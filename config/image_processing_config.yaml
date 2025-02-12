@@ -1,0 +1,15 @@
+# Image processing configuration
+image_processing:
+  target_dpi: 600  # Desired DPI for image extraction and processing
+  grayscale_conversion: true  # Convert images to grayscale
+  border_removal:
+    enabled: true  # Enable border removal
+    border_color: 255  # Color value considered as border
+    tolerance: 7  # Tolerance for border detection
+  adjust_dpi:
+    min_pixels: 1500  # Minimum pixels required for resizing
+    max_pixels: 3000  # Maximum pixels allowed after resizing
+  handle_transparency: true  # Process transparency in images
+
+ocr:
+  tesseract_config: "--oem 3 --psm 6"  # Tesseract OCR configuration options

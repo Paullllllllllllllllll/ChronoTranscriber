@@ -1,0 +1,8 @@
+# Concurrency settings for transcription and image processing tasks
+concurrency:
+  transcription:
+    concurrency_limit: 500  # Maximum number of concurrent transcription tasks
+    delay_between_tasks: 0.05  # Delay (in seconds) between starting transcription tasks
+  image_processing:
+    concurrency_limit: 10  # Maximum number of concurrent image processing tasks
+    delay_between_tasks: 0  # No delay for image processing tasks

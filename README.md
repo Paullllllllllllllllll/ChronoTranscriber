@@ -9,8 +9,8 @@ individual documents and asynchronous batch processing for large-scale, cost-eff
 
 ## Table of Contents
 
-- [Repository Structure](#repository-structure)
 - [Overview](#overview)
+- [Repository Structure](#repository-structure)
 - [Features](#features)
 - [Workflow](#workflow)
 - [Installation](#installation)

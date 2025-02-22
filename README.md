@@ -131,11 +131,12 @@ research. It offers flexible transcription options tailored to different types o
 
 1. **Clone the Repository:**
    ```bash
-   git clone https://your-repository-url.git
-   cd DissertationDigitalization
+   git clone https://ChronoMiner.git
+   cd ChronoTranscriber
    ```
 
-2. **Create and Activate a Virtual Environment:**
+2. **Set Up the Environment:**
+   Create and activate a virtual environment:
    ```bash
    python -m venv .venv
    # On Linux/Mac:
@@ -149,7 +150,18 @@ research. It offers flexible transcription options tailored to different types o
    pip install -r requirements.txt
    ```
 
-4. **Set Environment Variables:**
+4. **Adjust PYTHONPATH:**
+   To ensure that Python can find the `modules` package, update your PYTHONPATH. For example, on Linux/Mac:
+   ```bash
+   export PYTHONPATH="$PYTHONPATH:$(pwd)/modules"
+   ```
+   On Windows (PowerShell):
+   ```powershell
+   $env:PYTHONPATH = "$env:PYTHONPATH;$(Get-Location)\modules"
+   ```
+   Alternatively, you can add the above commands to your shell profile or run them each time before running the project.
+
+5. **Set Environment Variables:**
    ```bash
    export OPENAI_API_KEY=your_openai_api_key  # On Linux/Mac
    set OPENAI_API_KEY=your_openai_api_key     # On Windows

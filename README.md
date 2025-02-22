@@ -167,6 +167,11 @@ research. It offers flexible transcription options tailored to different types o
    set OPENAI_API_KEY=your_openai_api_key     # On Windows
    ```
 
+6. **Run the Transcriber:**
+   ```bash
+   python main/unified_transcriber.py
+   ```
+
 ## Configuration
 
 All configuration settings are managed through YAML files in the `config/` directory:

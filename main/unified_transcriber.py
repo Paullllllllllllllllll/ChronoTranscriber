@@ -31,6 +31,7 @@ from modules.concurrency import run_concurrent_transcription_tasks
 from modules.image_utils import ImageProcessor, SUPPORTED_IMAGE_EXTENSIONS
 from modules.text_processing import extract_transcribed_text
 from modules.utils import console_print, check_exit, safe_input
+from modules.user_interface import select_option
 
 logger = setup_logger(__name__)
 
@@ -98,16 +99,12 @@ async def process_single_pdf(pdf_path: Path,
 
     console_print(f"\n[INFO] Processing PDF: {pdf_path.name}")
 
-    # Prompt for transcription method if not provided
+    # Prompt for transcription method if not provided, using standardized numbered options.
     if chosen_method is None:
         if pdf_processor.is_native_pdf():
-            console_print("Choose how to extract/transcribe the PDF:")
-            for option in method_options:
-                console_print(option)
+            choice = select_option("Choose transcription method for this PDF:", ["Native", "Tesseract", "GPT"])
         else:
-            console_print("This PDF appears to be non-native (scanned).")
-            console_print("Available transcription methods: 1. Tesseract, 2. GPT")
-        choice = safe_input("Enter the method number (or type 'q' to exit): ")
+            choice = select_option("This PDF appears to be non-native (scanned).\nChoose transcription method for this PDF:", ["Tesseract", "GPT"])
         check_exit(choice)
     else:
         choice = str(chosen_method).strip()
@@ -286,24 +283,13 @@ async def process_single_image_folder(
         console_print(f"[WARN] No processed images found in folder '{folder.name}'.")
         return
 
-    # Prompt for transcription method if not provided
-    valid_methods_numeric = {"1": "gpt", "2": "tesseract"}
-    valid_methods_text = {"gpt": "gpt", "tesseract": "tesseract"}
+    # Prompt for transcription method using standardized options
     if chosen_method is None:
-        console_print("Choose image transcription method:")
-        console_print("1. GPT")
-        console_print("2. Tesseract")
-        choice = safe_input("Enter the number of your choice (or type 'q' to exit): ")
-        check_exit(choice)
+        choice = select_option("Choose image transcription method:", ["GPT", "Tesseract"])
     else:
         choice = str(chosen_method).strip().lower()
-    if choice in valid_methods_numeric:
-        method = valid_methods_numeric[choice]
-    elif choice in valid_methods_text:
-        method = valid_methods_text[choice]
-    else:
-        console_print(f"[WARN] Invalid chosen method '{choice}' for folder '{folder.name}'. Defaulting to 'gpt'.")
-        method = "gpt"
+    mapping = {"1": "gpt", "2": "tesseract", "gpt": "gpt", "tesseract": "tesseract"}
+    method = mapping.get(choice, "gpt")
 
     if method == "gpt":
         batch_choice = safe_input("Use batch processing for GPT transcription? (y/n): ").lower()
@@ -403,13 +389,6 @@ async def main() -> None:
         pdf_output_dir = pdf_input_dir
         image_output_dir = image_input_dir
 
-    if not pdf_input_dir.is_absolute():
-        console_print("[ERROR] PDF input path must be an absolute path. Please update your configuration.")
-        sys.exit(1)
-    if not image_input_dir.is_absolute():
-        console_print("[ERROR] Image input path must be an absolute path. Please update your configuration.")
-        sys.exit(1)
-
     for d in (pdf_input_dir, image_input_dir, pdf_output_dir, image_output_dir):
         d.mkdir(parents=True, exist_ok=True)
 
@@ -443,14 +422,12 @@ async def main() -> None:
         all_or_select = safe_input("\nProcess 1) All folders or 2) Specific folders? (or type 'q' to exit): ")
         check_exit(all_or_select)
         if all_or_select == "1":
-            method_choice = safe_input("Choose transcription method for all image folders (1 for GPT, 2 for Tesseract): ")
-            check_exit(method_choice)
-            if method_choice.strip() not in {"1", "2"}:
-                console_print(f"[WARN] Invalid method choice '{method_choice}'. Defaulting to '1' (GPT).")
-                method_choice = "1"
+            method_choice = select_option("Choose transcription method for all image folders:", ["GPT", "Tesseract"])
+            mapping = {"1": "gpt", "2": "tesseract"}
+            method_choice = mapping.get(method_choice, "gpt")
             for folder in subfolders:
                 console_print(f"Processing folder: {folder.name}")
-                if method_choice.strip() == "1":
+                if method_choice == "gpt":
                     api_key = os.getenv('OPENAI_API_KEY')
                     if not api_key:
                         console_print("[ERROR] OPENAI_API_KEY is required for GPT transcription. Please set it and try again.")
@@ -467,7 +444,7 @@ async def main() -> None:
                                                           image_output_dir,
                                                           processing_settings,
                                                           model_config,
-                                                          chosen_method=method_choice.strip())
+                                                          chosen_method=method_choice)
                 else:
                     await process_single_image_folder(folder, None,
                                                       image_processing_config,
@@ -475,7 +452,7 @@ async def main() -> None:
                                                       image_output_dir,
                                                       processing_settings,
                                                       model_config,
-                                                      chosen_method=method_choice.strip())
+                                                      chosen_method=method_choice)
         elif all_or_select == "2":
             selected = safe_input("Enter folder numbers separated by commas (or type 'q' to exit): ")
             check_exit(selected)
@@ -485,13 +462,9 @@ async def main() -> None:
             except ValueError:
                 console_print("[ERROR] Invalid input. Aborting.")
                 return
-            method_choice = safe_input("Enter transcription method for all selected folders (1 for GPT, 2 for Tesseract) (or type 'q' to exit): ")
-            check_exit(method_choice)
+            method_choice = select_option("Choose transcription method for all selected folders:", ["GPT", "Tesseract"])
             mapping = {"1": "gpt", "2": "tesseract"}
-            method_choice_mapped = mapping.get(method_choice.strip())
-            if not method_choice_mapped:
-                console_print(f"[WARN] Invalid method choice '{method_choice}'. Defaulting to 'gpt'.")
-                method_choice_mapped = "gpt"
+            method_choice_mapped = mapping.get(method_choice, "gpt")
             for folder in chosen_folders:
                 console_print(f"Processing folder: {folder.name}")
                 if method_choice_mapped == "gpt":
@@ -537,8 +510,7 @@ async def main() -> None:
         pdf_choice = safe_input("Enter your choice (1/2/3 or type 'q' to exit): ")
         check_exit(pdf_choice)
         if pdf_choice == "1":
-            method_choice = safe_input("Choose transcription method for all PDFs (For native PDFs: 1.Native, 2.Tesseract, 3.GPT): ")
-            check_exit(method_choice)
+            method_choice = select_option("Choose transcription method for all PDFs:", ["Native", "Tesseract", "GPT"])
             console_print(f"[INFO] Processing {len(all_pdfs)} PDF(s) with the selected transcription method...")
             if method_choice == "3":
                 api_key = os.getenv('OPENAI_API_KEY')
@@ -576,8 +548,7 @@ async def main() -> None:
             console_print("\n[INFO] Subfolders available:")
             for idx, sf in enumerate(subfolders, 1):
                 console_print(f"  {idx}. {sf.name}")
-            method_choice = safe_input("Enter transcription method for all selected subfolders (Native, Tesseract, GPT) (or type 'q' to exit): ")
-            check_exit(method_choice)
+            method_choice = select_option("Choose transcription method for all selected subfolders:", ["Native", "Tesseract", "GPT"])
             selected_indices = safe_input("Enter subfolder numbers separated by commas (or type 'q' to exit): ")
             check_exit(selected_indices)
             try:
@@ -586,11 +557,8 @@ async def main() -> None:
             except ValueError:
                 console_print("[ERROR] Invalid input. Exiting.")
                 return
-            mapping = {"native": "native", "tesseract": "tesseract", "gpt": "gpt"}
-            method_choice_mapped = mapping.get(method_choice.lower())
-            if not method_choice_mapped:
-                console_print(f"[WARN] Invalid method choice '{method_choice}'. Defaulting to Native.")
-                method_choice_mapped = "native"
+            mapping = {"1": "native", "2": "tesseract", "3": "gpt"}
+            method_choice_mapped = mapping.get(method_choice, "native")
             if method_choice_mapped == "gpt":
                 api_key = os.getenv('OPENAI_API_KEY')
                 if not api_key:
@@ -636,7 +604,7 @@ async def main() -> None:
                 pdf_stem = filename.replace(".pdf", "").lower()
                 match = next((pdf for pdf in all_pdfs if pdf.stem.lower() == pdf_stem), None)
                 if match:
-                    method_choice = safe_input("Choose transcription method for this PDF (1.Native, 2.Tesseract, 3.GPT): ")
+                    method_choice = select_option("Choose transcription method for this PDF:", ["Native", "Tesseract", "GPT"])
                     check_exit(method_choice)
                     if method_choice == "3":
                         api_key = os.getenv('OPENAI_API_KEY')

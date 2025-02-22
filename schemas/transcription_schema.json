@@ -10,7 +10,7 @@
       },
       "transcription": {
         "type": ["string", "null"],
-        "description": "The markdown-formatted transcribed text extracted from the image. Set to null if no transcribable text is found. Ensure **all** visible text and formatting elements (tables, headers, footers, page numbers) are transcribed to well-structured markdown."
+        "description": "The Markdown-formatted transcribed text extracted from the image. Ensure **all** visible text **and** structural elements (headers, footers, page numbers, tables, etc.), are transcribed to well-structured Markdown. If there are images or diagrams, indicate their presence with a brief description in square brackets, e.g., [Image: diagram of a cell]. For complex equations or formulas, use LaTeX syntax enclosed within $$ delimiters. Return only the Markdown content in its original language without any additional translations, explanations or Markdown code block delimiters. Set to null if no transcribable text is found."
       },
       "no_transcribable_text": {
         "type": "boolean",

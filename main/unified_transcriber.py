@@ -108,8 +108,6 @@ async def process_single_pdf(pdf_path: Path,
         check_exit(choice)
     else:
         choice = str(chosen_method).strip()
-        if choice == "3" and "3" not in valid_methods and "2" in valid_methods:
-            choice = "2"
         if choice not in valid_methods:
             console_print(f"[WARN] Invalid chosen method '{choice}' for PDF: {pdf_path.name}. Defaulting to the first available option.")
             choice = list(valid_methods.keys())[0]
@@ -321,7 +319,7 @@ async def process_single_image_folder(
                         }
                         await f.write(json.dumps(tracking_record) + "\n")
                 console_print(f"[SUCCESS] Batch submitted for folder '{folder.name}'.")
-                # In batch mode, we leave the temporary JSONL file intact.
+                # In batch mode, leave the temporary JSONL file intact.
                 return
             except Exception as e:
                 logger.exception(f"Error during GPT batch submission for folder '{folder.name}': {e}")
@@ -481,11 +479,10 @@ async def main() -> None:
                 console_print("[ERROR] Invalid input. Aborting.")
                 return
             method_choice = select_option("Choose transcription method for all selected folders:", ["GPT", "Tesseract"])
-            mapping = {"1": "gpt", "2": "tesseract"}
-            method_choice_mapped = mapping.get(method_choice, "gpt")
+            # Pass raw numeric string directly to process_single_image_folder
             for folder in chosen_folders:
                 console_print(f"Processing folder: {folder.name}")
-                if method_choice_mapped == "gpt":
+                if method_choice == "1":
                     api_key = os.getenv('OPENAI_API_KEY')
                     if not api_key:
                         console_print("[ERROR] OPENAI_API_KEY is required for GPT transcription. Please set it and try again.")
@@ -502,7 +499,7 @@ async def main() -> None:
                                                           image_output_dir,
                                                           processing_settings,
                                                           model_config,
-                                                          chosen_method=method_choice_mapped)
+                                                          chosen_method=method_choice)
                 else:
                     await process_single_image_folder(folder, None,
                                                       image_processing_config,
@@ -510,7 +507,7 @@ async def main() -> None:
                                                       image_output_dir,
                                                       processing_settings,
                                                       model_config,
-                                                      chosen_method=method_choice_mapped)
+                                                      chosen_method=method_choice)
         else:
             console_print("[ERROR] Invalid choice. Aborting.")
     elif overall_choice == "2":
@@ -566,6 +563,7 @@ async def main() -> None:
             console_print("\n[INFO] Subfolders available:")
             for idx, sf in enumerate(subfolders, 1):
                 console_print(f"  {idx}. {sf.name}")
+            # Use standardized prompt and pass raw numeric choice
             method_choice = select_option("Choose transcription method for all selected subfolders:", ["Native", "Tesseract", "GPT"])
             selected_indices = safe_input("Enter subfolder numbers separated by commas (or type 'q' to exit): ")
             check_exit(selected_indices)
@@ -575,9 +573,8 @@ async def main() -> None:
             except ValueError:
                 console_print("[ERROR] Invalid input. Exiting.")
                 return
-            mapping = {"1": "native", "2": "tesseract", "3": "gpt"}
-            method_choice_mapped = mapping.get(method_choice, "native")
-            if method_choice_mapped == "gpt":
+            # Pass the raw numeric choice directly
+            if method_choice == "3":
                 api_key = os.getenv('OPENAI_API_KEY')
                 if not api_key:
                     console_print("[ERROR] OPENAI_API_KEY is required for GPT transcription. Please set it and try again.")
@@ -600,7 +597,7 @@ async def main() -> None:
                                                  pdf_output_dir,
                                                  processing_settings,
                                                  model_config,
-                                                 chosen_method=method_choice_mapped)
+                                                 chosen_method=method_choice)
             else:
                 for folder in chosen_folders:
                     pdfs_in_folder = list(folder.rglob("*.pdf"))
@@ -614,7 +611,7 @@ async def main() -> None:
                                                  pdf_output_dir,
                                                  processing_settings,
                                                  model_config,
-                                                 chosen_method=method_choice_mapped)
+                                                 chosen_method=method_choice)
         elif pdf_choice == "3":
             while True:
                 filename = safe_input("\nEnter the filename (with or without .pdf) or type 'q' to exit: ")

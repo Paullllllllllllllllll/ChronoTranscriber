@@ -283,7 +283,6 @@ async def process_single_image_folder(
     if not temp_jsonl_path.exists():
         temp_jsonl_path.touch()
     console_print(f"\n[INFO] Processing image folder: {folder.name}")
-    # For image folders, only two options: GPT and Tesseract
     valid_methods = {"1": "gpt", "2": "tesseract"}
     if chosen_method is None:
         console_print("Choose image transcription method:")
@@ -394,7 +393,6 @@ async def process_single_image_folder(
                 logger.exception(f"Error cleaning up preprocessed images for folder {folder.name}: {e}")
     console_print(f"[SUCCESS] Transcription completed for folder '{folder.name}' -> {output_txt_path.name}")
 
-
 async def main() -> None:
     config_loader = ConfigLoader()
     try:
@@ -409,9 +407,15 @@ async def main() -> None:
     image_input_dir = Path(paths_config.get('file_paths', {}).get('Images', {}).get('input', 'images_in'))
     pdf_output_dir = Path(paths_config.get('file_paths', {}).get('PDFs', {}).get('output', 'pdfs_out'))
     image_output_dir = Path(paths_config.get('file_paths', {}).get('Images', {}).get('output', 'images_out'))
-    if processing_settings.get("input_paths_is_output_path", False):
-        pdf_output_dir = pdf_input_dir
-        image_output_dir = image_input_dir
+
+    # Enforce absolute paths for input directories
+    if not pdf_input_dir.is_absolute():
+        console_print("[ERROR] PDF input path must be an absolute path. Please update your configuration.")
+        sys.exit(1)
+    if not image_input_dir.is_absolute():
+        console_print("[ERROR] Image input path must be an absolute path. Please update your configuration.")
+        sys.exit(1)
+
     for d in (pdf_input_dir, image_input_dir, pdf_output_dir, image_output_dir):
         d.mkdir(parents=True, exist_ok=True)
     model_config = config_loader.get_model_config()
@@ -427,7 +431,6 @@ async def main() -> None:
         if not image_input_dir.exists():
             console_print(f"[ERROR] Image input directory does not exist: {image_input_dir}")
             return
-        # NEW: If there are no subfolders, process the images in the input folder directly.
         subfolders = [f for f in image_input_dir.iterdir() if f.is_dir()]
         if not subfolders:
             images = [f for f in image_input_dir.iterdir() if f.is_file() and f.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS]

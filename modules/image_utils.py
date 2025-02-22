@@ -1,8 +1,9 @@
 # modules/image_utils.py
+import shutil
 from PIL import Image, ImageOps
 from pathlib import Path
 import numpy as np
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from modules.config_loader import ConfigLoader
 from modules.logger import setup_logger
@@ -27,22 +28,20 @@ class ImageProcessor:
 
 	def convert_to_grayscale(self, image: Image.Image) -> Image.Image:
 		"""
-        Convert the image to grayscale if enabled.
-
-        Returns:
-            Image.Image: The grayscale image.
-        """
+		Convert the image to grayscale if enabled.
+		Returns:
+			Image.Image: The grayscale image.
+		"""
 		if self.image_config.get('grayscale_conversion', True):
 			return ImageOps.grayscale(image)
 		return image
 
 	def remove_borders(self, image: Image.Image) -> Image.Image:
 		"""
-        Remove borders from the image based on configuration.
-
-        Returns:
-            Image.Image: The cropped image.
-        """
+		Remove borders from the image based on configuration.
+		Returns:
+			Image.Image: The cropped image.
+		"""
 		border_removal = self.image_config.get('border_removal', {})
 		if not border_removal.get('enabled', True):
 			return image
@@ -74,11 +73,10 @@ class ImageProcessor:
 
 	def handle_transparency(self, image: Image.Image) -> Image.Image:
 		"""
-        Handle transparency by pasting the image onto a white background.
-
-        Returns:
-            Image.Image: The processed image.
-        """
+		Handle transparency by pasting the image onto a white background.
+		Returns:
+			Image.Image: The processed image.
+		"""
 		if self.image_config.get('handle_transparency', True):
 			if image.mode in ('RGBA', 'LA') or (
 					image.mode == 'P' and 'transparency' in image.info):
@@ -89,11 +87,10 @@ class ImageProcessor:
 
 	def adjust_dpi(self, image: Image.Image) -> Image.Image:
 		"""
-        Adjust the DPI of the image based on configuration.
-
-        Returns:
-            Image.Image: The resized image with updated DPI.
-        """
+		Adjust the DPI of the image based on configuration.
+		Returns:
+			Image.Image: The resized image with updated DPI.
+		"""
 		adjust_dpi = self.image_config.get('adjust_dpi', {})
 		target_dpi = self.image_config.get('image_processing', {}).get(
 			'target_dpi', 300)
@@ -125,11 +122,10 @@ class ImageProcessor:
 
 	def process_image(self, output_path: Path) -> str:
 		"""
-        Process the image and save it to the given output path.
-
-        Returns:
-            str: A message indicating the outcome.
-        """
+		Process the image and save it to the given output path.
+		Returns:
+			str: A message indicating the outcome.
+		"""
 		try:
 			with Image.open(self.image_path) as img:
 				img = self.handle_transparency(img)
@@ -150,23 +146,73 @@ class ImageProcessor:
 			logger.error(f"Error processing image {self.image_path.name}: {e}")
 			return f"Failed to process {self.image_path.name}: {e}"
 
+	# --- Static Methods for Folder-Level Processing ---
 
-def _process_image_task(img_path: Path, out_path: Path) -> str:
-	processor = ImageProcessor(img_path)
-	return processor.process_image(out_path)
+	@staticmethod
+	def prepare_image_folder(folder: Path, image_output_dir: Path) -> Tuple[
+		Path, Path, Path, Path, Path]:
+		"""
+		Prepares the output directories for processing an image folder.
 
+		Returns a tuple of:
+		  - parent_folder: The directory for outputs related to this folder.
+		  - raw_images_folder: Where raw images will be stored.
+		  - preprocessed_folder: Where preprocessed images will be stored.
+		  - temp_jsonl_path: File for recording transcription logs.
+		  - output_txt_path: Final transcription text file.
+		"""
+		parent_folder = image_output_dir / folder.name
+		parent_folder.mkdir(parents=True, exist_ok=True)
+		raw_images_folder = parent_folder / "raw_images"
+		raw_images_folder.mkdir(exist_ok=True)
+		preprocessed_folder = parent_folder / "preprocessed_images"
+		preprocessed_folder.mkdir(exist_ok=True)
+		temp_jsonl_path = parent_folder / f"{folder.name}_transcription.jsonl"
+		if not temp_jsonl_path.exists():
+			temp_jsonl_path.touch()
+		output_txt_path = parent_folder / f"{folder.name}_transcription.txt"
+		return parent_folder, raw_images_folder, preprocessed_folder, temp_jsonl_path, output_txt_path
 
-def process_images_multiprocessing(
-		image_paths: List[Path],
-		output_paths: List[Path]
-) -> List[Optional[str]]:
-	"""
-    Process images using multiprocessing.
+	@staticmethod
+	def copy_images_to_raw(source_folder: Path, raw_images_folder: Path) -> \
+	List[Path]:
+		"""
+		Copies image files from the source folder to the designated raw images folder.
 
-    Returns:
-        List[Optional[str]]: Results from the image processing tasks.
-    """
-	args_list = list(zip(image_paths, output_paths))
-	results = run_multiprocessing_tasks(_process_image_task, args_list,
-	                                    processes=12)
-	return results
+		Returns a list of copied image paths.
+		"""
+		image_files: List[Path] = []
+		for ext in SUPPORTED_IMAGE_EXTENSIONS:
+			image_files.extend(list(source_folder.glob(f'*{ext}')))
+		for file in image_files:
+			try:
+				shutil.copy(file, raw_images_folder / file.name)
+			except Exception as e:
+				logger.exception(
+					f"Error copying file {file} to raw_images_folder: {e}")
+		return list(raw_images_folder.glob("*"))
+
+	@staticmethod
+	def process_images_multiprocessing(image_paths: List[Path],
+	                                   output_paths: List[Path]) -> List[
+		Optional[str]]:
+		"""
+		Process images using multiprocessing.
+
+		Returns:
+			List[Optional[str]]: Results from the image processing tasks.
+		"""
+		args_list = list(zip(image_paths, output_paths))
+		results = run_multiprocessing_tasks(ImageProcessor._process_image_task,
+		                                    args_list, processes=12)
+		return results
+
+	@staticmethod
+	def _process_image_task(img_path: Path, out_path: Path) -> str:
+		"""
+		Process a single image: creates an ImageProcessor instance for the image
+		and processes it, saving the output to out_path.
+		"""
+		processor = ImageProcessor(img_path)
+		return processor.process_image(out_path)
+

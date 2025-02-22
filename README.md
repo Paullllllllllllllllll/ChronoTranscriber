@@ -240,7 +240,7 @@ Ensure to adjust these settings according to your environment and specific proce
 ### Troubleshooting
 
 - **OPENAI_API_KEY Not Set:**  
-  Ensure the `OPENAI_API_KEY` environment variable is properly configured before running the application.
+  Ensure the `OPENAI_API_KEY` environment variable is properly configured before using GPT-based transcription tasks.
 
 - **Missing Configuration Files:**  
   Verify that all necessary YAML configuration files are present in the `config/` directory.

@@ -146,7 +146,6 @@ async def process_single_pdf(
         valid_methods["2"] = "gpt"
         methods.append("2. GPT")
 
-    # Update prompt based on PDF type
     console_print(f"\n[INFO] Processing PDF: {pdf_path.name}")
     if chosen_method is None:
         if is_native:
@@ -302,8 +301,7 @@ async def process_single_image_folder(
     for ext in SUPPORTED_IMAGE_EXTENSIONS:
         image_files.extend(list(folder.glob(f'*{ext}')))
     if not image_files:
-        logger.info(f"No supported images found in folder: {folder}")
-        console_print(f"[WARN] No images found in {folder.name} to transcribe.")
+        console_print(f"[WARN] No images found in {folder}.")
         return
     for file in image_files:
         try:
@@ -396,6 +394,7 @@ async def process_single_image_folder(
                 logger.exception(f"Error cleaning up preprocessed images for folder {folder.name}: {e}")
     console_print(f"[SUCCESS] Transcription completed for folder '{folder.name}' -> {output_txt_path.name}")
 
+
 async def main() -> None:
     config_loader = ConfigLoader()
     try:
@@ -428,14 +427,20 @@ async def main() -> None:
         if not image_input_dir.exists():
             console_print(f"[ERROR] Image input directory does not exist: {image_input_dir}")
             return
+        # NEW: If there are no subfolders, process the images in the input folder directly.
         subfolders = [f for f in image_input_dir.iterdir() if f.is_dir()]
         if not subfolders:
-            console_print(f"[WARN] No subfolders found in {image_input_dir}.")
-            return
-        console_print(f"\n[INFO] Found {len(subfolders)} subfolder(s) in '{image_input_dir}'.")
+            images = [f for f in image_input_dir.iterdir() if f.is_file() and f.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS]
+            if images:
+                console_print(f"[WARN] No subfolders found in {image_input_dir}. Processing images directly in the input folder.")
+                subfolders = [image_input_dir]
+            else:
+                console_print(f"[WARN] No subfolders or images found in {image_input_dir}.")
+                return
+        console_print(f"\n[INFO] Found {len(subfolders)} folder(s) to process in '{image_input_dir}'.")
         for idx, sf in enumerate(subfolders, 1):
             console_print(f"  {idx}. {sf.name}")
-        all_or_select = safe_input("\nProcess 1) All subfolders or 2) Specific subfolders? (or type 'q' to exit): ")
+        all_or_select = safe_input("\nProcess 1) All folders or 2) Specific folders? (or type 'q' to exit): ")
         check_exit(all_or_select)
         if all_or_select == "1":
             method_choice = safe_input("Choose transcription method for all image folders (1 for GPT, 2 for Tesseract): ")
@@ -469,7 +474,7 @@ async def main() -> None:
                                                       model_config,
                                                       chosen_method=method_choice)
         elif all_or_select == "2":
-            selected = safe_input("Enter subfolder numbers separated by commas (or type 'q' to exit): ")
+            selected = safe_input("Enter folder numbers separated by commas (or type 'q' to exit): ")
             check_exit(selected)
             try:
                 indices = [int(n.strip()) - 1 for n in selected.split(",") if n.strip().isdigit()]
@@ -477,7 +482,7 @@ async def main() -> None:
             except ValueError:
                 console_print("[ERROR] Invalid input. Aborting.")
                 return
-            method_choice = safe_input("Enter transcription method for all selected subfolders (Native, Tesseract, GPT) (or type 'q' to exit): ")
+            method_choice = safe_input("Enter transcription method for all selected folders (Native, Tesseract, GPT) (or type 'q' to exit): ")
             check_exit(method_choice)
             mapping = {"native": "native", "tesseract": "tesseract", "gpt": "gpt"}
             method_choice_mapped = mapping.get(method_choice.lower())

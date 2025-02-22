@@ -7,14 +7,37 @@ combining native PDF extraction, Tesseract OCR, and advanced GPT-4o transcriptio
 diverse document types, from searchable PDFs to scanned images, offering both synchronous processing for
 individual documents and asynchronous batch processing for large-scale, cost-efficient transcription tasks.
 
+
+## Overview
+
+ChronoTranscriber is built to streamline the digitization and transcription of documents for historical
+research. It offers flexible transcription options tailored to different types of documents and research needs:
+
+- **Target Audience:**  
+  Designed for researchers, archivists, digital humanities scholars, and institutions seeking to
+  digitize and analyze historical documents.
+
+- **Applications:**  
+  Facilitates text extraction from archival PDFs and images, making it easier to conduct text analysis,
+  content indexing, and data-driven historical research.
+
+- **Transcription Methods:**  
+  Provides multiple methods to accommodate various document types:
+  - **Native PDF Extraction:** Directly extracts text from searchable PDFs, outputting results as plain text
+    files.
+  - **Tesseract OCR:** Uses optical character recognition to transcribe scanned PDFs and images.
+  - **GPT-4o Transcription:** Leverages OpenAI’s GPT-4o model for high-quality, context-aware transcriptions,
+    available in both synchronous and asynchronous batch modes.
+
 ## Table of Contents
 
 - [Overview](#overview)
 - [Repository Structure](#repository-structure)
-- [Features](#features)
-- [Workflow](#workflow)
+- [System Requirements & Dependencies](#system-requirements--dependencies)
 - [Installation](#installation)
 - [Configuration](#configuration)
+- [Features](#features)
+- [Workflow](#workflow)
 - [Usage](#usage)
   - [PDF Processing](#pdf-processing)
   - [Image Folder Processing](#image-folder-processing)
@@ -59,73 +82,15 @@ ChronoTranscriber/
 └── README.md
 ```
 
-## Overview
 
-ChronoTranscriber is built to streamline the digitization and transcription of documents for historical
-research. It offers flexible transcription options tailored to different types of documents and research needs:
+## System Requirements & Dependencies
 
-- **Target Audience:**  
-  Designed for researchers, archivists, digital humanities scholars, and institutions seeking to
-  digitize and analyze historical documents.
+- **Python Version:**  
+  Will work with Python 3.12 or later.
 
-- **Applications:**  
-  Facilitates text extraction from archival PDFs and images, making it easier to conduct text analysis,
-  content indexing, and data-driven historical research.
+- **Further Dependencies:**
+  - A full list of dependencies can be found in `requirements.txt`.
 
-- **Transcription Methods:**  
-  Provides multiple methods to accommodate various document types:
-  - **Native PDF Extraction:** Directly extracts text from searchable PDFs, outputting results as plain text
-    files.
-  - **Tesseract OCR:** Uses optical character recognition to transcribe scanned PDFs and images.
-  - **GPT-4o Transcription:** Leverages OpenAI’s GPT-4o model for high-quality, context-aware transcriptions,
-    available in both synchronous and asynchronous batch modes.
-
-## Features
-
-- **Multi-Method Transcription:**  
-  - *Native Extraction:* Automatically detects and extracts text from searchable PDFs without additional
-    processing.
-  - *Tesseract OCR:* Converts images and scanned documents into text using established OCR techniques.
-  - *GPT-4o Transcription:* Provides advanced transcription capabilities with natural language understanding,
-    ideal for documents that require contextual analysis.
-  - *Batch Processing:* Supports asynchronous processing of large document sets via OpenAI’s Batch API,
-    enhancing efficiency and reducing costs.
-
-- **Configurable Image Processing:**  
-  - Customizable DPI settings, grayscale conversion, border removal, and transparency handling.
-  - Options to adjust image resolution for optimal OCR and transcription accuracy.
-
-- **Concurrency and Multiprocessing:**  
-  - Asynchronous execution with configurable concurrency limits and task delays.
-  - Multiprocessing support for intensive image processing tasks to maximize performance on multi-core systems.
-
-- **Robust Logging and Error Handling:**  
-  - Detailed logging for monitoring and troubleshooting.
-  - Built-in error detection and recovery mechanisms ensure smooth processing even when issues arise.
-
-## Workflow
-
-1. **Configuration:**  
-   - Update YAML configuration files in the `config/` directory to define file paths, model parameters,
-     image processing options, and concurrency settings.
-   - Configure logging paths and cleanup preferences via `paths_config.yaml`.
-
-2. **Processing Documents:**  
-   - **PDF Processing:**  
-     - For native PDFs, the system extracts text directly and outputs a `.txt` file.
-     - For scanned PDFs, the system extracts images and processes them using Tesseract OCR or GPT-4o
-       transcription.
-   - **Image Folder Processing:**  
-     - Processes all images within specified folders, with options for pre-processing and transcription using
-       the chosen method.
-   - **Batch Processing:**  
-     - Enables asynchronous transcription using GPT-4o via OpenAI’s Batch API, with scripts available for
-       monitoring and cancellation of batch jobs.
-
-3. **Output Generation:**  
-   - Transcriptions are saved as `.txt` files, with JSONL records created for metadata and processing logs.
-   - Temporary files and directories (such as `raw_images` and `preprocessed_images`) are managed based on
-     user-defined cleanup settings.
 
 ## Installation
 
@@ -171,24 +136,6 @@ research. It offers flexible transcription options tailored to different types o
    ```bash
    python main/unified_transcriber.py
    ```
-## System Requirements & Dependencies
-
-- **Python Version:**  
-  Will work with Python 3.12 or later.
-
-- **Key Dependencies:**
-    - aiohttp==3.11.10  
-    - anyio==4.7.0  
-    - pydantic==2.10.3  
-    - requests==2.32.3  
-    - pillow==11.0.0  
-    - python-docx==1.1.2  
-    - numpy==2.2.0  
-    - openai==1.57.4  
-    - tqdm==4.67.1
-
-- **Further Dependencies:**
-    - A full list of dependencies can be found in requirements.txt.
 
 ## Configuration
 
@@ -206,15 +153,64 @@ All configuration settings are managed through YAML files in the `config/` direc
 Ensure to adjust these settings according to your environment and specific processing needs. Please ensure that the file paths in your configuration 
 (e.g., for PDF input, Image input, PDF output, and Image output) are specified as **absolute paths**. For example:
 
-  ```yaml
-  file_paths:
-    PDFs:
-      input: "/home/paul/ChronoTranscriber/PDFs/input"
-      output: "/home/paul/ChronoTranscriber/PDFs/output"
-    Images:
-      input: "/home/paul/ChronoTranscriber/Images/input"
-      output: "/home/paul/ChronoTranscriber/Images/output"
-  ```
+```yaml
+file_paths:
+  PDFs:
+    input: "/home/paul/ChronoTranscriber/PDFs/input"
+    output: "/home/paul/ChronoTranscriber/PDFs/output"
+  Images:
+    input: "/home/paul/ChronoTranscriber/Images/input"
+    output: "/home/paul/ChronoTranscriber/Images/output"
+```
+
+## Features
+
+- **Multi-Method Transcription:**  
+  - *Native Extraction:* Automatically detects and extracts text from searchable PDFs without additional
+    processing.
+  - *Tesseract OCR:* Converts images and scanned documents into text using established OCR techniques.
+  - *GPT-4o Transcription:* Provides advanced transcription capabilities with natural language understanding,
+    ideal for documents that require contextual analysis.
+  - *Batch Processing:* Supports asynchronous processing of large document sets via OpenAI’s Batch API,
+    enhancing efficiency and reducing costs.
+
+- **Configurable Image Processing:**  
+  - Customizable DPI settings, grayscale conversion, border removal, and transparency handling.
+  - Options to adjust image resolution for optimal OCR and transcription accuracy.
+
+- **Concurrency and Multiprocessing:**  
+  - Asynchronous execution with configurable concurrency limits and task delays.
+  - Multiprocessing support for intensive image processing tasks to maximize performance on multi-core systems.
+
+- **Robust Logging and Error Handling:**  
+  - Detailed logging for monitoring and troubleshooting.
+  - Built-in error detection and recovery mechanisms ensure smooth processing even when issues arise.
+
+
+## Workflow
+
+1. **Configuration:**  
+   - Update YAML configuration files in the `config/` directory to define file paths, model parameters,
+     image processing options, and concurrency settings.
+   - Configure logging paths and cleanup preferences via `paths_config.yaml`.
+
+2. **Processing Documents:**  
+   - **PDF Processing:**  
+     - For native PDFs, the system extracts text directly and outputs a `.txt` file.
+     - For scanned PDFs, the system extracts images and processes them using Tesseract OCR or GPT-4o
+       transcription.
+   - **Image Folder Processing:**  
+     - Processes all images within specified folders, with options for pre-processing and transcription using
+       the chosen method.
+   - **Batch Processing:**  
+     - Enables asynchronous transcription using GPT-4o via OpenAI’s Batch API, with scripts available for
+       monitoring and cancellation of batch jobs.
+
+3. **Output Generation:**  
+   - Transcriptions are saved as `.txt` files, with JSONL records created for metadata and processing logs.
+   - Temporary files and directories (such as `raw_images` and `preprocessed_images`) are managed based on
+     user-defined cleanup settings.
+
 
 ## Usage
 
@@ -290,7 +286,7 @@ Contributions are welcome! When contributing:
 - Update all relevant configuration files and documentation accordingly.
 - Follow the repository’s coding style and contribution guidelines.
 
-## Possible Future Extensions
+## Possible Future Extension
 
 Options for possible future extensions include:
 
@@ -311,11 +307,12 @@ Contributions are welcome! When contributing:
 - Contact the main developer before adding any new features.
 - Follow the repository’s coding style and contribution guidelines.
 
+
 ## Contact and Support
 
 - **Main Developer:**  
-  For support, questions, or to discuss contributions, please open an issue on GitHub or contact via email at [paul.
-  goetz@uni-goettingen.de](mailto:paul.goetz@uni-goettingen.de).
+  For support, questions, or to discuss contributions, please open an issue on GitHub or contact via email at
+  [paul.goetz@uni-goettingen.de](mailto:paul.goetz@uni-goettingen.de).
 
 ## License
 

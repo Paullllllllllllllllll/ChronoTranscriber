@@ -1,4 +1,5 @@
 # modules/image_utils.py
+
 import shutil
 from PIL import Image, ImageOps
 from pathlib import Path
@@ -199,8 +200,12 @@ class ImageProcessor:
 		"""
 		Process images using multiprocessing.
 
+		Parameters:
+			image_paths (List[Path]): List of source image paths.
+			output_paths (List[Path]): List of destination paths for processed images.
+
 		Returns:
-			List[Optional[str]]: Results from the image processing tasks.
+			List[Optional[str]]: Processing results for each image.
 		"""
 		args_list = list(zip(image_paths, output_paths))
 		results = run_multiprocessing_tasks(ImageProcessor._process_image_task,
@@ -210,9 +215,16 @@ class ImageProcessor:
 	@staticmethod
 	def _process_image_task(img_path: Path, out_path: Path) -> str:
 		"""
-		Process a single image: creates an ImageProcessor instance for the image
-		and processes it, saving the output to out_path.
+		Helper task to process a single image and save it to out_path.
+
+		Parameters:
+			img_path (Path): Path to the input image.
+			out_path (Path): Path to save the processed image.
+
+		Returns:
+			str: A status message.
 		"""
 		processor = ImageProcessor(img_path)
 		return processor.process_image(out_path)
+
 

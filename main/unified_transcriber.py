@@ -128,6 +128,7 @@ async def process_single_pdf(
     temp_jsonl_path = parent_folder / f"{pdf_path.stem}_transcription.jsonl"
     if not temp_jsonl_path.exists():
         temp_jsonl_path.touch()
+
     pdf_processor = PDFProcessor(pdf_path)
     is_native = pdf_processor.is_native_pdf()
     valid_methods: Dict[str, str] = {}
@@ -144,11 +145,17 @@ async def process_single_pdf(
         methods.append("1. Tesseract")
         valid_methods["2"] = "gpt"
         methods.append("2. GPT")
+
+    # Update prompt based on PDF type
+    console_print(f"\n[INFO] Processing PDF: {pdf_path.name}")
     if chosen_method is None:
-        console_print(f"\n[INFO] Processing PDF: {pdf_path.name}")
-        console_print("Choose how to extract/transcribe the PDF:")
-        for m in methods:
-            console_print(m)
+        if is_native:
+            console_print("Choose how to extract/transcribe the PDF:")
+            for m in methods:
+                console_print(m)
+        else:
+            console_print("This PDF appears to be non-native (scanned).")
+            console_print("Available transcription methods: 1. Tesseract, 2. GPT")
         choice = safe_input("Enter the method number (or type 'q' to exit): ")
         check_exit(choice)
     else:
@@ -157,6 +164,7 @@ async def process_single_pdf(
             console_print(f"[WARN] Invalid chosen method '{choice}' for PDF: {pdf_path.name}. Defaulting to the first available option.")
             choice = list(valid_methods.keys())[0]
     method = valid_methods.get(choice)
+
     if method == "native":
         text = native_extract_pdf_text(pdf_path)
         try:
@@ -174,6 +182,7 @@ async def process_single_pdf(
         except Exception as e:
             logger.exception(f"Error writing native extraction output for {pdf_path.name}: {e}")
         return
+
     raw_images_folder = parent_folder / "raw_images"
     raw_images_folder.mkdir(exist_ok=True)
     preprocessed_folder = parent_folder / "preprocessed_images"
@@ -183,6 +192,7 @@ async def process_single_pdf(
     processed_image_files = await process_images_for_pdf(pdf_path, raw_images_folder, preprocessed_folder, target_dpi)
     if not processed_image_files:
         return
+
     if method == "gpt":
         batch_choice = safe_input("Use batch processing for GPT transcription? (y/n): ").lower()
         if batch_choice == "y":
@@ -209,6 +219,7 @@ async def process_single_pdf(
                 logger.exception(f"Error during GPT batch submission for {pdf_path.name}: {e}")
                 console_print(f"[ERROR] Failed to submit batch for {pdf_path.name}.")
                 return
+
     args_list = [
         (img, transcriber if method == "gpt" else None, method,
          image_processing_config.get('ocr', {}).get('tesseract_config', "--oem 3 --psm 6"))
@@ -273,7 +284,7 @@ async def process_single_image_folder(
     if not temp_jsonl_path.exists():
         temp_jsonl_path.touch()
     console_print(f"\n[INFO] Processing image folder: {folder.name}")
-    # For image folders, there are only two options: GPT and Tesseract
+    # For image folders, only two options: GPT and Tesseract
     valid_methods = {"1": "gpt", "2": "tesseract"}
     if chosen_method is None:
         console_print("Choose image transcription method:")

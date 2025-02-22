@@ -25,19 +25,18 @@ from PIL import Image
 
 from modules.config_loader import ConfigLoader
 from modules.logger import setup_logger
-from modules.pdf_utils import PDFProcessor
+from modules.pdf_utils import PDFProcessor, native_extract_pdf_text
 from modules.openai_utils import transcribe_image_with_openai, open_transcriber
-from modules.image_utils import (ImageProcessor, SUPPORTED_IMAGE_EXTENSIONS)
-from modules.text_processing import extract_transcribed_text
 from modules.concurrency import run_concurrent_transcription_tasks
+from modules.image_utils import ImageProcessor, SUPPORTED_IMAGE_EXTENSIONS
+from modules.text_processing import extract_transcribed_text
 from modules.utils import console_print, check_exit, safe_input
 
 logger = setup_logger(__name__)
 
-
-# =====================================================
+# --------------------------------------------------
 # OCR and Transcription Functions
-# =====================================================
+# --------------------------------------------------
 
 async def tesseract_ocr_image(img_path: Path, tesseract_config: str) -> Optional[str]:
     """
@@ -52,7 +51,6 @@ async def tesseract_ocr_image(img_path: Path, tesseract_config: str) -> Optional
         logger.error(f"Tesseract OCR error on {img_path.name}: {e}")
         return None
 
-
 async def transcribe_single_image_task(
         img_path: Path,
         transcriber: Optional[Any],
@@ -61,7 +59,7 @@ async def transcribe_single_image_task(
 ) -> Tuple[str, str, Optional[str]]:
     """
     Transcribes a single image file using either GPT (via OpenAI) or Tesseract OCR.
-    Returns a tuple containing the image path (as string), image name, and the transcription result.
+    Returns a tuple containing the image path, image name, and the transcription result.
     """
     image_name = img_path.name
     try:
@@ -82,51 +80,25 @@ async def transcribe_single_image_task(
         logger.exception(f"Error transcribing {img_path.name} with method '{method}': {e}")
         return (str(img_path), image_name, None)
 
-
-def native_extract_pdf_text(pdf_path: Path) -> str:
-    """
-    Extract text from a native (searchable) PDF using PyMuPDF.
-    """
-    pdf_processor = PDFProcessor(pdf_path)
-    text = ""
-    try:
-        pdf_processor.open_pdf()
-        if pdf_processor.doc:
-            for page in pdf_processor.doc:
-                text += page.get_text()
-        pdf_processor.close_pdf()
-    except Exception as e:
-        logger.exception(f"Failed native PDF extraction on {pdf_path.name}: {e}")
-    return text
-
-
-# =====================================================
+# --------------------------------------------------
 # PDF Processing Function
-# =====================================================
+# --------------------------------------------------
 
-async def process_single_pdf(
-        pdf_path: Path,
-        transcriber: Optional[Any],
-        image_processing_config: Dict[str, Any],
-        concurrency_config: Dict[str, Any],
-        pdf_output_dir: Path,
-        processing_settings: Dict[str, Any],
-        model_config: Dict[str, Any],
-        chosen_method: Optional[str] = None
-) -> None:
-    """
-    Processes a single PDF file:
-      - If native, extracts text directly.
-      - Otherwise, extracts images, pre-processes them, and transcribes using Tesseract or GPT.
-    The output is saved in a dedicated folder.
-    """
+async def process_single_pdf(pdf_path: Path,
+                             transcriber: Optional[Any],
+                             image_processing_config: Dict[str, Any],
+                             concurrency_config: Dict[str, Any],
+                             pdf_output_dir: Path,
+                             processing_settings: Dict[str, Any],
+                             model_config: Dict[str, Any],
+                             chosen_method: Optional[str] = None) -> None:
     pdf_processor = PDFProcessor(pdf_path)
     parent_folder, output_txt_path, temp_jsonl_path = pdf_processor.prepare_output_folder(pdf_output_dir)
     valid_methods, method_options = pdf_processor.choose_transcription_method()
 
     console_print(f"\n[INFO] Processing PDF: {pdf_path.name}")
 
-    # Select transcription method for PDFs
+    # Prompt for transcription method if not provided
     if chosen_method is None:
         if pdf_processor.is_native_pdf():
             console_print("Choose how to extract/transcribe the PDF:")
@@ -139,7 +111,6 @@ async def process_single_pdf(
         check_exit(choice)
     else:
         choice = str(chosen_method).strip()
-        # Remap "3" to "2" if necessary (for non-native PDFs)
         if choice == "3" and "3" not in valid_methods and "2" in valid_methods:
             choice = "2"
         if choice not in valid_methods:
@@ -147,7 +118,6 @@ async def process_single_pdf(
             choice = list(valid_methods.keys())[0]
     method = valid_methods[choice]
 
-    # Process native extraction if selected
     if method == "native":
         text = native_extract_pdf_text(pdf_path)
         try:
@@ -166,7 +136,7 @@ async def process_single_pdf(
             logger.exception(f"Error writing native extraction output for {pdf_path.name}: {e}")
         return
 
-    # For non-native PDFs, extract and process images using the integrated method.
+    # For non-native PDFs, process images
     raw_images_folder = parent_folder / "raw_images"
     raw_images_folder.mkdir(exist_ok=True)
     preprocessed_folder = parent_folder / "preprocessed_images"
@@ -177,7 +147,7 @@ async def process_single_pdf(
     if not processed_image_files:
         return
 
-    # If using GPT, optionally allow batch processing
+    # Handle GPT method: prompt for batch processing option
     if method == "gpt":
         batch_choice = safe_input("Use batch processing for GPT transcription? (y/n): ").lower()
         if batch_choice == "y":
@@ -205,26 +175,40 @@ async def process_single_pdf(
                 logger.exception(f"Error during GPT batch submission for {pdf_path.name}: {e}")
                 console_print(f"[ERROR] Failed to submit batch for {pdf_path.name}.")
                 return
+        # Non-batch GPT processing branch
+        args_list = [
+            (img, transcriber, method, image_processing_config.get('ocr', {}).get('tesseract_config', "--oem 3 --psm 6"))
+            for img in processed_image_files
+        ]
+        transcription_conf = concurrency_config.get("transcription", {})
+        concurrency_limit = transcription_conf.get("concurrency_limit", 20)
+        delay_between_tasks = transcription_conf.get("delay_between_tasks", 0)
+        try:
+            results = await run_concurrent_transcription_tasks(
+                transcribe_single_image_task, args_list, concurrency_limit, delay_between_tasks
+            )
+        except Exception as e:
+            logger.exception(f"Error running concurrent transcription tasks for {pdf_path.name}: {e}")
+            console_print(f"[ERROR] Concurrency error for {pdf_path.name}.")
+            return
+    else:  # Tesseract processing branch
+        args_list = [
+            (img, None, method, image_processing_config.get('ocr', {}).get('tesseract_config', "--oem 3 --psm 6"))
+            for img in processed_image_files
+        ]
+        transcription_conf = concurrency_config.get("transcription", {})
+        concurrency_limit = transcription_conf.get("concurrency_limit", 20)
+        delay_between_tasks = transcription_conf.get("delay_between_tasks", 0)
+        try:
+            results = await run_concurrent_transcription_tasks(
+                transcribe_single_image_task, args_list, concurrency_limit, delay_between_tasks
+            )
+        except Exception as e:
+            logger.exception(f"Error running concurrent transcription tasks for {pdf_path.name}: {e}")
+            console_print(f"[ERROR] Concurrency error for {pdf_path.name}.")
+            return
 
-    # For Tesseract or non-batch GPT processing, run concurrent transcription tasks
-    args_list = [
-        (img, transcriber if method == "gpt" else None, method,
-         image_processing_config.get('ocr', {}).get('tesseract_config', "--oem 3 --psm 6"))
-        for img in processed_image_files
-    ]
-    transcription_conf = concurrency_config.get("transcription", {})
-    concurrency_limit = transcription_conf.get("concurrency_limit", 20)
-    delay_between_tasks = transcription_conf.get("delay_between_tasks", 0)
-    try:
-        results = await run_concurrent_transcription_tasks(
-            transcribe_single_image_task, args_list, concurrency_limit, delay_between_tasks
-        )
-    except Exception as e:
-        logger.exception(f"Error running concurrent transcription tasks for {pdf_path.name}: {e}")
-        console_print(f"[ERROR] Concurrency error for {pdf_path.name}.")
-        return
-
-    # Write individual transcription results to temporary JSONL file
+    # Write transcription results to temporary JSONL file
     async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as jfile:
         for result in results:
             if result is None or result[2] is None:
@@ -238,15 +222,12 @@ async def process_single_pdf(
                 "text_chunk": result[2]
             }
             await jfile.write(json.dumps(record) + "\n")
-
-    # Combine all transcription text and write final output
     try:
         combined_text = "\n".join([res[2] for res in results if res and res[2] is not None])
         output_txt_path.write_text(combined_text, encoding='utf-8')
     except Exception as e:
         logger.exception(f"Error writing combined text for {pdf_path.name}: {e}")
 
-    # Cleanup preprocessed images if not retained in settings
     if not processing_settings.get("keep_preprocessed_images", True):
         if preprocessed_folder.exists():
             try:
@@ -255,10 +236,9 @@ async def process_single_pdf(
                 logger.exception(f"Error cleaning up preprocessed images for {pdf_path.name}: {e}")
     console_print(f"[SUCCESS] Saved transcription for PDF '{pdf_path.name}' -> {output_txt_path.name}")
 
-
-# =====================================================
+# --------------------------------------------------
 # Image Folder Processing Function
-# =====================================================
+# --------------------------------------------------
 
 async def process_single_image_folder(
         folder: Path,
@@ -277,11 +257,11 @@ async def process_single_image_folder(
       - Transcribes using GPT or Tesseract.
     The transcription output is saved along with temporary logs.
     """
-    # Prepare output directories and files using the ImageProcessor static method
+    # Prepare output directories and files using ImageProcessor static method
     (parent_folder, raw_images_folder, preprocessed_folder,
      temp_jsonl_path, output_txt_path) = ImageProcessor.prepare_image_folder(folder, image_output_dir)
 
-    # Copy images from source folder to raw images folder using the ImageProcessor static method
+    # Copy images from source folder to raw images folder
     copied_images = ImageProcessor.copy_images_to_raw(folder, raw_images_folder)
     if not copied_images:
         console_print(f"[WARN] No images found in {folder}.")
@@ -300,14 +280,13 @@ async def process_single_image_folder(
                 except Exception as e:
                     logger.exception(f"Error deleting raw image {img}: {e}")
 
-    # Sort processed files by page number if applicable
     processed_files = [p for p in processed_image_paths if p.exists()]
     processed_files.sort(key=lambda x: int(__import__('modules.utils').utils.extract_page_number_from_filename(x.name)))
     if not processed_files:
-        console_print(f"[WARN] No processed images found in {folder.name}.")
+        console_print(f"[WARN] No processed images found in folder '{folder.name}'.")
         return
 
-    # Select transcription method: support both numeric and textual inputs.
+    # Prompt for transcription method if not provided
     valid_methods_numeric = {"1": "gpt", "2": "tesseract"}
     valid_methods_text = {"gpt": "gpt", "tesseract": "tesseract"}
     if chosen_method is None:
@@ -326,7 +305,6 @@ async def process_single_image_folder(
         console_print(f"[WARN] Invalid chosen method '{choice}' for folder '{folder.name}'. Defaulting to 'gpt'.")
         method = "gpt"
 
-    # If using GPT, allow for optional batch processing
     if method == "gpt":
         batch_choice = safe_input("Use batch processing for GPT transcription? (y/n): ").lower()
         if batch_choice == "y":
@@ -351,11 +329,10 @@ async def process_single_image_folder(
                 console_print(f"[SUCCESS] Batch submitted for folder '{folder.name}'.")
                 return
             except Exception as e:
-                logger.exception(f"Error during GPT batch submission for folder {folder.name}: {e}")
+                logger.exception(f"Error during GPT batch submission for folder '{folder.name}': {e}")
                 console_print(f"[ERROR] Failed to submit batch for folder '{folder.name}'.")
                 return
 
-    # Run concurrent transcription tasks (for GPT non-batch or Tesseract)
     args_list = [
         (img_path, transcriber if method == "gpt" else None, method,
          image_processing_config.get('ocr', {}).get('tesseract_config', "--oem 3 --psm 6"))
@@ -369,11 +346,10 @@ async def process_single_image_folder(
             transcribe_single_image_task, args_list, concurrency_limit, delay_between_tasks
         )
     except Exception as e:
-        logger.exception(f"Error running concurrent transcription tasks for folder {folder.name}: {e}")
-        console_print(f"[ERROR] Concurrency error for folder {folder.name}.")
+        logger.exception(f"Error running concurrent transcription tasks for folder '{folder.name}': {e}")
+        console_print(f"[ERROR] Concurrency error for folder '{folder.name}'.")
         return
 
-    # Write transcription results to temporary JSONL file
     async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as jfile:
         for result in results:
             if result is None or result[2] is None:
@@ -388,32 +364,25 @@ async def process_single_image_folder(
             }
             await jfile.write(json.dumps(record) + "\n")
 
-    # Combine transcription results and write final output file
     try:
         combined_text = "\n".join([res[2] for res in results if res and res[2] is not None])
         output_txt_path.write_text(combined_text, encoding='utf-8')
     except Exception as e:
-        logger.exception(f"Error writing combined text for folder {folder.name}: {e}")
+        logger.exception(f"Error writing combined text for folder '{folder.name}': {e}")
 
-    # Cleanup preprocessed images if settings require
     if not processing_settings.get("keep_preprocessed_images", True):
         if preprocessed_folder.exists():
             try:
                 shutil.rmtree(preprocessed_folder, ignore_errors=True)
             except Exception as e:
-                logger.exception(f"Error cleaning up preprocessed images for folder {folder.name}: {e}")
+                logger.exception(f"Error cleaning up preprocessed images for folder '{folder.name}': {e}")
     console_print(f"[SUCCESS] Transcription completed for folder '{folder.name}' -> {output_txt_path.name}")
 
-
-# =====================================================
+# --------------------------------------------------
 # Main Function
-# =====================================================
+# --------------------------------------------------
 
 async def main() -> None:
-    """
-    Main entry point.
-    Loads configuration, sets up input/output directories, and branches into either PDF or image folder processing.
-    """
     config_loader = ConfigLoader()
     try:
         config_loader.load_configs()
@@ -425,18 +394,15 @@ async def main() -> None:
     paths_config = config_loader.get_paths_config()
     processing_settings = paths_config.get("general", {})
 
-    # Retrieve absolute paths for inputs and outputs
     pdf_input_dir = Path(paths_config.get('file_paths', {}).get('PDFs', {}).get('input', 'pdfs_in'))
     image_input_dir = Path(paths_config.get('file_paths', {}).get('Images', {}).get('input', 'images_in'))
     pdf_output_dir = Path(paths_config.get('file_paths', {}).get('PDFs', {}).get('output', 'pdfs_out'))
     image_output_dir = Path(paths_config.get('file_paths', {}).get('Images', {}).get('output', 'images_out'))
 
-    # If the configuration specifies to use the input path as the output path, override the output directories.
     if processing_settings.get("input_paths_is_output_path", False):
         pdf_output_dir = pdf_input_dir
         image_output_dir = image_input_dir
 
-    # Enforce absolute paths for input directories
     if not pdf_input_dir.is_absolute():
         console_print("[ERROR] PDF input path must be an absolute path. Please update your configuration.")
         sys.exit(1)
@@ -444,7 +410,6 @@ async def main() -> None:
         console_print("[ERROR] Image input path must be an absolute path. Please update your configuration.")
         sys.exit(1)
 
-    # Ensure all directories exist
     for d in (pdf_input_dir, image_input_dir, pdf_output_dir, image_output_dir):
         d.mkdir(parents=True, exist_ok=True)
 
@@ -460,7 +425,6 @@ async def main() -> None:
     check_exit(overall_choice)
 
     if overall_choice == "1":
-        # Image Folder Processing
         if not image_input_dir.exists():
             console_print(f"[ERROR] Image input directory does not exist: {image_input_dir}")
             return
@@ -526,7 +490,7 @@ async def main() -> None:
             mapping = {"1": "gpt", "2": "tesseract"}
             method_choice_mapped = mapping.get(method_choice.strip())
             if not method_choice_mapped:
-                console_print(f"[WARN] Invalid method choice '{method_choice}'. Defaulting to '1' (GPT).")
+                console_print(f"[WARN] Invalid method choice '{method_choice}'. Defaulting to 'gpt'.")
                 method_choice_mapped = "gpt"
             for folder in chosen_folders:
                 console_print(f"Processing folder: {folder.name}")
@@ -559,7 +523,6 @@ async def main() -> None:
         else:
             console_print("[ERROR] Invalid choice. Aborting.")
     elif overall_choice == "2":
-        # PDF Processing
         if not pdf_input_dir.exists():
             console_print(f"[ERROR] PDF input directory does not exist: {pdf_input_dir}")
             return
@@ -708,6 +671,7 @@ async def main() -> None:
     else:
         console_print("[ERROR] Invalid overall choice. Exiting.")
 
+    console_print("\n[INFO] Processing complete.")
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -218,7 +218,8 @@ Ensure to adjust these settings according to your environment and specific proce
    Choose **Images** by entering `1`.
 
 3. **Folder Selection:**  
-   Select specific image folders or process all subfolders.
+   The script expects images to be organized in subfolders for better workflow coherence. However, if the image 
+   input directory contains images directly (i.e., no subfolders), the script will process those images as a single folder.
 
 4. **Choose Transcription Method:**  
    Options include GPT-4o and Tesseract OCR. Batch processing is available for GPT-4o.

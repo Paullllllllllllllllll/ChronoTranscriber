@@ -131,7 +131,7 @@ research. It offers flexible transcription options tailored to different types o
 
 1. **Clone the Repository:**
    ```bash
-   git clone https://ChronoTranscriber.git
+   git clone https://github.com/Paullllllllllllllllll/ChronoTranscriber.git
    cd ChronoTranscriber
    ```
 

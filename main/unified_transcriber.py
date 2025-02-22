@@ -57,7 +57,7 @@ async def transcribe_single_image_task(
 ) -> Tuple[str, str, Optional[str]]:
     image_name = img_path.name
     try:
-        if method == "gpt-4o":
+        if method == "gpt":
             if not transcriber:
                 logger.error("No transcriber instance provided for GPT usage.")
                 return (str(img_path), image_name, None)
@@ -137,13 +137,13 @@ async def process_single_pdf(
         methods.append("1. Native text extraction")
         valid_methods["2"] = "tesseract"
         methods.append("2. Tesseract")
-        valid_methods["3"] = "gpt-4o"
-        methods.append("3. GPT-4o")
+        valid_methods["3"] = "gpt"
+        methods.append("3. GPT")
     else:
         valid_methods["1"] = "tesseract"
         methods.append("1. Tesseract")
-        valid_methods["2"] = "gpt-4o"
-        methods.append("2. GPT-4o")
+        valid_methods["2"] = "gpt"
+        methods.append("2. GPT")
     if chosen_method is None:
         console_print(f"\n[INFO] Processing PDF: {pdf_path.name}")
         console_print("Choose how to extract/transcribe the PDF:")
@@ -183,8 +183,8 @@ async def process_single_pdf(
     processed_image_files = await process_images_for_pdf(pdf_path, raw_images_folder, preprocessed_folder, target_dpi)
     if not processed_image_files:
         return
-    if method == "gpt-4o":
-        batch_choice = safe_input("Use batch processing for GPT-4o transcription? (y/n): ").lower()
+    if method == "gpt":
+        batch_choice = safe_input("Use batch processing for GPT transcription? (y/n): ").lower()
         if batch_choice == "y":
             try:
                 batch_responses = await asyncio.to_thread(
@@ -206,11 +206,11 @@ async def process_single_pdf(
                 console_print(f"[SUCCESS] Batch submitted for PDF '{pdf_path.name}'.")
                 return
             except Exception as e:
-                logger.exception(f"Error during GPT-4o batch submission for {pdf_path.name}: {e}")
+                logger.exception(f"Error during GPT batch submission for {pdf_path.name}: {e}")
                 console_print(f"[ERROR] Failed to submit batch for {pdf_path.name}.")
                 return
     args_list = [
-        (img, transcriber if method == "gpt-4o" else None, method,
+        (img, transcriber if method == "gpt" else None, method,
          image_processing_config.get('ocr', {}).get('tesseract_config', "--oem 3 --psm 6"))
         for img in processed_image_files
     ]
@@ -273,10 +273,11 @@ async def process_single_image_folder(
     if not temp_jsonl_path.exists():
         temp_jsonl_path.touch()
     console_print(f"\n[INFO] Processing image folder: {folder.name}")
-    valid_methods = {"1": "gpt-4o", "2": "tesseract"}
+    # For image folders, there are only two options: GPT and Tesseract
+    valid_methods = {"1": "gpt", "2": "tesseract"}
     if chosen_method is None:
         console_print("Choose image transcription method:")
-        console_print("1. GPT-4o")
+        console_print("1. GPT")
         console_print("2. Tesseract")
         choice = safe_input("Enter the number of your choice (or type 'q' to exit): ")
         check_exit(choice)
@@ -315,8 +316,8 @@ async def process_single_image_folder(
     if not processed_files:
         console_print(f"[WARN] No processed images found in {folder.name}.")
         return
-    if method == "gpt-4o":
-        batch_choice = safe_input("Use batch processing for GPT-4o transcription? (y/n): ").lower()
+    if method == "gpt":
+        batch_choice = safe_input("Use batch processing for GPT transcription? (y/n): ").lower()
         if batch_choice == "y":
             try:
                 batch_responses = await asyncio.to_thread(
@@ -338,11 +339,11 @@ async def process_single_image_folder(
                 console_print(f"[SUCCESS] Batch submitted for folder '{folder.name}'.")
                 return
             except Exception as e:
-                logger.exception(f"Error during GPT-4o batch submission for folder {folder.name}: {e}")
+                logger.exception(f"Error during GPT batch submission for folder {folder.name}: {e}")
                 console_print(f"[ERROR] Failed to submit batch for folder '{folder.name}'.")
                 return
     args_list = [
-        (img_path, transcriber if method == "gpt-4o" else None, method,
+        (img_path, transcriber if method == "gpt" else None, method,
          image_processing_config.get('ocr', {}).get('tesseract_config', "--oem 3 --psm 6"))
         for img_path in processed_files
     ]
@@ -426,19 +427,18 @@ async def main() -> None:
         all_or_select = safe_input("\nProcess 1) All subfolders or 2) Specific subfolders? (or type 'q' to exit): ")
         check_exit(all_or_select)
         if all_or_select == "1":
-            method_choice = safe_input("Choose transcription method for all image folders (1 for GPT-4o, 2 for Tesseract): ")
+            method_choice = safe_input("Choose transcription method for all image folders (1 for GPT, 2 for Tesseract): ")
             check_exit(method_choice)
             if method_choice == "1":
-                # GPT-4o selected; require OPENAI_API_KEY
                 api_key = os.getenv('OPENAI_API_KEY')
                 if not api_key:
-                    console_print("[ERROR] OPENAI_API_KEY is required for GPT-4o transcription. Please set it and try again.")
+                    console_print("[ERROR] OPENAI_API_KEY is required for GPT transcription. Please set it and try again.")
                     sys.exit(1)
                 async with open_transcriber(
                         api_key=api_key,
                         system_prompt_path=system_prompt_path,
                         schema_path=schema_path,
-                        model=model_config.get("transcription_model", {}).get("name", "gpt-4o-2024-08-06")
+                        model=model_config.get("transcription_model", {}).get("name", "gpt")
                 ) as transcriber:
                     for folder in subfolders:
                         await process_single_image_folder(folder, transcriber,
@@ -449,7 +449,6 @@ async def main() -> None:
                                                           model_config,
                                                           chosen_method=method_choice)
             else:
-                # Tesseract selected; no transcriber needed
                 for folder in subfolders:
                     await process_single_image_folder(folder, None,
                                                       image_processing_config,
@@ -467,18 +466,23 @@ async def main() -> None:
             except ValueError:
                 console_print("[ERROR] Invalid input. Aborting.")
                 return
-            method_choice = safe_input("Choose transcription method for the selected image folders (1 for GPT-4o, 2 for Tesseract): ")
+            method_choice = safe_input("Enter transcription method for all selected subfolders (Native, Tesseract, GPT) (or type 'q' to exit): ")
             check_exit(method_choice)
-            if method_choice == "1":
+            mapping = {"native": "native", "tesseract": "tesseract", "gpt": "gpt"}
+            method_choice_mapped = mapping.get(method_choice.lower())
+            if not method_choice_mapped:
+                console_print(f"[WARN] Invalid method choice '{method_choice}'. Defaulting to Native.")
+                method_choice_mapped = "native"
+            if method_choice_mapped == "gpt":
                 api_key = os.getenv('OPENAI_API_KEY')
                 if not api_key:
-                    console_print("[ERROR] OPENAI_API_KEY is required for GPT-4o transcription. Please set it and try again.")
+                    console_print("[ERROR] OPENAI_API_KEY is required for GPT transcription. Please set it and try again.")
                     sys.exit(1)
                 async with open_transcriber(
                         api_key=api_key,
                         system_prompt_path=system_prompt_path,
                         schema_path=schema_path,
-                        model=model_config.get("transcription_model", {}).get("name", "gpt-4o-2024-08-06")
+                        model=model_config.get("transcription_model", {}).get("name", "gpt")
                 ) as transcriber:
                     for folder in chosen_folders:
                         await process_single_image_folder(folder, transcriber,
@@ -487,7 +491,7 @@ async def main() -> None:
                                                           image_output_dir,
                                                           processing_settings,
                                                           model_config,
-                                                          chosen_method=method_choice)
+                                                          chosen_method=method_choice_mapped)
             else:
                 for folder in chosen_folders:
                     await process_single_image_folder(folder, None,
@@ -496,7 +500,7 @@ async def main() -> None:
                                                       image_output_dir,
                                                       processing_settings,
                                                       model_config,
-                                                      chosen_method=method_choice)
+                                                      chosen_method=method_choice_mapped)
         else:
             console_print("[ERROR] Invalid choice. Aborting.")
     elif overall_choice == "2":
@@ -514,19 +518,19 @@ async def main() -> None:
         pdf_choice = safe_input("Enter your choice (1/2/3 or type 'q' to exit): ")
         check_exit(pdf_choice)
         if pdf_choice == "1":
-            method_choice = safe_input("Choose transcription method for all PDFs (For native PDFs: 1.Native, 2.Tesseract, 3.GPT-4o): ")
+            method_choice = safe_input("Choose transcription method for all PDFs (For native PDFs: 1.Native, 2.Tesseract, 3.GPT): ")
             check_exit(method_choice)
             console_print(f"[INFO] Processing {len(all_pdfs)} PDF(s) with the selected transcription method...")
             if method_choice == "3":
                 api_key = os.getenv('OPENAI_API_KEY')
                 if not api_key:
-                    console_print("[ERROR] OPENAI_API_KEY is required for GPT-4o transcription. Please set it and try again.")
+                    console_print("[ERROR] OPENAI_API_KEY is required for GPT transcription. Please set it and try again.")
                     sys.exit(1)
                 async with open_transcriber(
                         api_key=api_key,
                         system_prompt_path=system_prompt_path,
                         schema_path=schema_path,
-                        model=model_config.get("transcription_model", {}).get("name", "gpt-4o-2024-08-06")
+                        model=model_config.get("transcription_model", {}).get("name", "gpt")
                 ) as transcriber:
                     for pdf_path in all_pdfs:
                         await process_single_pdf(pdf_path, transcriber,
@@ -549,7 +553,7 @@ async def main() -> None:
             console_print("\n[INFO] Subfolders available:")
             for idx, sf in enumerate(subfolders, 1):
                 console_print(f"  {idx}. {sf.name}")
-            method_choice = safe_input("Enter transcription method for all selected subfolders (e.g., 1, 2 or 3) (or type 'q' to exit): ")
+            method_choice = safe_input("Enter transcription method for all selected subfolders (Native, Tesseract, GPT) (or type 'q' to exit): ")
             check_exit(method_choice)
             selected_indices = safe_input("Enter subfolder numbers separated by commas (or type 'q' to exit): ")
             check_exit(selected_indices)
@@ -559,16 +563,21 @@ async def main() -> None:
             except ValueError:
                 console_print("[ERROR] Invalid input. Exiting.")
                 return
-            if method_choice == "3":
+            mapping = {"native": "native", "tesseract": "tesseract", "gpt": "gpt"}
+            method_choice_mapped = mapping.get(method_choice.lower())
+            if not method_choice_mapped:
+                console_print(f"[WARN] Invalid method choice '{method_choice}'. Defaulting to Native.")
+                method_choice_mapped = "native"
+            if method_choice_mapped == "gpt":
                 api_key = os.getenv('OPENAI_API_KEY')
                 if not api_key:
-                    console_print("[ERROR] OPENAI_API_KEY is required for GPT-4o transcription. Please set it and try again.")
+                    console_print("[ERROR] OPENAI_API_KEY is required for GPT transcription. Please set it and try again.")
                     sys.exit(1)
                 async with open_transcriber(
                         api_key=api_key,
                         system_prompt_path=system_prompt_path,
                         schema_path=schema_path,
-                        model=model_config.get("transcription_model", {}).get("name", "gpt-4o-2024-08-06")
+                        model=model_config.get("transcription_model", {}).get("name", "gpt")
                 ) as transcriber:
                     for folder in chosen_folders:
                         pdfs_in_folder = list(folder.rglob("*.pdf"))
@@ -580,7 +589,7 @@ async def main() -> None:
                                                      image_processing_config,
                                                      concurrency_config, pdf_output_dir,
                                                      processing_settings, model_config,
-                                                     chosen_method=method_choice)
+                                                     chosen_method=method_choice_mapped)
             else:
                 for folder in chosen_folders:
                     pdfs_in_folder = list(folder.rglob("*.pdf"))
@@ -592,7 +601,7 @@ async def main() -> None:
                                                  image_processing_config,
                                                  concurrency_config, pdf_output_dir,
                                                  processing_settings, model_config,
-                                                 chosen_method=method_choice)
+                                                 chosen_method=method_choice_mapped)
         elif pdf_choice == "3":
             while True:
                 filename = safe_input("\nEnter the filename (with or without .pdf) or type 'q' to exit: ")
@@ -600,20 +609,18 @@ async def main() -> None:
                 pdf_stem = filename.replace(".pdf", "").lower()
                 match = next((pdf for pdf in all_pdfs if pdf.stem.lower() == pdf_stem), None)
                 if match:
-                    # For single PDF processing, assume method based on previous input (defaulting to native if unspecified)
-                    # Here we prompt for the method if needed.
-                    method_choice = safe_input("Choose transcription method for this PDF (1.Native, 2.Tesseract, 3.GPT-4o): ")
+                    method_choice = safe_input("Choose transcription method for this PDF (1.Native, 2.Tesseract, 3.GPT): ")
                     check_exit(method_choice)
                     if method_choice == "3":
                         api_key = os.getenv('OPENAI_API_KEY')
                         if not api_key:
-                            console_print("[ERROR] OPENAI_API_KEY is required for GPT-4o transcription. Please set it and try again.")
+                            console_print("[ERROR] OPENAI_API_KEY is required for GPT transcription. Please set it and try again.")
                             sys.exit(1)
                         async with open_transcriber(
                                 api_key=api_key,
                                 system_prompt_path=system_prompt_path,
                                 schema_path=schema_path,
-                                model=model_config.get("transcription_model", {}).get("name", "gpt-4o-2024-08-06")
+                                model=model_config.get("transcription_model", {}).get("name", "gpt")
                         ) as transcriber:
                             await process_single_pdf(match, transcriber,
                                                      image_processing_config,

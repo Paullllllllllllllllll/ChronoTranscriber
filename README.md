@@ -171,6 +171,24 @@ research. It offers flexible transcription options tailored to different types o
    ```bash
    python main/unified_transcriber.py
    ```
+## System Requirements & Dependencies
+
+- **Python Version:**  
+  Will work with Python 3.12 or later.
+
+- **Key Dependencies:**
+    - aiohttp==3.11.10  
+    - anyio==4.7.0  
+    - pydantic==2.10.3  
+    - requests==2.32.3  
+    - pillow==11.0.0  
+    - python-docx==1.1.2  
+    - numpy==2.2.0  
+    - openai==1.57.4  
+    - tqdm==4.67.1
+
+- **Further Dependencies:**
+    - A full list of dependencies can be found in requirements.txt.
 
 ## Configuration
 

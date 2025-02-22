@@ -2,6 +2,7 @@
 from pathlib import Path
 from typing import List
 from modules.logger import setup_logger
+from modules.utils import console_print, check_exit, safe_input
 
 logger = setup_logger(__name__)
 
@@ -86,3 +87,14 @@ def select_files(directory: Path, extension: str) -> List[Path]:
 		print("Invalid input. Please enter numbers separated by commas.")
 		logger.error("User entered invalid file selection input.")
 		return []
+
+def select_option(prompt: str, options: List[str]) -> str:
+    """
+    Display a prompt and a numbered list of options, then return the user's choice as a string.
+    """
+    console_print(prompt)
+    for idx, option in enumerate(options, 1):
+        console_print(f"{idx}. {option}")
+    choice = safe_input("Enter the number of your choice (or type 'q' to exit): ")
+    check_exit(choice)
+    return choice.strip()

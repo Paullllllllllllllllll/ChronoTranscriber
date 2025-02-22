@@ -31,7 +31,7 @@ from modules.concurrency import run_concurrent_transcription_tasks
 from modules.image_utils import ImageProcessor, SUPPORTED_IMAGE_EXTENSIONS
 from modules.text_processing import extract_transcribed_text
 from modules.utils import console_print, check_exit, safe_input
-from modules.user_interface import select_option
+from modules.user_interface import select_option  # For standardized prompts
 
 logger = setup_logger(__name__)
 
@@ -131,6 +131,14 @@ async def process_single_pdf(pdf_path: Path,
             console_print(f"[SUCCESS] Extracted text from '{pdf_path.name}' using native method -> {output_txt_path.name}")
         except Exception as e:
             logger.exception(f"Error writing native extraction output for {pdf_path.name}: {e}")
+        # Delete temporary JSONL if flag is false and not using batch processing.
+        if not processing_settings.get("retain_temporary_jsonl", True):
+            try:
+                temp_jsonl_path.unlink()
+                console_print(f"[CLEANUP] Deleted temporary file: {temp_jsonl_path.name}")
+            except Exception as e:
+                logger.exception(f"Error deleting temporary file {temp_jsonl_path}: {e}")
+                console_print(f"[ERROR] Could not delete temporary file {temp_jsonl_path.name}: {e}")
         return
 
     # For non-native PDFs, process images
@@ -167,43 +175,34 @@ async def process_single_pdf(pdf_path: Path,
                         }
                         await f.write(json.dumps(tracking_record) + "\n")
                 console_print(f"[SUCCESS] Batch submitted for PDF '{pdf_path.name}'.")
+                # In batch mode, temporary file is preserved for check_batches.py.
                 return
             except Exception as e:
                 logger.exception(f"Error during GPT batch submission for {pdf_path.name}: {e}")
                 console_print(f"[ERROR] Failed to submit batch for {pdf_path.name}.")
                 return
-        # Non-batch GPT processing branch
+    # Non-batch processing branch for GPT or Tesseract
+    if method == "gpt":
         args_list = [
             (img, transcriber, method, image_processing_config.get('ocr', {}).get('tesseract_config', "--oem 3 --psm 6"))
             for img in processed_image_files
         ]
-        transcription_conf = concurrency_config.get("transcription", {})
-        concurrency_limit = transcription_conf.get("concurrency_limit", 20)
-        delay_between_tasks = transcription_conf.get("delay_between_tasks", 0)
-        try:
-            results = await run_concurrent_transcription_tasks(
-                transcribe_single_image_task, args_list, concurrency_limit, delay_between_tasks
-            )
-        except Exception as e:
-            logger.exception(f"Error running concurrent transcription tasks for {pdf_path.name}: {e}")
-            console_print(f"[ERROR] Concurrency error for {pdf_path.name}.")
-            return
-    else:  # Tesseract processing branch
+    else:
         args_list = [
             (img, None, method, image_processing_config.get('ocr', {}).get('tesseract_config', "--oem 3 --psm 6"))
             for img in processed_image_files
         ]
-        transcription_conf = concurrency_config.get("transcription", {})
-        concurrency_limit = transcription_conf.get("concurrency_limit", 20)
-        delay_between_tasks = transcription_conf.get("delay_between_tasks", 0)
-        try:
-            results = await run_concurrent_transcription_tasks(
-                transcribe_single_image_task, args_list, concurrency_limit, delay_between_tasks
-            )
-        except Exception as e:
-            logger.exception(f"Error running concurrent transcription tasks for {pdf_path.name}: {e}")
-            console_print(f"[ERROR] Concurrency error for {pdf_path.name}.")
-            return
+    transcription_conf = concurrency_config.get("transcription", {})
+    concurrency_limit = transcription_conf.get("concurrency_limit", 20)
+    delay_between_tasks = transcription_conf.get("delay_between_tasks", 0)
+    try:
+        results = await run_concurrent_transcription_tasks(
+            transcribe_single_image_task, args_list, concurrency_limit, delay_between_tasks
+        )
+    except Exception as e:
+        logger.exception(f"Error running concurrent transcription tasks for {pdf_path.name}: {e}")
+        console_print(f"[ERROR] Concurrency error for {pdf_path.name}.")
+        return
 
     # Write transcription results to temporary JSONL file
     async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as jfile:
@@ -232,6 +231,15 @@ async def process_single_pdf(pdf_path: Path,
             except Exception as e:
                 logger.exception(f"Error cleaning up preprocessed images for {pdf_path.name}: {e}")
     console_print(f"[SUCCESS] Saved transcription for PDF '{pdf_path.name}' -> {output_txt_path.name}")
+
+    # Delete temporary JSONL file if flag is false and not using batch processing.
+    if not processing_settings.get("retain_temporary_jsonl", True):
+        try:
+            temp_jsonl_path.unlink()
+            console_print(f"[CLEANUP] Deleted temporary file: {temp_jsonl_path.name}")
+        except Exception as e:
+            logger.exception(f"Error deleting temporary file {temp_jsonl_path}: {e}")
+            console_print(f"[ERROR] Could not delete temporary file {temp_jsonl_path.name}: {e}")
 
 # --------------------------------------------------
 # Image Folder Processing Function
@@ -313,6 +321,7 @@ async def process_single_image_folder(
                         }
                         await f.write(json.dumps(tracking_record) + "\n")
                 console_print(f"[SUCCESS] Batch submitted for folder '{folder.name}'.")
+                # In batch mode, we leave the temporary JSONL file intact.
                 return
             except Exception as e:
                 logger.exception(f"Error during GPT batch submission for folder '{folder.name}': {e}")
@@ -363,6 +372,15 @@ async def process_single_image_folder(
             except Exception as e:
                 logger.exception(f"Error cleaning up preprocessed images for folder '{folder.name}': {e}")
     console_print(f"[SUCCESS] Transcription completed for folder '{folder.name}' -> {output_txt_path.name}")
+
+    # Delete temporary JSONL file if flag is false and not using batch processing.
+    if not processing_settings.get("retain_temporary_jsonl", True):
+        try:
+            temp_jsonl_path.unlink()
+            console_print(f"[CLEANUP] Deleted temporary file: {temp_jsonl_path.name}")
+        except Exception as e:
+            logger.exception(f"Error deleting temporary file {temp_jsonl_path}: {e}")
+            console_print(f"[ERROR] Could not delete temporary file {temp_jsonl_path.name}: {e}")
 
 # --------------------------------------------------
 # Main Function

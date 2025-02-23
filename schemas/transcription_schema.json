@@ -6,7 +6,7 @@
     "properties": {
       "image_analysis": {
         "type": "string",
-        "description": "Let’s think step by step to describe what you can see on the image. Write down all formatting elements (titles, subtitles, headers, footers, page numbers) and text blocks and tables on the image."
+        "description": "Let’s think step by step to describe what you can see on the image. Write down all formatting elements (titles, subtitles, headers, footers, page numbers) and text blocks and tables on the image, and develop a Markdown-transcription strategy."
       },
       "transcription": {
         "type": ["string", "null"],

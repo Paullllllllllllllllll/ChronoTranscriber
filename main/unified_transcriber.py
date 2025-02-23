@@ -31,7 +31,6 @@ from modules.concurrency import run_concurrent_transcription_tasks
 from modules.image_utils import ImageProcessor, SUPPORTED_IMAGE_EXTENSIONS
 from modules.text_processing import extract_transcribed_text
 from modules.utils import console_print, check_exit, safe_input
-from modules.user_interface import select_option  # For standardized prompts
 
 logger = setup_logger(__name__)
 
@@ -93,13 +92,20 @@ async def process_single_pdf(pdf_path: Path,
                              processing_settings: Dict[str, Any],
                              model_config: Dict[str, Any],
                              chosen_method: Optional[str] = None) -> None:
+    """
+    Processes a single PDF file for transcription.
+    1) Prepares an output folder structure and determines the method (native, Tesseract, GPT).
+    2) If it's native, extract text directly. Otherwise, extract images, possibly use OCR or GPT transcription.
+    3) Optionally handle batch processing for GPT requests.
+    4) Manage raw/preprocessed image folders based on user settings.
+    """
     pdf_processor = PDFProcessor(pdf_path)
     parent_folder, output_txt_path, temp_jsonl_path = pdf_processor.prepare_output_folder(pdf_output_dir)
-    valid_methods, method_options = pdf_processor.choose_transcription_method()
+    valid_methods, _ = pdf_processor.choose_transcription_method()
 
     console_print(f"\n[INFO] Processing PDF: {pdf_path.name}")
 
-    # Prompt for transcription method if not provided, using standardized numbered options.
+    # Determine or prompt for the chosen method
     if chosen_method is None:
         if pdf_processor.is_native_pdf():
             choice = select_option("Choose transcription method for this PDF:", ["Native", "Tesseract", "GPT"])
@@ -113,6 +119,7 @@ async def process_single_pdf(pdf_path: Path,
             choice = list(valid_methods.keys())[0]
     method = valid_methods[choice]
 
+    # Native PDF extraction
     if method == "native":
         text = native_extract_pdf_text(pdf_path)
         try:
@@ -129,7 +136,8 @@ async def process_single_pdf(pdf_path: Path,
             console_print(f"[SUCCESS] Extracted text from '{pdf_path.name}' using native method -> {output_txt_path.name}")
         except Exception as e:
             logger.exception(f"Error writing native extraction output for {pdf_path.name}: {e}")
-        # Delete temporary JSONL if flag is false and not using batch processing.
+
+        # Cleanup if not retaining
         if not processing_settings.get("retain_temporary_jsonl", True):
             try:
                 temp_jsonl_path.unlink()
@@ -137,9 +145,10 @@ async def process_single_pdf(pdf_path: Path,
             except Exception as e:
                 logger.exception(f"Error deleting temporary file {temp_jsonl_path}: {e}")
                 console_print(f"[ERROR] Could not delete temporary file {temp_jsonl_path.name}: {e}")
+
         return
 
-    # For non-native PDFs, process images
+    # Non-native PDF: Extract images
     raw_images_folder = parent_folder / "raw_images"
     raw_images_folder.mkdir(exist_ok=True)
     preprocessed_folder = parent_folder / "preprocessed_images"
@@ -147,10 +156,21 @@ async def process_single_pdf(pdf_path: Path,
 
     target_dpi = image_processing_config.get('target_dpi', 300)
     processed_image_files = await pdf_processor.process_images(raw_images_folder, preprocessed_folder, target_dpi)
-    if not processed_image_files:
-        return
 
-    # Handle GPT method: prompt for batch processing option
+    # Ensure proper page ordering
+    from modules.utils import extract_page_number_from_filename
+    processed_image_files.sort(key=lambda p: extract_page_number_from_filename(p.name))
+
+    # Delete raw images folder immediately if the flag is false
+    if not processing_settings.get("keep_raw_images", True):
+        if raw_images_folder.exists():
+            try:
+                shutil.rmtree(raw_images_folder, ignore_errors=True)
+                console_print(f"[CLEANUP] Deleted raw_images folder: {raw_images_folder.name}")
+            except Exception as e:
+                logger.exception(f"Error deleting raw_images folder {raw_images_folder}: {e}")
+
+    # Handle GPT batch or synchronous modes
     if method == "gpt":
         batch_choice = safe_input("Use batch processing for GPT transcription? (y/n): ").lower()
         if batch_choice == "y":
@@ -172,14 +192,26 @@ async def process_single_pdf(pdf_path: Path,
                             }
                         }
                         await f.write(json.dumps(tracking_record) + "\n")
+
                 console_print(f"[SUCCESS] Batch submitted for PDF '{pdf_path.name}'.")
-                # In batch mode, temporary file is preserved for check_batches.py.
+
+                # Even in batch mode, delete the preprocessed folder if the user doesn't want to keep it
+                if not processing_settings.get("keep_preprocessed_images", True):
+                    if preprocessed_folder.exists():
+                        try:
+                            shutil.rmtree(preprocessed_folder, ignore_errors=True)
+                        except Exception as e:
+                            logger.exception(f"Error cleaning up preprocessed images for {pdf_path.name}: {e}")
+
                 return
             except Exception as e:
                 logger.exception(f"Error during GPT batch submission for {pdf_path.name}: {e}")
                 console_print(f"[ERROR] Failed to submit batch for {pdf_path.name}.")
+                # Fall through to the rest of the function; the user might want some fallback
+                # or we can simply return here. For clarity, let's just return.
                 return
-    # Non-batch processing branch for GPT or Tesseract
+
+    # Non-batch flow for GPT or Tesseract
     if method == "gpt":
         args_list = [
             (img, transcriber, method, image_processing_config.get('ocr', {}).get('tesseract_config', "--oem 3 --psm 6"))
@@ -190,9 +222,11 @@ async def process_single_pdf(pdf_path: Path,
             (img, None, method, image_processing_config.get('ocr', {}).get('tesseract_config', "--oem 3 --psm 6"))
             for img in processed_image_files
         ]
+
     transcription_conf = concurrency_config.get("transcription", {})
     concurrency_limit = transcription_conf.get("concurrency_limit", 20)
     delay_between_tasks = transcription_conf.get("delay_between_tasks", 0)
+
     try:
         results = await run_concurrent_transcription_tasks(
             transcribe_single_image_task, args_list, concurrency_limit, delay_between_tasks
@@ -202,7 +236,7 @@ async def process_single_pdf(pdf_path: Path,
         console_print(f"[ERROR] Concurrency error for {pdf_path.name}.")
         return
 
-    # Write transcription results to temporary JSONL file
+    # Write the transcription results to a temporary JSONL
     async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as jfile:
         for result in results:
             if result is None or result[2] is None:
@@ -216,21 +250,25 @@ async def process_single_pdf(pdf_path: Path,
                 "text_chunk": result[2]
             }
             await jfile.write(json.dumps(record) + "\n")
+
+    # Combine the transcription text in page order
     try:
         combined_text = "\n".join([res[2] for res in results if res and res[2] is not None])
         output_txt_path.write_text(combined_text, encoding='utf-8')
     except Exception as e:
         logger.exception(f"Error writing combined text for {pdf_path.name}: {e}")
 
+    # If keep_preprocessed_images is false, delete preprocessed folder
     if not processing_settings.get("keep_preprocessed_images", True):
         if preprocessed_folder.exists():
             try:
                 shutil.rmtree(preprocessed_folder, ignore_errors=True)
             except Exception as e:
                 logger.exception(f"Error cleaning up preprocessed images for {pdf_path.name}: {e}")
+
     console_print(f"[SUCCESS] Saved transcription for PDF '{pdf_path.name}' -> {output_txt_path.name}")
 
-    # Delete temporary JSONL file if flag is false and not using batch processing.
+    # Remove temporary JSONL if not retaining
     if not processing_settings.get("retain_temporary_jsonl", True):
         try:
             temp_jsonl_path.unlink()
@@ -255,16 +293,14 @@ async def process_single_image_folder(
 ) -> None:
     """
     Processes all images in a given folder:
-      - Copies images to a raw folder.
-      - Preprocesses them.
-      - Transcribes using GPT or Tesseract.
-    The transcription output is saved along with temporary logs.
+    1) Copies images to a raw folder.
+    2) Preprocesses them.
+    3) Transcribes using GPT or Tesseract.
+    4) Manages folder cleanup if flags are set.
     """
-    # Prepare output directories and files using ImageProcessor static method
-    (parent_folder, raw_images_folder, preprocessed_folder,
-     temp_jsonl_path, output_txt_path) = ImageProcessor.prepare_image_folder(folder, image_output_dir)
+    parent_folder, raw_images_folder, preprocessed_folder, temp_jsonl_path, output_txt_path = ImageProcessor.prepare_image_folder(folder, image_output_dir)
 
-    # Copy images from source folder to raw images folder
+    # Copy images
     copied_images = ImageProcessor.copy_images_to_raw(folder, raw_images_folder)
     if not copied_images:
         console_print(f"[WARN] No images found in {folder}.")
@@ -274,14 +310,14 @@ async def process_single_image_folder(
     processed_image_paths = [preprocessed_folder / f"{img.stem}_pre_processed{img.suffix}" for img in copied_images]
     ImageProcessor.process_images_multiprocessing(copied_images, processed_image_paths)
 
-    # Optionally remove raw images if settings require cleanup
+    # Delete raw_images_folder immediately if the flag is false
     if not processing_settings.get("keep_raw_images", True):
-        for img in copied_images:
-            if img.exists():
-                try:
-                    img.unlink()
-                except Exception as e:
-                    logger.exception(f"Error deleting raw image {img}: {e}")
+        if raw_images_folder.exists():
+            try:
+                shutil.rmtree(raw_images_folder, ignore_errors=True)
+                console_print(f"[CLEANUP] Deleted raw_images folder: {raw_images_folder.name}")
+            except Exception as e:
+                logger.exception(f"Error deleting raw_images folder {raw_images_folder}: {e}")
 
     processed_files = [p for p in processed_image_paths if p.exists()]
     processed_files.sort(key=lambda x: int(__import__('modules.utils').utils.extract_page_number_from_filename(x.name)))
@@ -289,7 +325,7 @@ async def process_single_image_folder(
         console_print(f"[WARN] No processed images found in folder '{folder.name}'.")
         return
 
-    # Prompt for transcription method using standardized options
+    # Determine or prompt for GPT/Tesseract
     if chosen_method is None:
         choice = select_option("Choose image transcription method:", ["GPT", "Tesseract"])
     else:
@@ -297,6 +333,7 @@ async def process_single_image_folder(
     mapping = {"1": "gpt", "2": "tesseract", "gpt": "gpt", "tesseract": "tesseract"}
     method = mapping.get(choice, "gpt")
 
+    # Optionally handle batch mode
     if method == "gpt":
         batch_choice = safe_input("Use batch processing for GPT transcription? (y/n): ").lower()
         if batch_choice == "y":
@@ -319,13 +356,22 @@ async def process_single_image_folder(
                         }
                         await f.write(json.dumps(tracking_record) + "\n")
                 console_print(f"[SUCCESS] Batch submitted for folder '{folder.name}'.")
-                # In batch mode, leave the temporary JSONL file intact.
+
+                # Even for batch usage, delete preprocessed folder if the user doesn't want to keep it
+                if not processing_settings.get("keep_preprocessed_images", True):
+                    if preprocessed_folder.exists():
+                        try:
+                            shutil.rmtree(preprocessed_folder, ignore_errors=True)
+                        except Exception as e:
+                            logger.exception(f"Error cleaning up preprocessed images for folder '{folder.name}': {e}")
+
                 return
             except Exception as e:
                 logger.exception(f"Error during GPT batch submission for folder '{folder.name}': {e}")
                 console_print(f"[ERROR] Failed to submit batch for folder '{folder.name}'.")
                 return
 
+    # Non-batch GPT or Tesseract
     args_list = [
         (img_path, transcriber if method == "gpt" else None, method,
          image_processing_config.get('ocr', {}).get('tesseract_config', "--oem 3 --psm 6"))
@@ -334,6 +380,7 @@ async def process_single_image_folder(
     transcription_conf = concurrency_config.get("transcription", {})
     concurrency_limit = transcription_conf.get("concurrency_limit", 20)
     delay_between_tasks = transcription_conf.get("delay_between_tasks", 0)
+
     try:
         results = await run_concurrent_transcription_tasks(
             transcribe_single_image_task, args_list, concurrency_limit, delay_between_tasks
@@ -343,6 +390,7 @@ async def process_single_image_folder(
         console_print(f"[ERROR] Concurrency error for folder '{folder.name}'.")
         return
 
+    # Write to temporary JSONL
     async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as jfile:
         for result in results:
             if result is None or result[2] is None:
@@ -357,21 +405,24 @@ async def process_single_image_folder(
             }
             await jfile.write(json.dumps(record) + "\n")
 
+    # Combine final text
     try:
         combined_text = "\n".join([res[2] for res in results if res and res[2] is not None])
         output_txt_path.write_text(combined_text, encoding='utf-8')
     except Exception as e:
         logger.exception(f"Error writing combined text for folder '{folder.name}': {e}")
 
+    # Delete preprocessed folder if not retaining
     if not processing_settings.get("keep_preprocessed_images", True):
         if preprocessed_folder.exists():
             try:
                 shutil.rmtree(preprocessed_folder, ignore_errors=True)
             except Exception as e:
                 logger.exception(f"Error cleaning up preprocessed images for folder '{folder.name}': {e}")
+
     console_print(f"[SUCCESS] Transcription completed for folder '{folder.name}' -> {output_txt_path.name}")
 
-    # Delete temporary JSONL file if flag is false and not using batch processing.
+    # Delete temporary JSONL if not retaining
     if not processing_settings.get("retain_temporary_jsonl", True):
         try:
             temp_jsonl_path.unlink()
@@ -379,6 +430,21 @@ async def process_single_image_folder(
         except Exception as e:
             logger.exception(f"Error deleting temporary file {temp_jsonl_path}: {e}")
             console_print(f"[ERROR] Could not delete temporary file {temp_jsonl_path.name}: {e}")
+
+# --------------------------------------------------
+# User Interface Helper
+# --------------------------------------------------
+
+def select_option(prompt: str, options: list) -> str:
+    """
+    Prompt the user for a choice among a list of options.
+    """
+    console_print(prompt)
+    for idx, option in enumerate(options, 1):
+        console_print(f"{idx}. {option}")
+    choice = safe_input("Enter the number of your choice (or type 'q' to exit): ")
+    check_exit(choice)
+    return choice.strip()
 
 # --------------------------------------------------
 # Main Function
@@ -479,7 +545,6 @@ async def main() -> None:
                 console_print("[ERROR] Invalid input. Aborting.")
                 return
             method_choice = select_option("Choose transcription method for all selected folders:", ["GPT", "Tesseract"])
-            # Pass raw numeric string directly to process_single_image_folder
             for folder in chosen_folders:
                 console_print(f"Processing folder: {folder.name}")
                 if method_choice == "1":
@@ -563,7 +628,6 @@ async def main() -> None:
             console_print("\n[INFO] Subfolders available:")
             for idx, sf in enumerate(subfolders, 1):
                 console_print(f"  {idx}. {sf.name}")
-            # Use standardized prompt and pass raw numeric choice
             method_choice = select_option("Choose transcription method for all selected subfolders:", ["Native", "Tesseract", "GPT"])
             selected_indices = safe_input("Enter subfolder numbers separated by commas (or type 'q' to exit): ")
             check_exit(selected_indices)
@@ -573,7 +637,6 @@ async def main() -> None:
             except ValueError:
                 console_print("[ERROR] Invalid input. Exiting.")
                 return
-            # Pass the raw numeric choice directly
             if method_choice == "3":
                 api_key = os.getenv('OPENAI_API_KEY')
                 if not api_key:

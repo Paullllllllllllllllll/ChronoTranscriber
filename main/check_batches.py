@@ -5,8 +5,8 @@ are marked as completed) and—if so—to download and process them.
 Temporary .jsonl files and image folders will only be deleted if the final
 output is successfully written.
 """
+
 import json
-import shutil
 from pathlib import Path
 from typing import Tuple, Dict, Any, List
 
@@ -20,8 +20,11 @@ logger = setup_logger(__name__)
 def console_print(message: str) -> None:
     print(message)
 
-
 def load_config() -> Tuple[List[Path], Dict[str, Any]]:
+    """
+    Load and parse configuration YAML files. Identify directories to scan and
+    retrieve general processing settings (e.g., concurrency limits, keep_raw_images flag).
+    """
     config_loader = ConfigLoader()
     config_loader.load_configs()
     paths_config = config_loader.get_paths_config()
@@ -39,14 +42,16 @@ def load_config() -> Tuple[List[Path], Dict[str, Any]]:
     scan_dirs = list(set(scan_dirs))
     return scan_dirs, processing_settings
 
-
 def process_batch_output(file_content: bytes) -> List[str]:
-    # Decode content if needed and strip extra whitespace.
+    """
+    Parse JSON output from the OpenAI batch result file. Accumulate the
+    transcribed text from each line into a list of transcription strings.
+    """
     content = file_content.decode("utf-8") if isinstance(file_content, bytes) else file_content
     content = content.strip()
     transcriptions = []
-    # Support both JSON array and newline-delimited JSON.
     if content.startswith("[") and content.endswith("]"):
+        # Possibly a JSON array
         try:
             items = json.loads(content)
             lines = [json.dumps(item) for item in items]
@@ -64,6 +69,7 @@ def process_batch_output(file_content: bytes) -> List[str]:
             continue
 
         data = None
+        # If there's a "response" object, read from that. Otherwise, if there's a "choices" key, use it directly
         if "response" in obj and isinstance(obj["response"], dict) and "body" in obj["response"]:
             data = obj["response"]["body"]
         elif "choices" in obj:
@@ -81,10 +87,15 @@ def process_batch_output(file_content: bytes) -> List[str]:
                     transcription = extract_transcribed_text(parsed_inner)
                     if transcription:
                         transcriptions.append(transcription)
+
     return transcriptions
 
-
 def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any], client: OpenAI) -> None:
+    """
+    Scans the root folder for *_transcription.jsonl files, locates batch IDs
+    within those files, checks if the batch is completed, and if so, downloads
+    the results and writes them to a final text file.
+    """
     console_print(f"\n[INFO] Scanning directory '{root_folder}' for temporary batch files...")
     temp_files = list(root_folder.rglob("*_transcription.jsonl"))
     if not temp_files:
@@ -92,7 +103,6 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any], 
         logger.info(f"No temporary batch files found in {root_folder}.")
         return
 
-    # Map batch IDs to their temporary JSONL file.
     batch_map: Dict[str, Path] = {}
     for temp_file in temp_files:
         with temp_file.open("r", encoding="utf-8") as f:
@@ -124,7 +134,6 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any], 
             logger.info(info)
 
     for batch in batches:
-        # Process only completed batches.
         if batch.id in batch_map and batch.status.lower() == "completed":
             temp_file = batch_map[batch.id]
             console_print(f"\n[PROCESS] Processing temporary batch file: {temp_file.name} for Batch ID: {batch.id}")
@@ -142,6 +151,7 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any], 
                 console_print(f"[WARN] No transcriptions extracted for Batch ID {batch.id}. Skipping this batch.")
                 continue
 
+            # Build the final text file path
             identifier = temp_file.stem.replace("_transcription", "")
             final_txt_path = temp_file.parent / f"{identifier}_transcription.txt"
 
@@ -157,49 +167,29 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any], 
                 logger.exception(f"Error writing final output for batch {batch.id}: {e}")
                 console_print(f"[ERROR] Failed to write final output for Batch ID {batch.id}: {e}")
 
-            if processing_success:
-                if not processing_settings.get("retain_temporary_jsonl", True):
-                    try:
-                        temp_file.unlink()
-                        logger.info(f"Deleted temporary file after processing: {temp_file}")
-                        console_print(f"[CLEANUP] Deleted temporary file: {temp_file.name}")
-                    except Exception as e:
-                        logger.exception(f"Error deleting temporary file {temp_file}: {e}")
-                        console_print(f"[ERROR] Could not delete temporary file {temp_file.name}: {e}")
+            # Delete temporary JSONL file if we successfully wrote the final output
+            if processing_success and not processing_settings.get("retain_temporary_jsonl", True):
+                try:
+                    temp_file.unlink()
+                    logger.info(f"Deleted temporary file after processing: {temp_file}")
+                    console_print(f"[CLEANUP] Deleted temporary file: {temp_file.name}")
+                except Exception as e:
+                    logger.exception(f"Error deleting temporary file {temp_file}: {e}")
+                    console_print(f"[ERROR] Could not delete temporary file {temp_file.name}: {e}")
 
-                if not processing_settings.get("keep_raw_images", True):
-                    raw_images_dir = temp_file.parent / "raw_images"
-                    if raw_images_dir.exists() and raw_images_dir.is_dir():
-                        try:
-                            shutil.rmtree(raw_images_dir)
-                            logger.info(f"Deleted raw_images directory: {raw_images_dir}")
-                            console_print(f"[CLEANUP] Deleted raw_images directory: {raw_images_dir.name}")
-                        except Exception as e:
-                            logger.exception(f"Error deleting raw_images directory {raw_images_dir}: {e}")
-
-                if not processing_settings.get("keep_preprocessed_images", True):
-                    preprocessed_dir = temp_file.parent / "preprocessed_images"
-                    if preprocessed_dir.exists() and preprocessed_dir.is_dir():
-                        try:
-                            shutil.rmtree(preprocessed_dir)
-                            logger.info(f"Deleted preprocessed_images directory: {preprocessed_dir}")
-                            console_print(f"[CLEANUP] Deleted preprocessed_images directory: {preprocessed_dir.name}")
-                        except Exception as e:
-                            logger.exception(f"Error deleting preprocessed_images directory {preprocessed_dir}: {e}")
-        elif batch.id in batch_map:
-            console_print(f"[INFO] Skipping Batch ID {batch.id} with status '{batch.status}'")
     console_print(f"\n[INFO] Completed processing batches in directory: {root_folder}")
     logger.info(f"Batch results processing complete for directory: {root_folder}")
 
-
 def main() -> None:
+    """
+    Entrypoint for checking all directories for batch outputs and finalizing them.
+    """
     scan_dirs, processing_settings = load_config()
     client = OpenAI()
     for directory in scan_dirs:
         process_all_batches(directory, processing_settings, client)
     console_print("\n[INFO] Batch results processing complete across all directories.")
     logger.info("Batch results processing complete across all directories.")
-
 
 if __name__ == "__main__":
     main()

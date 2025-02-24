@@ -69,7 +69,7 @@ def process_batch_output(file_content: bytes) -> List[str]:
             continue
 
         data = None
-        # If there's a "response" object, read from that. Otherwise, if there's a "choices" key, use it directly
+        # If there's a "response" object, read from that. Otherwise, if there's a "choices" key, use it directly.
         if "response" in obj and isinstance(obj["response"], dict) and "body" in obj["response"]:
             data = obj["response"]["body"]
         elif "choices" in obj:
@@ -81,14 +81,16 @@ def process_batch_output(file_content: bytes) -> List[str]:
                     inner_content = choice["message"]["content"]
                     try:
                         parsed_inner = json.loads(inner_content)
-                    except Exception as e:
-                        logger.exception(f"Error parsing inner content: {e}")
-                        parsed_inner = {}
+                    except json.JSONDecodeError as e:
+                        # Log the error along with the problematic content, then skip this entry.
+                        logger.error(f"JSONDecodeError while parsing inner content: {e}. Raw content: {inner_content}")
+                        continue  # Skip this choice
                     transcription = extract_transcribed_text(parsed_inner)
                     if transcription:
                         transcriptions.append(transcription)
 
     return transcriptions
+
 
 def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any], client: OpenAI) -> None:
     """

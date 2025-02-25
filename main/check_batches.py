@@ -1,4 +1,3 @@
-# check_batches.py
 """
 Script to check whether batch jobs have finished successfully (i.e.,
 are marked as completed) and—if so—to download and process them.
@@ -13,7 +12,7 @@ from typing import Tuple, Dict, Any, List
 from openai import OpenAI
 from modules.config_loader import ConfigLoader
 from modules.logger import setup_logger
-from modules.text_processing import extract_transcribed_text
+from modules.text_processing import process_batch_output
 
 logger = setup_logger(__name__)
 
@@ -41,56 +40,6 @@ def load_config() -> Tuple[List[Path], Dict[str, Any]]:
                 scan_dirs.append(dir_path.resolve())
     scan_dirs = list(set(scan_dirs))
     return scan_dirs, processing_settings
-
-def process_batch_output(file_content: bytes) -> List[str]:
-    """
-    Parse JSON output from the OpenAI batch result file. Accumulate the
-    transcribed text from each line into a list of transcription strings.
-    """
-    content = file_content.decode("utf-8") if isinstance(file_content, bytes) else file_content
-    content = content.strip()
-    transcriptions = []
-    if content.startswith("[") and content.endswith("]"):
-        # Possibly a JSON array
-        try:
-            items = json.loads(content)
-            lines = [json.dumps(item) for item in items]
-        except Exception as e:
-            logger.exception(f"Error parsing JSON array: {e}")
-            lines = content.splitlines()
-    else:
-        lines = content.splitlines()
-
-    for line in lines:
-        try:
-            obj = json.loads(line)
-        except Exception as e:
-            logger.exception(f"Error parsing line: {e}")
-            continue
-
-        data = None
-        # If there's a "response" object, read from that. Otherwise, if there's a "choices" key, use it directly.
-        if "response" in obj and isinstance(obj["response"], dict) and "body" in obj["response"]:
-            data = obj["response"]["body"]
-        elif "choices" in obj:
-            data = obj
-
-        if data and "choices" in data and isinstance(data["choices"], list):
-            for choice in data["choices"]:
-                if "message" in choice and "content" in choice["message"]:
-                    inner_content = choice["message"]["content"]
-                    try:
-                        parsed_inner = json.loads(inner_content)
-                    except json.JSONDecodeError as e:
-                        # Log the error along with the problematic content, then skip this entry.
-                        logger.error(f"JSONDecodeError while parsing inner content: {e}. Raw content: {inner_content}")
-                        continue  # Skip this choice
-                    transcription = extract_transcribed_text(parsed_inner)
-                    if transcription:
-                        transcriptions.append(transcription)
-
-    return transcriptions
-
 
 def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any], client: OpenAI) -> None:
     """
@@ -142,6 +91,7 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any], 
             try:
                 file_obj = client.files.content(batch.output_file_id)
                 file_content = file_obj.content
+            # Raw response logging
             except Exception as e:
                 logger.exception(f"Error downloading batch {batch.id}: {e}")
                 console_print(f"[ERROR] Failed to download output for Batch ID {batch.id}: {e}")

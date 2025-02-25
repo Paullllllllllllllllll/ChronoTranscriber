@@ -66,10 +66,14 @@ async def transcribe_single_image_task(
         if method == "gpt":
             if not transcriber:
                 logger.error("No transcriber instance provided for GPT usage.")
-                return (str(img_path), image_name, None)
+                return (str(img_path), image_name, f"[transcription error: {image_name}]")
             result = await transcribe_image_with_openai(img_path, transcriber)
             logger.debug(f"OpenAI response for {img_path.name}: {result}")
-            final_text = extract_transcribed_text(result, image_name)
+            try:
+                final_text = extract_transcribed_text(result, image_name)
+            except Exception as e:
+                logger.error(f"Error extracting transcription for {img_path.name}: {e}. Marking as transcription error.")
+                final_text = f"[transcription error: {image_name}]"
         elif method == "tesseract":
             final_text = await tesseract_ocr_image(img_path, tesseract_config)
         else:
@@ -78,7 +82,7 @@ async def transcribe_single_image_task(
         return (str(img_path), image_name, final_text)
     except Exception as e:
         logger.exception(f"Error transcribing {img_path.name} with method '{method}': {e}")
-        return (str(img_path), image_name, None)
+        return (str(img_path), image_name, f"[transcription error: {image_name}]")
 
 # --------------------------------------------------
 # PDF Processing Function
@@ -194,8 +198,6 @@ async def process_single_pdf(pdf_path: Path,
                         await f.write(json.dumps(tracking_record) + "\n")
 
                 console_print(f"[SUCCESS] Batch submitted for PDF '{pdf_path.name}'.")
-
-                # Even in batch mode, delete the preprocessed folder if the user doesn't want to keep it
                 if not processing_settings.get("keep_preprocessed_images", True):
                     if preprocessed_folder.exists():
                         try:
@@ -207,8 +209,6 @@ async def process_single_pdf(pdf_path: Path,
             except Exception as e:
                 logger.exception(f"Error during GPT batch submission for {pdf_path.name}: {e}")
                 console_print(f"[ERROR] Failed to submit batch for {pdf_path.name}.")
-                # Fall through to the rest of the function; the user might want some fallback
-                # or we can simply return here. For clarity, let's just return.
                 return
 
     # Non-batch flow for GPT or Tesseract

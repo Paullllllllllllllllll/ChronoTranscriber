@@ -1,8 +1,8 @@
 # Model configuration for transcription tasks
 transcription_model:
-  name: "gpt-4o-2024-11-20"  # Model name/version to use for transcription
-  temperature: 0.0  # Sampling temperature
+  name: "gpt-4o-2024-08-06"  # Model name/version to use for transcription
+  temperature: 0.05  # Sampling temperature
   max_tokens: 4096  # Maximum number of tokens in the response
   top_p: 1.0  # Top-p sampling parameter
-  frequency_penalty: 0.0  # Frequency penalty
-  presence_penalty: 0.0  # Presence penalty
+  frequency_penalty: 0.05  # Frequency penalty
+  presence_penalty: 0.05  # Presence penalty

@@ -1,7 +1,7 @@
 # modules/text_processing.py
 import json
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
@@ -65,3 +65,54 @@ def extract_transcribed_text(result: Dict[str, Any], image_name: str = "") -> st
     else:
         logger.error(f"No choices in response for image {image_name}: {json.dumps(result)}")
         return json.dumps(result)
+
+def process_batch_output(file_content: bytes) -> List[str]:
+    """
+    Parse JSON output from the OpenAI batch result file. Accumulate the
+    transcribed text from each line into a list of transcription strings.
+    """
+    content = file_content.decode("utf-8") if isinstance(file_content, bytes) else file_content
+    content = content.strip()
+    transcriptions = []
+    if content.startswith("[") and content.endswith("]"):
+        # Possibly a JSON array
+        try:
+            items = json.loads(content)
+            lines = [json.dumps(item) for item in items]
+        except Exception as e:
+            logger.exception(f"Error parsing JSON array: {e}")
+            lines = content.splitlines()
+    else:
+        lines = content.splitlines()
+
+    for line in lines:
+        try:
+            obj = json.loads(line)
+        except Exception as e:
+            logger.exception(f"Error parsing line: {e}")
+            continue
+
+        data = None
+        # If there's a "response" object, read from that. Otherwise, if there's a "choices" key, use it directly.
+        if "response" in obj and isinstance(obj["response"], dict) and "body" in obj["response"]:
+            data = obj["response"]["body"]
+        elif "choices" in obj:
+            data = obj
+
+        if data and "choices" in data and isinstance(data["choices"], list):
+            for choice in data["choices"]:
+                if "message" in choice and "content" in choice["message"]:
+                    inner_content = choice["message"]["content"]
+                    try:
+                        parsed_inner = json.loads(inner_content)
+                    except json.JSONDecodeError as e:
+                        image_name = obj.get("file_name") or obj.get("image_name") or "[unknown image]"
+                        placeholder = f"[transcription error: {image_name}]"
+                        logger.error(f"JSONDecodeError while parsing inner content: {e}. Raw content: {inner_content}")
+                        transcriptions.append(placeholder)
+                        continue
+                    transcription = extract_transcribed_text(parsed_inner)
+                    if transcription:
+                        transcriptions.append(transcription)
+
+    return transcriptions

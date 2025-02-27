@@ -8,7 +8,7 @@ output is successfully written and all batches in a JSONL file are completed.
 
 import json
 from pathlib import Path
-from typing import Tuple, Dict, Any, List, Set
+from typing import Tuple, Dict, Any, List, Set, Optional
 
 from openai import OpenAI
 from modules.config_loader import ConfigLoader
@@ -48,6 +48,38 @@ def load_config() -> Tuple[List[Path], Dict[str, Any]]:
     scan_dirs = list(set(scan_dirs))
     return scan_dirs, processing_settings
 
+def extract_custom_id_mapping(temp_file: Path) -> Dict[str, Dict[str, Any]]:
+    """
+    Extract mapping between custom_ids and image information from the JSONL file.
+
+    Returns:
+        Dict[str, Dict[str, Any]]: Mapping of custom_id to image information
+    """
+    custom_id_map = {}
+    batch_order = {}
+
+    try:
+        with temp_file.open("r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    record = json.loads(line)
+                    if "batch_request" in record:
+                        # This is a record of the batch request details
+                        request_data = record["batch_request"]
+                        custom_id = request_data.get("custom_id")
+                        image_info = request_data.get("image_info", {})
+                        if custom_id and image_info:
+                            custom_id_map[custom_id] = image_info
+                            # Extract order information if available
+                            if "order_index" in image_info:
+                                batch_order[custom_id] = image_info["order_index"]
+                except json.JSONDecodeError:
+                    continue
+    except Exception as e:
+        logger.error(f"Error extracting custom_id mapping from {temp_file}: {e}")
+
+    return custom_id_map, batch_order
+
 def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any], client: OpenAI) -> None:
     """
     Scans the root folder for *_transcription.jsonl files, locates batch IDs
@@ -86,12 +118,11 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any], 
     for temp_file in temp_files:
         console_print(f"\n[INFO] Checking batch status for file: {temp_file.name}")
 
-        # Extract all batch IDs from this temporary file and map batches to their image file data
+        # Extract all batch IDs from this temporary file
         batch_ids: Set[str] = set()
-        batch_to_images: Dict[str, List[Dict[str, Any]]] = {}
-        image_records: List[Dict[str, Any]] = []
+        original_image_order: List[Dict[str, Any]] = []
+        images_by_page: Dict[int, Dict[str, Any]] = {}
 
-        # First pass: collect all image records and batch IDs
         with temp_file.open("r", encoding="utf-8") as f:
             for line in f:
                 try:
@@ -100,13 +131,18 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any], 
                         batch_id = record["batch_tracking"].get("batch_id")
                         if batch_id:
                             batch_ids.add(batch_id)
-                            if batch_id not in batch_to_images:
-                                batch_to_images[batch_id] = []
                     elif "image_name" in record or "pre_processed_image" in record:
-                        # This is a record with image data - store it to establish order
-                        image_records.append(record)
+                        # Store original image record to track order
+                        image_name = record.get("image_name", "")
+                        page_num = extract_page_number_from_filename(image_name)
+                        images_by_page[page_num] = record
+
                 except json.JSONDecodeError:
                     continue
+
+        # Sort images by page number
+        for page_num in sorted(images_by_page.keys()):
+            original_image_order.append(images_by_page[page_num])
 
         if not batch_ids:
             console_print(f"[WARN] No batch IDs found in {temp_file.name}. Skipping this file.")
@@ -139,21 +175,68 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any], 
         # All batches are completed, now download and process them
         console_print(f"[SUCCESS] All batches for {temp_file.name} are completed. Processing results...")
 
-        # Sort image records based on page numbers
-        image_records.sort(key=lambda r: extract_page_number_from_filename(r.get("image_name", "")))
+        # Extract custom_id mapping if available
+        custom_id_map, batch_order = extract_custom_id_mapping(temp_file)
 
         # Collect all transcriptions from all batches
-        all_batch_transcriptions: Dict[str, List[str]] = {}
+        all_transcriptions: List[Dict[str, Any]] = []
+
         for batch_id in batch_ids:
             batch = batch_dict[batch_id]
             try:
                 file_obj = client.files.content(batch.output_file_id)
                 file_content = file_obj.content
-                transcriptions = process_batch_output(file_content)
-                if transcriptions:
-                    all_batch_transcriptions[batch_id] = transcriptions
-                else:
-                    logger.warning(f"No transcriptions extracted for batch {batch_id}.")
+
+                # Try to parse the file content directly to get custom_id mapping
+                try:
+                    batch_response_text = file_content.decode('utf-8') if isinstance(file_content, bytes) else file_content
+                    batch_response_lines = batch_response_text.strip().split('\n')
+
+                    for line in batch_response_lines:
+                        response_obj = json.loads(line)
+                        custom_id = response_obj.get("custom_id")
+
+                        if "response" in response_obj and "body" in response_obj["response"]:
+                            response_body = response_obj["response"]["body"]
+
+                            if "choices" in response_body and len(response_body["choices"]) > 0:
+                                message_content = response_body["choices"][0].get("message", {}).get("content", "")
+
+                                try:
+                                    # Try to parse JSON content if present
+                                    transcription_data = json.loads(message_content)
+
+                                    # Store the transcription along with custom_id and any order info
+                                    transcription_entry = {
+                                        "custom_id": custom_id,
+                                        "transcription": transcription_data.get("transcription", ""),
+                                        "order_info": batch_order.get(custom_id, None),
+                                        "image_info": custom_id_map.get(custom_id, {})
+                                    }
+
+                                    all_transcriptions.append(transcription_entry)
+
+                                except json.JSONDecodeError:
+                                    # If not JSON, just use the raw content
+                                    all_transcriptions.append({
+                                        "custom_id": custom_id,
+                                        "transcription": message_content,
+                                        "order_info": batch_order.get(custom_id, None),
+                                        "image_info": custom_id_map.get(custom_id, {})
+                                    })
+                except Exception as json_parse_error:
+                    # Fall back to the process_batch_output function if direct parsing fails
+                    logger.warning(f"Could not directly parse batch result, falling back to process_batch_output: {json_parse_error}")
+                    transcriptions = process_batch_output(file_content)
+
+                    # In fallback mode, we can't maintain page order reliably
+                    # Just append in the order they come
+                    for idx, transcription in enumerate(transcriptions):
+                        all_transcriptions.append({
+                            "transcription": transcription,
+                            "fallback_index": idx
+                        })
+
             except Exception as e:
                 logger.exception(f"Error downloading batch {batch_id}: {e}")
                 console_print(f"[ERROR] Failed to download output for Batch ID {batch_id}: {e}")
@@ -164,7 +247,7 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any], 
             console_print(f"[WARN] Failed to process all batches for {temp_file.name}. Skipping output writing.")
             continue
 
-        if not all_batch_transcriptions:
+        if not all_transcriptions:
             logger.warning(f"No transcriptions extracted for any batch in {temp_file.name}.")
             console_print(f"[WARN] No transcriptions extracted for any batch in {temp_file.name}. Skipping this file.")
             continue
@@ -173,16 +256,28 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any], 
         identifier = temp_file.stem.replace("_transcription", "")
         final_txt_path = temp_file.parent / f"{identifier}_transcription.txt"
 
-        ordered_transcriptions: List[str] = []
+        # First try to sort by order_info
+        if any(t.get("order_info") is not None for t in all_transcriptions):
+            all_transcriptions.sort(key=lambda t: t.get("order_info", 999999))
+        # If image_info has page_number, use that
+        elif any("page_number" in t.get("image_info", {}) for t in all_transcriptions):
+            all_transcriptions.sort(key=lambda t: t.get("image_info", {}).get("page_number", 999999))
+        # If image_info has image_name, extract page number from filename
+        elif any("image_name" in t.get("image_info", {}) for t in all_transcriptions):
+            all_transcriptions.sort(key=lambda t: extract_page_number_from_filename(t.get("image_info", {}).get("image_name", "")))
+        # Last resort: if we have fallback_index, use that
+        elif any("fallback_index" in t for t in all_transcriptions):
+            all_transcriptions.sort(key=lambda t: t.get("fallback_index", 999999))
 
-        for batch_id, transcriptions in all_batch_transcriptions.items():
-            ordered_transcriptions.extend(transcriptions)
+        # Extract just the transcription text in sorted order
+        ordered_transcriptions = [t.get("transcription", "") for t in all_transcriptions]
 
         processing_success = False
         try:
             with final_txt_path.open("w", encoding="utf-8") as fout:
                 for text in ordered_transcriptions:
-                    fout.write(text + "\n")
+                    if text:  # Only write non-empty transcriptions
+                        fout.write(text + "\n")
             logger.info(f"All batches for {temp_file.name} processed and saved to {final_txt_path}")
             console_print(f"[SUCCESS] Processed all batches for {temp_file.name}. Results saved to {final_txt_path.name}")
             processing_success = True

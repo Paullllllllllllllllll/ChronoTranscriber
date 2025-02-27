@@ -150,17 +150,17 @@ All configuration settings are managed through YAML files in the `config/` direc
 - **concurrency_config.yaml:**  
   Sets concurrency limits and delays for transcription and image processing tasks.
 
-Ensure to adjust these settings according to your environment and specific processing needs. Please ensure that the file paths in your configuration 
-(e.g., for PDF input, Image input, PDF output, and Image output) are specified as **absolute paths**. For example:
+ChronoTranscriber supports both absolute and relative file paths, improving portability across different environments and operating systems.
+
+In the `paths_config.yaml` file, you can use these options:
 
 ```yaml
-file_paths:
-  PDFs:
-    input: "/home/paul/ChronoTranscriber/PDFs/input"
-    output: "/home/paul/ChronoTranscriber/PDFs/output"
-  Images:
-    input: "/home/paul/ChronoTranscriber/Images/input"
-    output: "/home/paul/ChronoTranscriber/Images/output"
+general:
+  # Enable relative path support (default: false)
+  allow_relative_paths: true
+  
+  # Base directory for resolving relative paths
+  base_directory: "."
 ```
 
 ## Features

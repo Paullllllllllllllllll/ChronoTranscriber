@@ -31,6 +31,7 @@ from modules.concurrency import run_concurrent_transcription_tasks
 from modules.image_utils import ImageProcessor, SUPPORTED_IMAGE_EXTENSIONS
 from modules.text_processing import extract_transcribed_text
 from modules.utils import console_print, check_exit, safe_input
+from modules.path_utils import validate_paths
 
 logger = setup_logger(__name__)
 
@@ -462,6 +463,8 @@ async def main() -> None:
     paths_config = config_loader.get_paths_config()
     processing_settings = paths_config.get("general", {})
 
+    validate_paths(paths_config)
+
     pdf_input_dir = Path(paths_config.get('file_paths', {}).get('PDFs', {}).get('input', 'pdfs_in'))
     image_input_dir = Path(paths_config.get('file_paths', {}).get('Images', {}).get('input', 'images_in'))
     pdf_output_dir = Path(paths_config.get('file_paths', {}).get('PDFs', {}).get('output', 'pdfs_out'))
@@ -512,13 +515,13 @@ async def main() -> None:
                 if method_choice == "gpt":
                     api_key = os.getenv('OPENAI_API_KEY')
                     if not api_key:
-                        console_print("[ERROR] OPENAI_API_KEY is required for GPT transcription. Please set it and try again.")
+                        console_print(
+                            "[ERROR] OPENAI_API_KEY is required for GPT transcription. Please set it and try again.")
                         sys.exit(1)
                     async with open_transcriber(
                             api_key=api_key,
-                            system_prompt_path=system_prompt_path,
-                            schema_path=schema_path,
-                            model=model_config.get("transcription_model", {}).get("name", "gpt")
+                            model=model_config.get("transcription_model",
+                                                   {}).get("name", "gpt")
                     ) as transcriber:
                         await process_single_image_folder(folder, transcriber,
                                                           image_processing_config,
@@ -554,8 +557,6 @@ async def main() -> None:
                         sys.exit(1)
                     async with open_transcriber(
                             api_key=api_key,
-                            system_prompt_path=system_prompt_path,
-                            schema_path=schema_path,
                             model=model_config.get("transcription_model", {}).get("name", "gpt")
                     ) as transcriber:
                         await process_single_image_folder(folder, transcriber,
@@ -599,8 +600,6 @@ async def main() -> None:
                     sys.exit(1)
                 async with open_transcriber(
                         api_key=api_key,
-                        system_prompt_path=system_prompt_path,
-                        schema_path=schema_path,
                         model=model_config.get("transcription_model", {}).get("name", "gpt")
                 ) as transcriber:
                     for pdf_path in all_pdfs:
@@ -644,8 +643,6 @@ async def main() -> None:
                     sys.exit(1)
                 async with open_transcriber(
                         api_key=api_key,
-                        system_prompt_path=system_prompt_path,
-                        schema_path=schema_path,
                         model=model_config.get("transcription_model", {}).get("name", "gpt")
                 ) as transcriber:
                     for folder in chosen_folders:
@@ -691,8 +688,6 @@ async def main() -> None:
                             sys.exit(1)
                         async with open_transcriber(
                                 api_key=api_key,
-                                system_prompt_path=system_prompt_path,
-                                schema_path=schema_path,
                                 model=model_config.get("transcription_model", {}).get("name", "gpt")
                         ) as transcriber:
                             await process_single_pdf(match, transcriber,

@@ -21,13 +21,21 @@ SUPPORTED_IMAGE_FORMATS = {
 
 
 class OpenAITranscriber:
-	def __init__(self, api_key: str, system_prompt_path: Path,
-	             schema_path: Path, model: str = None) -> None:
+	def __init__(self, api_key: str, model: str = None) -> None:
+		"""
+		Initialize the OpenAI transcriber with a fixed system prompt path.
+
+		Parameters:
+			api_key (str): The OpenAI API key
+			model (str, optional): Model name to use. Defaults to "gpt-4o-2024-08-06".
+		"""
 		self.api_key = api_key
 		self.model = model if model else "gpt-4o-2024-08-06"
 		self.endpoint = "https://api.openai.com/v1/chat/completions"
-		self.system_prompt_path = system_prompt_path
-		self.schema_path = schema_path
+
+		root_dir = Path(__file__).resolve().parent.parent
+		self.system_prompt_path = root_dir / "system_prompt" / "system_prompt.txt"
+		self.schema_path = root_dir / "schemas" / "transcription_schema.json"
 
 		if not self.system_prompt_path.exists():
 			logger.error(
@@ -40,6 +48,17 @@ class OpenAITranscriber:
 				self.system_prompt_text = prompt_file.read().strip()
 		except Exception as e:
 			logger.error(f"Failed to read system prompt: {e}")
+			raise
+
+		if not self.schema_path.exists():
+			logger.error(f"Schema file not found: {self.schema_path}")
+			raise FileNotFoundError(
+				f"Schema file does not exist: {self.schema_path}")
+		try:
+			with self.schema_path.open('r', encoding='utf-8') as schema_file:
+				self.transcription_schema = json.load(schema_file)
+		except Exception as e:
+			logger.error(f"Failed to load transcription schema: {e}")
 			raise
 
 		if not self.schema_path.exists():
@@ -156,10 +175,15 @@ class OpenAITranscriber:
 
 
 @asynccontextmanager
-async def open_transcriber(api_key: str, system_prompt_path: Path,
-                           schema_path: Path, model: str = None):
-	transcriber = OpenAITranscriber(api_key, system_prompt_path, schema_path,
-	                                model)
+async def open_transcriber(api_key: str, model: str = None):
+	"""
+	Context manager for the OpenAI transcriber with hardcoded system prompt path.
+
+	Parameters:
+		api_key (str): The OpenAI API key
+		model (str, optional): Model name to use
+	"""
+	transcriber = OpenAITranscriber(api_key, model)
 	try:
 		yield transcriber
 	finally:

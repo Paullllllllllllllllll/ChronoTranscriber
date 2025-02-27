@@ -6,6 +6,8 @@ general:
   keep_raw_images: false  # Retain raw images after processing
   keep_preprocessed_images: false  # Retain preprocessed images after processing
   transcription_prompt_path: "C:/path"  # Path to system prompt for transcription
+  allow_relative_paths: false  # Set to true to enable relative path support
+  base_directory: "."  # Base directory for resolving relative paths
 
 file_paths:
   PDFs:

@@ -1,3 +1,4 @@
+# cancel_batches.py
 """
 Script to check whether batch jobs have finished successfully (i.e.,
 are marked as completed) and—if so—to download and process them.
@@ -13,6 +14,7 @@ from openai import OpenAI
 from modules.config_loader import ConfigLoader
 from modules.logger import setup_logger
 from modules.text_processing import process_batch_output
+from modules.path_utils import validate_paths
 
 logger = setup_logger(__name__)
 
@@ -27,6 +29,10 @@ def load_config() -> Tuple[List[Path], Dict[str, Any]]:
     config_loader = ConfigLoader()
     config_loader.load_configs()
     paths_config = config_loader.get_paths_config()
+
+    # Add path validation with the new function
+    validate_paths(paths_config)
+
     processing_settings = paths_config.get("general", {})
 
     file_paths = paths_config.get("file_paths", {})

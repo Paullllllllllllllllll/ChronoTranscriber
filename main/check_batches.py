@@ -1,4 +1,4 @@
-# cancel_batches.py
+# check_batches.py
 """
 Script to check whether batch jobs have finished successfully (i.e.,
 are marked as completed) and—if so—to download and process them.

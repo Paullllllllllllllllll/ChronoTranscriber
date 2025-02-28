@@ -8,42 +8,55 @@ Terminal statuses are assumed to be: completed, expired, cancelled, or failed.
 from openai import OpenAI
 from modules.logger import setup_logger
 from modules.utils import console_print
+from modules.user_interface import UserPrompt
 
 logger = setup_logger(__name__)
 TERMINAL_STATUSES = {"completed", "expired", "cancelled", "failed"}
 
+
 def main() -> None:
-    client = OpenAI()
-    console_print("Retrieving list of batches...")
-    try:
-        batches = list(client.batches.list(limit=100))
-    except Exception as e:
-        logger.error(f"Error listing batches: {e}")
-        console_print(f"Error listing batches: {e}")
-        return
+	client = OpenAI()
+	console_print("[INFO] Retrieving list of batches...")
+	try:
+		batches = list(client.batches.list(limit=100))
+	except Exception as e:
+		logger.error(f"Error listing batches: {e}")
+		console_print(f"[ERROR] Error listing batches: {e}")
+		return
 
-    if not batches:
-        console_print("No batches found.")
-        return
+	# Display batch summary
+	UserPrompt.display_batch_summary(batches)
 
-    console_print(f"Found {len(batches)} batches. Processing cancellations...")
-    for batch in batches:
-        batch_id = batch.id
-        status = batch.status.lower()
-        if status in TERMINAL_STATUSES:
-            logger.info(f"Skipping batch {batch_id} with terminal status '{status}'.")
-            console_print(f"Skipping batch {batch_id} (status: '{status}').")
-            continue
+	if not batches:
+		return
 
-        console_print(f"Cancelling batch {batch_id} (status: '{status}')...")
-        try:
-            client.batches.cancel(batch_id)
-            logger.info(f"Batch {batch_id} cancelled.")
-            console_print(f"Batch {batch_id} cancelled.")
-        except Exception as e:
-            logger.error(f"Error cancelling batch {batch_id}: {e}")
-            console_print(f"Error cancelling batch {batch_id}: {e}")
+	# Track batches for cancellation and those that are skipped
+	cancelled_batches = []  # (batch_id, status, success)
+	skipped_batches = []  # (batch_id, status)
+
+	console_print("\n[INFO] Processing cancellations...")
+	for batch in batches:
+		batch_id = batch.id
+		status = batch.status.lower()
+
+		if status in TERMINAL_STATUSES:
+			logger.info(
+				f"Skipping batch {batch_id} with terminal status '{status}'.")
+			skipped_batches.append((batch_id, status))
+			continue
+
+		try:
+			client.batches.cancel(batch_id)
+			logger.info(f"Batch {batch_id} cancelled.")
+			cancelled_batches.append((batch_id, status, True))
+		except Exception as e:
+			logger.error(f"Error cancelling batch {batch_id}: {e}")
+			cancelled_batches.append((batch_id, status, False))
+
+	# Display cancellation results
+	UserPrompt.display_batch_cancellation_results(cancelled_batches,
+	                                              skipped_batches)
 
 
 if __name__ == "__main__":
-    main()
+	main()

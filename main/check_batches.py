@@ -15,12 +15,9 @@ from modules.config_loader import ConfigLoader
 from modules.logger import setup_logger
 from modules.text_processing import process_batch_output
 from modules.path_utils import validate_paths
-from modules.utils import extract_page_number_from_filename
+from modules.utils import extract_page_number_from_filename, console_print
 
 logger = setup_logger(__name__)
-
-def console_print(message: str) -> None:
-    print(message)
 
 def load_config() -> Tuple[List[Path], Dict[str, Any]]:
     """

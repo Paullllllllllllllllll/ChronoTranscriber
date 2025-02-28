@@ -1,100 +1,470 @@
 # modules/user_interface.py
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
+import sys
+import os
+
 from modules.logger import setup_logger
 from modules.utils import console_print, check_exit, safe_input
 
 logger = setup_logger(__name__)
 
 
-def select_folders(directory: Path) -> List[Path]:
+class UserConfiguration:
 	"""
-    List subdirectories in the given directory and allow the user to select folders.
-
-    Parameters:
-        directory (Path): The directory to scan.
-
-    Returns:
-        List[Path]: The list of selected folder paths.
-    """
-	folders = [d for d in directory.iterdir() if d.is_dir()]
-	if not folders:
-		print(f"No folders found in {directory}.")
-		logger.info(f"No folders found in {directory}.")
-		return []
-
-	print(f"Folders found in {directory}:")
-	for idx, folder in enumerate(folders, 1):
-		print(f"{idx}. {folder.name}")
-
-	selected = input(
-		"Enter the numbers of the folders to select, separated by commas (or type 'q' to exit): ").strip()
-	if selected.lower() in ["q", "exit"]:
-		print("Exiting.")
-		exit(0)
-	try:
-		indices = [int(i.strip()) - 1 for i in selected.split(',') if
-		           i.strip().isdigit()]
-		selected_folders = [folders[i] for i in indices if
-		                    0 <= i < len(folders)]
-		if not selected_folders:
-			print("No valid folders selected.")
-			logger.info("No valid folders selected by the user.")
-		return selected_folders
-	except ValueError:
-		print("Invalid input. Please enter numbers separated by commas.")
-		logger.error("User entered invalid folder selection input.")
-		return []
-
-
-def select_files(directory: Path, extension: str) -> List[Path]:
+	Stores user's processing preferences to avoid re-prompting during workflow.
 	"""
-    List files with a given extension and allow the user to select files.
 
-    Parameters:
-        directory (Path): The directory to scan.
-        extension (str): The file extension to filter by.
+	def __init__(self):
+		self.processing_type = None  # "images" or "pdfs"
+		self.transcription_method = None  # "native", "tesseract", or "gpt"
+		self.use_batch_processing = False
+		self.selected_items = []  # files or folders to process
+		self.process_all = False  # flag to process all files/folders
 
-    Returns:
-        List[Path]: The list of selected file paths.
-    """
-	files = [f for f in directory.iterdir() if
-	         f.is_file() and f.suffix.lower() == extension.lower()]
-	if not files:
-		print(f"No files with extension '{extension}' found in {directory}.")
-		logger.info(
-			f"No files with extension '{extension}' found in {directory}.")
-		return []
+	def __str__(self):
+		"""String representation for logging purposes."""
+		method_name = {
+			"native": "Native PDF extraction",
+			"tesseract": "Tesseract OCR",
+			"gpt": "GPT-based transcription"
+		}.get(self.transcription_method, self.transcription_method)
 
-	print(f"Files with extension '{extension}' found in {directory}:")
-	for idx, file in enumerate(files, 1):
-		print(f"{idx}. {file.name}")
+		batch_text = " with batch processing" if self.use_batch_processing else ""
 
-	selected = input(
-		"Enter the numbers of the files to select, separated by commas (or type 'q' to exit): ").strip()
-	if selected.lower() in ["q", "exit"]:
-		print("Exiting.")
-		exit(0)
-	try:
-		indices = [int(i.strip()) - 1 for i in selected.split(',') if
-		           i.strip().isdigit()]
-		selected_files = [files[i] for i in indices if 0 <= i < len(files)]
-		if not selected_files:
-			print("No valid files selected.")
-			logger.info("No valid files selected by the user.")
-		return selected_files
-	except ValueError:
-		print("Invalid input. Please enter numbers separated by commas.")
-		logger.error("User entered invalid file selection input.")
-		return []
+		return (f"Processing type: {self.processing_type}, "
+		        f"Method: {method_name}{batch_text}, "
+		        f"Process all: {self.process_all}, "
+		        f"Selected items: {len(self.selected_items)}")
 
-def select_option(prompt: str, options: List[str]) -> str:
-    """
-    Display a prompt and a numbered list of options, then return the user's choice as a string.
-    """
-    console_print(prompt)
-    for idx, option in enumerate(options, 1):
-        console_print(f"{idx}. {option}")
-    choice = safe_input("Enter the number of your choice (or type 'q' to exit): ")
-    check_exit(choice)
-    return choice.strip()
+
+class UserPrompt:
+	"""
+	A class for handling all user interaction and prompting functionality.
+	Consolidates UI functions from unified_transcriber.py.
+	"""
+
+	@staticmethod
+	def display_banner():
+		"""
+		Display a welcome banner with basic information about the application.
+		"""
+		console_print("\n" + "=" * 80)
+		console_print(
+			"  CHRONO TRANSCRIBER - Historical Document Digitization Tool")
+		console_print("=" * 80)
+		console_print(
+			"  This tool helps you convert historical documents to searchable text using")
+		console_print(
+			"  multiple transcription methods tailored to different document types.")
+		console_print("=" * 80 + "\n")
+
+	@staticmethod
+	def enhanced_select_option(prompt: str, options: List[Tuple[str, str]],
+	                           allow_quit: bool = True) -> str:
+		"""
+		Display a prompt with detailed options and return the user's choice.
+		"""
+		console_print(f"\n{prompt}")
+		console_print("-" * 80)
+
+		for idx, (value, description) in enumerate(options, 1):
+			console_print(f"  {idx}. {description}")
+
+		if allow_quit:
+			console_print(f"\n  (Type 'q' to exit the application)")
+
+		while True:
+			choice = safe_input("\nEnter your choice: ").strip()
+
+			if allow_quit:
+				check_exit(choice)
+
+			if choice.isdigit() and 1 <= int(choice) <= len(options):
+				return options[int(choice) - 1][0]
+
+			console_print("[ERROR] Invalid selection. Please try again.")
+
+	@staticmethod
+	def select_pdfs_or_folders(
+			directory: Path,
+			selection_type: str = "folders",
+			process_subfolders: bool = False
+	) -> List[Path]:
+		"""
+		List and allow selection of folders or PDF files.
+		"""
+		if selection_type == "folders":
+			items = [d for d in directory.iterdir() if d.is_dir()]
+			item_description = "folders"
+		else:  # pdfs
+			if process_subfolders:
+				items = list(directory.rglob("*.pdf"))
+			else:
+				items = [f for f in directory.iterdir() if
+				         f.is_file() and f.suffix.lower() == ".pdf"]
+			item_description = "PDF files"
+
+		if not items:
+			console_print(f"[INFO] No {item_description} found in {directory}")
+			return []
+
+		console_print(f"\nAvailable {item_description} ({len(items)}):")
+		console_print("-" * 80)
+
+		for idx, item in enumerate(items, 1):
+			name = item.name
+			if len(name) > 70:
+				name = name[:67] + "..."
+			console_print(f"  {idx}. {name}")
+
+		console_print("\nSelection options:")
+		console_print("  - Enter numbers separated by commas (e.g., '1,3,5')")
+		console_print("  - Enter 'all' to select all items")
+		console_print("  - Type 'q' to exit")
+
+		while True:
+			selection = safe_input("\nMake your selection: ").strip().lower()
+			check_exit(selection)
+
+			if selection == "all":
+				return items
+
+			try:
+				indices = [int(i.strip()) - 1 for i in selection.split(',') if
+				           i.strip().isdigit()]
+				selected_items = [items[i] for i in indices if
+				                  0 <= i < len(items)]
+
+				if not selected_items:
+					console_print(
+						"[ERROR] No valid items selected. Please try again.")
+					continue
+
+				return selected_items
+
+			except (ValueError, IndexError):
+				console_print(
+					"[ERROR] Invalid selection format. Please try again.")
+
+	@staticmethod
+	def select_files(directory: Path, extension: str) -> List[Path]:
+		"""
+		List files with a given extension and allow the user to select files.
+		"""
+		files = [f for f in directory.iterdir() if
+		         f.is_file() and f.suffix.lower() == extension.lower()]
+		if not files:
+			console_print(
+				f"No files with extension '{extension}' found in {directory}.")
+			logger.info(
+				f"No files with extension '{extension}' found in {directory}.")
+			return []
+
+		console_print(
+			f"Files with extension '{extension}' found in {directory}:")
+		for idx, file in enumerate(files, 1):
+			console_print(f"{idx}. {file.name}")
+
+		selected = safe_input(
+			"Enter the numbers of the files to select, separated by commas (or type 'q' to exit): ").strip()
+		check_exit(selected)
+		try:
+			indices = [int(i.strip()) - 1 for i in selected.split(',') if
+			           i.strip().isdigit()]
+			selected_files = [files[i] for i in indices if 0 <= i < len(files)]
+			if not selected_files:
+				console_print("No valid files selected.")
+				logger.info("No valid files selected by the user.")
+			return selected_files
+		except ValueError:
+			console_print(
+				"Invalid input. Please enter numbers separated by commas.")
+			logger.error("User entered invalid file selection input.")
+			return []
+
+	@staticmethod
+	def select_option(prompt: str, options: List[str]) -> str:
+		"""
+		Display a prompt and a numbered list of options, then return the user's choice as a string.
+		"""
+		console_print(prompt)
+		for idx, option in enumerate(options, 1):
+			console_print(f"{idx}. {option}")
+		choice = safe_input(
+			"Enter the number of your choice (or type 'q' to exit): ")
+		check_exit(choice)
+		return choice.strip()
+
+	@staticmethod
+	def get_processing_type_options() -> List[Tuple[str, str]]:
+		"""Return options for processing type selection."""
+		return [
+			("images",
+			 "Image Folders - Process collections of image files organized in folders"),
+			("pdfs",
+			 "PDF Documents - Process PDF files containing documents or scanned pages")
+		]
+
+	@staticmethod
+	def get_method_options(processing_type: str) -> List[Tuple[str, str]]:
+		"""Return transcription method options based on processing type."""
+		if processing_type == "pdfs":
+			return [
+				("native",
+				 "Native PDF extraction - Fast extraction from searchable PDFs (text-based, not scanned)"),
+				("tesseract",
+				 "Tesseract OCR - Open-source OCR suited for printed text and scanned documents"),
+				("gpt",
+				 "GPT Transcription - High-quality AI-powered transcription ideal for complex documents")
+			]
+		else:  # Images
+			return [
+				("tesseract",
+				 "Tesseract OCR - Open-source OCR suited for printed text and straightforward layouts"),
+				("gpt",
+				 "GPT Transcription - High-quality AI-powered transcription ideal for handwriting and complex layouts")
+			]
+
+	@staticmethod
+	def get_batch_options() -> List[Tuple[str, str]]:
+		"""Return options for batch processing selection."""
+		return [
+			("yes",
+			 "Yes - Batch processing (for large jobs, processes asynchronously, lower cost)"),
+			("no",
+			 "No - Synchronous processing (for small jobs, immediate results)")
+		]
+
+	@staticmethod
+	def get_pdf_scope_options() -> List[Tuple[str, str]]:
+		"""Return options for PDF processing scope."""
+		return [
+			("all",
+			 "Process all PDFs in the input directory and its subfolders"),
+			("subfolders", "Process PDFs from specific subfolders"),
+			("specific", "Process specific PDF files")
+		]
+
+	@staticmethod
+	def configure_processing_type(user_config: UserConfiguration) -> None:
+		"""
+		Configure the processing type for the user configuration.
+		"""
+		processing_type_options = UserPrompt.get_processing_type_options()
+		user_config.processing_type = UserPrompt.enhanced_select_option(
+			"What type of documents would you like to process?",
+			processing_type_options
+		)
+
+	@staticmethod
+	def configure_transcription_method(user_config: UserConfiguration) -> None:
+		"""
+		Configure the transcription method for the user configuration.
+		"""
+		method_options = UserPrompt.get_method_options(
+			user_config.processing_type)
+		user_config.transcription_method = UserPrompt.enhanced_select_option(
+			f"Which transcription method would you like to use for {user_config.processing_type}?",
+			method_options
+		)
+
+	@staticmethod
+	def configure_batch_processing(user_config: UserConfiguration) -> None:
+		"""
+		Configure batch processing options for GPT transcription.
+		"""
+		if user_config.transcription_method == "gpt":
+			batch_options = UserPrompt.get_batch_options()
+			batch_choice = UserPrompt.enhanced_select_option(
+				"Would you like to use batch processing for GPT transcription?",
+				batch_options
+			)
+			user_config.use_batch_processing = (batch_choice == "yes")
+
+			# Check for API key if using GPT
+			api_key = os.getenv('OPENAI_API_KEY')
+			if not api_key:
+				console_print(
+					"[ERROR] OPENAI_API_KEY is required for GPT transcription. Please set it and try again.")
+				sys.exit(1)
+
+	@staticmethod
+	def select_pdfs_workflow(user_config: UserConfiguration,
+	                         pdf_input_dir: Path) -> None:
+		"""
+		Guide user through PDF selection workflow.
+		"""
+		# PDF selection
+		source_dir = pdf_input_dir
+
+		# First, decide on the scope of PDF processing
+		pdf_scope_options = UserPrompt.get_pdf_scope_options()
+		pdf_scope = UserPrompt.enhanced_select_option(
+			"How would you like to select PDFs for processing?",
+			pdf_scope_options
+		)
+
+		if pdf_scope == "all":
+			all_pdfs = list(pdf_input_dir.rglob("*.pdf"))
+			if not all_pdfs:
+				console_print(
+					f"[ERROR] No PDF files found in {pdf_input_dir} or its subfolders.")
+				return
+
+			console_print(
+				f"[INFO] Found {len(all_pdfs)} PDF file(s) to process.")
+			user_config.selected_items = all_pdfs
+			user_config.process_all = True
+
+		elif pdf_scope == "subfolders":
+			subfolders = [d for d in pdf_input_dir.iterdir() if d.is_dir()]
+			if not subfolders:
+				console_print(f"[ERROR] No subfolders found in {pdf_input_dir}")
+				return
+
+			console_print(
+				f"[INFO] Found {len(subfolders)} subfolder(s) in the input directory.")
+			user_config.selected_items = UserPrompt.select_pdfs_or_folders(
+				pdf_input_dir,
+				"folders")
+
+			if not user_config.selected_items:
+				console_print("[INFO] No folders selected. Exiting.")
+				return
+
+			# Convert folder selection to list of PDFs
+			pdf_files = []
+			for folder in user_config.selected_items:
+				folder_pdfs = list(folder.glob("*.pdf"))
+				if not folder_pdfs:
+					console_print(
+						f"[WARN] No PDF files found in {folder.name}.")
+				else:
+					pdf_files.extend(folder_pdfs)
+
+			if not pdf_files:
+				console_print(
+					"[ERROR] No PDF files found in the selected folders.")
+				return
+
+			console_print(
+				f"[INFO] Found {len(pdf_files)} PDF file(s) in the selected folders.")
+			user_config.selected_items = pdf_files
+
+		else:  # specific PDFs
+			all_pdfs = list(pdf_input_dir.glob("*.pdf"))
+			if not all_pdfs:
+				console_print(
+					f"[ERROR] No PDF files found directly in {pdf_input_dir}")
+				return
+
+			user_config.selected_items = UserPrompt.select_pdfs_or_folders(
+				pdf_input_dir,
+				"pdfs")
+
+			if not user_config.selected_items:
+				console_print("[INFO] No PDFs selected. Exiting.")
+				return
+
+	@staticmethod
+	def select_images_workflow(user_config: UserConfiguration,
+	                           image_input_dir: Path) -> None:
+		"""
+		Guide user through image folder selection workflow.
+		"""
+		from modules.image_utils import SUPPORTED_IMAGE_EXTENSIONS
+
+		# Image folder selection
+		source_dir = image_input_dir
+
+		# Check if there are subfolders or direct images
+		subfolders = [f for f in source_dir.iterdir() if f.is_dir()]
+		direct_images = [f for f in source_dir.iterdir() if
+		                 f.is_file() and f.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS]
+
+		if not subfolders and not direct_images:
+			console_print(
+				f"[ERROR] No image folders or images found in {source_dir}")
+			console_print(
+				"[INFO] Please add image folders or images to the input directory and try again.")
+			return
+
+		# If there are no subfolders but direct images exist, treat the input dir as a folder to process
+		if not subfolders and direct_images:
+			console_print(
+				f"[INFO] No subfolders found, but {len(direct_images)} images detected directly in the input directory.")
+			process_option = UserPrompt.enhanced_select_option(
+				"How would you like to proceed?",
+				[("process_direct", "Process these images directly"),
+				 ("cancel", "Cancel and create proper subfolders first")]
+			)
+
+			if process_option == "process_direct":
+				user_config.selected_items = [source_dir]
+			else:
+				console_print(
+					"[INFO] Operation cancelled. Please organize your images into subfolders and try again.")
+				return
+		else:
+			# Normal subfolder selection
+			console_print(
+				f"[INFO] Found {len(subfolders)} image folder(s) in the input directory.")
+			selection_options = [
+				("specific", "Select specific folders to process"),
+				("all", "Process all folders")
+			]
+			selection_mode = UserPrompt.enhanced_select_option(
+				"Would you like to process all folders or select specific ones?",
+				selection_options
+			)
+
+			if selection_mode == "all":
+				user_config.selected_items = subfolders
+				user_config.process_all = True
+			else:
+				user_config.selected_items = UserPrompt.select_pdfs_or_folders(
+					source_dir,
+					"folders")
+				if not user_config.selected_items:
+					console_print("[INFO] No folders selected. Exiting.")
+					return
+
+	@staticmethod
+	def display_processing_summary(user_config: UserConfiguration) -> bool:
+		"""
+		Display processing summary and ask for confirmation.
+		Returns True if user confirms, False otherwise.
+		"""
+		console_print("\n" + "=" * 80)
+		console_print("  PROCESSING SUMMARY")
+		console_print("=" * 80)
+
+		if user_config.processing_type == "images":
+			item_type = "image folder(s)"
+		else:
+			item_type = "PDF file(s)"
+
+		console_print(
+			f"\nReady to process {len(user_config.selected_items)} {item_type} with the following settings:")
+		console_print(
+			f"  - Document type: {user_config.processing_type.capitalize()}")
+		console_print(
+			f"  - Transcription method: {user_config.transcription_method.capitalize()}")
+
+		if user_config.transcription_method == "gpt":
+			batch_mode = "Batch (asynchronous)" if user_config.use_batch_processing else "Synchronous"
+			console_print(f"  - Processing mode: {batch_mode}")
+
+		# First few items to show
+		console_print("\nSelected items (first 5 shown):")
+		for i, item in enumerate(user_config.selected_items[:5]):
+			console_print(f"  {i + 1}. {item.name}")
+
+		if len(user_config.selected_items) > 5:
+			console_print(
+				f"  ... and {len(user_config.selected_items) - 5} more")
+
+		confirmation = safe_input(
+			"\nProceed with processing? (y/n): ").strip().lower()
+		return confirmation == "y"

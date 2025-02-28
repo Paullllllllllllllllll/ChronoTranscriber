@@ -468,3 +468,99 @@ class UserPrompt:
 		confirmation = safe_input(
 			"\nProceed with processing? (y/n): ").strip().lower()
 		return confirmation == "y"
+
+	@staticmethod
+	def display_batch_summary(batches):
+		"""
+		Display a summary of batches grouped by status.
+		Only shows details for in-progress batches.
+
+		Parameters:
+			batches: List of batch objects from OpenAI API
+		"""
+		if not batches:
+			console_print("No batches found.")
+			return
+
+		# Group batches by status
+		status_groups = {}
+		for batch in batches:
+			status = batch.status.lower()
+			if status not in status_groups:
+				status_groups[status] = []
+			status_groups[status].append(batch)
+
+		# Display summary counts
+		console_print("\n===== Batch Summary =====")
+		console_print(f"Total batches: {len(batches)}")
+		for status, batch_list in sorted(status_groups.items()):
+			console_print(f"{status.capitalize()}: {len(batch_list)} batch(es)")
+
+		# Display in-progress batches with more detail
+		in_progress_statuses = {"validating", "in_progress", "finalizing"}
+		for status in in_progress_statuses:
+			if status in status_groups and status_groups[status]:
+				console_print(f"\n----- {status.capitalize()} Batches -----")
+				for batch in status_groups[status]:
+					console_print(
+						f"  Batch ID: {batch.id} | Status: {batch.status}")
+
+	@staticmethod
+	def display_batch_processing_progress(temp_file, batch_ids, completed_count,
+	                                      missing_count):
+		"""
+		Display progress information for batch processing.
+
+		Parameters:
+			temp_file: Path to the temporary file
+			batch_ids: Set of batch IDs
+			completed_count: Number of completed batches
+			missing_count: Number of missing batches
+		"""
+		console_print(f"\n----- Processing File: {temp_file.name} -----")
+		console_print(f"Found {len(batch_ids)} batch ID(s)")
+
+		if completed_count == len(batch_ids):
+			console_print(f"[SUCCESS] All batches completed!")
+		else:
+			console_print(
+				f"Completed: {completed_count} | Pending: {len(batch_ids) - completed_count - missing_count} | Missing: {missing_count}")
+			if missing_count > 0:
+				console_print(
+					f"[WARN] {missing_count} batch ID(s) were not found in the API response")
+			if completed_count < len(batch_ids) - missing_count:
+				console_print(
+					f"[INFO] Some batches are still processing. Try again later.")
+
+	@staticmethod
+	def display_batch_cancellation_results(cancelled_batches, skipped_batches):
+		"""
+		Display the results of batch cancellation attempts.
+
+		Parameters:
+			cancelled_batches: List of tuples (batch_id, status, success)
+			skipped_batches: List of tuples (batch_id, status)
+		"""
+		success_count = sum(1 for _, _, success in cancelled_batches if success)
+		fail_count = len(cancelled_batches) - success_count
+
+		console_print(f"\n===== Cancellation Summary =====")
+		console_print(
+			f"Total batches found: {len(cancelled_batches) + len(skipped_batches)}")
+		console_print(f"Skipped (terminal status): {len(skipped_batches)}")
+		console_print(f"Attempted to cancel: {len(cancelled_batches)}")
+		console_print(f"Successfully cancelled: {success_count}")
+
+		if fail_count > 0:
+			console_print(f"Failed to cancel: {fail_count}")
+			console_print("\n----- Failed Cancellations -----")
+			for batch_id, status, success in cancelled_batches:
+				if not success:
+					console_print(f"  Batch {batch_id} (status: '{status}')")
+
+		if success_count > 0:
+			console_print("\n----- Successfully Cancelled -----")
+			for batch_id, status, success in cancelled_batches:
+				if success:
+					console_print(
+						f"  Batch {batch_id} (previous status: '{status}')")

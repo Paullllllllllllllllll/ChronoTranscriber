@@ -7,15 +7,10 @@ Terminal statuses are assumed to be: completed, expired, cancelled, or failed.
 
 from openai import OpenAI
 from modules.logger import setup_logger
+from modules.utils import console_print
 
 logger = setup_logger(__name__)
 TERMINAL_STATUSES = {"completed", "expired", "cancelled", "failed"}
-
-
-def console_print(message: str) -> None:
-    # Print a succinct message to console.
-    print(message)
-
 
 def main() -> None:
     client = OpenAI()

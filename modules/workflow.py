@@ -16,7 +16,7 @@ from modules.image_utils import ImageProcessor
 from modules.openai_utils import transcribe_image_with_openai
 from modules.concurrency import run_concurrent_transcription_tasks
 from modules.text_processing import extract_transcribed_text
-from modules.utils import console_print
+from modules.utils import console_print, extract_page_number_from_filename
 
 logger = setup_logger(__name__)
 
@@ -180,7 +180,6 @@ class WorkflowManager:
 			raw_images_folder, preprocessed_folder, target_dpi)
 
 		# Ensure proper page ordering
-		from modules.utils import extract_page_number_from_filename
 		processed_image_files.sort(
 			key=lambda p: extract_page_number_from_filename(p.name))
 		console_print(
@@ -203,12 +202,33 @@ class WorkflowManager:
 				from modules import batching
 				console_print(
 					f"[INFO] Submitting batch job for {len(processed_image_files)} images...")
+
+				# Record image metadata in the JSONL file before batch submission
+				async with aiofiles.open(temp_jsonl_path, 'a',
+				                         encoding='utf-8') as f:
+					for idx, img_path in enumerate(processed_image_files):
+						page_num = extract_page_number_from_filename(
+							img_path.name)
+						image_record = {
+							"pre_processed_image": str(img_path),
+							"image_name": img_path.name,
+							"page_number": page_num,
+							"order_index": idx,
+							"custom_id": f"req-{idx + 1}"
+						}
+						# Store image metadata before sending batch to help with ordering later
+						await f.write(
+							json.dumps({"image_metadata": image_record}) + "\n")
+
+				# Now submit the batch job
 				batch_responses = await asyncio.to_thread(
 					batching.process_batch_transcription,
 					processed_image_files,
 					"",
 					self.model_config.get("transcription_model", {})
 				)
+
+				# Record batch tracking information
 				async with aiofiles.open(temp_jsonl_path, 'a',
 				                         encoding='utf-8') as f:
 					for response in batch_responses:
@@ -227,6 +247,7 @@ class WorkflowManager:
 				console_print(
 					"[INFO] The batch will be processed asynchronously. Use 'check_batches.py' to monitor status.")
 
+				# Delete preprocessed folder if setting indicates
 				if not self.processing_settings.get("keep_preprocessed_images",
 				                                    True):
 					if preprocessed_folder.exists():
@@ -329,10 +350,8 @@ class WorkflowManager:
 
 		processed_files = [p for p in processed_image_paths if p.exists()]
 		try:
-			processed_files.sort(key=lambda x: int(
-				__import__(
-					'modules.utils').utils.extract_page_number_from_filename(
-					x.name)))
+			processed_files.sort(
+				key=lambda x: extract_page_number_from_filename(x.name))
 		except Exception:
 			# If page number extraction fails, sort by filename
 			processed_files.sort(key=lambda x: x.name)
@@ -348,12 +367,34 @@ class WorkflowManager:
 				from modules import batching
 				console_print(
 					f"[INFO] Submitting batch job for {len(processed_files)} images...")
+
+				# Record image metadata in the JSONL file before batch submission
+				async with aiofiles.open(temp_jsonl_path, 'a',
+				                         encoding='utf-8') as f:
+					for idx, img_path in enumerate(processed_files):
+						page_num = extract_page_number_from_filename(
+							img_path.name)
+						image_record = {
+							"pre_processed_image": str(img_path),
+							"image_name": img_path.name,
+							"folder_name": folder.name,
+							"page_number": page_num,
+							"order_index": idx,
+							"custom_id": f"req-{idx + 1}"
+						}
+						# Store image metadata before sending batch to help with ordering later
+						await f.write(
+							json.dumps({"image_metadata": image_record}) + "\n")
+
+				# Now submit the batch job
 				batch_responses = await asyncio.to_thread(
 					batching.process_batch_transcription,
 					processed_files,
 					"",
 					self.model_config.get("transcription_model", {})
 				)
+
+				# Record batch tracking information
 				async with aiofiles.open(temp_jsonl_path, 'a',
 				                         encoding='utf-8') as f:
 					for response in batch_responses:
@@ -366,6 +407,7 @@ class WorkflowManager:
 							}
 						}
 						await f.write(json.dumps(tracking_record) + "\n")
+
 				console_print(
 					f"[SUCCESS] Batch submitted for folder '{folder.name}'.")
 				console_print(

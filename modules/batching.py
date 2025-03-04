@@ -4,7 +4,7 @@ import base64
 import logging
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from modules.utils import extract_page_number_from_filename
 
 from openai import OpenAI
@@ -41,11 +41,11 @@ def encode_image_to_data_url(image_path: Path) -> str:
 def create_batch_request_line(
 		custom_id: str,
 		image_url: str,
-		image_info: Dict[str, Any],  # Added parameter for image metadata
+		image_info: Dict[str, Any],
 		model_config: Dict[str, Any],
 		system_prompt_path: Optional[Path] = None,
 		schema_path: Optional[Path] = None
-) -> str:
+) -> Tuple[str, Dict[str, Any]]:
 	"""
 	Create a batch request line for an image transcription task.
 
@@ -60,7 +60,9 @@ def create_batch_request_line(
 			Defaults to "schemas/transcription_schema.json".
 
 	Returns:
-		str: A JSON string representing the batch request.
+		Tuple[str, Dict[str, Any]]: A tuple containing:
+			- A JSON string representing the batch request (for API submission)
+			- A dictionary with image metadata (for internal tracking)
 	"""
 	if system_prompt_path is None:
 		system_prompt_path = Path("system_prompt/system_prompt.txt")
@@ -102,15 +104,23 @@ def create_batch_request_line(
 		}
 	}
 
-	# Include image metadata in the request line
+	# Create the API-compliant batch request (must have exactly these fields)
 	request_line = {
 		"custom_id": custom_id,
 		"method": "POST",
 		"url": "/v1/chat/completions",
-		"body": request_body,
-		"image_info": image_info  # Store metadata for proper ordering later
+		"body": request_body
 	}
-	return json.dumps(request_line)
+
+	# Create a separate metadata record for our internal tracking
+	metadata_record = {
+		"batch_request": {
+			"custom_id": custom_id,
+			"image_info": image_info
+		}
+	}
+
+	return json.dumps(request_line), metadata_record
 
 
 def write_batch_file(request_lines: List[str], output_path: Path) -> Path:
@@ -160,7 +170,8 @@ def submit_batch(batch_file_path: Path) -> Dict[str, Any]:
 
 
 def process_batch_transcription(image_files: List[Path], prompt_text: str,
-                                model_config: Dict[str, Any]) -> List[Any]:
+                                model_config: Dict[str, Any]) -> Tuple[
+	List[Any], List[Dict[str, Any]]]:
 	"""
 	Process a batch transcription for a list of image files.
 
@@ -170,10 +181,12 @@ def process_batch_transcription(image_files: List[Path], prompt_text: str,
 		model_config (Dict[str, Any]): Model configuration parameters.
 
 	Returns:
-		List[Any]: List of batch responses.
+		Tuple[List[Any], List[Dict[str, Any]]]: A tuple containing:
+			- List of batch responses
+			- List of metadata records for tracking ordering information
 	"""
 	batch_request_lines = []
-	batch_request_records = []  # Track metadata for each request
+	metadata_records = []  # Track metadata for each request separately
 
 	for index, image_file in enumerate(image_files):
 		try:
@@ -188,17 +201,13 @@ def process_batch_transcription(image_files: List[Path], prompt_text: str,
 					image_file.name)
 			}
 
-			line = create_batch_request_line(custom_id, data_url, image_info,
-			                                 model_config)
-			batch_request_lines.append(line)
+			# Get both the API request line and metadata for tracking
+			request_line, metadata_record = create_batch_request_line(
+				custom_id, data_url, image_info, model_config
+			)
 
-			# Store a record mapping custom_id to image information
-			batch_request_records.append({
-				"batch_request": {
-					"custom_id": custom_id,
-					"image_info": image_info
-				}
-			})
+			batch_request_lines.append(request_line)
+			metadata_records.append(metadata_record)
 		except Exception as e:
 			logger.error(f"Error processing image {image_file}: {e}")
 
@@ -229,12 +238,12 @@ def process_batch_transcription(image_files: List[Path], prompt_text: str,
 	for batch_file in batch_files:
 		response = submit_batch(batch_file)
 
-		# First write all the metadata records to help with order reconstruction
+		# Write the metadata records to the JSONL file for tracking
 		with batch_file.open("a", encoding="utf-8") as f:
-			for record in batch_request_records:
+			for record in metadata_records:
 				f.write(json.dumps(record) + "\n")
 
-			# Then add the batch tracking record
+			# Add the batch tracking record
 			tracking_record = {
 				"batch_tracking": {
 					"batch_id": response.id,
@@ -252,4 +261,4 @@ def process_batch_transcription(image_files: List[Path], prompt_text: str,
 			logger.error(
 				f"Error deleting temporary batch request file {batch_file}: {e}")
 
-	return batch_responses
+	return batch_responses, metadata_records

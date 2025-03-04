@@ -62,13 +62,14 @@ def extract_custom_id_mapping(temp_file: Path) -> Tuple[
 	"""
 	custom_id_map = {}
 	batch_order = {}
-	order_index_map = {}
+	order_index_map = {}  # Maps order_index -> image metadata
 
 	try:
 		with temp_file.open("r", encoding="utf-8") as f:
 			for line in f:
 				try:
 					record = json.loads(line)
+
 					# Process batch_request records from batching.py
 					if "batch_request" in record:
 						request_data = record["batch_request"]

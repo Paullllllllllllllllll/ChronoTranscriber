@@ -210,18 +210,19 @@ class WorkflowManager:
 						page_num = extract_page_number_from_filename(
 							img_path.name)
 						image_record = {
-							"pre_processed_image": str(img_path),
-							"image_name": img_path.name,
-							"page_number": page_num,
-							"order_index": idx,
-							"custom_id": f"req-{idx + 1}"
+							"image_metadata": {
+								"pre_processed_image": str(img_path),
+								"image_name": img_path.name,
+								"page_number": page_num,
+								"order_index": idx,
+								"custom_id": f"req-{idx + 1}"
+							}
 						}
 						# Store image metadata before sending batch to help with ordering later
-						await f.write(
-							json.dumps({"image_metadata": image_record}) + "\n")
+						await f.write(json.dumps(image_record) + "\n")
 
-				# Now submit the batch job
-				batch_responses = await asyncio.to_thread(
+				# Now submit the batch job - modified to work with updated batching module
+				batch_responses, metadata_records = await asyncio.to_thread(
 					batching.process_batch_transcription,
 					processed_image_files,
 					"",
@@ -231,6 +232,11 @@ class WorkflowManager:
 				# Record batch tracking information
 				async with aiofiles.open(temp_jsonl_path, 'a',
 				                         encoding='utf-8') as f:
+					# Write metadata records to help with ordering
+					for record in metadata_records:
+						await f.write(json.dumps(record) + "\n")
+
+					# Write batch tracking records
 					for response in batch_responses:
 						tracking_record = {
 							"batch_tracking": {
@@ -375,19 +381,20 @@ class WorkflowManager:
 						page_num = extract_page_number_from_filename(
 							img_path.name)
 						image_record = {
-							"pre_processed_image": str(img_path),
-							"image_name": img_path.name,
-							"folder_name": folder.name,
-							"page_number": page_num,
-							"order_index": idx,
-							"custom_id": f"req-{idx + 1}"
+							"image_metadata": {
+								"pre_processed_image": str(img_path),
+								"image_name": img_path.name,
+								"folder_name": folder.name,
+								"page_number": page_num,
+								"order_index": idx,
+								"custom_id": f"req-{idx + 1}"
+							}
 						}
 						# Store image metadata before sending batch to help with ordering later
-						await f.write(
-							json.dumps({"image_metadata": image_record}) + "\n")
+						await f.write(json.dumps(image_record) + "\n")
 
-				# Now submit the batch job
-				batch_responses = await asyncio.to_thread(
+				# Now submit the batch job - modified to work with updated batching module
+				batch_responses, metadata_records = await asyncio.to_thread(
 					batching.process_batch_transcription,
 					processed_files,
 					"",
@@ -397,6 +404,11 @@ class WorkflowManager:
 				# Record batch tracking information
 				async with aiofiles.open(temp_jsonl_path, 'a',
 				                         encoding='utf-8') as f:
+					# Write metadata records to help with ordering
+					for record in metadata_records:
+						await f.write(json.dumps(record) + "\n")
+
+					# Write batch tracking records
 					for response in batch_responses:
 						tracking_record = {
 							"batch_tracking": {

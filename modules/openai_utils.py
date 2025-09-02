@@ -145,9 +145,10 @@ class OpenAIExtractor:
                 sock_connect_timeout = 180.0
                 sock_read = 1200.0
             else:
+                # Default tier: raise connect timeouts to better tolerate pool queueing under load
                 total_timeout = 900.0
-                connect_timeout = 30.0
-                sock_connect_timeout = 30.0
+                connect_timeout = 120.0
+                sock_connect_timeout = 120.0
                 sock_read = 600.0
         client_timeout = aiohttp.ClientTimeout(
             total=total_timeout,
@@ -155,7 +156,17 @@ class OpenAIExtractor:
             sock_connect=sock_connect_timeout,
             sock_read=sock_read,
         )
-        self.session = aiohttp.ClientSession(timeout=client_timeout)
+        # Align connector pool with configured transcription concurrency to avoid queue wait timeouts
+        try:
+            conc_cfg = cl.get_concurrency_config()
+            trans_cfg = conc_cfg.get("concurrency", {}).get("transcription", {})
+            conn_limit = int(trans_cfg.get("concurrency_limit", 100))
+            if conn_limit <= 0:
+                conn_limit = 100
+        except Exception:
+            conn_limit = 100
+        connector = aiohttp.TCPConnector(limit=conn_limit, limit_per_host=conn_limit)
+        self.session = aiohttp.ClientSession(timeout=client_timeout, connector=connector)
 
     async def close(self) -> None:
         if self.session and not self.session.closed:

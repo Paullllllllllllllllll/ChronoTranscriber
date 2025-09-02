@@ -5,6 +5,9 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import asyncio
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, Optional, Tuple
@@ -31,9 +34,35 @@ SUPPORTED_IMAGE_FORMATS: Dict[str, str] = {
 class TransientOpenAIError(Exception):
     """Error category that is safe to retry (429/5xx/timeouts)."""
 
+    def __init__(self, message: str, retry_after: Optional[float] = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
 
 class NonRetryableOpenAIError(Exception):
     """Error category that should not be retried (e.g., 4xx other than 429)."""
+
+
+# ---------- Retry wait helpers ----------
+
+_WAIT_IMAGE_BASE = wait_exponential(multiplier=1, min=4, max=60)
+_WAIT_TRANSCRIBE_BASE = wait_exponential(multiplier=1, min=4, max=10)
+
+
+def _wait_with_server_hint_factory(base_wait):
+    """Respect server-provided Retry-After if present; otherwise use base wait."""
+
+    def _wait(retry_state):
+        try:
+            exc = retry_state.outcome.exception() if retry_state.outcome else None
+            ra = getattr(exc, "retry_after", None)
+            if isinstance(ra, (int, float)) and ra and ra > 0:
+                return ra
+        except Exception:
+            pass
+        return base_wait(retry_state)
+
+    return _wait
 
 
 # ---------- Responses API adapter ----------
@@ -99,9 +128,34 @@ class OpenAIExtractor:
         self.reasoning: Dict[str, Any] = tm.get("reasoning", {"effort": "medium"})
         self.text_params: Dict[str, Any] = tm.get("text", {"verbosity": "medium"})
 
-        # Timeout: longer for "flex"
-        total_timeout = timeout if timeout is not None else (900.0 if service_tier == "flex" else 600.0)
-        self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=total_timeout))
+        # Timeouts: explicit per-stage; longer for "flex" (tolerate connector queueing)
+        if timeout is not None:
+            total_timeout = float(timeout)
+            connect_timeout = 30.0
+            sock_connect_timeout = 30.0
+            sock_read = 600.0
+            if service_tier == "flex":
+                connect_timeout = 180.0
+                sock_connect_timeout = 180.0
+                sock_read = 900.0
+        else:
+            if service_tier == "flex":
+                total_timeout = 1800.0
+                connect_timeout = 180.0
+                sock_connect_timeout = 180.0
+                sock_read = 1200.0
+            else:
+                total_timeout = 900.0
+                connect_timeout = 30.0
+                sock_connect_timeout = 30.0
+                sock_read = 600.0
+        client_timeout = aiohttp.ClientTimeout(
+            total=total_timeout,
+            connect=connect_timeout,
+            sock_connect=sock_connect_timeout,
+            sock_read=sock_read,
+        )
+        self.session = aiohttp.ClientSession(timeout=client_timeout)
 
     async def close(self) -> None:
         if self.session and not self.session.closed:
@@ -115,9 +169,25 @@ class OpenAIExtractor:
         async with self.session.post(self.endpoint, headers=headers, json=payload) as resp:
             if resp.status != 200:
                 error_text = await resp.text()
+                retry_after_val: Optional[float] = None
                 if resp.status == 429 or 500 <= resp.status < 600:
+                    # Respect Retry-After when provided by the server
+                    ra_hdr = resp.headers.get("Retry-After")
+                    if ra_hdr is not None:
+                        try:
+                            retry_after_val = float(ra_hdr)
+                        except Exception:
+                            # Retry-After may be an HTTP-date; convert to seconds if in the future
+                            try:
+                                dt = parsedate_to_datetime(ra_hdr)
+                                if dt is not None:
+                                    delta = (dt - datetime.now(timezone.utc)).total_seconds()
+                                    if delta and delta > 0:
+                                        retry_after_val = delta
+                            except Exception:
+                                retry_after_val = None
                     logger.warning("Transient OpenAI error (%s): %s", resp.status, error_text)
-                    raise TransientOpenAIError(f"{resp.status}: {error_text}")
+                    raise TransientOpenAIError(f"{resp.status}: {error_text}", retry_after=retry_after_val)
                 logger.error("Non-retryable OpenAI error (%s): %s", resp.status, error_text)
                 raise NonRetryableOpenAIError(f"{resp.status}: {error_text}")
             return await resp.json()
@@ -194,9 +264,14 @@ class OpenAIExtractor:
         return "".join(parts).strip()
 
     @retry(
-        wait=wait_exponential(multiplier=1, min=4, max=60),
-        stop=stop_after_attempt(3),
-        retry=(retry_if_exception_type(TransientOpenAIError) | retry_if_exception_type(aiohttp.ClientError)),
+        wait=_wait_with_server_hint_factory(_WAIT_IMAGE_BASE),
+        stop=stop_after_attempt(5),
+        retry=(
+            retry_if_exception_type(TransientOpenAIError)
+            | retry_if_exception_type(aiohttp.ClientError)
+            | retry_if_exception_type(asyncio.TimeoutError)
+            | retry_if_exception_type(asyncio.CancelledError)
+        ),
     )
     async def process_image(
         self,
@@ -392,9 +467,14 @@ class OpenAITranscriber:
         return f"data:{mime_type};base64,{encoded}"
 
     @retry(
-        wait=wait_exponential(multiplier=1, min=4, max=10),
-        stop=stop_after_attempt(5),
-        retry=(retry_if_exception_type(TransientOpenAIError) | retry_if_exception_type(aiohttp.ClientError)),
+        wait=_wait_with_server_hint_factory(_WAIT_TRANSCRIBE_BASE),
+        stop=stop_after_attempt(7),
+        retry=(
+            retry_if_exception_type(TransientOpenAIError)
+            | retry_if_exception_type(aiohttp.ClientError)
+            | retry_if_exception_type(asyncio.TimeoutError)
+            | retry_if_exception_type(asyncio.CancelledError)
+        ),
     )
     async def transcribe_image(self, image_path: Path) -> Dict[str, Any]:
         """

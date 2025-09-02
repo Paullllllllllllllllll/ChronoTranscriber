@@ -1,10 +1,10 @@
 # Concurrency settings for transcription and image processing tasks
 concurrency:
   transcription:
-    concurrency_limit: 25000  # Maximum number of concurrent transcription tasks
-    delay_between_tasks: 0.01  # Delay (in seconds) between starting transcription tasks
+    concurrency_limit: 5000  # Maximum number of concurrent transcription tasks
+    delay_between_tasks: 0  # Delay (in seconds) between starting transcription tasks
     service_tier: flex        # Controls OpenAI Responses service tier, allowed
     # tiers: 'auto', 'default', 'flex', and 'priority'
   image_processing:
-    concurrency_limit: 12  # Maximum number of concurrent image processing tasks
+    concurrency_limit: 24  # Maximum number of concurrent image processing tasks
     delay_between_tasks: 0  # No delay for image processing tasks

@@ -2,15 +2,15 @@
 general:
   retain_temporary_jsonl: true  # Retain temporary JSONL files after processing
   input_paths_is_output_path: false  # Use input paths as output paths if true
-  logs_dir: ""  # Directory for log files
+  logs_dir: 'C:\Users\pagoetz\Desktop\working_dir\python_repo_logs\chrono_miner_logs'  # Directory for log files
   keep_preprocessed_images: true  # Retain preprocessed images after processing
   allow_relative_paths: false  # Set to true to enable relative path support
   base_directory: "."  # Base directory for resolving relative paths
 
 file_paths:
   PDFs:
-    input: ""  # Input directory for PDFs
-    output: ""  # Output directory for processed PDFs
+    input: 'C:\Users\pagoetz\Documents\Arbeit\Doktor\Forschung\Data\culinary_bibliographies\raw_pdfs'  # Input directory for PDFs
+    output: 'C:\Users\pagoetz\Documents\Arbeit\Doktor\Forschung\Data\culinary_bibliographies\transcribed_pdfs_gpt_5_mini'  # Output directory for processed PDFs
   Images:
-    input: ""  # Input directory for image folders
-    output: ""  # Output directory for processed folders
+    input: ''  # Input directory for image folders
+    output: ''  # Output directory for processed folders

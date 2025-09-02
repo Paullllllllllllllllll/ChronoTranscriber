@@ -1,319 +1,143 @@
-# ChronoTranscriber
+## Chrono Transcriber
 
-ChronoTranscriber is a comprehensive Python-based project designed to digitize and transcribe a variety
-of historical sources provided as input files—including PDFs and image folders—using multiple transcription
-methods. It is particularly useful for researchers, archivists, and digital humanities professionals. By
-combining native PDF extraction, Tesseract OCR, and advanced GPT-4o transcription, the system addresses
-diverse document types, from searchable PDFs to scanned images, offering both synchronous processing for
-individual documents and asynchronous batch processing for large-scale, cost-efficient transcription tasks.
+A pipeline to transcribe historical documents (PDFs or image folders) using either a local OCR engine (Tesseract) or modern vision-language models via the OpenAI **Responses API** with JSON-schema structured outputs. It includes scalable Batch submission, recoverable processing, and careful page ordering for long multi-page sources.
 
 
-## Overview
+## Core Functions
 
-ChronoTranscriber is built to streamline the digitization and transcription of documents for historical
-research. It offers flexible transcription options tailored to different types of documents and research needs:
+1. **Transcribe PDFs** into plaintext, with native text extraction fallback and/or page-to-image rendering.  
+2. **Transcribe image folders** (PNG/JPEG) representing page scans.  
+3. **Two OCR backends**:  
+   - **Tesseract** (local).  
+   - **OpenAI Responses** (vision models), including GPT-4o, GPT-4.1, **GPT-5** / **GPT-5-mini**, and **o-series** (o1/o3) with automatic capability checks.  
+4. **Batch mode** for VLM OCR at scale, with direct data-URL image embedding (no external hosting), chunking, and order-preserving merge.  
+5. **Structured outputs** using a JSON Schema injected into the system prompt, ensuring predictable extraction and robust downstream parsing.
 
-- **Target Audience:**  
-  Designed for researchers, archivists, digital humanities scholars, and institutions seeking to
-  digitize and analyze historical documents.
-
-- **Applications:**  
-  Facilitates text extraction from archival PDFs and images, making it easier to conduct text analysis,
-  content indexing, and data-driven historical research.
-
-- **Transcription Methods:**  
-  Provides multiple methods to accommodate various document types:
-  - **Native PDF Extraction:** Directly extracts text from searchable PDFs, outputting results as plain text
-    files.
-  - **Tesseract OCR:** Uses optical character recognition to transcribe scanned PDFs and images.
-  - **GPT-4o Transcription:** Leverages OpenAI’s GPT-4o model for high-quality, context-aware transcriptions,
-    available in both synchronous and asynchronous batch modes.
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Repository Structure](#repository-structure)
-- [System Requirements & Dependencies](#system-requirements--dependencies)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Features](#features)
-- [Workflow](#workflow)
-- [Usage](#usage)
-  - [PDF Processing](#pdf-processing)
-  - [Image Folder Processing](#image-folder-processing)
-  - [Batch Processing](#batch-processing)
-- [Troubleshooting and FAQ](#troubleshooting-and-faq)
-- [Contributing and Development Guidelines](#contributing-and-development-guidelines)
-- [Possible Future Extension](#possible-future-extension)
-- [Contributing](#contributing)
-- [Contact and Support](#contact-and-support)
-- [License](#license)
-
-## Repository Structure
-
-```
-ChronoTranscriber/
-├── config/
-│   ├── concurrency_config.yaml
-│   ├── image_processing_config.yaml
-│   ├── model_config.yaml
-│   └── paths_config.yaml
-├── main/
-│   ├── cancel_batches.py
-│   ├── check_batches.py
-│   └── unified_transcriber.py
-├── modules/
-│   ├── batching.py
-│   ├── concurrency.py
-│   ├── config_loader.py
-│   ├── image_utils.py
-│   ├── logger.py
-│   ├── multiprocessing_utils.py
-│   ├── openai_utils.py
-│   ├── pdf_utils.py
-│   ├── text_processing.py
-│   ├── user_interface.py
-│   └── utils.py
-├── schemas/
-│   └── transcription_schema.json
-├── system_prompt/
-│   └── system_prompt.txt
-├── requirements.txt
-└── README.md
-```
-
-
-## System Requirements & Dependencies
-
-- **Python Version:**  
-  Will work with Python 3.12 or later.
-
-- **Further Dependencies:**
-  - A full list of dependencies can be found in `requirements.txt`.
-
-
-## Installation
-
-1. **Clone the Repository:**
-   ```bash
-   git clone https://github.com/Paullllllllllllllllll/ChronoTranscriber.git
-   cd ChronoTranscriber
-   ```
-
-2. **Set Up the Environment:**
-   Create and activate a virtual environment:
-   ```bash
-   python -m venv .venv
-   # On Linux/Mac:
-   source .venv/bin/activate
-   # On Windows:
-   .venv\Scripts\activate
-   ```
-
-3. **Install Dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Adjust PYTHONPATH:**
-   To ensure that Python can find the `modules` package, update your PYTHONPATH. For example, on Linux/Mac:
-   ```bash
-   export PYTHONPATH="$PYTHONPATH:$(pwd)/modules"
-   ```
-   On Windows (PowerShell):
-   ```powershell
-   $env:PYTHONPATH = "$env:PYTHONPATH;$(Get-Location)\modules"
-   ```
-   Alternatively, you can add the above commands to your shell profile or run them each time before running the project.
-
-5. **Set Environment Variables:**
-   ```bash
-   export OPENAI_API_KEY=your_openai_api_key  # On Linux/Mac
-   set OPENAI_API_KEY=your_openai_api_key     # On Windows
-   ```
-
-6. **Run the Transcriber:**
-   ```bash
-   python main/unified_transcriber.py
-   ```
+---
 
 ## Configuration
 
-All configuration settings are managed through YAML files in the `config/` directory:
+The project reads three YAML files from `config/`:
 
-- **paths_config.yaml:**  
-  Defines input/output directories, logging directory, and cleanup options.
-- **model_config.yaml:**  
-  Configures the transcription model (name, temperature, max tokens, etc.).
-- **image_processing_config.yaml:**  
-  Specifies image processing parameters such as DPI, grayscale conversion, and border removal.
-- **concurrency_config.yaml:**  
-  Sets concurrency limits and delays for transcription and image processing tasks.
+- **`model_config.yaml`** — choose model and per-family controls.  
+  - `name`: `gpt-5-mini` (default), or `gpt-5`, `o3`, `o1`, `gpt-4o`, `gpt-4.1`.  
+  - `max_output_tokens`, `service_tier`.  
+  - GPT-5-only: `reasoning.effort`, `text.verbosity`.  
+  - Sampler controls (`temperature`, `top_p`, `frequency_penalty`, `presence_penalty`) are only applied to **non-reasoning** models (e.g., GPT-4o/4.1).
 
-ChronoTranscriber supports both absolute and relative file paths, improving portability across different environments and operating systems.
+- **`image_processing_config.yaml`** — pre-processing and VLM detail.  
+  - Page rendering settings when rasterising PDFs.  
+  - `llm_detail: auto|high|low` (controls Requests’ `detail` for images).  
+  - If `low`, images are resized to a configured max side length prior to encoding as `data:` URLs to improve token efficiency.
 
-In the `paths_config.yaml` file, you can use these options:
+- **`paths_config.yaml`** — filesystem conventions.  
+  - `file_paths` for `PDFs` and `Images` (separate `input`/`output`).  
+  - `allow_relative_paths` with `base_directory`.  
+  - `input_paths_is_output_path` to co-locate results.  
+  - `keep_preprocessed_images`, `retain_temporary_jsonl`, `logs_dir`.
 
-```yaml
-general:
-  # Enable relative path support (default: false)
-  allow_relative_paths: true
-  
-  # Base directory for resolving relative paths
-  base_directory: "."
-```
+---
 
-## Features
+## Setup
 
-- **Multi-Method Transcription:**  
-  - *Native Extraction:* Automatically detects and extracts text from searchable PDFs without additional
-    processing.
-  - *Tesseract OCR:* Converts images and scanned documents into text using established OCR techniques.
-  - *GPT-4o Transcription:* Provides advanced transcription capabilities with natural language understanding,
-    ideal for documents that require contextual analysis.
-  - *Batch Processing:* Supports asynchronous processing of large document sets via OpenAI’s Batch API,
-    enhancing efficiency and reducing costs.
+1. Install Python dependencies and ensure Tesseract is available if you plan to use the local backend.  
+2. Set `OPENAI_API_KEY` in your environment if you will use the VLM backend and/or Batch.  
+3. Edit the three config files under `config/` to reflect your paths, model choice, and preprocessing preferences.  
+4. (Optional) Adjust the JSON schema under `schemas/` if you want to change the structured output contract (e.g., to include per-page markers).
 
-- **Configurable Image Processing:**  
-  - Customizable DPI settings, grayscale conversion, border removal, and transparency handling.
-  - Options to adjust image resolution for optimal OCR and transcription accuracy.
-
-- **Concurrency and Multiprocessing:**  
-  - Asynchronous execution with configurable concurrency limits and task delays.
-  - Multiprocessing support for intensive image processing tasks to maximize performance on multi-core systems.
-
-- **Robust Logging and Error Handling:**  
-  - Detailed logging for monitoring and troubleshooting.
-  - Built-in error detection and recovery mechanisms ensure smooth processing even when issues arise.
-
-
-## Workflow
-
-1. **Configuration:**  
-   - Update YAML configuration files in the `config/` directory to define file paths, model parameters,
-     image processing options, and concurrency settings.
-   - Configure logging paths and cleanup preferences via `paths_config.yaml`.
-
-2. **Processing Documents:**  
-   - **PDF Processing:**  
-     - For native PDFs, the system extracts text directly and outputs a `.txt` file.
-     - For scanned PDFs, the system extracts images and processes them using Tesseract OCR or GPT-4o
-       transcription.
-   - **Image Folder Processing:**  
-     - Processes all images within specified folders, with options for pre-processing and transcription using
-       the chosen method.
-   - **Batch Processing:**  
-     - Enables asynchronous transcription using GPT-4o via OpenAI’s Batch API, with scripts available for
-       monitoring and cancellation of batch jobs.
-
-3. **Output Generation:**  
-   - Transcriptions are saved as `.txt` files, with JSONL records created for metadata and processing logs.
-   - Temporary files and directories (such as `raw_images` and `preprocessed_images`) are managed based on
-     user-defined cleanup settings.
-
+---
 
 ## Usage
 
-### PDF Processing
+### A. Transcribing PDFs
 
-1. **Run the Unified Transcriber:**
-   ```bash
-   python main/unified_transcriber.py
-   ```
+1. Place PDFs under the configured `file_paths.PDFs.input`.  
+2. Run the main entry point and select **PDF** mode.  
+3. Choose OCR backend:  
+   - **Tesseract** for purely local processing.  
+   - **OpenAI Responses** for VLM OCR (streaming single requests) or **Batch** for large jobs.  
+4. Outputs are written to `file_paths.PDFs.output` (or to input directories if `input_paths_is_output_path: true`).
 
-2. **Select Processing Type:**  
-   When prompted, choose **PDFs** by entering `2`.
+### B. Transcribing Image Folders
 
-3. **Choose PDF Processing Method:**  
-   - For **native extraction**, the system directly extracts text from searchable PDFs.
-   - For **non-native PDFs**, choose between Tesseract OCR and GPT-4o transcription. Batch processing is
-     available for GPT-4o.
+1. Place folders of page images under `file_paths.Images.input`.  
+2. Run the main entry point and select **Image Folder** mode.  
+3. Select backend and (optionally) Batch.  
+4. Outputs are written to `file_paths.Images.output` (or co-located).
 
-4. **Output:**  
-   Transcribed text is saved in the designated output directory along with corresponding JSONL records.
+> **Supported formats:** PNG and JPEG are packaged directly into Requests/Batch via base64-encoded `data:` URLs.
 
-### Image Folder Processing
+---
 
-1. **Run the Unified Transcriber:**
-   ```bash
-   python main/unified_transcriber.py
-   ```
+## Batch Mode (Responses API)
 
-2. **Select Processing Type:**  
-   Choose **Images** by entering `1`.
+Chrono Transcriber can submit large image sets as OpenAI **Batches** against the **Responses** endpoint.
 
-3. **Folder Selection:**  
-   The script expects images to be organized in subfolders for better workflow coherence. However, if the image 
-   input directory contains images directly (i.e., no subfolders), the script will process those images as a single folder.
+- **How it works**  
+  - Images are base64-encoded as `data:` URLs and paired with a **system prompt** containing your JSON Schema (injected automatically).  
+  - Requests are chunked, size-aware (≤150 MB per part to allow headroom under the 180 MB limit), and tagged with stable `custom_id`s and per-image metadata (image name, page number, order index).  
+  - After submission, the tool writes a local **`batch_submission_debug.json`** (count of batches and their IDs) to support “lost batch id” recovery.
 
-4. **Choose Transcription Method:**  
-   Options include GPT-4o and Tesseract OCR. Batch processing is available for GPT-4o.
+- **Monitoring & finalisation**  
+  - Run `check_batches.py` to poll status for all temp JSONL files, diagnose failures, and download results when **all** batches of a source are complete.  
+  - The checker merges model outputs using a **multi-level ordering** strategy: explicit order info → custom-id index → embedded page number → number parsed from filename → stable fallback index.  
+  - Temporary JSONL files are deleted **only if** the final text was written and all batches in that JSONL completed successfully (configurable via `retain_temporary_jsonl`).
 
-5. **Output:**  
-   Processed images are stored in dedicated subfolders with transcribed text saved as `.txt` files
-   alongside JSONL records.
+- **Cancelling jobs**  
+  - Use `cancel_batches.py` to list batches, skip terminal ones (`completed|expired|cancelled|failed`), and cancel the rest with a clear summary.
 
-### Batch Processing
+---
 
-- **Checking Batches:**  
-  Use `python main/check_batches.py` to review and download completed batch job outputs.
+## Image Preprocessing
 
-- **Cancelling Batches:**  
-  Use `python main/cancel_batches.py` to cancel ongoing batch jobs that are not in a terminal state.
+- PDF pages can be rasterised to images with your chosen DPI/layout settings.  
+- Optional grayscale/alpha handling and safe JPEG export for uniform downstream behaviour.  
+- **VLM detail control**: `llm_detail` influences how much visual information is fed to the model (`auto|high|low`). For `low`, images are automatically resized to limit tokens and cost.
 
-## Troubleshooting and FAQ
+---
 
-### Troubleshooting
+## Structured Outputs
 
-- **OPENAI_API_KEY Not Set:**  
-  Ensure the `OPENAI_API_KEY` environment variable is properly configured before using GPT-based transcription tasks.
+- The pipeline injects a **JSON Schema** into the system prompt so the model returns typed responses (e.g., fields like `transcription`, flags for “no transcribable text”, etc.).  
+- Downstream parsing first attempts structured JSON; if absent/invalid, it falls back to raw text content. This ensures the merge step never blocks.
 
-- **Missing Configuration Files:**  
-  Verify that all necessary YAML configuration files are present in the `config/` directory.
+---
 
-- **PDF Extraction Errors:**  
-  - For native extraction, confirm that the PDF is searchable.
-  - For scanned PDFs, check the image extraction and processing settings.
+## Model Selection & Capabilities
 
-- **Batch Processing Issues:**  
-  Check your network connectivity and review OpenAI API usage limits if batch submissions fail.
+- Choose from `gpt-4o`, `gpt-4.1`, `gpt-5`, `gpt-5-mini`, `o1`, `o3`.  
+- The tool **gates** features by model family (images, structured outputs, reasoning controls, sampler controls). GPT-5 exposes `reasoning.effort` and `text.verbosity`; sampler controls are applied only to classic non-reasoning models.
 
-## Contributing and Development Guidelines
+---
 
-Contributions are welcome! When contributing:
-- Contact the main developer before adding any new features.
-- Follow good Python programming practices.
-- Update all relevant configuration files and documentation accordingly.
-- Follow the repository’s coding style and contribution guidelines.
+## Relative Paths
 
-## Possible Future Extension
+- Enable `allow_relative_paths: true` and set `base_directory` to work with relative inputs/outputs across the entire pipeline.  
+- If you want results written next to inputs, set `input_paths_is_output_path: true`. Path validation guards against common misconfigurations.
 
-Options for possible future extensions include:
+---
 
-- **Enhanced Error Handling:**  
-  Improve error recovery mechanisms and user notifications.
-- **Extended Format Support:**  
-  Add support for additional file formats beyond PDFs and common image types.
-- **Performance Optimizations:**  
-  Enhance concurrency management and processing speeds for large-scale tasks.
-- **User Interface Improvements:**  
-  Develop a graphical user interface (GUI) for non-technical users.
-- **Integration with Digital Archives:**  
-  Enable direct integration with digital archive platforms for seamless data ingestion.
+## Utilities
 
-## Contributing
+- **`check_batches.py`**: scans for temp JSONL files, repairs missing batch IDs using `batch_submission_debug.json`, diagnoses API/model issues, downloads results, and merges them in the right order before (optionally) cleaning up.  
+- **`cancel_batches.py`**: lists batches, shows a summary, and cancels all non-terminal jobs; terminal ones are skipped with a report.
 
-Contributions are welcome! When contributing:
-- Contact the main developer before adding any new features.
-- Follow the repository’s coding style and contribution guidelines.
+---
 
+## Troubleshooting
 
-## Contact and Support
+- Run the **API diagnostics** built into `check_batches.py` to verify API key presence, model listing, and Batch API access if anything looks off.  
+- If a temp `.jsonl` appears to be missing some `batch_tracking` lines, the checker can pull IDs from `batch_submission_debug.json` and repair the file before proceeding.
 
-- **Main Developer:**  
-  For support, questions, or to discuss contributions, please open an issue on GitHub or contact via email at
-  [paul.goetz@uni-goettingen.de](mailto:paul.goetz@uni-goettingen.de).
+---
 
-## License
+## Notes
 
-This project is licensed under the MIT License.
+- Temporary files are only removed when it is safe to do so (successful final write and all batches complete), or retained if `retain_temporary_jsonl: true`.  
+- Supported image formats: PNG and JPEG; images are embedded in requests as `data:` URLs.
+
+---
+
+### License
+
+Private; do not distribute without permission.

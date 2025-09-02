@@ -2,14 +2,26 @@
 image_processing:
   target_dpi: 300  # The resolution (in dots per inch) at which images will be extracted and processed. A higher DPI can improve clarity for OCR but may increase processing time.
   grayscale_conversion: true  # When enabled, converts colored images to grayscale. This reduction of color noise can improve OCR accuracy.
-  border_removal:
-    enabled: true  # Enables a pre-processing step that automatically removes borders or margins from images to eliminate unwanted background elements.
-    border_color: 255  # The pixel intensity value (typically white) that is considered as the border color for detection.
-    tolerance: 7  # Specifies the acceptable deviation from the defined border color during border detection, accommodating slight brightness variations.
-  adjust_dpi:
-    min_pixels: 1500  # The minimum number of pixels for image dimensions during DPI adjustment. Images below this threshold will be upscaled to ensure sufficient resolution.
-    max_pixels: 3000  # The maximum number of pixels allowed after DPI adjustment, preventing images from becoming excessively large and slowing down processing.
   handle_transparency: true  # When enabled, processes images with transparent backgrounds by placing them on a white background for consistent OCR input.
+  # Controls the fidelity of images sent to the LLM via the Responses API.
+  # - high: better fidelity OCR, potentially higher token usage
+  # - low: faster/cheaper, lower fidelity
+  # - auto: omit the parameter and let the model decide
+  llm_detail: high
+
+  # JPEG compression quality (1-100) used when saving processed images.
+  jpeg_quality: 100
+
+  # Resizing behavior prior to sending to the LLM
+  # - auto: choose a resizing strategy based on llm_detail
+  # - none: do not resize (only transparency/grayscale steps applied)
+  resize_profile: high
+
+  # Parameters for resizing profiles
+  # For low detail, cap the longest side to this many pixels (preserve aspect ratio)
+  low_max_side_px: 512
+  # For high detail, fit into this box (width, height) with padding as needed
+  high_target_box: [768, 1536]
 
 ocr:
   tesseract_config: "--oem 3 --psm 6"  # Tesseract OCR configuration options: '--oem 3' selects the default OCR engine mode, and '--psm 6' assumes a single uniform block of text.

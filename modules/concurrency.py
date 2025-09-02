@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from typing import Any, Callable, List, Tuple, Awaitable
+from typing import Any, Callable, List, Tuple, Awaitable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +11,8 @@ async def run_concurrent_transcription_tasks(
 		corofunc: Callable[..., Awaitable[Any]],
 		args_list: List[Tuple[Any, ...]],
 		concurrency_limit: int = 20,
-		delay: float = 0
+		delay: float = 0,
+		on_result: Optional[Callable[[Any], Awaitable[None]]] = None,
 ) -> List[Any]:
 	"""
     Run the given asynchronous function concurrently over a list of argument tuples, respecting a concurrency limit.
@@ -32,7 +33,14 @@ async def run_concurrent_transcription_tasks(
 			if delay > 0:
 				await asyncio.sleep(delay)
 			try:
-				return await corofunc(*args)
+				result = await corofunc(*args)
+				# Stream the result to the callback as soon as it is ready
+				if on_result is not None:
+					try:
+						await on_result(result)
+					except Exception as cb_exc:
+						logger.error(f"on_result callback failed for args {args}: {cb_exc}")
+				return result
 			except Exception as e:
 				logger.error(
 					f"Transcription task failed with arguments {args}: {e}")

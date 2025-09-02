@@ -1,202 +1,442 @@
 # modules/openai_utils.py
-import aiofiles
+
+from __future__ import annotations
+
 import base64
-from pathlib import Path
-import aiohttp
-from typing import Dict, Any
-from contextlib import asynccontextmanager
 import json
+import logging
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any, AsyncGenerator, Dict, Optional, Tuple
+
+import aiofiles
+import aiohttp
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from modules.config_loader import ConfigLoader
-from modules.logger import setup_logger
-from tenacity import retry, wait_exponential, stop_after_attempt
+from modules.model_capabilities import Capabilities, detect_capabilities
 
-logger = setup_logger(__name__)
+logger = logging.getLogger(__name__)
 
-SUPPORTED_IMAGE_FORMATS = {
-	'.png': 'image/png',
-	'.jpg': 'image/jpeg',
-	'.jpeg': 'image/jpeg'
+SUPPORTED_IMAGE_FORMATS: Dict[str, str] = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
 }
 
 
+# ---------- Exceptions (retry control) ----------
+
+
+class TransientOpenAIError(Exception):
+    """Error category that is safe to retry (429/5xx/timeouts)."""
+
+
+class NonRetryableOpenAIError(Exception):
+    """Error category that should not be retried (e.g., 4xx other than 429)."""
+
+
+# ---------- Responses API adapter ----------
+
+
+class OpenAIExtractor:
+    """
+    Minimal, robust adapter for the OpenAI **Responses API**.
+
+    - Uses typed `input` (input_text / input_image).
+    - Structured outputs via `text.format` where supported.
+    - GPT-5 public `reasoning` / `text.verbosity` when applicable.
+    - Excludes sampler controls for reasoning families and GPT-5.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        *,
+        service_tier: Optional[str] = None,
+        timeout: Optional[float] = None,
+        model_config: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not api_key:
+            raise ValueError("api_key must be provided.")
+        if not model:
+            raise ValueError("model must be provided.")
+
+        self.api_key = api_key
+        self.model = model
+        self.endpoint = "https://api.openai.com/v1/responses"
+        self.service_tier = service_tier
+
+        self.caps: Capabilities = detect_capabilities(model)
+
+        # Load model configuration dictionary (preserving legacy structure)
+        if model_config is None:
+            cl = ConfigLoader()
+            cl.load_configs()
+            mc = cl.get_model_config()
+        else:
+            mc = model_config
+
+        tm = mc.get("transcription_model") or mc.get("extraction_model") or {}
+
+        # Token budget: Responses uses max_output_tokens (fallbacks for backward-compat)
+        self.max_output_tokens: int = int(
+            tm.get("max_output_tokens")
+            if tm.get("max_output_tokens") is not None
+            else (tm.get("max_completion_tokens") if tm.get("max_completion_tokens") is not None else tm.get("max_tokens", 4096))
+        )
+
+        # Classic sampler controls (only used on non-reasoning, non-GPT-5)
+        self.temperature: float = float(tm.get("temperature", 0.0))
+        self.top_p: float = float(tm.get("top_p", 1.0))
+        self.presence_penalty: float = float(tm.get("presence_penalty", 0.0))
+        self.frequency_penalty: float = float(tm.get("frequency_penalty", 0.0))
+        self.stop = tm.get("stop") or []
+        self.seed = tm.get("seed")
+
+        # GPT-5 specifics (only attached if caps.supports_reasoning_effort is True)
+        self.reasoning: Dict[str, Any] = tm.get("reasoning", {"effort": "medium"})
+        self.text_params: Dict[str, Any] = tm.get("text", {"verbosity": "medium"})
+
+        # Timeout: longer for "flex"
+        total_timeout = timeout if timeout is not None else (900.0 if service_tier == "flex" else 600.0)
+        self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=total_timeout))
+
+    async def close(self) -> None:
+        if self.session and not self.session.closed:
+            await self.session.close()
+
+    async def _post(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        async with self.session.post(self.endpoint, headers=headers, json=payload) as resp:
+            if resp.status != 200:
+                error_text = await resp.text()
+                if resp.status == 429 or 500 <= resp.status < 600:
+                    logger.warning("Transient OpenAI error (%s): %s", resp.status, error_text)
+                    raise TransientOpenAIError(f"{resp.status}: {error_text}")
+                logger.error("Non-retryable OpenAI error (%s): %s", resp.status, error_text)
+                raise NonRetryableOpenAIError(f"{resp.status}: {error_text}")
+            return await resp.json()
+
+    def _build_base_payload(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "model": self.model,
+            "max_output_tokens": self.max_output_tokens,
+        }
+        if self.service_tier:
+            payload["service_tier"] = self.service_tier
+
+        # GPT-5 public reasoning/text controls
+        if self.caps.supports_reasoning_effort:
+            payload["reasoning"] = self.reasoning
+            if isinstance(self.text_params, dict) and self.text_params.get("verbosity") is not None:
+                payload.setdefault("text", {})["verbosity"] = self.text_params["verbosity"]
+
+        # Sampler controls only for non-reasoning, non-GPT-5 families
+        if self.caps.supports_sampler_controls:
+            payload["temperature"] = self.temperature
+            payload["top_p"] = self.top_p
+            if self.stop:
+                payload["stop"] = self.stop
+
+        return payload
+
+    def _maybe_add_text_format(self, payload: Dict[str, Any], json_schema: Optional[Dict[str, Any]]) -> None:
+        """
+        Add `text.format` (Structured Outputs) where supported (avoid on o-series).
+        """
+        if not json_schema or not self.caps.supports_structured_outputs:
+            return
+        # Accept wrapper form {name, strict, schema: {...}} or bare schema {...}
+        if isinstance(json_schema, dict) and "schema" in json_schema:
+            name_val = json_schema.get("name") or "TranscriptionSchema"
+            schema_val = json_schema.get("schema") or {}
+            strict_val = bool(json_schema.get("strict", True))
+        else:
+            name_val = "TranscriptionSchema"
+            schema_val = json_schema  # assume bare JSON Schema object
+            strict_val = True
+
+        # Basic sanity check: avoid sending malformed schemas that will 400
+        if not isinstance(schema_val, dict) or not schema_val:
+            logger.warning("Skipping structured outputs: provided schema is empty or not a dict")
+            return
+
+        payload.setdefault("text", {})
+        payload["text"]["format"] = {
+            "type": "json_schema",
+            "name": name_val,
+            "schema": schema_val,
+            "strict": strict_val,
+        }
+
+    @staticmethod
+    def _collect_output_text(data: Dict[str, Any]) -> str:
+        """
+        Normalize Responses output into a single text string.
+        """
+        if isinstance(data, dict) and isinstance(data.get("output_text"), str):
+            return data["output_text"].strip()
+
+        parts: list[str] = []
+        output = data.get("output") if isinstance(data, dict) else None
+        if isinstance(output, list):
+            for item in output:
+                if isinstance(item, dict) and item.get("type") == "message":
+                    for c in item.get("content", []):
+                        t = c.get("text")
+                        if isinstance(t, str):
+                            parts.append(t)
+        return "".join(parts).strip()
+
+    @retry(
+        wait=wait_exponential(multiplier=1, min=4, max=60),
+        stop=stop_after_attempt(3),
+        retry=(retry_if_exception_type(TransientOpenAIError) | retry_if_exception_type(aiohttp.ClientError)),
+    )
+    async def process_image(
+        self,
+        *,
+        system_message: str,
+        image_data_url: str,
+        json_schema: Optional[Dict[str, Any]] = None,
+        user_instruction: str = "Please transcribe the text from this image.",
+        detail: Optional[str] = None,
+    ) -> Tuple[str, Dict[str, Any]]:
+        """
+        Call Responses API with an image and optional JSON schema.
+
+        Returns
+        -------
+        tuple[str, dict]
+            (content_text, raw_response_dict)
+        """
+        if not self.caps.supports_image_input:
+            raise NonRetryableOpenAIError(
+                f"Selected model '{self.model}' does not support image inputs."
+            )
+
+        # Normalize detail: when explicitly set to 'auto', omit the field.
+        detail_norm = (detail or None)
+        if isinstance(detail_norm, str):
+            dlow = detail_norm.lower().strip()
+            if dlow == "auto":
+                detail_norm = None
+            elif dlow in ("low", "high"):
+                detail_norm = dlow
+            else:
+                detail_norm = None
+
+        effective_detail = detail_norm if detail_norm is not None else (
+            self.caps.default_ocr_detail if self.caps.supports_image_detail else None
+        )
+
+        image_part: Dict[str, Any] = {
+            "type": "input_image",
+            # Responses API expects image_url as a STRING (URL or data URL)
+            # and optional detail as a sibling property.
+            "image_url": image_data_url,
+        }
+        if detail_norm is not None and self.caps.supports_image_detail:
+            image_part["detail"] = effective_detail
+
+        input_messages = [
+            {"role": "system", "content": [{"type": "input_text", "text": system_message}]},
+            {"role": "user", "content": [{"type": "input_text", "text": user_instruction}, image_part]},
+        ]
+
+        payload = self._build_base_payload()
+        payload["input"] = input_messages
+
+        # Add structured outputs when supported
+        self._maybe_add_text_format(payload, json_schema)
+
+        logger.debug(
+            "Submitting Responses image request: model=%s, has_text_format=%s, service_tier=%s",
+            self.model,
+            "text" in payload and isinstance(payload["text"], dict) and "format" in payload["text"],
+            self.service_tier,
+        )
+        logger.debug(
+            "Responses image call: model=%s include_detail=%s effective_detail=%s",
+            self.model,
+            detail_norm is not None and self.caps.supports_image_detail,
+            effective_detail,
+        )
+        data = await self._post(payload)
+        content_text = self._collect_output_text(data)
+        return content_text, data
+
+
+# ---------- Backward-compatible façade (same public interface) ----------
+
+
 class OpenAITranscriber:
-	def __init__(self, api_key: str, model: str = None) -> None:
-		"""
-		Initialize the OpenAI transcriber with a fixed system prompt path.
+    """
+    Backward-compatible façade used by existing workflow code.
 
-		Parameters:
-			api_key (str): The OpenAI API key
-			model (str, optional): Model name to use. Defaults to "gpt-4o-2024-08-06".
-		"""
-		self.api_key = api_key
-		self.model = model if model else "gpt-4o-2024-08-06"
-		self.endpoint = "https://api.openai.com/v1/chat/completions"
+    Preserves:
+      - constructor signature (api_key, model)
+      - `transcribe_image(Path)` method
+    but internally routes to the Responses API via `OpenAIExtractor`.
+    """
 
-		root_dir = Path(__file__).resolve().parent.parent
-		self.system_prompt_path = root_dir / "system_prompt" / "system_prompt.txt"
-		self.schema_path = root_dir / "schemas" / "transcription_schema.json"
+    def __init__(self, api_key: str, model: Optional[str] = None) -> None:
+        cfg = ConfigLoader()
+        cfg.load_configs()
 
-		if not self.system_prompt_path.exists():
-			logger.error(
-				f"System prompt file not found: {self.system_prompt_path}")
-			raise FileNotFoundError(
-				f"System prompt file does not exist: {self.system_prompt_path}")
-		try:
-			with self.system_prompt_path.open('r',
-			                                  encoding='utf-8') as prompt_file:
-				self.system_prompt_text = prompt_file.read().strip()
-		except Exception as e:
-			logger.error(f"Failed to read system prompt: {e}")
-			raise
+        mc = cfg.get_model_config()
+        tm = mc.get("transcription_model", {})
+        self.model = model or tm.get("name", "gpt-4o-2024-08-06")
 
-		if not self.schema_path.exists():
-			logger.error(f"Schema file not found: {self.schema_path}")
-			raise FileNotFoundError(
-				f"Schema file does not exist: {self.schema_path}")
-		try:
-			with self.schema_path.open('r', encoding='utf-8') as schema_file:
-				self.transcription_schema = json.load(schema_file)
-		except Exception as e:
-			logger.error(f"Failed to load transcription schema: {e}")
-			raise
+        self.api_key = api_key
+        # service_tier now sourced from concurrency_config.yaml
+        try:
+            cc = cfg.get_concurrency_config()
+            st = (cc.get("concurrency", {}) or {}).get("transcription", {}).get("service_tier")
+        except Exception:
+            st = None
+        # Backward-compat fallback to model_config.yaml if present
+        self.service_tier: Optional[str] = st if st is not None else tm.get("service_tier")
 
-		if not self.schema_path.exists():
-			logger.error(f"Schema file not found: {self.schema_path}")
-			raise FileNotFoundError(
-				f"Schema file does not exist: {self.schema_path}")
-		try:
-			with self.schema_path.open('r', encoding='utf-8') as schema_file:
-				self.transcription_schema = json.load(schema_file)
-		except Exception as e:
-			logger.error(f"Failed to load transcription schema: {e}")
-			raise
+        self.extractor = OpenAIExtractor(
+            api_key=api_key,
+            model=self.model,
+            service_tier=self.service_tier,
+            timeout=None,
+            model_config=mc,
+        )
 
-		config_loader = ConfigLoader()
-		config_loader.load_configs()
-		self.model_config = config_loader.get_model_config()
-		self.temperature = self.model_config.get('transcription_model', {}).get(
-			'temperature', 0.0)
-		self.max_tokens = self.model_config.get('transcription_model', {}).get(
-			'max_tokens', 4096)
-		self.session = aiohttp.ClientSession()
+        # Load image processing config for LLM image detail
+        ipc = cfg.get_image_processing_config()
+        self.image_cfg = ipc.get("image_processing", {}) if isinstance(ipc, dict) else {}
+        raw_detail = str(self.image_cfg.get("llm_detail", "high")).lower().strip()
+        self.llm_detail: Optional[str]
+        if raw_detail in ("low", "high"):
+            self.llm_detail = raw_detail
+        elif raw_detail == "auto":
+            self.llm_detail = "auto"
+        else:
+            # Fallback to model capability default if misconfigured
+            self.llm_detail = "auto"
 
-	async def close(self) -> None:
-		if self.session and not self.session.closed:
-			await self.session.close()
+        # Load system prompt & schema from fixed paths
+        root_dir = Path(__file__).resolve().parent.parent
+        self.system_prompt_path = root_dir / "system_prompt" / "system_prompt.txt"
+        self.schema_path = root_dir / "schemas" / "transcription_schema.json"
 
-	@retry(wait=wait_exponential(multiplier=1, min=4, max=10),
-	       stop=stop_after_attempt(5))
-	async def transcribe_image(self, image_path: Path) -> Dict[str, Any]:
-		"""
-        Transcribe the given image using the OpenAI API.
+        if not self.system_prompt_path.exists():
+            raise FileNotFoundError(f"System prompt missing: {self.system_prompt_path}")
+        if not self.schema_path.exists():
+            raise FileNotFoundError(f"Schema file missing: {self.schema_path}")
+        # Load prompt and schema, then inject schema into prompt at runtime
+        raw_prompt = self.system_prompt_path.read_text(encoding="utf-8").strip()
+        with self.schema_path.open("r", encoding="utf-8") as sf:
+            loaded_schema = json.load(sf)
+            full_schema_obj = loaded_schema
+            # Accept wrapper form {name, strict, schema: {...}} or bare schema {...}
+            if isinstance(loaded_schema, dict) and "schema" in loaded_schema and isinstance(loaded_schema["schema"], dict):
+                self.transcription_schema = loaded_schema["schema"]
+            else:
+                self.transcription_schema = loaded_schema
 
-        Returns:
-            Dict[str, Any]: The API response.
+        # Render system prompt with current schema content
+        self.system_prompt_text = self._render_prompt_with_schema(raw_prompt, full_schema_obj)
+
+    async def close(self) -> None:
+        await self.extractor.close()
+
+    @staticmethod
+    def _render_prompt_with_schema(prompt_text: str, schema_obj: Dict[str, Any]) -> str:
         """
-		mime_type = SUPPORTED_IMAGE_FORMATS.get(image_path.suffix.lower())
-		if not mime_type:
-			logger.error(f"Unsupported image format for {image_path.name}.")
-			raise ValueError(f"Unsupported image format: {image_path.suffix}")
-
-		data_url = await self.encode_image(image_path, mime_type)
-
-		messages = [
-			{
-				"role": "system",
-				"content": self.system_prompt_text
-			},
-			{
-				"role": "user",
-				"content": [
-					{"type": "text",
-					 "text": "Please analyze and transcribe the text from this image according to the provided instructions."},
-					{"type": "image_url",
-					 "image_url": {"url": data_url, "detail": "high"}}
-				]
-			}
-		]
-
-		headers = {
-			"Authorization": f"Bearer {self.api_key}",
-			"Content-Type": "application/json"
-		}
-
-		payload: Dict[str, Any] = {
-			"model": self.model,
-			"messages": messages,
-			"temperature": self.temperature,
-			"max_tokens": self.max_tokens,
-			"top_p": self.model_config.get('transcription_model', {}).get(
-				'top_p', 1.0),
-			"frequency_penalty": self.model_config.get('transcription_model',
-			                                           {}).get(
-				'frequency_penalty', 0.0),
-			"presence_penalty": self.model_config.get('transcription_model',
-			                                          {}).get(
-				'presence_penalty', 0.0),
-			"response_format": {
-				"type": "json_schema",
-				"json_schema": self.transcription_schema
-			}
-		}
-
-		try:
-			async with self.session.post(self.endpoint, headers=headers,
-			                             json=payload) as response:
-				if response.status != 200:
-					error_text = await response.text()
-					logger.error(
-						f"OpenAI API error for {image_path.name}: {error_text}")
-					raise Exception(f"OpenAI API error: {error_text}")
-				data = await response.json()
-				return data
-		except aiohttp.ClientError as e:
-			logger.error(
-				f"HTTP error during OpenAI API call for {image_path.name}: {e}")
-			raise
-
-	async def encode_image(self, image_path: Path, mime_type: str) -> str:
-		"""
-        Encode an image to a data URL.
-
-        Returns:
-            str: The data URL.
+        Render the system prompt with the latest schema content injected.
+        Supports a placeholder token "{{TRANSCRIPTION_SCHEMA}}" or replaces
+        any JSON block that follows the marker line "The JSON schema:".
         """
-		try:
-			async with aiofiles.open(image_path, 'rb') as image_file:
-				content = await image_file.read()
-				encoded = base64.b64encode(content).decode("utf-8")
-				data_url = f"data:{mime_type};base64,{encoded}"
-				return data_url
-		except Exception as e:
-			logger.error(f"Failed to encode image {image_path.name}: {e}")
-			raise
+        try:
+            schema_str = json.dumps(schema_obj, indent=2, ensure_ascii=False)
+        except Exception:
+            schema_str = str(schema_obj)
+
+        token = "{{TRANSCRIPTION_SCHEMA}}"
+        if token in prompt_text:
+            return prompt_text.replace(token, schema_str)
+
+        marker = "The JSON schema:"
+        if marker in prompt_text:
+            idx = prompt_text.find(marker)
+            start_brace = prompt_text.find("{", idx)
+            if start_brace != -1:
+                # Try to find a matching closing brace after the start
+                end_brace = prompt_text.rfind("}")
+                if end_brace != -1 and end_brace > start_brace:
+                    return prompt_text[:start_brace] + schema_str + prompt_text[end_brace + 1:]
+            # Fallback: append schema after the marker
+            return prompt_text + "\n" + schema_str
+
+        # Fallback: append schema section at the end
+        return prompt_text + "\n\nThe JSON schema:\n" + schema_str
+
+    @staticmethod
+    async def _encode_image_to_data_url(image_path: Path, mime_type: str) -> str:
+        """
+        Async file read + Base64 to data URL.
+        """
+        async with aiofiles.open(image_path, "rb") as f:
+            content = await f.read()
+        encoded = base64.b64encode(content).decode("utf-8")
+        return f"data:{mime_type};base64,{encoded}"
+
+    @retry(
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        stop=stop_after_attempt(5),
+        retry=(retry_if_exception_type(TransientOpenAIError) | retry_if_exception_type(aiohttp.ClientError)),
+    )
+    async def transcribe_image(self, image_path: Path) -> Dict[str, Any]:
+        """
+        Backward-compatible call used by workflow.
+
+        Returns
+        -------
+        dict
+            Raw Responses dict (safest for downstream parsers).
+        """
+        mime = SUPPORTED_IMAGE_FORMATS.get(image_path.suffix.lower())
+        if not mime:
+            raise ValueError(f"Unsupported image format: {image_path.suffix}")
+
+        data_url = await self._encode_image_to_data_url(image_path, mime)
+
+        _, data = await self.extractor.process_image(
+            system_message=self.system_prompt_text,
+            image_data_url=data_url,
+            # Pass bare JSON Schema; helper will wrap if needed
+            json_schema=self.transcription_schema,
+            user_instruction="Please analyze and transcribe the text from this image according to the provided instructions.",
+            # Use configured detail; 'auto' will omit the field
+            detail=self.llm_detail,
+        )
+        return data
 
 
 @asynccontextmanager
-async def open_transcriber(api_key: str, model: str = None):
-	"""
-	Context manager for the OpenAI transcriber with hardcoded system prompt path.
-
-	Parameters:
-		api_key (str): The OpenAI API key
-		model (str, optional): Model name to use
-	"""
-	transcriber = OpenAITranscriber(api_key, model)
-	try:
-		yield transcriber
-	finally:
-		await transcriber.close()
-
-
-async def transcribe_image_with_openai(image_path: Path,
-                                       transcriber: OpenAITranscriber) -> Dict[
-	str, Any]:
-	"""
-    Transcribe an image using the provided OpenAITranscriber.
-
-    Returns:
-        Dict[str, Any]: The transcription result.
+async def open_transcriber(api_key: str, model: Optional[str] = None) -> AsyncGenerator[OpenAITranscriber, None]:
     """
-	return await transcriber.transcribe_image(image_path)
+    Context manager matching legacy import sites.
+    """
+    transcriber = OpenAITranscriber(api_key=api_key, model=model)
+    try:
+        yield transcriber
+    finally:
+        await transcriber.close()
+
+
+async def transcribe_image_with_openai(image_path: Path, transcriber: OpenAITranscriber) -> Dict[str, Any]:
+    """
+    Legacy helper retained for callers in the workflow.
+    """
+    return await transcriber.transcribe_image(image_path)

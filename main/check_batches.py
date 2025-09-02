@@ -7,8 +7,9 @@ output is successfully written and all batches in a JSONL file are completed.
 """
 
 import json
+import os
 from pathlib import Path
-from typing import Tuple, Dict, Any, List, Set
+from typing import Tuple, Dict, Any, List, Set, Optional
 
 from openai import OpenAI
 from modules.config_loader import ConfigLoader
@@ -46,6 +47,36 @@ def load_config() -> Tuple[List[Path], Dict[str, Any]]:
 				scan_dirs.append(dir_path.resolve())
 	scan_dirs = list(set(scan_dirs))
 	return scan_dirs, processing_settings
+
+
+def diagnose_batch_failure(batch_id: str, client: OpenAI) -> str:
+	"""
+	Attempts to diagnose why a batch might have failed.
+	Returns a diagnostic message.
+	"""
+	try:
+		# Try to get batch details
+		batch = client.batches.retrieve(batch_id)
+		status = batch.status.lower()
+
+		if status == "failed":
+			return f"Batch {batch_id} failed. Check your OpenAI dashboard for specific error details."
+		elif status == "cancelled":
+			return f"Batch {batch_id} was cancelled."
+		elif status == "expired":
+			return f"Batch {batch_id} expired (not completed within 24 hours)."
+		else:
+			return f"Batch {batch_id} has status '{status}'."
+	except Exception as e:
+		error_message = str(e).lower()
+		if "not found" in error_message:
+			return f"Batch {batch_id} not found in OpenAI. It may have been deleted or belong to a different API key."
+		elif "unauthorized" in error_message:
+			return "API key unauthorized. Check your OpenAI API key permissions."
+		elif "quota" in error_message:
+			return "API quota exceeded. Check your usage limits."
+		else:
+			return f"Error checking batch {batch_id}: {e}"
 
 
 def extract_custom_id_mapping(temp_file: Path) -> Tuple[
@@ -104,6 +135,21 @@ def extract_custom_id_mapping(temp_file: Path) -> Tuple[
 	return custom_id_map, batch_order, order_index_map
 
 
+def check_batch_debug_file() -> Optional[Dict[str, Any]]:
+	"""
+	Check if a batch debug file exists and return its contents.
+	This can help with troubleshooting missing batch IDs.
+	"""
+	debug_path = Path("batch_submission_debug.json")
+	if debug_path.exists():
+		try:
+			with debug_path.open("r", encoding="utf-8") as f:
+				return json.load(f)
+		except Exception as e:
+			logger.error(f"Error reading batch debug file: {e}")
+	return None
+
+
 def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any],
                         client: OpenAI) -> None:
 	"""
@@ -120,6 +166,12 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any],
 			f"[INFO] No temporary batch files found in {root_folder}.")
 		logger.info(f"No temporary batch files found in {root_folder}.")
 		return
+
+	# Check if we have a debug file with batch submission data
+	debug_data = check_batch_debug_file()
+	if debug_data:
+		console_print(
+			f"[INFO] Found batch debug data for {debug_data.get('total_batches', 0)} batches")
 
 	# Retrieve all batches from OpenAI
 	console_print("[INFO] Retrieving list of submitted batches from OpenAI...")
@@ -165,39 +217,84 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any],
 
 		if not batch_ids:
 			console_print(
-				f"[WARN] No batch IDs found in {temp_file.name}. Skipping this file.")
-			continue
+				f"[WARN] No batch IDs found in {temp_file.name}. Checking if this file needs repair...")
+
+			# Check if the debug data can help us repair this file
+			if debug_data and debug_data.get("batch_data"):
+				console_print(
+					f"[INFO] Attempting to repair {temp_file.name} using debug data")
+				try:
+					# Write batch tracking records from debug data
+					with temp_file.open("a", encoding="utf-8") as f:
+						for batch_data in debug_data.get("batch_data", []):
+							tracking_record = {
+								"batch_tracking": {
+									"batch_id": batch_data["batch_id"],
+									"timestamp": batch_data["timestamp"],
+									"batch_file": str(batch_data["batch_id"])
+								}
+							}
+							f.write(json.dumps(tracking_record) + "\n")
+							batch_ids.add(batch_data["batch_id"])
+
+					console_print(
+						f"[SUCCESS] Added {len(debug_data.get('batch_data', []))} missing batch IDs to {temp_file.name}")
+				except Exception as e:
+					console_print(f"[ERROR] Failed to repair file: {e}")
+					continue
+			else:
+				console_print(
+					f"[WARN] No debug data available to repair {temp_file.name}. Skipping this file.")
+				continue
 
 		# Check if all batches are completed
 		all_completed = True
 		missing_batches = []
 		completed_count = 0
+		failed_count = 0
+		failed_details = []
 
 		for batch_id in batch_ids:
 			if batch_id not in batch_dict:
 				all_completed = False
 				missing_batches.append(batch_id)
+				diagnosis = diagnose_batch_failure(batch_id, client)
 				logger.warning(
-					f"Batch ID {batch_id} not found in OpenAI batches.")
+					f"Batch ID {batch_id} not found in OpenAI batches. {diagnosis}")
 				continue
 
 			batch = batch_dict[batch_id]
-			if batch.status.lower() == "completed":
+			status = batch.status.lower()
+
+			if status == "completed":
 				completed_count += 1
+			elif status == "failed":
+				failed_count += 1
+				failed_details.append(f"Batch {batch_id}: status={status}")
+				all_completed = False
 			else:
 				all_completed = False
 				logger.info(
-					f"Batch {batch_id} has status '{batch.status}' - not yet completed.")
+					f"Batch {batch_id} has status '{status}' - not yet completed.")
 
 		# Display progress information for this temp file
-		UserPrompt.display_batch_processing_progress(
-			temp_file,
-			batch_ids,
-			completed_count,
-			len(missing_batches)
-		)
+		console_print(f"\n----- Processing File: {temp_file.name} -----")
+		console_print(f"Found {len(batch_ids)} batch ID(s)")
 
 		if not all_completed:
+			if missing_batches:
+				console_print(
+					f"Completed: {completed_count} | Failed: {failed_count} | In Progress: {len(batch_ids) - completed_count - failed_count - len(missing_batches)} | Missing: {len(missing_batches)}")
+				console_print(
+					f"[WARN] {len(missing_batches)} batch ID(s) were not found in the API response")
+			else:
+				console_print(
+					f"Completed: {completed_count} | Failed: {failed_count} | In Progress: {len(batch_ids) - completed_count - failed_count}")
+
+			if failed_count > 0:
+				console_print(
+					f"[WARN] {failed_count} batches have failed. Check the OpenAI dashboard for details.")
+
 			continue
 
 		# All batches are completed, now download and process them
@@ -399,12 +496,52 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any],
 		f"Batch results processing complete for directory: {root_folder}")
 
 
+def diagnose_api_issues() -> None:
+	"""
+	Provide diagnostics on common API issues.
+	"""
+	console_print("\n=== API Issue Diagnostics ===")
+
+	# Check API key
+	api_key = os.environ.get("OPENAI_API_KEY")
+	if not api_key:
+		console_print(
+			"[ERROR] No OpenAI API key found in environment variables")
+	else:
+		key_summary = f"{api_key[:4]}...{api_key[-4:]}" if len(
+			api_key) > 10 else "[hidden]"
+		console_print(f"[INFO] OpenAI API key present: {key_summary}")
+
+	# Check for common model issues
+	client = OpenAI()
+	try:
+		models = client.models.list()
+		has_gpt4o = any("gpt-4o" in model.id for model in models)
+		console_print(
+			f"[INFO] API Connection successful: {len(models)} models available")
+		console_print(
+			f"[INFO] GPT-4o models available: {'Yes' if has_gpt4o else 'No'}")
+	except Exception as e:
+		console_print(f"[ERROR] Failed to list models: {e}")
+
+	# Check for batch issues
+	try:
+		batch_list = client.batches.list(limit=1)
+		console_print("[INFO] Batch API access successful")
+	except Exception as e:
+		console_print(f"[ERROR] Batch API access failed: {e}")
+
+
 def main() -> None:
 	"""
     Entrypoint for checking all directories for batch outputs and finalizing them.
     """
 	scan_dirs, processing_settings = load_config()
 	client = OpenAI()
+
+	# Run diagnostics
+	diagnose_api_issues()
+
 	for directory in scan_dirs:
 		process_all_batches(directory, processing_settings, client)
 	console_print(

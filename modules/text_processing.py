@@ -1,28 +1,82 @@
 # modules/text_processing.py
+# Python 3.11+ • PEP8-compliant
+
+from __future__ import annotations
+
 import json
 import logging
-from typing import Dict, Any, List
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+
+def _extract_from_responses_object(data: Dict[str, Any]) -> str:
+    """
+    Normalize **Responses API** output into a string.
+    Tries `output_text`; if missing, reconstructs from `output[*].content[].text`.
+    """
+    if isinstance(data, dict) and isinstance(data.get("output_text"), str):
+        return data["output_text"].strip()
+
+    parts: List[str] = []
+    output = data.get("output")
+    if isinstance(output, list):
+        for item in output:
+            if isinstance(item, dict) and item.get("type") == "message":
+                for c in item.get("content", []):
+                    t = c.get("text")
+                    if isinstance(t, str):
+                        parts.append(t)
+    return "".join(parts).strip()
+
+
+def _try_parse_json(text: str) -> Optional[Dict[str, Any]]:
+    try:
+        return json.loads(text)
+    except Exception:
+        return None
+
+
 def extract_transcribed_text(result: Dict[str, Any], image_name: str = "") -> str:
     """
-    Extract and return the transcribed text from a structured OpenAI API response.
-    Supports both batched and non-batched responses.
-    If the result already contains the expected schema, it uses that directly.
+    Extract a transcription string from either:
+      - A structured object already containing our schema keys
+      - A **Responses API** payload (preferred)
+      - A legacy Chat Completions payload
+
+    Returns
+    -------
+    str
+        The transcription (or a helpful placeholder).
     """
-    # If the result already has the expected keys, use them directly.
+    # Case 1: Already normalized (schema object)
     if isinstance(result, dict) and "transcription" in result:
         if result.get("no_transcribable_text", False):
             return "[No transcribable text]"
         if result.get("transcription_not_possible", False):
             return "[Transcription not possible]"
-        return result.get("transcription", "").strip()
+        return str(result.get("transcription", "")).strip()
 
-    # Otherwise, assume the result follows the typical API response structure
+    # Case 2: Responses API object
+    if isinstance(result, dict) and ("output_text" in result or "output" in result):
+        text = _extract_from_responses_object(result)
+        if text:
+            if text.startswith("{"):
+                parsed = _try_parse_json(text)
+                if parsed is not None:
+                    if parsed.get("no_transcribable_text", False):
+                        return "[No transcribable text]"
+                    if parsed.get("transcription_not_possible", False):
+                        return "[Transcription not possible]"
+                    if "transcription" in parsed:
+                        return str(parsed["transcription"]).strip()
+            return text
+
+    # Case 3: Legacy Chat Completions object
     choices = result.get("choices")
     if choices and isinstance(choices, list) and len(choices) > 0:
         message = choices[0].get("message", {})
+        # Structured (message.parsed)
         if "parsed" in message and message["parsed"]:
             parsed = message["parsed"]
             if isinstance(parsed, dict):
@@ -41,78 +95,85 @@ def extract_transcribed_text(result: Dict[str, Any], image_name: str = "") -> st
                         return "[Transcription not possible]"
                     transcription_value = parsed_obj.get("transcription")
                     return transcription_value.strip() if transcription_value is not None else ""
-                except Exception as e:
-                    logger.error(f"Error parsing structured output for {image_name}: {e}")
+                except Exception as exc:
+                    logger.error("Error parsing structured output for %s: %s", image_name, exc)
                     return ""
-        else:
-            content = message.get("content", "").strip()
-            if content:
-                if content.startswith("{"):
-                    try:
-                        parsed_obj = json.loads(content)
-                        if parsed_obj.get("no_transcribable_text", False):
-                            return "[No transcribable text]"
-                        if parsed_obj.get("transcription_not_possible", False):
-                            return "[Transcription not possible]"
-                        if "transcription" in parsed_obj:
-                            return str(parsed_obj["transcription"]).strip()
-                    except Exception as e:
-                        logger.error(f"Error parsing content JSON for {image_name}: {e}")
-                return content
-            else:
-                logger.error(f"Empty content field in response for {image_name}: {json.dumps(result)}")
-                return json.dumps(result)
-    else:
-        logger.error(f"No choices in response for image {image_name}: {json.dumps(result)}")
+        # Plain content
+        content = str(message.get("content", "")).strip()
+        if content:
+            if content.startswith("{"):
+                parsed = _try_parse_json(content)
+                if parsed is not None:
+                    if parsed.get("no_transcribable_text", False):
+                        return "[No transcribable text]"
+                    if parsed.get("transcription_not_possible", False):
+                        return "[Transcription not possible]"
+                    if "transcription" in parsed:
+                        return str(parsed["transcription"]).strip()
+            return content
+        logger.error("Empty content field in response for %s: %s", image_name, json.dumps(result))
         return json.dumps(result)
+
+    # Last resort: log and return raw JSON
+    logger.error("Unrecognized response shape for image %s: %s", image_name, json.dumps(result))
+    return json.dumps(result)
+
 
 def process_batch_output(file_content: bytes) -> List[str]:
     """
-    Parse JSON output from the OpenAI batch result file. Accumulate the
-    transcribed text from each line into a list of transcription strings.
+    Parse the JSONL content from an OpenAI Batch output file.
+
+    Supports:
+      - Responses API lines: { response: { status_code, body: {...} }, ... }
+      - Legacy Chat Completions lines (older jobs)
+      - A top-level JSON array or plain JSONL lines
+
+    Returns
+    -------
+    List[str]
+        One transcription per line/object.
     """
-    content = file_content.decode("utf-8") if isinstance(file_content, bytes) else file_content
+    content = file_content.decode("utf-8") if isinstance(file_content, bytes) else str(file_content)
     content = content.strip()
-    transcriptions = []
+    transcriptions: List[str] = []
+
+    # Normalize to a list of JSON lines
     if content.startswith("[") and content.endswith("]"):
-        # Possibly a JSON array
         try:
             items = json.loads(content)
             lines = [json.dumps(item) for item in items]
-        except Exception as e:
-            logger.exception(f"Error parsing JSON array: {e}")
+        except Exception:
             lines = content.splitlines()
     else:
         lines = content.splitlines()
 
     for line in lines:
+        line = line.strip()
+        if not line:
+            continue
         try:
             obj = json.loads(line)
-        except Exception as e:
-            logger.exception(f"Error parsing line: {e}")
+        except Exception as exc:
+            logger.exception("Error parsing line as JSON: %s", exc)
             continue
 
-        data = None
-        # If there's a "response" object, read from that. Otherwise, if there's a "choices" key, use it directly.
-        if "response" in obj and isinstance(obj["response"], dict) and "body" in obj["response"]:
-            data = obj["response"]["body"]
-        elif "choices" in obj:
+        # Prefer Responses 'response.body'
+        data: Optional[Dict[str, Any]] = None
+        if "response" in obj and isinstance(obj["response"], dict):
+            body = obj["response"].get("body")
+            if isinstance(body, dict):
+                data = body
+        # Fallback: legacy 'choices' at the top level
+        if data is None and "choices" in obj:
             data = obj
 
-        if data and "choices" in data and isinstance(data["choices"], list):
-            for choice in data["choices"]:
-                if "message" in choice and "content" in choice["message"]:
-                    inner_content = choice["message"]["content"]
-                    try:
-                        parsed_inner = json.loads(inner_content)
-                    except json.JSONDecodeError as e:
-                        image_name = obj.get("file_name") or obj.get("image_name") or "[unknown image]"
-                        placeholder = f"[transcription error: {image_name}]"
-                        logger.error(f"JSONDecodeError while parsing inner content: {e}. Raw content: {inner_content}")
-                        transcriptions.append(placeholder)
-                        continue
-                    transcription = extract_transcribed_text(parsed_inner)
-                    if transcription:
-                        transcriptions.append(transcription)
+        if data is None:
+            image_name = obj.get("file_name") or obj.get("image_name") or "[unknown image]"
+            transcriptions.append(f"[transcription error: {image_name}]")
+            continue
+
+        transcription = extract_transcribed_text(data, obj.get("image_name", ""))
+        if transcription:
+            transcriptions.append(transcription)
 
     return transcriptions

@@ -3,7 +3,6 @@
 import shutil
 from PIL import Image, ImageOps
 from pathlib import Path
-import numpy as np
 from typing import List, Optional, Tuple
 
 from modules.config_loader import ConfigLoader
@@ -17,214 +16,203 @@ SUPPORTED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.tiff', '.tif', '.bmp',
 
 
 class ImageProcessor:
-	def __init__(self, image_path: Path) -> None:
-		if image_path.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
-			logger.error(f"Unsupported image format: {image_path.suffix}")
-			raise ValueError(f"Unsupported image format: {image_path.suffix}")
-		self.image_path = image_path
+    def __init__(self, image_path: Path) -> None:
+        if image_path.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
+            logger.error(f"Unsupported image format: {image_path.suffix}")
+            raise ValueError(f"Unsupported image format: {image_path.suffix}")
+        self.image_path = image_path
 
-		config_loader = ConfigLoader()
-		config_loader.load_configs()
-		self.image_config = config_loader.get_image_processing_config()
+        config_loader = ConfigLoader()
+        config_loader.load_configs()
+        # Full config dict (contains 'image_processing' and 'ocr' sections)
+        self.image_config = config_loader.get_image_processing_config()
+        self.img_cfg = self.image_config.get('image_processing', {})
 
-	def convert_to_grayscale(self, image: Image.Image) -> Image.Image:
-		"""
-		Convert the image to grayscale if enabled.
-		Returns:
-			Image.Image: The grayscale image.
-		"""
-		if self.image_config.get('grayscale_conversion', True):
-			return ImageOps.grayscale(image)
-		return image
+    def convert_to_grayscale(self, image: Image.Image) -> Image.Image:
+        """
+        Convert the image to grayscale if enabled.
+        Returns:
+            Image.Image: The grayscale image.
+        """
+        if self.img_cfg.get('grayscale_conversion', True):
+            return ImageOps.grayscale(image)
+        return image
 
-	def remove_borders(self, image: Image.Image) -> Image.Image:
-		"""
-		Remove borders from the image based on configuration.
-		Returns:
-			Image.Image: The cropped image.
-		"""
-		border_removal = self.image_config.get('border_removal', {})
-		if not border_removal.get('enabled', True):
-			return image
+    @staticmethod
+    def resize_for_detail(image: Image.Image, detail: str, img_cfg: dict) -> Image.Image:
+        """
+        Resize strategy based on desired LLM detail.
+        - low: downscale longest side to low_max_side_px.
+        - high: fit/pad into high_target_box [width, height].
+        - auto: default to 'high' strategy.
+        """
+        # Normalize flags and defaults
+        resize_profile = (img_cfg.get('resize_profile', 'auto') or 'auto').lower()
+        if resize_profile == 'none':
+            return image
+        detail_norm = (detail or 'high').lower()
+        if detail_norm not in ('low', 'high', 'auto'):
+            detail_norm = 'high'
+        if detail_norm == 'low':
+            max_side = int(img_cfg.get('low_max_side_px', 512))
+            w, h = image.size
+            longest = max(w, h)
+            if longest <= max_side:
+                return image
+            scale = max_side / float(longest)
+            new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
+            return image.resize(new_size, Image.Resampling.LANCZOS)
+        # high or auto -> box/pad
+        box = img_cfg.get('high_target_box', [768, 1536])
+        try:
+            target_width = int(box[0])
+            target_height = int(box[1])
+        except Exception:
+            target_width, target_height = 768, 1536
+        orig_width, orig_height = image.size
+        scale_w = target_width / orig_width
+        scale_h = target_height / orig_height
+        scale = min(scale_w, scale_h)
+        new_width = max(1, int(orig_width * scale))
+        new_height = max(1, int(orig_height * scale))
+        resized_img = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        final_img = Image.new("RGB", (target_width, target_height), (255, 255, 255))
+        paste_x = (target_width - new_width) // 2
+        paste_y = (target_height - new_height) // 2
+        final_img.paste(resized_img, (paste_x, paste_y))
+        return final_img
 
-		border_color = border_removal.get('border_color', 255)
-		tolerance = border_removal.get('tolerance', 15)
-		min_border = border_removal.get('min_border', 20)
-		padding = 20
+    def handle_transparency(self, image: Image.Image) -> Image.Image:
+        """
+        Handle transparency by pasting the image onto a white background.
+        Returns:
+            Image.Image: The processed image.
+        """
+        if self.img_cfg.get('handle_transparency', True):
+            if image.mode in ('RGBA', 'LA') or (
+                    image.mode == 'P' and 'transparency' in image.info):
+                background = Image.new("RGB", image.size, (255, 255, 255))
+                background.paste(image, mask=image.split()[-1])
+                return background
+        return image
 
-		img_np = np.array(image)
-		mask = img_np < (border_color - tolerance)
+    def process_image(self, output_path: Path) -> str:
+        """
+        Process the image and save it to the given output path with compression.
+        Returns:
+            str: A message indicating the outcome.
+        """
+        try:
+            with Image.open(self.image_path) as img:
+                img = self.handle_transparency(img)
+                img = self.convert_to_grayscale(img)
+                # Choose resizing based on llm_detail and resize_profile
+                detail = (self.img_cfg.get('llm_detail', 'high') or 'high')
+                img = ImageProcessor.resize_for_detail(img, detail, self.img_cfg)
 
-		rows = np.any(mask, axis=1)
-		cols = np.any(mask, axis=0)
-		if not rows.any() or not cols.any():
-			return image
+                # Force output to JPEG with configurable quality (regardless of extension)
+                # Create a new path with .jpg extension
+                jpg_output_path = output_path.with_suffix('.jpg')
+                jpeg_quality = int(self.img_cfg.get('jpeg_quality', 95))
+                img.save(
+                    jpg_output_path,
+                    format='JPEG',
+                    quality=jpeg_quality
+                )
+                logger.debug(
+                    f"Saved processed image {jpg_output_path.name} size={img.size} quality={jpeg_quality} detail={detail}"
+                )
+            return f"Processed and saved: {jpg_output_path.name}"
+        except Exception as e:
+            logger.error(f"Error processing image {self.image_path.name}: {e}")
+            return f"Failed to process {self.image_path.name}: {e}"
 
-		top = max(np.argmax(rows) - padding, min_border)
-		bottom = min(len(rows) - np.argmax(rows[::-1]) + padding,
-		             len(rows) - min_border)
-		left = max(np.argmax(cols) - padding, min_border)
-		right = min(len(cols) - np.argmax(cols[::-1]) + padding,
-		            len(cols) - min_border)
+    # --- Static Methods for Folder-Level Processing ---
 
-		if top >= bottom or left >= right:
-			return image
+    @staticmethod
+    def prepare_image_folder(folder: Path, image_output_dir: Path) -> Tuple[
+        Path, Path, Path, Path]:
+        """
+        Prepares the output directories for processing an image folder.
 
-		return image.crop((left, top, right, bottom))
+        Returns a tuple of:
+          - parent_folder: The directory for outputs related to this folder.
+          - preprocessed_folder: Where preprocessed images will be stored.
+          - temp_jsonl_path: File for recording transcription logs.
+          - output_txt_path: Final transcription text file.
+        """
+        parent_folder = image_output_dir / folder.name
+        parent_folder.mkdir(parents=True, exist_ok=True)
+        preprocessed_folder = parent_folder / "preprocessed_images"
+        preprocessed_folder.mkdir(exist_ok=True)
+        temp_jsonl_path = parent_folder / f"{folder.name}_transcription.jsonl"
+        if not temp_jsonl_path.exists():
+            temp_jsonl_path.touch()
+        output_txt_path = parent_folder / f"{folder.name}_transcription.txt"
+        return parent_folder, preprocessed_folder, temp_jsonl_path, output_txt_path
 
-	def handle_transparency(self, image: Image.Image) -> Image.Image:
-		"""
-		Handle transparency by pasting the image onto a white background.
-		Returns:
-			Image.Image: The processed image.
-		"""
-		if self.image_config.get('handle_transparency', True):
-			if image.mode in ('RGBA', 'LA') or (
-					image.mode == 'P' and 'transparency' in image.info):
-				background = Image.new("RGB", image.size, (255, 255, 255))
-				background.paste(image, mask=image.split()[-1])
-				return background
-		return image
+    @staticmethod
+    def process_images_multiprocessing(image_paths: List[Path],
+                                       output_paths: List[Path]) -> List[
+        Optional[str]]:
+        """
+        Process images using multiprocessing.
 
-	def adjust_dpi(self, image: Image.Image) -> Image.Image:
-		"""
-		Adjust the DPI of the image based on configuration.
-		Returns:
-			Image.Image: The resized image with updated DPI.
-		"""
-		adjust_dpi = self.image_config.get('adjust_dpi', {})
-		target_dpi = self.image_config.get('image_processing', {}).get(
-			'target_dpi', 300)
-		min_pixels = adjust_dpi.get('min_pixels', 1500)
-		max_pixels = adjust_dpi.get('max_pixels', 3000)
+        Parameters:
+            image_paths (List[Path]): List of source image paths.
+            output_paths (List[Path]): List of destination paths for processed images.
 
-		current_dpi = image.info.get('dpi', (300, 300))[0]
-		width_in = image.width / current_dpi
-		height_in = image.height / current_dpi
-		new_width = int(width_in * target_dpi)
-		new_height = int(height_in * target_dpi)
+        Returns:
+            List[Optional[str]]: Processing results for each image.
+        """
+        args_list = list(zip(image_paths, output_paths))
+        results = run_multiprocessing_tasks(ImageProcessor._process_image_task,
+                                            args_list, processes=12)
+        return results
 
-		scale_factor = 1.0
-		if new_width < min_pixels or new_height < min_pixels:
-			scale_factor = max(min_pixels / new_width, min_pixels / new_height)
-		elif new_width > max_pixels or new_height > max_pixels:
-			scale_factor = min(max_pixels / new_width, max_pixels / new_height)
+    @staticmethod
+    def _process_image_task(img_path: Path, out_path: Path) -> str:
+        """
+        Helper task to process a single image and save it to out_path.
 
-		if scale_factor != 1.0:
-			new_width = int(new_width * scale_factor)
-			new_height = int(new_height * scale_factor)
-			image = image.resize((new_width, new_height),
-			                     Image.Resampling.LANCZOS)
-			logger.info(
-				f"Resized image to {new_width}x{new_height} pixels for optimal DPI.")
+        Parameters:
+            img_path (Path): Path to the input image.
+            out_path (Path): Path to save the processed image.
 
-		image.info['dpi'] = (target_dpi, target_dpi)
-		return image
+        Returns:
+            str: A status message.
+        """
+        processor = ImageProcessor(img_path)
+        return processor.process_image(out_path)
 
-	def process_image(self, output_path: Path) -> str:
-		"""
-		Process the image and save it to the given output path.
-		Returns:
-			str: A message indicating the outcome.
-		"""
-		try:
-			with Image.open(self.image_path) as img:
-				img = self.handle_transparency(img)
-				img = self.convert_to_grayscale(img)
-				img = self.remove_borders(img)
-				img = self.adjust_dpi(img)
-				img.save(
-					output_path,
-					dpi=(
-						self.image_config.get('image_processing', {}).get(
-							'target_dpi', 300),
-						self.image_config.get('image_processing', {}).get(
-							'target_dpi', 300)
-					)
-				)
-			return f"Processed and saved: {output_path.name}"
-		except Exception as e:
-			logger.error(f"Error processing image {self.image_path.name}: {e}")
-			return f"Failed to process {self.image_path.name}: {e}"
+    @staticmethod
+    def process_and_save_images(source_folder: Path, preprocessed_folder: Path) -> List[Path]:
+        """
+        Reads images from source folder, processes them, and saves directly to preprocessed folder.
+        Eliminates the need for intermediate raw image storage.
 
-	# --- Static Methods for Folder-Level Processing ---
+        Parameters:
+            source_folder (Path): Path to the source folder containing original images.
+            preprocessed_folder (Path): Path to save processed images.
 
-	@staticmethod
-	def prepare_image_folder(folder: Path, image_output_dir: Path) -> Tuple[
-		Path, Path, Path, Path, Path]:
-		"""
-		Prepares the output directories for processing an image folder.
+        Returns:
+            List[Path]: List of processed image paths.
+        """
+        # Find all image files in source folder
+        image_files: List[Path] = []
+        for ext in SUPPORTED_IMAGE_EXTENSIONS:
+            image_files.extend(list(source_folder.glob(f'*{ext}')))
 
-		Returns a tuple of:
-		  - parent_folder: The directory for outputs related to this folder.
-		  - raw_images_folder: Where raw images will be stored.
-		  - preprocessed_folder: Where preprocessed images will be stored.
-		  - temp_jsonl_path: File for recording transcription logs.
-		  - output_txt_path: Final transcription text file.
-		"""
-		parent_folder = image_output_dir / folder.name
-		parent_folder.mkdir(parents=True, exist_ok=True)
-		raw_images_folder = parent_folder / "raw_images"
-		raw_images_folder.mkdir(exist_ok=True)
-		preprocessed_folder = parent_folder / "preprocessed_images"
-		preprocessed_folder.mkdir(exist_ok=True)
-		temp_jsonl_path = parent_folder / f"{folder.name}_transcription.jsonl"
-		if not temp_jsonl_path.exists():
-			temp_jsonl_path.touch()
-		output_txt_path = parent_folder / f"{folder.name}_transcription.txt"
-		return parent_folder, raw_images_folder, preprocessed_folder, temp_jsonl_path, output_txt_path
+        if not image_files:
+            return []
 
-	@staticmethod
-	def copy_images_to_raw(source_folder: Path, raw_images_folder: Path) -> \
-	List[Path]:
-		"""
-		Copies image files from the source folder to the designated raw images folder.
+        # Create list of output paths
+        output_paths = [
+            preprocessed_folder / f"{img.stem}_pre_processed.jpg" for img in image_files
+        ]
 
-		Returns a list of copied image paths.
-		"""
-		image_files: List[Path] = []
-		for ext in SUPPORTED_IMAGE_EXTENSIONS:
-			image_files.extend(list(source_folder.glob(f'*{ext}')))
-		for file in image_files:
-			try:
-				shutil.copy(file, raw_images_folder / file.name)
-			except Exception as e:
-				logger.exception(
-					f"Error copying file {file} to raw_images_folder: {e}")
-		return list(raw_images_folder.glob("*"))
+        # Process all images at once using multiprocessing
+        ImageProcessor.process_images_multiprocessing(image_files, output_paths)
 
-	@staticmethod
-	def process_images_multiprocessing(image_paths: List[Path],
-	                                   output_paths: List[Path]) -> List[
-		Optional[str]]:
-		"""
-		Process images using multiprocessing.
-
-		Parameters:
-			image_paths (List[Path]): List of source image paths.
-			output_paths (List[Path]): List of destination paths for processed images.
-
-		Returns:
-			List[Optional[str]]: Processing results for each image.
-		"""
-		args_list = list(zip(image_paths, output_paths))
-		results = run_multiprocessing_tasks(ImageProcessor._process_image_task,
-		                                    args_list, processes=12)
-		return results
-
-	@staticmethod
-	def _process_image_task(img_path: Path, out_path: Path) -> str:
-		"""
-		Helper task to process a single image and save it to out_path.
-
-		Parameters:
-			img_path (Path): Path to the input image.
-			out_path (Path): Path to save the processed image.
-
-		Returns:
-			str: A status message.
-		"""
-		processor = ImageProcessor(img_path)
-		return processor.process_image(out_path)
-
-
+        # Return all processed image paths that exist
+        return [p for p in output_paths if p.exists()]

@@ -399,7 +399,7 @@ class OpenAITranscriber:
 
         # Load image processing config for LLM image detail
         ipc = cfg.get_image_processing_config()
-        self.image_cfg = ipc.get("image_processing", {}) if isinstance(ipc, dict) else {}
+        self.image_cfg = ipc.get("api_image_processing", {}) if isinstance(ipc, dict) else {}
         raw_detail = str(self.image_cfg.get("llm_detail", "high")).lower().strip()
         self.llm_detail: Optional[str]
         if raw_detail in ("low", "high"):

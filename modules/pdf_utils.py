@@ -70,7 +70,7 @@ class PDFProcessor:
         try:
             cfg = ConfigLoader()
             cfg.load_configs()
-            img_cfg = cfg.get_image_processing_config().get('image_processing', {})
+            img_cfg = cfg.get_image_processing_config().get('api_image_processing', {})
             jpeg_quality = int(img_cfg.get('jpeg_quality', 95))
         except Exception:
             jpeg_quality = 95
@@ -140,7 +140,7 @@ class PDFProcessor:
                     # Load processing config
                     config_loader = ConfigLoader()
                     config_loader.load_configs()
-                    image_cfg = config_loader.get_image_processing_config().get('image_processing', {})
+                    image_cfg = config_loader.get_image_processing_config().get('api_image_processing', {})
 
                     # Handle transparency (if needed)
                     if image_cfg.get('handle_transparency', True):
@@ -179,6 +179,98 @@ class PDFProcessor:
             logger.exception(f"Error extracting and processing images from PDF {self.pdf_path.name}: {e}")
             console_print(f"[ERROR] Failed to process images from {self.pdf_path.name}.")
             return []
+
+    async def process_images_for_tesseract(self, preprocessed_folder: Path, target_dpi: int) -> List[Path]:
+        """
+        Render PDF pages at target_dpi and preprocess for Tesseract OCR.
+        Saves lossless PNG/TIFF, preserves resolution, embeds DPI metadata if enabled.
+        """
+        preprocessed_folder.mkdir(parents=True, exist_ok=True)
+
+        from modules.utils import console_print
+
+        try:
+            # Ensure PDF is open
+            if self.doc is None:
+                self.open_pdf()
+
+            # Load Tesseract preprocessing config
+            config_loader = ConfigLoader()
+            config_loader.load_configs()
+            img_cfg = config_loader.get_image_processing_config()
+            tip_cfg = img_cfg.get('tesseract_image_processing', {})
+            preproc_cfg = tip_cfg.get('preprocessing', {})
+            output_format = str(preproc_cfg.get('output_format', 'png')).lower()
+            embed_dpi = bool(preproc_cfg.get('embed_dpi_metadata', True))
+            # Concurrency settings
+            conc_cfg = config_loader.get_concurrency_config()
+            img_conc = (conc_cfg.get('concurrency', {})
+                                 .get('image_processing', {}))
+            concurrency_limit = int(img_conc.get('concurrency_limit', 4))
+
+            # Deterministic output paths
+            suffix = '.png' if output_format == 'png' else '.tif'
+            total_pages = int(self.doc.page_count)
+            out_paths: List[Path] = [
+                preprocessed_folder / f"page_{i + 1:04d}_tess_preprocessed{suffix}"
+                for i in range(total_pages)
+            ]
+
+            sem = asyncio.Semaphore(max(1, concurrency_limit))
+
+            async def bound_worker(page_index: int, out_path: Path) -> bool:
+                async with sem:
+                    return await asyncio.to_thread(
+                        PDFProcessor._process_single_page_tesseract,
+                        self.pdf_path,
+                        page_index,
+                        target_dpi,
+                        out_path,
+                        preproc_cfg,
+                        embed_dpi,
+                    )
+
+            tasks = [bound_worker(i, out_paths[i]) for i in range(total_pages)]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for i, res in enumerate(results):
+                if isinstance(res, Exception):
+                    logger.error(f"Error Tesseract-preprocessing page {i + 1} from {self.pdf_path}: {res}")
+                elif not res:
+                    logger.error(f"Tesseract-preprocessing page {i + 1} did not complete successfully.")
+                else:
+                    logger.info(f"[Tesseract] Processed page {i + 1} -> {out_paths[i].name} dpi={target_dpi}")
+
+            return [p for p in out_paths if p.exists()]
+
+        except Exception as e:
+            logger.exception(f"Error in Tesseract PDF image processing {self.pdf_path.name}: {e}")
+            console_print(f"[ERROR] Failed Tesseract preprocessing for {self.pdf_path.name}.")
+            return []
+
+    @staticmethod
+    def _process_single_page_tesseract(pdf_path: Path, page_index: int, target_dpi: int,
+                                       out_path: Path, tess_cfg: Dict, embed_dpi: bool) -> bool:
+        """
+        Thread worker: open PDF, render a single page, preprocess for Tesseract, and write output.
+        Returns True on success.
+        """
+        try:
+            # Open a local document instance to avoid PyMuPDF thread-safety issues
+            with fitz.open(pdf_path) as doc:
+                page = doc[page_index]
+                pix = page.get_pixmap(matrix=fitz.Matrix(target_dpi / 72, target_dpi / 72), alpha=False)
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+            processed_img, _diag = ImageProcessor.preprocess_for_tesseract(img, tess_cfg)
+            save_kwargs = {}
+            if embed_dpi:
+                save_kwargs['dpi'] = (target_dpi, target_dpi)
+            processed_img.save(out_path, **save_kwargs)
+            return True
+        except Exception as e:
+            logger.error(f"Worker failed on page {page_index + 1} of {pdf_path.name}: {e}")
+            return False
 
     def prepare_output_folder(self, pdf_output_dir: Path) -> Tuple[Path, Path, Path]:
         """

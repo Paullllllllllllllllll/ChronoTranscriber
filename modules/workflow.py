@@ -40,6 +40,22 @@ class WorkflowManager:
         self.image_processing_config = image_processing_config
         self.processing_settings = paths_config.get("general", {})
 
+        # Configure Tesseract executable if provided
+        self.ocr_config = (self.image_processing_config
+                           .get('tesseract_image_processing', {})
+                           .get('ocr', {}))
+        tess_cmd = (self.ocr_config.get('tesseract_cmd') or '').strip()
+        if tess_cmd:
+            try:
+                cmd_path = Path(tess_cmd)
+                if cmd_path.exists():
+                    pytesseract.pytesseract.tesseract_cmd = str(cmd_path)
+                    logger.info(f"Using Tesseract executable: {cmd_path}")
+                else:
+                    logger.warning(f"Configured tesseract_cmd does not exist: {cmd_path}")
+            except Exception as e:
+                logger.warning(f"Could not set tesseract_cmd '{tess_cmd}': {e}")
+
         # Set up output directories
         pdf_output_dir = Path(
             paths_config.get('file_paths', {}).get('PDFs', {}).get('output',
@@ -64,6 +80,23 @@ class WorkflowManager:
         # Ensure directories exist
         self.pdf_output_dir.mkdir(parents=True, exist_ok=True)
         self.image_output_dir.mkdir(parents=True, exist_ok=True)
+
+    def _ensure_tesseract_available(self) -> bool:
+        """
+        Verify that Tesseract is available. Returns True if available, False otherwise.
+        """
+        try:
+            _ = pytesseract.get_tesseract_version()
+            return True
+        except getattr(pytesseract, 'TesseractNotFoundError', Exception):
+            console_print("[ERROR] Tesseract is not installed or not in PATH.\n"
+                          "- Install: https://github.com/tesseract-ocr/tesseract (Windows: official installer)\n"
+                          "- Or set 'tesseract_image_processing.ocr.tesseract_cmd' in config/image_processing_config.yaml to the full path, e.g.:\n"
+                          "  C:\\\\Program Files\\\\Tesseract-OCR\\\\tesseract.exe")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error checking Tesseract availability: {e}")
+            return False
 
     async def tesseract_ocr_image(self, img_path: Path,
                                   tesseract_config: str) -> Optional[str]:
@@ -123,6 +156,9 @@ class WorkflowManager:
         console_print(f"\n[INFO] Processing PDF: {pdf_path.name}")
         console_print(f"[INFO] Using method: {method}")
 
+        if method == "tesseract" and not self._ensure_tesseract_available():
+            return
+
         # Check if method is valid for this PDF
         if method == "native" and not pdf_processor.is_native_pdf():
             console_print(
@@ -166,16 +202,27 @@ class WorkflowManager:
             return
 
         # Non-native PDF: Extract images
-        preprocessed_folder = parent_folder / "preprocessed_images"
-        preprocessed_folder.mkdir(exist_ok=True)
-
-        target_dpi = self.image_processing_config.get('image_processing',
-                                                      {}).get(
-            'target_dpi', 300)
-        console_print(
-            f"[INFO] Extracting and processing images from PDF with {target_dpi} DPI...")
-        processed_image_files = await pdf_processor.process_images(
-            preprocessed_folder, target_dpi)
+        if method == "tesseract":
+            # Use separate folder and pipeline for Tesseract
+            preprocessed_folder = parent_folder / "preprocessed_images_tesseract"
+            preprocessed_folder.mkdir(exist_ok=True)
+            target_dpi = (self.image_processing_config
+                          .get('tesseract_image_processing', {})
+                          .get('target_dpi', 300))
+            console_print(
+                f"[INFO] Extracting and preprocessing images for Tesseract at {target_dpi} DPI...")
+            processed_image_files = await pdf_processor.process_images_for_tesseract(
+                preprocessed_folder, target_dpi)
+        else:
+            preprocessed_folder = parent_folder / "preprocessed_images"
+            preprocessed_folder.mkdir(exist_ok=True)
+            target_dpi = (self.image_processing_config
+                          .get('api_image_processing', {})
+                          .get('target_dpi', 300))
+            console_print(
+                f"[INFO] Extracting and processing images from PDF with {target_dpi} DPI...")
+            processed_image_files = await pdf_processor.process_images(
+                preprocessed_folder, target_dpi)
 
         # Ensure proper page ordering
         processed_image_files.sort(
@@ -313,9 +360,18 @@ class WorkflowManager:
         console_print(f"\n[INFO] Processing folder: {folder.name}")
         console_print(f"[INFO] Using method: {method}")
 
+        if method == "tesseract" and not self._ensure_tesseract_available():
+            return
+
         # Process images directly from source folder to preprocessed folder
-        console_print(f"[INFO] Processing images from folder...")
-        processed_files = ImageProcessor.process_and_save_images(folder, preprocessed_folder)
+        if method == "tesseract":
+            preprocessed_folder = parent_folder / "preprocessed_images_tesseract"
+            preprocessed_folder.mkdir(exist_ok=True)
+            console_print(f"[INFO] Preprocessing images for Tesseract...")
+            processed_files = ImageProcessor.process_and_save_images_for_tesseract(folder, preprocessed_folder)
+        else:
+            console_print(f"[INFO] Processing images from folder for GPT...")
+            processed_files = ImageProcessor.process_and_save_images(folder, preprocessed_folder)
 
         if not processed_files:
             console_print(f"[WARN] No images found or processed in {folder}.")
@@ -515,7 +571,10 @@ class WorkflowManager:
                     img,
                     transcriber,
                     method,
-                    self.image_processing_config.get('ocr', {}).get('tesseract_config', "--oem 3 --psm 6"),
+                    (self.image_processing_config
+                     .get('tesseract_image_processing', {})
+                     .get('ocr', {})
+                     .get('tesseract_config', "--oem 3 --psm 6")),
                     idx,
                 )
                 for idx, img in enumerate(image_files)
@@ -526,7 +585,10 @@ class WorkflowManager:
                     img,
                     None,
                     method,
-                    self.image_processing_config.get('ocr', {}).get('tesseract_config', "--oem 3 --psm 6"),
+                    (self.image_processing_config
+                     .get('tesseract_image_processing', {})
+                     .get('ocr', {})
+                     .get('tesseract_config', "--oem 3 --psm 6")),
                     idx,
                 )
                 for idx, img in enumerate(image_files)

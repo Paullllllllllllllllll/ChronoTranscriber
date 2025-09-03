@@ -465,10 +465,6 @@ class UserPrompt:
 			console_print(
 				f"  ... and {len(user_config.selected_items) - 5} more")
 
-		confirmation = safe_input(
-			"\nProceed with processing? (y/n): ").strip().lower()
-		return confirmation == "y"
-
 	@staticmethod
 	def display_batch_summary(batches):
 		"""
@@ -476,7 +472,7 @@ class UserPrompt:
 		Only shows details for in-progress batches.
 
 		Parameters:
-			batches: List of batch objects from OpenAI API
+			batches: List of batch items from OpenAI API (SDK objects or dicts)
 		"""
 		if not batches:
 			console_print("No batches found.")
@@ -485,7 +481,11 @@ class UserPrompt:
 		# Group batches by status
 		status_groups = {}
 		for batch in batches:
-			status = batch.status.lower()
+			# Support both object-style and dict-style batches
+			status_val = getattr(batch, "status", None)
+			if status_val is None and isinstance(batch, dict):
+				status_val = batch.get("status")
+			status = (status_val or "").lower()
 			if status not in status_groups:
 				status_groups[status] = []
 			status_groups[status].append(batch)
@@ -502,8 +502,12 @@ class UserPrompt:
 			if status in status_groups and status_groups[status]:
 				console_print(f"\n----- {status.capitalize()} Batches -----")
 				for batch in status_groups[status]:
-					console_print(
-						f"  Batch ID: {batch.id} | Status: {batch.status}")
+					batch_id = getattr(batch, "id", None)
+					batch_status = getattr(batch, "status", None)
+					if isinstance(batch, dict):
+						batch_id = batch.get("id", batch_id)
+						batch_status = batch.get("status", batch_status)
+					console_print(f"  Batch ID: {batch_id} | Status: {batch_status}")
 
 	@staticmethod
 	def display_batch_processing_progress(temp_file, batch_ids, completed_count,

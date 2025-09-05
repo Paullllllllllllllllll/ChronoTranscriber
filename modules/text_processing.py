@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any, Dict, List, Optional
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,28 @@ def _try_parse_json(text: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _salvage_last_json_object(text: str) -> Optional[Dict[str, Any]]:
+    """
+    When the model returns concatenated JSON objects or mixed prose+JSON,
+    try to salvage the last valid JSON object near the end of the string.
+    """
+    if not text:
+        return None
+    last_close = text.rfind("}")
+    if last_close == -1:
+        return None
+    # Walk backwards to find a starting '{' that yields a valid JSON object
+    i = last_close
+    while i >= 0:
+        if text[i] == "{":
+            candidate = text[i:last_close + 1]
+            obj = _try_parse_json(candidate)
+            if obj is not None:
+                return obj
+        i -= 1
+    return None
+
+
 def extract_transcribed_text(result: Dict[str, Any], image_name: str = "") -> str:
     """
     Extract a transcription string from either:
@@ -61,8 +84,12 @@ def extract_transcribed_text(result: Dict[str, Any], image_name: str = "") -> st
     if isinstance(result, dict) and ("output_text" in result or "output" in result):
         text = _extract_from_responses_object(result)
         if text:
-            if text.startswith("{"):
-                parsed = _try_parse_json(text)
+            stripped = text.lstrip()
+            if stripped.startswith("{"):
+                parsed = _try_parse_json(stripped)
+                if parsed is None:
+                    # Improved salvage: locate the last valid JSON object
+                    parsed = _salvage_last_json_object(stripped)
                 if parsed is not None:
                     if parsed.get("no_transcribable_text", False):
                         return "[No transcribable text]"
@@ -112,11 +139,13 @@ def extract_transcribed_text(result: Dict[str, Any], image_name: str = "") -> st
                         return str(parsed["transcription"]).strip()
             return content
         logger.error("Empty content field in response for %s: %s", image_name, json.dumps(result))
-        return json.dumps(result)
+        img = image_name or "[unknown image]"
+        return f"[transcription error: {img}]"
 
     # Last resort: log and return raw JSON
     logger.error("Unrecognized response shape for image %s: %s", image_name, json.dumps(result))
-    return json.dumps(result)
+    img = image_name or "[unknown image]"
+    return f"[transcription error: {img}]"
 
 
 def process_batch_output(file_content: bytes) -> List[str]:

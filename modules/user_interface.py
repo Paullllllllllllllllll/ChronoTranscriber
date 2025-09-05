@@ -466,6 +466,16 @@ class UserPrompt:
 			console_print(
 				f"  ... and {len(user_config.selected_items) - 5} more")
 
+		# Ask for confirmation
+		while True:
+			choice = safe_input("\nProceed with processing? (Y/n): ").strip().lower()
+			check_exit(choice)
+			if choice in ("", "y", "yes"):
+				return True
+			if choice in ("n", "no"):
+				return False
+			console_print("[ERROR] Please enter 'y' to proceed, 'n' to cancel, or 'q' to quit.")
+
 	@staticmethod
 	def display_batch_summary(batches):
 		"""

@@ -1,6 +1,7 @@
 # modules/pdf_utils.py
 
 import logging
+import hashlib
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 import fitz
@@ -282,7 +283,45 @@ class PDFProcessor:
               - output_txt_path: File path for the final transcription text.
               - temp_jsonl_path: File path for temporary JSONL records.
         """
-        safe_stem = self.pdf_path.stem.strip()
+        def _sanitize(name: str) -> str:
+            # Remove/replace characters not allowed on Windows filenames
+            invalid = '<>:"/\\|?*'
+            cleaned = ''.join('_' if ch in invalid or ord(ch) < 32 else ch for ch in name)
+            # Collapse excessive whitespace
+            cleaned = cleaned.strip()
+            return cleaned
+
+        original_stem = self.pdf_path.stem
+        cleaned_stem = _sanitize(original_stem)
+
+        # Compute a conservative max total path length (Windows MAX_PATH ~260)
+        # Path shape: base / stem / stem + suffix
+        base_len = len(str(pdf_output_dir))
+        suffix = "_transcription.jsonl"
+        # Reserve a safety margin (20 chars)
+        MAX_TOTAL = 240
+
+        def _truncate_with_hash(name: str, target_len: int) -> str:
+            if target_len <= 0:
+                # Fallback to a short hash if the base path is extremely long
+                return hashlib.sha1(name.encode('utf-8')).hexdigest()[:12]
+            if len(name) <= target_len:
+                return name
+            h = hashlib.sha1(name.encode('utf-8')).hexdigest()[:8]
+            # Leave room for '-' + hash
+            core_len = max(8, target_len - 9)
+            return name[:core_len] + '-' + h
+
+        # Estimate total and truncate if necessary
+        total_estimate = base_len + 1 + len(cleaned_stem) + 1 + len(cleaned_stem) + len(suffix)
+        if total_estimate > MAX_TOTAL:
+            # Allowed per occurrence of stem (appears twice):
+            allowed_for_stems = MAX_TOTAL - base_len - len(suffix) - 2  # two separators
+            per_stem = max(16, allowed_for_stems // 2)
+            safe_stem = _truncate_with_hash(cleaned_stem, per_stem)
+        else:
+            safe_stem = cleaned_stem
+
         parent_folder = pdf_output_dir / safe_stem
         parent_folder.mkdir(parents=True, exist_ok=True)
         output_txt_path = parent_folder / f"{safe_stem}_transcription.txt"

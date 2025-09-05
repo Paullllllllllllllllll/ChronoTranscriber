@@ -16,7 +16,7 @@ from modules.config_loader import ConfigLoader
 from modules.logger import setup_logger
 from modules.text_processing import process_batch_output, extract_transcribed_text
 from modules.path_utils import validate_paths
-from modules.utils import extract_page_number_from_filename, console_print
+from modules.utils import console_print
 from modules.user_interface import UserPrompt
 
 logger = setup_logger(__name__)
@@ -247,7 +247,8 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any],
                     continue
 
         # Determine if this JSONL file truly belongs to a batch run
-        is_batched_file = has_batch_metadata or has_batch_request
+        # Accept files that at least contain batch_tracking entries (older runs may lack metadata lines)
+        is_batched_file = has_batch_metadata or has_batch_request or bool(batch_ids)
 
         # If there are no real batch markers, ignore any orphan batch_tracking lines and skip
         if not is_batched_file:
@@ -336,8 +337,60 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any],
 
         for batch_id in batch_ids:
             batch = batch_dict[batch_id]
+
+            # Resolve the output file id robustly
+            output_file_id = batch.get("output_file_id")
+
+            if not output_file_id:
+                # Refresh batch details (list endpoint may omit some fields)
+                try:
+                    refreshed = client.retrieve_batch(batch_id)
+                    if isinstance(refreshed, dict) and refreshed.get("id"):
+                        batch = refreshed
+                        batch_dict[batch_id] = refreshed
+                        output_file_id = batch.get("output_file_id")
+                except Exception as e:
+                    logger.warning("Could not refresh batch %s: %s", batch_id, e)
+
+            if not output_file_id:
+                # Try alternate field shapes just in case
+                def _coerce_file_id(candidate: Any) -> Optional[str]:
+                    if isinstance(candidate, str) and candidate:
+                        return candidate
+                    if isinstance(candidate, dict):
+                        cid = candidate.get("id") or candidate.get("file_id")
+                        return cid if isinstance(cid, str) and cid else None
+                    if isinstance(candidate, list) and candidate:
+                        first = candidate[0]
+                        if isinstance(first, str) and first:
+                            return first
+                        if isinstance(first, dict):
+                            cid = first.get("id") or first.get("file_id")
+                            return cid if isinstance(cid, str) and cid else None
+                    return None
+
+                for key in (
+                    "output_file_id",
+                    "output_file",
+                    "output_file_ids",
+                    "response_file_id",
+                    "result_file_id",
+                    "results_file_id",
+                    "result_file_ids",
+                ):
+                    output_file_id = _coerce_file_id(batch.get(key))
+                    if output_file_id:
+                        break
+
+            if not output_file_id:
+                console_print(
+                    f"[ERROR] Batch {batch_id} is marked completed but no output_file_id was found. Skipping this batch.")
+                logger.warning("Batch %s completed without output_file_id.", batch_id)
+                all_completed = False
+                continue
+
             try:
-                file_content = client.get_file_content(batch.get("output_file_id"))
+                file_content = client.get_file_content(output_file_id)
             except Exception as e:
                 logger.exception(
                     f"Error downloading batch {batch_id}: {e}")
@@ -533,35 +586,30 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any],
         console_print(
             f"[INFO] Using multi-level sorting to ensure correct page order.")
 
-        # Define a sorting key function that tries multiple sorting methods
+        # Define a sorting key function that uses order indices; fallback to custom_id numeric, then fallback_index
         def get_sorting_key(transcription_entry):
-            """Returns a sorting key tuple based on available ordering information"""
-            # 1. Try order_info from batch processing
+            """Returns a sorting key tuple for stable page ordering"""
+            # 1) order_info attached during parsing (authoritative)
             order_info = transcription_entry.get("order_info")
             if order_info is not None:
-                return (0, order_info, 0, 0)
+                return (0, order_info)
 
-            # 2. Try order_index from image_info in custom_id_map
+            # 2) order_index from batch_order mapping derived from JSONL metadata
             custom_id = transcription_entry.get("custom_id")
             if custom_id in batch_order:
-                return (1, batch_order[custom_id], 0, 0)
+                return (1, batch_order[custom_id])
 
-            # 3. Try page_number from image_info
-            image_info = transcription_entry.get("image_info", {})
-            page_number = image_info.get("page_number")
-            if page_number is not None:
-                return (2, page_number, 0, 0)
+            # 3) Derive index from a custom_id pattern like 'req-<n>'
+            if isinstance(custom_id, str) and custom_id.startswith("req-"):
+                try:
+                    req_idx = int(custom_id.split("-", 1)[1]) - 1
+                    if req_idx >= 0:
+                        return (2, req_idx)
+                except Exception:
+                    pass
 
-            # 4. Try to extract page number from image name
-            image_name = image_info.get("image_name", "")
-            if image_name:
-                page_num = extract_page_number_from_filename(image_name)
-                if page_num is not None:
-                    return (3, page_num, 0, 0)
-
-            # 5. Fallback to fallback_index
-            fallback_index = transcription_entry.get("fallback_index", 999999)
-            return (4, fallback_index, 0, 0)
+            # 4) Fallback to the enumeration index used when we had to degrade
+            return (3, transcription_entry.get("fallback_index", 999999))
 
         # Sort the transcriptions using the multi-level key
         all_transcriptions.sort(key=get_sorting_key)

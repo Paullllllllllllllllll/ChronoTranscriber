@@ -8,10 +8,9 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from openai import OpenAI
 
 from modules.model_capabilities import detect_capabilities
-from modules.utils import console_print, extract_page_number_from_filename
+from modules.utils import console_print
 from modules.config_loader import ConfigLoader
 
 logger = logging.getLogger(__name__)
@@ -304,6 +303,8 @@ def submit_batch(batch_file_path: Path) -> Dict[str, Any]:
     """
     Submit a prepared JSONL batch to the OpenAI Batch API targeting **/v1/responses**.
     """
+    # Lazy import to avoid import-time dependency issues when this module is imported for config/telemetry only
+    from openai import OpenAI  # type: ignore
     client = OpenAI()
     try:
         console_print(f"[INFO] Uploading batch file {batch_file_path.name} to OpenAI...")
@@ -353,6 +354,9 @@ def process_batch_transcription(
     # Note: Previously captured submitted_batch_data for a local debug snapshot; removed.
     console_print(f"[INFO] Processing {total_images} images in chunks of {chunk_size}...")
 
+    submitted_parts = 0
+    attempted_parts = 0
+
     for chunk_start in range(0, total_images, chunk_size):
         chunk_end = min(chunk_start + chunk_size, total_images)
         chunk_images = image_files[chunk_start:chunk_end]
@@ -378,7 +382,6 @@ def process_batch_transcription(
                 image_info = {
                     "image_name": image_file.name,
                     "order_index": global_idx,
-                    "page_number": extract_page_number_from_filename(image_file.name),
                 }
                 request_line, metadata_record = create_batch_request_line(
                     custom_id=custom_id,
@@ -405,11 +408,13 @@ def process_batch_transcription(
             if current_size + line_bytes > max_batch_size and current_lines:
                 batch_file = Path(f"batch_requests_part_{batch_index}.jsonl")
                 write_batch_file(current_lines, batch_file)
+                attempted_parts += 1
                 try:
                     response = submit_batch(batch_file)
                     batch_id = response.id
                     console_print(f"[SUCCESS] Successfully submitted batch {batch_index} with ID: {batch_id}")
                     batch_responses.append(response)
+                    submitted_parts += 1
                 except Exception as exc:
                     logger.error("Error submitting batch file %s: %s", batch_file, exc)
                     console_print(f"[ERROR] Failed to submit batch file {batch_file}: {exc}")
@@ -431,11 +436,13 @@ def process_batch_transcription(
         if current_lines:
             batch_file = Path(f"batch_requests_part_{batch_index}.jsonl")
             write_batch_file(current_lines, batch_file)
+            attempted_parts += 1
             try:
                 response = submit_batch(batch_file)
                 batch_id = response.id
                 console_print(f"[SUCCESS] Successfully submitted batch {batch_index} with ID: {batch_id}")
                 batch_responses.append(response)
+                submitted_parts += 1
             except Exception as exc:
                 logger.error("Error submitting batch file %s: %s", batch_file, exc)
                 console_print(f"[ERROR] Failed to submit batch file {batch_file}: {exc}")
@@ -444,5 +451,12 @@ def process_batch_transcription(
             except Exception:
                 logger.warning("Could not delete temporary batch file: %s", batch_file)
             batch_index += 1
-    console_print(f"[INFO] All {total_images} images processed and submitted in {batch_index - 1} batch files")
+    total_parts = attempted_parts
+    if submitted_parts == total_parts and total_parts > 0:
+        console_print(f"[INFO] All {total_images} images processed and submitted in {total_parts} batch file(s)")
+    else:
+        console_print(f"[INFO] Submitted {submitted_parts}/{total_parts} batch file(s) for {total_images} images")
+        if submitted_parts == 0:
+            # Propagate failure to caller so workflow can decide on fallback
+            raise RuntimeError("No batch submissions succeeded; see logs for details.")
     return batch_responses, all_metadata_records

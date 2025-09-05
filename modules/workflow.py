@@ -18,7 +18,7 @@ from modules.batching import get_batch_chunk_size
 from modules.openai_utils import transcribe_image_with_openai
 from modules.concurrency import run_concurrent_transcription_tasks
 from modules.text_processing import extract_transcribed_text
-from modules.utils import console_print, extract_page_number_from_filename
+from modules.utils import console_print
 
 logger = setup_logger(__name__)
 
@@ -226,9 +226,7 @@ class WorkflowManager:
             processed_image_files = await pdf_processor.process_images(
                 preprocessed_folder, target_dpi)
 
-        # Ensure proper page ordering
-        processed_image_files.sort(
-            key=lambda p: extract_page_number_from_filename(p.name))
+        # Rely on extraction order; order_index will follow the list order
         console_print(
             f"[INFO] Extracted {len(processed_image_files)} page images from PDF.")
 
@@ -262,12 +260,10 @@ class WorkflowManager:
             try:
                 async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as f:
                     for idx, img_path in enumerate(processed_image_files):
-                        page_num = extract_page_number_from_filename(img_path.name)
                         image_record = {
                             "image_metadata": {
                                 "pre_processed_image": str(img_path),
                                 "image_name": img_path.name,
-                                "page_number": page_num,
                                 "order_index": idx,
                                 "custom_id": f"req-{idx + 1}"
                             }
@@ -406,12 +402,8 @@ class WorkflowManager:
             console_print(f"[WARN] No images found or processed in {folder}.")
             return
 
-        try:
-            processed_files.sort(
-                key=lambda x: extract_page_number_from_filename(x.name))
-        except Exception:
-            # If page number extraction fails, sort by filename
-            processed_files.sort(key=lambda x: x.name)
+        # Deterministic ordering for folders: sort by filename
+        processed_files.sort(key=lambda x: x.name.lower())
 
         # Handle batch mode for GPT
         if method == "gpt" and self.user_config.use_batch_processing:
@@ -435,13 +427,11 @@ class WorkflowManager:
             try:
                 async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as f:
                     for idx, img_path in enumerate(processed_files):
-                        page_num = extract_page_number_from_filename(img_path.name)
                         image_record = {
                             "image_metadata": {
                                 "pre_processed_image": str(img_path),
                                 "image_name": img_path.name,
                                 "folder_name": folder.name,
-                                "page_number": page_num,
                                 "order_index": idx,
                                 "custom_id": f"req-{idx + 1}"
                             }

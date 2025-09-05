@@ -14,7 +14,7 @@ from typing import Tuple, Dict, Any, List, Set, Optional
 import requests
 from modules.config_loader import ConfigLoader
 from modules.logger import setup_logger
-from modules.text_processing import process_batch_output
+from modules.text_processing import process_batch_output, extract_transcribed_text
 from modules.path_utils import validate_paths
 from modules.utils import extract_page_number_from_filename, console_print
 from modules.user_interface import UserPrompt
@@ -123,7 +123,7 @@ def diagnose_batch_failure(batch_id: str, client: OpenAIHttpClient) -> str:
 
 
 def extract_custom_id_mapping(temp_file: Path) -> Tuple[
-    Dict[str, Dict[str, Any]], Dict[str, int], Dict[int, Dict[str, Any]]]:
+    Dict[str, Dict[str, Any]], Dict[str, int]]:
     """
     Extract mapping between custom_ids and image information from the JSONL file.
     Collects metadata from both batch_request entries and image_metadata entries.
@@ -132,11 +132,9 @@ def extract_custom_id_mapping(temp_file: Path) -> Tuple[
         Tuple containing:
         - Dict[str, Dict[str, Any]]: Mapping of custom_id to image information
         - Dict[str, int]: Mapping of custom_id to order index
-        - Dict[int, Dict[str, Any]]: Mapping of order index to image metadata
     """
     custom_id_map = {}
     batch_order = {}
-    order_index_map = {}  # Maps order_index -> image metadata
 
     try:
         with temp_file.open("r", encoding="utf-8") as f:
@@ -155,8 +153,6 @@ def extract_custom_id_mapping(temp_file: Path) -> Tuple[
                             if "order_index" in image_info:
                                 batch_order[custom_id] = image_info[
                                     "order_index"]
-                                order_index_map[
-                                    image_info["order_index"]] = image_info
 
                     # Process image_metadata records from workflow.py
                     elif "image_metadata" in record:
@@ -166,8 +162,6 @@ def extract_custom_id_mapping(temp_file: Path) -> Tuple[
                             custom_id_map[custom_id] = metadata
                             if "order_index" in metadata:
                                 batch_order[custom_id] = metadata["order_index"]
-                                order_index_map[
-                                    metadata["order_index"]] = metadata
 
                 except json.JSONDecodeError:
                     continue
@@ -175,7 +169,7 @@ def extract_custom_id_mapping(temp_file: Path) -> Tuple[
         logger.error(
             f"Error extracting custom_id mapping from {temp_file}: {e}")
 
-    return custom_id_map, batch_order, order_index_map
+    return custom_id_map, batch_order
 
 
 def check_batch_debug_file() -> Optional[Dict[str, Any]]:
@@ -234,8 +228,12 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any],
     for temp_file in temp_files:
         # Extract all batch IDs from this temporary file
         batch_ids: Set[str] = set()
-        original_image_order: List[Dict[str, Any]] = []
-        images_by_page: Dict[int, Dict[str, Any]] = {}
+
+        # Track markers to distinguish batch vs non-batch JSONL
+        has_batch_metadata = False  # presence of image_metadata with custom_id
+        has_batch_request = False   # presence of batch_request lines from batching.py
+        image_metadata_count = 0
+        batch_request_count = 0
 
         # Ensure this is always defined even if we skip processing later
         all_transcriptions: List[Dict[str, Any]] = []
@@ -244,53 +242,91 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any],
             for line in f:
                 try:
                     record = json.loads(line)
+
+                    # Batch tracking records explicitly store batch IDs
                     if "batch_tracking" in record:
                         batch_id = record["batch_tracking"].get("batch_id")
                         if batch_id:
                             batch_ids.add(batch_id)
-                    elif "image_name" in record or "pre_processed_image" in record:
-                        # Store original image record to track order
-                        image_name = record.get("image_name", "")
-                        page_num = extract_page_number_from_filename(image_name)
-                        images_by_page[page_num] = record
+
+                    # Batch metadata written by the batch workflow
+                    elif "image_metadata" in record and isinstance(record["image_metadata"], dict):
+                        meta = record["image_metadata"]
+                        if meta.get("custom_id"):
+                            has_batch_metadata = True
+                            image_metadata_count += 1
+
+                    # Batch request records written by batching.process_batch_transcription
+                    elif "batch_request" in record and isinstance(record["batch_request"], dict):
+                        has_batch_request = True
+                        batch_request_count += 1
+
+                    # Ignore non-batch single-call workflow markers
+                    else:
+                        pass
 
                 except json.JSONDecodeError:
                     continue
 
-        # Sort images by page number
-        for page_num in sorted(images_by_page.keys()):
-            original_image_order.append(images_by_page[page_num])
+        # Determine if this JSONL file truly belongs to a batch run
+        is_batched_file = has_batch_metadata or has_batch_request
 
-        if not batch_ids:
-            console_print(
-                f"[WARN] No batch IDs found in {temp_file.name}. Checking if this file needs repair...")
-
-            # Check if the debug data can help us repair this file
-            if debug_data and debug_data.get("batch_data"):
+        # If there are no real batch markers, ignore any orphan batch_tracking lines and skip
+        if not is_batched_file:
+            if batch_ids:
                 console_print(
-                    f"[INFO] Attempting to repair {temp_file.name} using debug data")
-                try:
-                    # Write batch tracking records from debug data
-                    with temp_file.open("a", encoding="utf-8") as f:
-                        for batch_data in debug_data.get("batch_data", []):
-                            tracking_record = {
-                                "batch_tracking": {
-                                    "batch_id": batch_data["batch_id"],
-                                    "timestamp": batch_data["timestamp"],
-                                    "batch_file": str(batch_data["batch_id"])
-                                }
-                            }
-                            f.write(json.dumps(tracking_record) + "\n")
-                            batch_ids.add(batch_data["batch_id"])
-
-                    console_print(
-                        f"[SUCCESS] Added {len(debug_data.get('batch_data', []))} missing batch IDs to {temp_file.name}")
-                except Exception as e:
-                    console_print(f"[ERROR] Failed to repair file: {e}")
-                    continue
+                    f"[WARN] {temp_file.name} contains {len(batch_ids)} batch_tracking entries but no batch metadata; ignoring and skipping.")
             else:
                 console_print(
-                    f"[WARN] No debug data available to repair {temp_file.name}. Skipping this file.")
+                    f"[INFO] {temp_file.name} has no batch markers; treating as non-batched and skipping.")
+            continue
+
+        if not batch_ids:
+            # Decide whether this file is a batch-run candidate for repair
+            # Only files with batch metadata (image_metadata or batch_request) are eligible
+            
+            console_print(
+                f"[WARN] No batch IDs found in {temp_file.name}. Checking if this file can be repaired...")
+
+            # Only repair when debug data is present AND this file looks like the batch that generated the debug
+            if debug_data and debug_data.get("batch_data") and (has_batch_metadata or has_batch_request):
+                expected_total = debug_data.get("total_images")
+                meta_count = image_metadata_count if image_metadata_count > 0 else batch_request_count
+                if isinstance(expected_total, int) and expected_total > 0:
+                    if meta_count == expected_total:
+                        console_print(
+                            f"[INFO] Repair conditions satisfied (metadata entries={meta_count}, debug total_images={expected_total}). Adding batch IDs from debug data.")
+                        try:
+                            # Write batch tracking records from debug data
+                            with temp_file.open("a", encoding="utf-8") as f:
+                                for batch_data in debug_data.get("batch_data", []):
+                                    tracking_record = {
+                                        "batch_tracking": {
+                                            "batch_id": batch_data["batch_id"],
+                                            "timestamp": batch_data.get("timestamp"),
+                                            "batch_file": str(batch_data["batch_id"])
+                                        }
+                                    }
+                                    f.write(json.dumps(tracking_record) + "\n")
+                                    batch_ids.add(batch_data["batch_id"])
+
+                            console_print(
+                                f"[SUCCESS] Added {len(debug_data.get('batch_data', []))} missing batch IDs to {temp_file.name}")
+                        except Exception as e:
+                            console_print(f"[ERROR] Failed to repair file: {e}")
+                            continue
+                    else:
+                        console_print(
+                            f"[WARN] Debug data total_images ({expected_total}) does not match this file's metadata entries ({meta_count}). Skipping repair for {temp_file.name}.")
+                        continue
+                else:
+                    console_print(
+                        f"[WARN] Debug data missing or invalid total_images; cannot safely repair {temp_file.name}. Skipping.")
+                    continue
+                
+            else:
+                console_print(
+                    f"[WARN] No suitable debug data to repair {temp_file.name}. Skipping this file.")
                 continue
 
         # Check if all batches are completed
@@ -298,7 +334,6 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any],
         missing_batches = []
         completed_count = 0
         failed_count = 0
-        failed_details = []
 
         for batch_id in batch_ids:
             if batch_id not in batch_dict:
@@ -316,7 +351,6 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any],
                 completed_count += 1
             elif status == "failed":
                 failed_count += 1
-                failed_details.append(f"Batch {batch_id}: status={status}")
                 all_completed = False
             else:
                 all_completed = False
@@ -348,7 +382,7 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any],
             f"[SUCCESS] All batches for {temp_file.name} are completed. Processing results...")
 
         # Extract custom_id mapping if available
-        custom_id_map, batch_order, order_index_map = extract_custom_id_mapping(
+        custom_id_map, batch_order = extract_custom_id_mapping(
             temp_file)
 
         # Collect all transcriptions from all batches
@@ -367,46 +401,149 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any],
                 all_completed = False
                 break
 
-            # Try to parse the file content directly to get custom_id mapping
+            # Parse the batch output file content (Responses API aware)
             try:
-                batch_response_text = file_content.decode(
-                    'utf-8') if isinstance(file_content,
-                                           bytes) else file_content
+                batch_response_text = file_content.decode('utf-8') if isinstance(file_content, bytes) else file_content
                 batch_response_lines = batch_response_text.strip().split('\n')
                 for line in batch_response_lines:
                     if not line.strip():
                         continue
-                    response_obj = json.loads(line)
+                    try:
+                        response_obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
                     custom_id = response_obj.get("custom_id")
+                    image_info = custom_id_map.get(custom_id, {}) if custom_id else {}
+                    image_name = image_info.get("image_name") or (custom_id or "[unknown image]")
+                    page_number = image_info.get("page_number")
+                    transcription_text = None
 
-                    if "response" in response_obj and "body" in response_obj["response"]:
-                        response_body = response_obj["response"]["body"]
-                        choices = response_body.get("choices", [])
-                        if choices:
-                            message_content = choices[0].get("message", {}).get("content", "")
-
-                            try:
-                                # Try to parse JSON content if present
-                                transcription_data = json.loads(message_content)
-
-                                # Store the transcription along with custom_id and any order info
-                                transcription_entry = {
-                                    "custom_id": custom_id,
-                                    "transcription": transcription_data.get("transcription", ""),
-                                    "order_info": batch_order.get(custom_id, None),
-                                    "image_info": custom_id_map.get(custom_id, {})
-                                }
-
-                                all_transcriptions.append(transcription_entry)
-
-                            except json.JSONDecodeError:
-                                # If not JSON, just use the raw content
+                    # Primary: Responses API body with status/diagnostics
+                    resp = response_obj.get("response")
+                    if isinstance(resp, dict):
+                        status_code = resp.get("status_code")
+                        body = resp.get("body")
+                        if isinstance(body, dict):
+                            # Detect explicit API errors per item
+                            error_obj = body.get("error")
+                            if isinstance(status_code, int) and status_code != 200:
+                                err_code = (error_obj or {}).get("code") or (error_obj or {}).get("type")
+                                err_message = (error_obj or {}).get("message") or (error_obj or {}).get("error")
+                                diag_text = f"[transcription error: {image_name}; status {status_code}"
+                                if err_code:
+                                    diag_text += f"; code {err_code}"
+                                if err_message:
+                                    diag_text += f"; {err_message}"
+                                diag_text += "]"
+                                UserPrompt.print_transcription_item_error(
+                                    image_name=image_name,
+                                    page_number=page_number,
+                                    status_code=status_code,
+                                    err_code=err_code,
+                                    err_message=err_message,
+                                )
                                 all_transcriptions.append({
                                     "custom_id": custom_id,
-                                    "transcription": message_content,
+                                    "transcription": diag_text,
                                     "order_info": batch_order.get(custom_id, None),
-                                    "image_info": custom_id_map.get(custom_id, {})
+                                    "image_info": image_info,
+                                    "error": True,
+                                    "error_details": {
+                                        "status_code": status_code,
+                                        "code": err_code,
+                                        "message": err_message,
+                                    },
                                 })
+                                continue
+                            if isinstance(error_obj, dict):
+                                err_code = error_obj.get("code") or error_obj.get("type")
+                                err_message = error_obj.get("message") or error_obj.get("error")
+                                diag_text = f"[transcription error: {image_name}"
+                                if err_code:
+                                    diag_text += f"; code {err_code}"
+                                if err_message:
+                                    diag_text += f"; {err_message}"
+                                diag_text += "]"
+                                UserPrompt.print_transcription_item_error(
+                                    image_name=image_name,
+                                    page_number=page_number,
+                                    err_code=err_code,
+                                    err_message=err_message,
+                                )
+                                all_transcriptions.append({
+                                    "custom_id": custom_id,
+                                    "transcription": diag_text,
+                                    "order_info": batch_order.get(custom_id, None),
+                                    "image_info": image_info,
+                                    "error": True,
+                                    "error_details": {
+                                        "status_code": status_code,
+                                        "code": err_code,
+                                        "message": err_message,
+                                    },
+                                })
+                                continue
+                            # Success path: extract transcription text
+                            transcription_text = extract_transcribed_text(body, "")
+
+                    # Secondary: legacy Chat Completions style at body level
+                    if not transcription_text and isinstance(resp, dict):
+                        body = resp.get("body")
+                        if isinstance(body, dict) and "choices" in body:
+                            transcription_text = extract_transcribed_text(body, "")
+
+                    if transcription_text:
+                        # Provide page-aware placeholders for special cases
+                        if transcription_text == "[Transcription not possible]":
+                            UserPrompt.print_transcription_not_possible(
+                                image_name=image_name,
+                                page_number=page_number,
+                            )
+                            transcription_text = (
+                                f"[Transcription not possible: {image_name}]"
+                            )
+                            entry = {
+                                "custom_id": custom_id,
+                                "transcription": transcription_text,
+                                "order_info": batch_order.get(custom_id, None),
+                                "image_info": image_info,
+                                "warning": True,
+                                "warning_type": "transcription_not_possible",
+                            }
+                        elif transcription_text == "[No transcribable text]":
+                            UserPrompt.print_no_transcribable_text(
+                                image_name=image_name,
+                                page_number=page_number,
+                            )
+                            transcription_text = (
+                                f"[No transcribable text: {image_name}]"
+                            )
+                            entry = {
+                                "custom_id": custom_id,
+                                "transcription": transcription_text,
+                                "order_info": batch_order.get(custom_id, None),
+                                "image_info": image_info,
+                                "warning": True,
+                                "warning_type": "no_transcribable_text",
+                            }
+                        else:
+                            entry = {
+                                "custom_id": custom_id,
+                                "transcription": transcription_text,
+                                "order_info": batch_order.get(custom_id, None),
+                                "image_info": image_info,
+                            }
+                        all_transcriptions.append(entry)
+                
+                # If nothing parsed, fall back to generic processor
+                if not all_transcriptions:
+                    transcriptions = process_batch_output(file_content)
+                    for idx, transcription in enumerate(transcriptions):
+                        all_transcriptions.append({
+                            "transcription": transcription,
+                            "fallback_index": idx
+                        })
             except Exception as json_parse_error:
                 # Fall back to the process_batch_output function if direct parsing fails
                 logger.warning(
@@ -473,7 +610,8 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any],
             image_name = image_info.get("image_name", "")
             if image_name:
                 page_num = extract_page_number_from_filename(image_name)
-                return (3, page_num, 0, 0)
+                if page_num is not None:
+                    return (3, page_num, 0, 0)
 
             # 5. Fallback to fallback_index
             fallback_index = transcription_entry.get("fallback_index", 999999)
@@ -492,6 +630,15 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any],
                                                          "unknown")
             logger.info(
                 f"Position {idx}: custom_id={custom_id}, order_info={order_info}, image={image_name}")
+
+        # Summarize per-page diagnostics to console
+        error_entries = [e for e in all_transcriptions if e.get("error")]
+        if error_entries:
+            UserPrompt.display_page_error_summary(error_entries)
+
+        np_entries = [e for e in all_transcriptions if e.get("warning_type") == "transcription_not_possible"]
+        if np_entries:
+            UserPrompt.display_transcription_not_possible_summary(len(np_entries))
 
         # Extract just the transcription text in sorted order
         ordered_transcriptions = [t.get("transcription", "") for t in

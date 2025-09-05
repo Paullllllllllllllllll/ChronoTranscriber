@@ -1,6 +1,7 @@
 # modules/user_interface.py
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Dict, Any
+
 import sys
 import os
 
@@ -508,6 +509,88 @@ class UserPrompt:
 						batch_id = batch.get("id", batch_id)
 						batch_status = batch.get("status", batch_status)
 					console_print(f"  Batch ID: {batch_id} | Status: {batch_status}")
+
+	@staticmethod
+	def _format_page_image(page_number: Optional[int], image_name: str) -> str:
+		"""
+		Format a concise page/image label. If page_number is None, omit the page label to avoid bogus values.
+		"""
+		if page_number is None:
+			return f"({image_name})"
+		return f"page {page_number} ({image_name})"
+
+	@staticmethod
+	def print_transcription_item_error(
+			image_name: str,
+			page_number: Optional[int] = None,
+			status_code: Optional[int] = None,
+			err_code: Optional[str] = None,
+			err_message: Optional[str] = None,
+	) -> None:
+		"""
+		Standardized print for a single per-page transcription error.
+		Avoids printing unknown page numbers and prettifies the message.
+		"""
+		label = UserPrompt._format_page_image(page_number, image_name)
+		parts = []
+		if status_code is not None:
+			parts.append(f"status={status_code}")
+		if err_code:
+			parts.append(f"code={err_code}")
+		if err_message:
+			parts.append(f"message={err_message}")
+		detail = " ".join(parts)
+		console_print(f"[ERROR] {label} failed in batch" + (f": {detail}" if detail else ""))
+
+	@staticmethod
+	def print_transcription_not_possible(image_name: str, page_number: Optional[int] = None) -> None:
+		"""
+		Standardized print for a 'transcription not possible' warning.
+		"""
+		label = UserPrompt._format_page_image(page_number, image_name)
+		console_print(f"[WARN] Model reported transcription not possible for {label}.")
+
+	@staticmethod
+	def print_no_transcribable_text(image_name: str, page_number: Optional[int] = None) -> None:
+		"""
+		Standardized print for a 'no transcribable text' informational message.
+		"""
+		label = UserPrompt._format_page_image(page_number, image_name)
+		console_print(f"[INFO] No transcribable text detected for {label}.")
+
+	@staticmethod
+	def display_page_error_summary(error_entries: List[Dict[str, Any]]) -> None:
+		"""
+		Display a summary list of per-page errors captured during batch processing.
+		Each entry is expected to include 'image_info' and 'error_details'.
+		"""
+		if not error_entries:
+			return
+		console_print(f"[WARN] {len(error_entries)} page(s) failed during batch processing:")
+		for e in error_entries:
+			img = (e.get("image_info", {}) or {}).get("image_name") or e.get("custom_id", "[unknown image]")
+			page = (e.get("image_info", {}) or {}).get("page_number")
+			det = (e.get("error_details", {}) or {})
+			status = det.get("status_code")
+			code = det.get("code")
+			msg = det.get("message")
+			label = UserPrompt._format_page_image(page, img)
+			parts = []
+			if status is not None:
+				parts.append(f"status={status}")
+			if code:
+				parts.append(f"code={code}")
+			if msg:
+				parts.append(f"message={msg}")
+			console_print("  - " + label + (": " + " ".join(parts) if parts else ""))
+
+	@staticmethod
+	def display_transcription_not_possible_summary(count: int) -> None:
+		"""
+		Display a short summary for pages where the model reported 'transcription not possible'.
+		"""
+		if count > 0:
+			console_print(f"[INFO] {count} page(s) reported 'transcription not possible' by the model.")
 
 	@staticmethod
 	def display_batch_processing_progress(temp_file, batch_ids, completed_count,

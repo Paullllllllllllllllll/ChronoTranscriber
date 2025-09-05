@@ -5,6 +5,7 @@ concurrency:
     delay_between_tasks: 0.01  # Delay (in seconds) between starting transcription tasks
     service_tier: default        # Controls OpenAI Responses service tier, allowed
     # tiers: 'auto', 'default', 'flex', and 'priority'
+    batch_chunk_size: 50         # Number of requests per batch part file (used by Batch API)
   image_processing:
     concurrency_limit: 24  # Maximum number of concurrent image processing tasks
     delay_between_tasks: 0  # No delay for image processing tasks

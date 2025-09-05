@@ -14,6 +14,7 @@ from modules.logger import setup_logger
 from modules.user_interface import UserConfiguration
 from modules.pdf_utils import PDFProcessor, native_extract_pdf_text
 from modules.image_utils import ImageProcessor
+from modules.batching import get_batch_chunk_size
 from modules.openai_utils import transcribe_image_with_openai
 from modules.concurrency import run_concurrent_transcription_tasks
 from modules.text_processing import extract_transcribed_text
@@ -235,7 +236,7 @@ class WorkflowManager:
         if method == "gpt" and self.user_config.use_batch_processing:
             from modules import batching
             total_images = len(processed_image_files)
-            chunk_size = 50  # keep in sync with modules/batching.py
+            chunk_size = get_batch_chunk_size()
             expected_batches = math.ceil(total_images / max(1, chunk_size))
 
             # Telemetry (console + log), do NOT write to JSONL
@@ -416,7 +417,7 @@ class WorkflowManager:
         if method == "gpt" and self.user_config.use_batch_processing:
             from modules import batching
             total_images = len(processed_files)
-            chunk_size = 50  # keep in sync with modules/batching.py
+            chunk_size = get_batch_chunk_size()
             expected_batches = math.ceil(total_images / max(1, chunk_size))
 
             # Telemetry (console + log), do NOT write to JSONL

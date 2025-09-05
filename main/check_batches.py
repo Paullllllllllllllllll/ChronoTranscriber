@@ -188,12 +188,6 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any],
         logger.info(f"No temporary batch files found in {root_folder}.")
         return
 
-    # Check if we have a debug file with batch submission data
-    debug_data = check_batch_debug_file()
-    if debug_data:
-        console_print(
-            f"[INFO] Found batch debug data for {debug_data.get('total_batches', 0)} batches")
-
     # Retrieve all batches from OpenAI
     console_print("[INFO] Retrieving list of submitted batches from OpenAI...")
     try:
@@ -266,52 +260,9 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any],
             continue
 
         if not batch_ids:
-            # Decide whether this file is a batch-run candidate for repair
-            # Only files with batch metadata (image_metadata or batch_request) are eligible
-            
             console_print(
-                f"[WARN] No batch IDs found in {temp_file.name}. Checking if this file can be repaired...")
-
-            # Only repair when debug data is present AND this file looks like the batch that generated the debug
-            if debug_data and debug_data.get("batch_data") and (has_batch_metadata or has_batch_request):
-                expected_total = debug_data.get("total_images")
-                meta_count = image_metadata_count if image_metadata_count > 0 else batch_request_count
-                if isinstance(expected_total, int) and expected_total > 0:
-                    if meta_count == expected_total:
-                        console_print(
-                            f"[INFO] Repair conditions satisfied (metadata entries={meta_count}, debug total_images={expected_total}). Adding batch IDs from debug data.")
-                        try:
-                            # Write batch tracking records from debug data
-                            with temp_file.open("a", encoding="utf-8") as f:
-                                for batch_data in debug_data.get("batch_data", []):
-                                    tracking_record = {
-                                        "batch_tracking": {
-                                            "batch_id": batch_data["batch_id"],
-                                            "timestamp": batch_data.get("timestamp"),
-                                            "batch_file": str(batch_data["batch_id"])
-                                        }
-                                    }
-                                    f.write(json.dumps(tracking_record) + "\n")
-                                    batch_ids.add(batch_data["batch_id"])
-
-                            console_print(
-                                f"[SUCCESS] Added {len(debug_data.get('batch_data', []))} missing batch IDs to {temp_file.name}")
-                        except Exception as e:
-                            console_print(f"[ERROR] Failed to repair file: {e}")
-                            continue
-                    else:
-                        console_print(
-                            f"[WARN] Debug data total_images ({expected_total}) does not match this file's metadata entries ({meta_count}). Skipping repair for {temp_file.name}.")
-                        continue
-                else:
-                    console_print(
-                        f"[WARN] Debug data missing or invalid total_images; cannot safely repair {temp_file.name}. Skipping.")
-                    continue
-                
-            else:
-                console_print(
-                    f"[WARN] No suitable debug data to repair {temp_file.name}. Skipping this file.")
-                continue
+                f"[WARN] No batch IDs found in {temp_file.name}. This file appears to be batched but missing tracking entries. Use 'main/repair_transcriptions.py' if you need to reconstruct outputs.")
+            continue
 
         # Check if all batches are completed
         all_completed = True
@@ -321,12 +272,23 @@ def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any],
 
         for batch_id in batch_ids:
             if batch_id not in batch_dict:
-                all_completed = False
-                missing_batches.append(batch_id)
-                diagnosis = diagnose_batch_failure(batch_id, client)
-                logger.warning(
-                    f"Batch ID {batch_id} not found in OpenAI batches. {diagnosis}")
-                continue
+                # Attempt to retrieve individually (handles pagination and older batches)
+                try:
+                    batch = client.retrieve_batch(batch_id)
+                    if isinstance(batch, dict) and batch.get("id"):
+                        batch_dict[batch_id] = batch
+                    else:
+                        all_completed = False
+                        missing_batches.append(batch_id)
+                        logger.warning("Batch ID %s retrieval returned no object", batch_id)
+                        continue
+                except Exception:
+                    all_completed = False
+                    missing_batches.append(batch_id)
+                    diagnosis = diagnose_batch_failure(batch_id, client)
+                    logger.warning(
+                        f"Batch ID {batch_id} not found in OpenAI batches. {diagnosis}")
+                    continue
 
             batch = batch_dict[batch_id]
             status = str(batch.get("status", "")).lower()

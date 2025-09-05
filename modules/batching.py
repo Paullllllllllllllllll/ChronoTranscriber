@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import json
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -22,6 +21,34 @@ SUPPORTED_IMAGE_FORMATS: Dict[str, str] = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
 }
+
+# Centralized batch chunk size default and getter (configurable via concurrency_config.yaml)
+DEFAULT_BATCH_CHUNK_SIZE: int = 50
+
+def get_batch_chunk_size() -> int:
+    """
+    Returns the batch chunk size from concurrency_config.yaml if present, otherwise a safe default.
+
+    Expected path in YAML:
+    concurrency:
+      transcription:
+        batch_chunk_size: 50
+    """
+    try:
+        cfg = ConfigLoader()
+        cfg.load_configs()
+        cc = cfg.get_concurrency_config() or {}
+        val = (cc.get("concurrency", {}) or {}).get("transcription", {}).get("batch_chunk_size", DEFAULT_BATCH_CHUNK_SIZE)
+        # Coerce to int and guard against invalid values
+        try:
+            ival = int(val)
+            if ival < 1:
+                return DEFAULT_BATCH_CHUNK_SIZE
+            return ival
+        except Exception:
+            return DEFAULT_BATCH_CHUNK_SIZE
+    except Exception:
+        return DEFAULT_BATCH_CHUNK_SIZE
 
 
 def _render_prompt_with_schema(prompt_text: str, schema_obj: Dict[str, Any]) -> str:
@@ -108,11 +135,7 @@ def _build_responses_body_for_image(
                         # Responses API expects image_url as a STRING (URL or data URL)
                         # with optional detail as a sibling property.
                         "image_url": image_url,
-                        **(
-                            {"detail": detail_norm}
-                            if (detail_norm is not None and caps.supports_image_detail)
-                            else ({"detail": caps.default_ocr_detail} if caps.supports_image_detail and detail_norm is None and False else {})
-                        ),
+                        **( {"detail": detail_norm} if (detail_norm in ("low", "high") and caps.supports_image_detail) else {} ),
                     },
                 ],
             },
@@ -135,16 +158,28 @@ def _build_responses_body_for_image(
     # Backward-compat: fall back to model_config if concurrency_config missing
     effective_service_tier = st if st is not None else tm.get("service_tier")
     if effective_service_tier:
-        body["service_tier"] = effective_service_tier
+        # Accept commonly documented service tiers; ignore unknowns
+        allowed_service_tiers = {"auto", "default", "flex", "priority"}
+        if str(effective_service_tier) in allowed_service_tiers:
+            body["service_tier"] = str(effective_service_tier)
+        else:
+            logger.warning(
+                "Ignoring unsupported service_tier=%s for model %s",
+                effective_service_tier,
+                model_name,
+            )
 
     # Structured outputs (avoid on o-series)
     if caps.supports_structured_outputs:
+        # Responses API expects the JSON Schema nested under text.format.json_schema
         body["text"] = {
             "format": {
                 "type": "json_schema",
-                "name": "TranscriptionSchema",
-                "schema": transcription_schema,
-                "strict": True,
+                "json_schema": {
+                    "name": "TranscriptionSchema",
+                    "schema": transcription_schema,
+                    "strict": True,
+                },
             }
         }
 
@@ -199,8 +234,15 @@ def create_batch_request_line(
         else:
             transcription_schema = loaded_schema
 
-    # Inject current schema into system prompt
-    system_prompt = _render_prompt_with_schema(system_prompt, loaded_schema)
+    # Inject current schema into system prompt (optional)
+    inject_schema_into_prompt = True
+    try:
+        # Respect a model_config flag if provided
+        inject_schema_into_prompt = bool(model_config.get("inject_schema_into_prompt", True))
+    except Exception:
+        inject_schema_into_prompt = True
+    if inject_schema_into_prompt:
+        system_prompt = _render_prompt_with_schema(system_prompt, loaded_schema)
 
     # Load image processing config for llm_detail
     try:
@@ -299,7 +341,7 @@ def process_batch_transcription(
     Tuple[List[Any], List[Dict[str, Any]]]
         (batch_responses, all_metadata_records)
     """
-    chunk_size = 50
+    chunk_size = get_batch_chunk_size()
     total_images = len(image_files)
     batch_responses: List[Any] = []
     all_metadata_records: List[Dict[str, Any]] = []

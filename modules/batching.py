@@ -308,7 +308,7 @@ def process_batch_transcription(
     max_batch_size = 150 * 1024 * 1024
     batch_index = 1
 
-    submitted_batch_data: List[Dict[str, Any]] = []
+    # Note: Previously captured submitted_batch_data for a local debug snapshot; removed.
     console_print(f"[INFO] Processing {total_images} images in chunks of {chunk_size}...")
 
     for chunk_start in range(0, total_images, chunk_size):
@@ -366,13 +366,6 @@ def process_batch_transcription(
                 try:
                     response = submit_batch(batch_file)
                     batch_id = response.id
-                    submitted_batch_data.append(
-                        {
-                            "batch_id": batch_id,
-                            "metadata": current_metadata.copy(),
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                        }
-                    )
                     console_print(f"[SUCCESS] Successfully submitted batch {batch_index} with ID: {batch_id}")
                     batch_responses.append(response)
                 except Exception as exc:
@@ -399,13 +392,6 @@ def process_batch_transcription(
             try:
                 response = submit_batch(batch_file)
                 batch_id = response.id
-                submitted_batch_data.append(
-                    {
-                        "batch_id": batch_id,
-                        "metadata": current_metadata.copy(),
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    }
-                )
                 console_print(f"[SUCCESS] Successfully submitted batch {batch_index} with ID: {batch_id}")
                 batch_responses.append(response)
             except Exception as exc:
@@ -416,23 +402,5 @@ def process_batch_transcription(
             except Exception:
                 logger.warning("Could not delete temporary batch file: %s", batch_file)
             batch_index += 1
-
-    # Local debug snapshot
-    debug_batch_path = Path("batch_submission_debug.json")
-    try:
-        with debug_batch_path.open("w", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "total_images": total_images,
-                    "total_batches": len(submitted_batch_data),
-                    "batch_data": submitted_batch_data,
-                },
-                f,
-                indent=2,
-            )
-        console_print(f"[INFO] Wrote batch submission debug file to {debug_batch_path}")
-    except Exception as exc:
-        logger.error("Error writing batch debug file: %s", exc)
-
     console_print(f"[INFO] All {total_images} images processed and submitted in {batch_index - 1} batch files")
     return batch_responses, all_metadata_records

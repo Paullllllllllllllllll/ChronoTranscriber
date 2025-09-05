@@ -171,22 +171,6 @@ def extract_custom_id_mapping(temp_file: Path) -> Tuple[
 
     return custom_id_map, batch_order
 
-
-def check_batch_debug_file() -> Optional[Dict[str, Any]]:
-    """
-    Check if a batch debug file exists and return its contents.
-    This can help with troubleshooting missing batch IDs.
-    """
-    debug_path = Path("batch_submission_debug.json")
-    if debug_path.exists():
-        try:
-            with debug_path.open("r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"Error reading batch debug file: {e}")
-    return None
-
-
 def process_all_batches(root_folder: Path, processing_settings: Dict[str, Any],
                         client: OpenAIHttpClient) -> None:
     """

@@ -31,16 +31,8 @@ from modules.text_processing import extract_transcribed_text
 from modules.openai_utils import open_transcriber
 from modules.concurrency import run_concurrent_transcription_tasks
 
-# Reuse tiny HTTP client for Batches from check_batches
-try:
-    # Prefer fully qualified import when repo root is on sys.path
-    from main.check_batches import OpenAIHttpClient  # type: ignore
-except Exception:
-    try:
-        # Fallback if 'main' package context isn't available
-        from check_batches import OpenAIHttpClient  # type: ignore
-    except Exception:
-        OpenAIHttpClient = None  # Will validate later
+# Use the official OpenAI SDK directly for batch status and files
+from openai import OpenAI
 
 logger = setup_logger(__name__)
 
@@ -72,11 +64,12 @@ class RepairTarget:
     line_index: int
 
 
+# Fixed regex: ensure trailing ']' and remove stray literal '$'
 FAILURE_PATTERNS = [
-    re.compile(r"^\[transcription error:\s*.+]$", re.IGNORECASE),
-    re.compile(r"^\[Transcription not possible.*\$"),
+    re.compile(r"^\[transcription error:\s*.+\]$", re.IGNORECASE),
+    re.compile(r"^\[Transcription not possible.*\]$", re.IGNORECASE),
 ]
-NO_TEXT_PATTERN = re.compile(r"^\[No transcribable text.*\$")
+NO_TEXT_PATTERN = re.compile(r"^\[No transcribable text.*\]$", re.IGNORECASE)
 
 
 def _extract_image_name_from_failure_line(line: str) -> Optional[str]:
@@ -129,16 +122,8 @@ def _discover_jobs(paths_config: Dict[str, Any]) -> List[Job]:
                 )
             )
 
-    pdf_out = (
-        paths_config.get("file_paths", {})
-        .get("PDFs", {})
-        .get("output", None)
-    )
-    img_out = (
-        paths_config.get("file_paths", {})
-        .get("Images", {})
-        .get("output", None)
-    )
+    pdf_out = paths_config.get("file_paths", {}).get("PDFs", {}).get("output", None)
+    img_out = paths_config.get("file_paths", {}).get("Images", {}).get("output", None)
     scan_root(pdf_out, "PDF")
     scan_root(img_out, "Images")
     jobs.sort(key=lambda j: str(j.parent_folder))
@@ -177,9 +162,7 @@ def _collect_image_entries_from_jsonl(
                     continue
 
                 # Preferred: image_metadata
-                if "image_metadata" in obj and isinstance(
-                    obj["image_metadata"], dict
-                ):
+                if "image_metadata" in obj and isinstance(obj["image_metadata"], dict):
                     meta = obj["image_metadata"]
                     oi = meta.get("order_index")
                     if isinstance(oi, int):
@@ -190,16 +173,13 @@ def _collect_image_entries_from_jsonl(
                                 meta.get("pre_processed_image") or ""
                             ).strip()
                             or None,
-                            custom_id=str(meta.get("custom_id") or "").strip()
-                            or None,
+                            custom_id=str(meta.get("custom_id") or "").strip() or None,
                             page_number=meta.get("page_number"),
                         )
                     continue
 
                 # Fallback: batch_request lines
-                if "batch_request" in obj and isinstance(
-                    obj["batch_request"], dict
-                ):
+                if "batch_request" in obj and isinstance(obj["batch_request"], dict):
                     br = obj["batch_request"]
                     custom_id = str(br.get("custom_id") or "").strip() or None
                     ii = br.get("image_info") or {}
@@ -215,11 +195,7 @@ def _collect_image_entries_from_jsonl(
                     continue
 
                 # Synchronous GPT JSONL records
-                if (
-                    "method" in obj
-                    and obj.get("method") == "gpt"
-                    and "order_index" in obj
-                ):
+                if "method" in obj and obj.get("method") == "gpt" and "order_index" in obj:
                     try:
                         oi = int(obj.get("order_index"))
                         entries.setdefault(
@@ -258,9 +234,7 @@ def _find_failure_indices(
     return idxs
 
 
-def _resolve_image_path(
-    parent_folder: Path, entry: ImageEntry
-) -> Optional[Path]:
+def _resolve_image_path(parent_folder: Path, entry: ImageEntry) -> Optional[Path]:
     if entry.pre_processed_image:
         p = Path(entry.pre_processed_image)
         if p.exists():
@@ -392,13 +366,11 @@ async def _repair_sync_mode(
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        console_print(
-            "[ERROR] OPENAI_API_KEY is required for GPT repair. Aborting."
-        )
+        console_print("[ERROR] OPENAI_API_KEY is required for GPT repair. Aborting.")
         return
 
-    model_name = (
-        model_config.get("transcription_model", {}).get("name", "gpt-4o-2024-08-06")
+    model_name = model_config.get("transcription_model", {}).get(
+        "name", "gpt-4o-2024-08-06"
     )
 
     cl = ConfigLoader()
@@ -430,17 +402,26 @@ async def _repair_sync_mode(
             if not res:
                 return
             line_index, text, raw = res
-            img_name = next((t.image_name for t in targets if t.line_index == line_index), None)
+            img_name = next(
+                (t.image_name for t in targets if t.line_index == line_index), None
+            )
             # Normalize placeholders to include image name for traceability
             normalized_text = (
-                f"[Transcription not possible: {img_name}]" if text == "[Transcription not possible]" and img_name else (
-                    f"[No transcribable text: {img_name}]" if text == "[No transcribable text]" and img_name else text
+                f"[Transcription not possible: {img_name}]"
+                if text == "[Transcription not possible]" and img_name
+                else (
+                    f"[No transcribable text: {img_name}]"
+                    if text == "[No transcribable text]" and img_name
+                    else text
                 )
             )
             record = {
                 "repair_response": {
                     "line_index": line_index,
-                    "order_index": next((t.order_index for t in targets if t.line_index == line_index), None),
+                    "order_index": next(
+                        (t.order_index for t in targets if t.line_index == line_index),
+                        None,
+                    ),
                     "image_name": img_name,
                     "raw_response": raw,
                     "text": normalized_text,
@@ -451,9 +432,7 @@ async def _repair_sync_mode(
             async with write_lock:
                 _write_repair_jsonl_line(repair_jsonl_path, record)
 
-        args_list = [
-            (t.image_path, t.line_index, t.image_name, trans) for t in targets
-        ]
+        args_list = [(t.image_path, t.line_index, t.image_name, trans) for t in targets]
 
         results = await run_concurrent_transcription_tasks(
             worker,
@@ -486,7 +465,7 @@ async def _repair_sync_mode(
 
 
 def _await_batches_blocking(
-    client: Any,
+    client: OpenAI,
     batch_ids: List[str],
     poll_seconds: float = 10.0,
     timeout_seconds: float = 7200.0,
@@ -499,7 +478,12 @@ def _await_batches_blocking(
         all_terminal = True
         for bid in batch_ids:
             try:
-                b = client.retrieve_batch(bid)
+                b_obj = client.batches.retrieve(bid)
+                b = (
+                    b_obj.model_dump()
+                    if hasattr(b_obj, "model_dump")
+                    else json.loads(b_obj.json())
+                )
                 status = str(b.get("status", "")).lower()
                 status_map[bid] = status
                 if status not in terminal:
@@ -519,7 +503,7 @@ def _await_batches_blocking(
 
 def _parse_batch_outputs_for_repairs(
     batches: List[Dict[str, Any]],
-    client: Any,
+    client: OpenAI,
 ) -> List[Dict[str, Any]]:
     parsed_lines: List[Dict[str, Any]] = []
     for b in batches:
@@ -529,10 +513,10 @@ def _parse_batch_outputs_for_repairs(
             output_file_id = b.get("output_file_id")
             if not output_file_id:
                 continue
-            content = client.get_file_content(output_file_id)
-            text = (
-                content.decode("utf-8") if isinstance(content, bytes) else str(content)
-            ).strip()
+            resp = client.files.content(output_file_id)
+            content = resp.read()
+            text = content.decode("utf-8") if isinstance(content, bytes) else str(content)
+            text = text.strip()
             for ln in text.splitlines():
                 ln = ln.strip()
                 if not ln:
@@ -554,13 +538,6 @@ async def _repair_batch_mode(
     final_lines: List[str],
     repair_jsonl_path: Path,
 ) -> None:
-    if OpenAIHttpClient is None:
-        console_print(
-            "[ERROR] Could not import OpenAIHttpClient from check_batches.py. "
-            "Ensure this repository script is present."
-        )
-        return
-
     targets: List[RepairTarget] = []
     images_for_batch: List[Path] = []
 
@@ -624,9 +601,7 @@ async def _repair_batch_mode(
         console_print("[INFO] No targets resolved for batch repair.")
         return
 
-    console_print(
-        f"[INFO] Batch repair of {len(targets)} page(s) for '{job.identifier}'."
-    )
+    console_print(f"[INFO] Batch repair of {len(targets)} page(s) for '{job.identifier}'.")
 
     from modules import batching
 
@@ -669,16 +644,20 @@ async def _repair_batch_mode(
         console_print("[ERROR] No batch IDs returned for repair submission.")
         return
 
-    client = OpenAIHttpClient()
+    client = OpenAI()
     console_print("[INFO] Waiting for repair batches to complete...")
-    all_batches_done, status_map = await asyncio.to_thread(
-        _await_batches_blocking, client, batch_ids, 10.0, 7200.0
-    )
+    _ = await asyncio.to_thread(_await_batches_blocking, client, batch_ids, 10.0, 7200.0)
 
     batches = []
     for bid in batch_ids:
         try:
-            batches.append(client.retrieve_batch(bid))
+            b_obj = client.batches.retrieve(bid)
+            b_dict = (
+                b_obj.model_dump()
+                if hasattr(b_obj, "model_dump")
+                else json.loads(b_obj.json())
+            )
+            batches.append(b_dict)
         except Exception as e:
             logger.warning("Could not retrieve batch %s: %s", bid, e)
 
@@ -719,8 +698,6 @@ async def _repair_batch_mode(
     line_index_by_custom: Dict[str, int] = {}
     image_name_by_custom: Dict[str, str] = {}
 
-    # metadata_records were created in the same order as images_for_batch,
-    # which we built from 'targets' in order; zip them together.
     for t, rec in zip(targets, metadata_records):
         br = rec.get("batch_request", {})
         cid = br.get("custom_id")
@@ -766,18 +743,10 @@ async def _repair_batch_mode(
     backup = _backup_file(job.final_txt_path)
     job.final_txt_path.write_text("\n".join(final_lines), encoding="utf-8")
 
-    completed = sum(1 for s in status_map.values() if s == "completed")
-    failed = sum(1 for s in status_map.values() if s == "failed")
-    expired = sum(1 for s in status_map.values() if s == "expired")
-    cancelled = sum(1 for s in status_map.values() if s == "cancelled")
-
+    # No explicit status summary here (optional to add)
     console_print(
         f"[SUCCESS] Batch repair complete for '{job.identifier}'. "
         f"Backup written to: {backup.name}"
-    )
-    console_print(
-        f"[INFO] Batch statuses -> Completed: {completed}; Failed: {failed}; "
-        f"Expired: {expired}; Cancelled: {cancelled}."
     )
 
 
@@ -799,9 +768,7 @@ async def main() -> None:
 
     console_print("\nSelect a transcription to repair:")
     for i, j in enumerate(jobs, 1):
-        console_print(
-            f"  {i}. [{j.kind}] {j.parent_folder.name} -> {j.final_txt_path.name}"
-        )
+        console_print(f"  {i}. [{j.kind}] {j.parent_folder.name} -> {j.final_txt_path.name}")
     console_print("\n(Type 'q' to exit)")
 
     job_sel = None
@@ -858,9 +825,7 @@ async def main() -> None:
             s = safe_input("Indices: ").strip()
             check_exit(s)
             try:
-                chosen = sorted(
-                    set(int(x.strip()) for x in s.split(",") if x.strip())
-                )
+                chosen = sorted(set(int(x.strip()) for x in s.split(",") if x.strip()))
                 failure_indices = [i for i in chosen if 0 <= i < len(final_lines)]
                 if failure_indices:
                     break
@@ -901,9 +866,7 @@ async def main() -> None:
             repair_jsonl_path=repair_jsonl_path,
         )
 
-    console_print(
-        f"\n[INFO] Repair session completed for '{job_sel.identifier}'."
-    )
+    console_print(f"\n[INFO] Repair session completed for '{job_sel.identifier}'.")
     console_print(
         f"[INFO] Repair log: {repair_jsonl_path.relative_to(job_sel.parent_folder)}"
     )

@@ -1,5 +1,3 @@
-# modules/openai_utils.py
-
 from __future__ import annotations
 
 import base64
@@ -18,6 +16,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 from modules.config_loader import ConfigLoader
 from modules.model_capabilities import Capabilities, detect_capabilities
+from modules.structured_outputs import build_structured_text_format
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +69,7 @@ def _wait_with_server_hint_factory(base_wait):
 
 class OpenAIExtractor:
     """
-    Minimal, robust adapter for the OpenAI **Responses API**.
+    Minimal, robust adapter for the OpenAI Responses API.
 
     - Uses typed `input` (input_text / input_image).
     - Structured outputs via `text.format` where supported.
@@ -113,7 +112,11 @@ class OpenAIExtractor:
         self.max_output_tokens: int = int(
             tm.get("max_output_tokens")
             if tm.get("max_output_tokens") is not None
-            else (tm.get("max_completion_tokens") if tm.get("max_completion_tokens") is not None else tm.get("max_tokens", 4096))
+            else (
+                tm.get("max_completion_tokens")
+                if tm.get("max_completion_tokens") is not None
+                else tm.get("max_tokens", 4096)
+            )
         )
 
         # Classic sampler controls (only used on non-reasoning, non-GPT-5)
@@ -158,7 +161,7 @@ class OpenAIExtractor:
         )
         # Align connector pool with configured transcription concurrency to avoid queue wait timeouts
         try:
-            conc_cfg = cl.get_concurrency_config()
+            conc_cfg = ConfigLoader().get_concurrency_config()
             trans_cfg = conc_cfg.get("concurrency", {}).get("transcription", {})
             conn_limit = int(trans_cfg.get("concurrency_limit", 100))
             if conn_limit <= 0:
@@ -192,13 +195,19 @@ class OpenAIExtractor:
                             try:
                                 dt = parsedate_to_datetime(ra_hdr)
                                 if dt is not None:
-                                    delta = (dt - datetime.now(timezone.utc)).total_seconds()
+                                    delta = (
+                                        dt - datetime.now(timezone.utc)
+                                    ).total_seconds()
                                     if delta and delta > 0:
                                         retry_after_val = delta
                             except Exception:
                                 retry_after_val = None
-                    logger.warning("Transient OpenAI error (%s): %s", resp.status, error_text)
-                    raise TransientOpenAIError(f"{resp.status}: {error_text}", retry_after=retry_after_val)
+                    logger.warning(
+                        "Transient OpenAI error (%s): %s", resp.status, error_text
+                    )
+                    raise TransientOpenAIError(
+                        f"{resp.status}: {error_text}", retry_after=retry_after_val
+                    )
                 logger.error("Non-retryable OpenAI error (%s): %s", resp.status, error_text)
                 raise NonRetryableOpenAIError(f"{resp.status}: {error_text}")
             return await resp.json()
@@ -214,7 +223,10 @@ class OpenAIExtractor:
         # GPT-5 public reasoning/text controls
         if self.caps.supports_reasoning_effort:
             payload["reasoning"] = self.reasoning
-            if isinstance(self.text_params, dict) and self.text_params.get("verbosity") is not None:
+            if (
+                isinstance(self.text_params, dict)
+                and self.text_params.get("verbosity") is not None
+            ):
                 payload.setdefault("text", {})["verbosity"] = self.text_params["verbosity"]
 
         # Sampler controls only for non-reasoning, non-GPT-5 families
@@ -226,34 +238,21 @@ class OpenAIExtractor:
 
         return payload
 
-    def _maybe_add_text_format(self, payload: Dict[str, Any], json_schema: Optional[Dict[str, Any]]) -> None:
+    def _maybe_add_text_format(
+        self, payload: Dict[str, Any], json_schema: Optional[Dict[str, Any]]
+    ) -> None:
         """
         Add `text.format` (Structured Outputs) where supported (avoid on o-series).
         """
         if not json_schema or not self.caps.supports_structured_outputs:
             return
-        # Accept wrapper form {name, strict, schema: {...}} or bare schema {...}
-        if isinstance(json_schema, dict) and "schema" in json_schema:
-            name_val = json_schema.get("name") or "TranscriptionSchema"
-            schema_val = json_schema.get("schema") or {}
-            strict_val = bool(json_schema.get("strict", True))
-        else:
-            name_val = "TranscriptionSchema"
-            schema_val = json_schema  # assume bare JSON Schema object
-            strict_val = True
 
-        # Basic sanity check: avoid sending malformed schemas that will 400
-        if not isinstance(schema_val, dict) or not schema_val:
-            logger.warning("Skipping structured outputs: provided schema is empty or not a dict")
+        fmt = build_structured_text_format(json_schema, "TranscriptionSchema", True)
+        if fmt is None:
             return
 
         payload.setdefault("text", {})
-        payload["text"]["format"] = {
-            "type": "json_schema",
-            "name": name_val,
-            "schema": schema_val,
-            "strict": strict_val,
-        }
+        payload["text"]["format"] = fmt
 
     @staticmethod
     def _collect_output_text(data: Dict[str, Any]) -> str:
@@ -307,7 +306,7 @@ class OpenAIExtractor:
             )
 
         # Normalize detail: when explicitly set to 'auto', omit the field.
-        detail_norm = (detail or None)
+        detail_norm = detail or None
         if isinstance(detail_norm, str):
             dlow = detail_norm.lower().strip()
             if dlow == "auto":
@@ -317,8 +316,10 @@ class OpenAIExtractor:
             else:
                 detail_norm = None
 
-        effective_detail = detail_norm if detail_norm is not None else (
-            self.caps.default_ocr_detail if self.caps.supports_image_detail else None
+        effective_detail = (
+            detail_norm
+            if detail_norm is not None
+            else (self.caps.default_ocr_detail if self.caps.supports_image_detail else None)
         )
 
         image_part: Dict[str, Any] = {
@@ -332,7 +333,10 @@ class OpenAIExtractor:
 
         input_messages = [
             {"role": "system", "content": [{"type": "input_text", "text": system_message}]},
-            {"role": "user", "content": [{"type": "input_text", "text": user_instruction}, image_part]},
+            {
+                "role": "user",
+                "content": [{"type": "input_text", "text": user_instruction}, image_part],
+            },
         ]
 
         payload = self._build_base_payload()
@@ -383,7 +387,11 @@ class OpenAITranscriber:
         # service_tier now sourced from concurrency_config.yaml
         try:
             cc = cfg.get_concurrency_config()
-            st = (cc.get("concurrency", {}) or {}).get("transcription", {}).get("service_tier")
+            st = (
+                (cc.get("concurrency", {}) or {})
+                .get("transcription", {})
+                .get("service_tier")
+            )
         except Exception:
             st = None
         # Backward-compat fallback to model_config.yaml if present
@@ -399,7 +407,9 @@ class OpenAITranscriber:
 
         # Load image processing config for LLM image detail
         ipc = cfg.get_image_processing_config()
-        self.image_cfg = ipc.get("api_image_processing", {}) if isinstance(ipc, dict) else {}
+        self.image_cfg = (
+            ipc.get("api_image_processing", {}) if isinstance(ipc, dict) else {}
+        )
         raw_detail = str(self.image_cfg.get("llm_detail", "high")).lower().strip()
         self.llm_detail: Optional[str]
         if raw_detail in ("low", "high"):
@@ -425,19 +435,27 @@ class OpenAITranscriber:
             loaded_schema = json.load(sf)
             full_schema_obj = loaded_schema
             # Accept wrapper form {name, strict, schema: {...}} or bare schema {...}
-            if isinstance(loaded_schema, dict) and "schema" in loaded_schema and isinstance(loaded_schema["schema"], dict):
+            if (
+                isinstance(loaded_schema, dict)
+                and "schema" in loaded_schema
+                and isinstance(loaded_schema["schema"], dict)
+            ):
                 self.transcription_schema = loaded_schema["schema"]
             else:
                 self.transcription_schema = loaded_schema
 
         # Render system prompt with current schema content
-        self.system_prompt_text = self._render_prompt_with_schema(raw_prompt, full_schema_obj)
+        self.system_prompt_text = self._render_prompt_with_schema(
+            raw_prompt, full_schema_obj
+        )
 
     async def close(self) -> None:
         await self.extractor.close()
 
     @staticmethod
-    def _render_prompt_with_schema(prompt_text: str, schema_obj: Dict[str, Any]) -> str:
+    def _render_prompt_with_schema(
+        prompt_text: str, schema_obj: Dict[str, Any]
+    ) -> str:
         """
         Render the system prompt with the latest schema content injected.
         Supports a placeholder token "{{TRANSCRIPTION_SCHEMA}}" or replaces
@@ -460,7 +478,11 @@ class OpenAITranscriber:
                 # Try to find a matching closing brace after the start
                 end_brace = prompt_text.rfind("}")
                 if end_brace != -1 and end_brace > start_brace:
-                    return prompt_text[:start_brace] + schema_str + prompt_text[end_brace + 1:]
+                    return (
+                        prompt_text[:start_brace]
+                        + schema_str
+                        + prompt_text[end_brace + 1 :]
+                    )
             # Fallback: append schema after the marker
             return prompt_text + "\n" + schema_str
 
@@ -515,7 +537,9 @@ class OpenAITranscriber:
 
 
 @asynccontextmanager
-async def open_transcriber(api_key: str, model: Optional[str] = None) -> AsyncGenerator[OpenAITranscriber, None]:
+async def open_transcriber(
+    api_key: str, model: Optional[str] = None
+) -> AsyncGenerator[OpenAITranscriber, None]:
     """
     Context manager matching legacy import sites.
     """
@@ -526,7 +550,9 @@ async def open_transcriber(api_key: str, model: Optional[str] = None) -> AsyncGe
         await transcriber.close()
 
 
-async def transcribe_image_with_openai(image_path: Path, transcriber: OpenAITranscriber) -> Dict[str, Any]:
+async def transcribe_image_with_openai(
+    image_path: Path, transcriber: OpenAITranscriber
+) -> Dict[str, Any]:
     """
     Legacy helper retained for callers in the workflow.
     """

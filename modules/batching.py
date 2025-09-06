@@ -1,5 +1,3 @@
-# modules/batching.py
-
 from __future__ import annotations
 
 import base64
@@ -8,10 +6,10 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-
 from modules.model_capabilities import detect_capabilities
 from modules.utils import console_print
 from modules.config_loader import ConfigLoader
+from modules.structured_outputs import build_structured_text_format
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +21,7 @@ SUPPORTED_IMAGE_FORMATS: Dict[str, str] = {
 
 # Centralized batch chunk size default and getter (configurable via concurrency_config.yaml)
 DEFAULT_BATCH_CHUNK_SIZE: int = 50
+
 
 def get_batch_chunk_size() -> int:
     """
@@ -37,7 +36,11 @@ def get_batch_chunk_size() -> int:
         cfg = ConfigLoader()
         cfg.load_configs()
         cc = cfg.get_concurrency_config() or {}
-        val = (cc.get("concurrency", {}) or {}).get("transcription", {}).get("batch_chunk_size", DEFAULT_BATCH_CHUNK_SIZE)
+        val = (
+            (cc.get("concurrency", {}) or {})
+            .get("transcription", {})
+            .get("batch_chunk_size", DEFAULT_BATCH_CHUNK_SIZE)
+        )
         # Coerce to int and guard against invalid values
         try:
             ival = int(val)
@@ -73,7 +76,11 @@ def _render_prompt_with_schema(prompt_text: str, schema_obj: Dict[str, Any]) -> 
         if start_brace != -1:
             end_brace = prompt_text.rfind("}")
             if end_brace != -1 and end_brace > start_brace:
-                return prompt_text[:start_brace] + schema_str + prompt_text[end_brace + 1:]
+                return (
+                    prompt_text[:start_brace]
+                    + schema_str
+                    + prompt_text[end_brace + 1 :]
+                )
         # Fallback: append schema after the marker
         return prompt_text + "\n" + schema_str
 
@@ -104,7 +111,7 @@ def _build_responses_body_for_image(
     llm_detail: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Construct a **Responses API** request body for vision transcription,
+    Construct a Responses API request body for vision transcription,
     with feature gating based on the capabilities registry.
     """
     tm = model_config or {}
@@ -124,17 +131,30 @@ def _build_responses_body_for_image(
     body: Dict[str, Any] = {
         "model": model_name,
         "input": [
-            {"role": "system", "content": [{"type": "input_text", "text": system_prompt}]},
+            {
+                "role": "system",
+                "content": [{"type": "input_text", "text": system_prompt}],
+            },
             {
                 "role": "user",
                 "content": [
-                    {"type": "input_text", "text": "Please transcribe the text from this image."},
+                    {
+                        "type": "input_text",
+                        "text": "Please transcribe the text from this image.",
+                    },
                     {
                         "type": "input_image",
                         # Responses API expects image_url as a STRING (URL or data URL)
                         # with optional detail as a sibling property.
                         "image_url": image_url,
-                        **( {"detail": detail_norm} if (detail_norm in ("low", "high") and caps.supports_image_detail) else {} ),
+                        **(
+                            {"detail": detail_norm}
+                            if (
+                                detail_norm in ("low", "high")
+                                and caps.supports_image_detail
+                            )
+                            else {}
+                        ),
                     },
                 ],
             },
@@ -142,7 +162,11 @@ def _build_responses_body_for_image(
         "max_output_tokens": int(
             tm.get("max_output_tokens")
             if tm.get("max_output_tokens") is not None
-            else (tm.get("max_completion_tokens") if tm.get("max_completion_tokens") is not None else tm.get("max_tokens", 4096))
+            else (
+                tm.get("max_completion_tokens")
+                if tm.get("max_completion_tokens") is not None
+                else tm.get("max_tokens", 4096)
+            )
         ),
     }
 
@@ -151,13 +175,16 @@ def _build_responses_body_for_image(
         cfg = ConfigLoader()
         cfg.load_configs()
         cc = cfg.get_concurrency_config()
-        st = (cc.get("concurrency", {}) or {}).get("transcription", {}).get("service_tier")
+        st = (
+            (cc.get("concurrency", {}) or {})
+            .get("transcription", {})
+            .get("service_tier")
+        )
     except Exception:
         st = None
     # Backward-compat: fall back to model_config if concurrency_config missing
     effective_service_tier = st if st is not None else tm.get("service_tier")
     if effective_service_tier:
-        # Accept commonly documented service tiers; ignore unknowns
         allowed_service_tiers = {"auto", "default", "flex", "priority"}
         if str(effective_service_tier) in allowed_service_tiers:
             body["service_tier"] = str(effective_service_tier)
@@ -168,24 +195,23 @@ def _build_responses_body_for_image(
                 model_name,
             )
 
-    # Structured outputs (avoid on o-series)
+    # Structured outputs (avoid on o-series if disabled)
     if caps.supports_structured_outputs:
-        # Responses API expects the JSON Schema nested under text.format.json_schema
-        body["text"] = {
-            "format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "TranscriptionSchema",
-                    "schema": transcription_schema,
-                    "strict": True,
-                },
-            }
-        }
+        fmt = build_structured_text_format(
+            transcription_schema, "TranscriptionSchema", True
+        )
+        if fmt is not None:
+            body.setdefault("text", {})
+            body["text"]["format"] = fmt
 
     # GPT-5 public reasoning controls (no classic sampler)
     if caps.supports_reasoning_effort and tm.get("reasoning"):
         body["reasoning"] = tm["reasoning"]
-        if tm.get("text") and isinstance(tm["text"], dict) and tm["text"].get("verbosity") is not None:
+        if (
+            tm.get("text")
+            and isinstance(tm["text"], dict)
+            and tm["text"].get("verbosity") is not None
+        ):
             body.setdefault("text", {})["verbosity"] = tm["text"]["verbosity"]
 
     # Classic sampler controls only for families that support them
@@ -206,7 +232,7 @@ def create_batch_request_line(
     schema_path: Optional[Path] = None,
 ) -> Tuple[str, Dict[str, Any]]:
     """
-    Create a **Responses API** batch request line for an image transcription task.
+    Create a Responses API batch request line for an image transcription task.
 
     Returns
     -------
@@ -228,7 +254,11 @@ def create_batch_request_line(
     with schema_path.open("r", encoding="utf-8") as sfile:
         loaded_schema = json.load(sfile)
         # Accept either a wrapper {name, strict, schema: {...}} or a bare JSON Schema
-        if isinstance(loaded_schema, dict) and "schema" in loaded_schema and isinstance(loaded_schema["schema"], dict):
+        if (
+            isinstance(loaded_schema, dict)
+            and "schema" in loaded_schema
+            and isinstance(loaded_schema["schema"], dict)
+        ):
             transcription_schema = loaded_schema["schema"]
         else:
             transcription_schema = loaded_schema
@@ -237,7 +267,9 @@ def create_batch_request_line(
     inject_schema_into_prompt = True
     try:
         # Respect a model_config flag if provided
-        inject_schema_into_prompt = bool(model_config.get("inject_schema_into_prompt", True))
+        inject_schema_into_prompt = bool(
+            model_config.get("inject_schema_into_prompt", True)
+        )
     except Exception:
         inject_schema_into_prompt = True
     if inject_schema_into_prompt:
@@ -259,7 +291,7 @@ def create_batch_request_line(
     except Exception:
         llm_detail = "auto"
 
-    # Build **Responses** body (typed input + text.format where supported)
+    # Build Responses body (typed input + text.format where supported)
     request_body = _build_responses_body_for_image(
         model_config=model_config,
         system_prompt=system_prompt,
@@ -284,7 +316,9 @@ def create_batch_request_line(
     }
 
     # Separate metadata for local ordering/tracking
-    metadata_record = {"batch_request": {"custom_id": custom_id, "image_info": image_info}}
+    metadata_record = {
+        "batch_request": {"custom_id": custom_id, "image_info": image_info}
+    }
     return json.dumps(request_line), metadata_record
 
 
@@ -301,10 +335,11 @@ def write_batch_file(request_lines: List[str], output_path: Path) -> Path:
 
 def submit_batch(batch_file_path: Path) -> Dict[str, Any]:
     """
-    Submit a prepared JSONL batch to the OpenAI Batch API targeting **/v1/responses**.
+    Submit a prepared JSONL batch to the OpenAI Batch API targeting /v1/responses.
     """
     # Lazy import to avoid import-time dependency issues when this module is imported for config/telemetry only
     from openai import OpenAI  # type: ignore
+
     client = OpenAI()
     try:
         console_print(f"[INFO] Uploading batch file {batch_file_path.name} to OpenAI...")
@@ -321,7 +356,9 @@ def submit_batch(batch_file_path: Path) -> Dict[str, Any]:
             metadata={"description": "Batch OCR transcription via Responses API"},
         )
         logger.info("Batch submitted; batch id: %s", batch_response.id)
-        console_print(f"[INFO] Batch job created successfully with ID: {batch_response.id}")
+        console_print(
+            f"[INFO] Batch job created successfully with ID: {batch_response.id}"
+        )
         return batch_response
     except Exception as exc:  # propagate after logging
         logger.error("Error submitting batch file %s: %s", batch_file_path, exc)
@@ -335,7 +372,7 @@ def process_batch_transcription(
     model_config: Dict[str, Any],
 ) -> Tuple[List[Any], List[Dict[str, Any]]]:
     """
-    Prepare and submit batched image transcriptions using the **Responses API**.
+    Prepare and submit batched image transcriptions using the Responses API.
 
     Returns
     -------
@@ -351,8 +388,9 @@ def process_batch_transcription(
     max_batch_size = 150 * 1024 * 1024
     batch_index = 1
 
-    # Note: Previously captured submitted_batch_data for a local debug snapshot; removed.
-    console_print(f"[INFO] Processing {total_images} images in chunks of {chunk_size}...")
+    console_print(
+        f"[INFO] Processing {total_images} images in chunks of {chunk_size}..."
+    )
 
     submitted_parts = 0
     attempted_parts = 0
@@ -394,9 +432,13 @@ def process_batch_transcription(
                 all_metadata_records.append(metadata_record)
             except Exception as exc:
                 logger.error("Error processing image %s: %s", image_file, exc)
-                console_print(f"[ERROR] Failed to process image {image_file.name}: {exc}")
+                console_print(
+                    f"[ERROR] Failed to process image {image_file.name}: {exc}"
+                )
 
-        console_print(f"[INFO] Creating batch files for chunk {chunk_start // chunk_size + 1}...")
+        console_print(
+            f"[INFO] Creating batch files for chunk {chunk_start // chunk_size + 1}..."
+        )
 
         current_lines: List[str] = []
         current_size = 0
@@ -412,16 +454,24 @@ def process_batch_transcription(
                 try:
                     response = submit_batch(batch_file)
                     batch_id = response.id
-                    console_print(f"[SUCCESS] Successfully submitted batch {batch_index} with ID: {batch_id}")
+                    console_print(
+                        f"[SUCCESS] Successfully submitted batch {batch_index} with ID: {batch_id}"
+                    )
                     batch_responses.append(response)
                     submitted_parts += 1
                 except Exception as exc:
-                    logger.error("Error submitting batch file %s: %s", batch_file, exc)
-                    console_print(f"[ERROR] Failed to submit batch file {batch_file}: {exc}")
+                    logger.error(
+                        "Error submitting batch file %s: %s", batch_file, exc
+                    )
+                    console_print(
+                        f"[ERROR] Failed to submit batch file {batch_file}: {exc}"
+                    )
                 try:
                     batch_file.unlink()
                 except Exception:
-                    logger.warning("Could not delete temporary batch file: %s", batch_file)
+                    logger.warning(
+                        "Could not delete temporary batch file: %s", batch_file
+                    )
 
                 batch_index += 1
                 current_lines = []
@@ -440,12 +490,16 @@ def process_batch_transcription(
             try:
                 response = submit_batch(batch_file)
                 batch_id = response.id
-                console_print(f"[SUCCESS] Successfully submitted batch {batch_index} with ID: {batch_id}")
+                console_print(
+                    f"[SUCCESS] Successfully submitted batch {batch_index} with ID: {batch_id}"
+                )
                 batch_responses.append(response)
                 submitted_parts += 1
             except Exception as exc:
                 logger.error("Error submitting batch file %s: %s", batch_file, exc)
-                console_print(f"[ERROR] Failed to submit batch file {batch_file}: {exc}")
+                console_print(
+                    f"[ERROR] Failed to submit batch file {batch_file}: {exc}"
+                )
             try:
                 batch_file.unlink()
             except Exception:
@@ -453,10 +507,16 @@ def process_batch_transcription(
             batch_index += 1
     total_parts = attempted_parts
     if submitted_parts == total_parts and total_parts > 0:
-        console_print(f"[INFO] All {total_images} images processed and submitted in {total_parts} batch file(s)")
+        console_print(
+            f"[INFO] All {total_images} images processed and submitted in {total_parts} batch file(s)"
+        )
     else:
-        console_print(f"[INFO] Submitted {submitted_parts}/{total_parts} batch file(s) for {total_images} images")
+        console_print(
+            f"[INFO] Submitted {submitted_parts}/{total_parts} batch file(s) for {total_images} images"
+        )
         if submitted_parts == 0:
             # Propagate failure to caller so workflow can decide on fallback
-            raise RuntimeError("No batch submissions succeeded; see logs for details.")
+            raise RuntimeError(
+                "No batch submissions succeeded; see logs for details."
+            )
     return batch_responses, all_metadata_records

@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 from typing import Tuple, Dict, Any, List, Set, Optional, Iterable
+from datetime import datetime, timezone
 
 from openai import OpenAI
 from modules.config_loader import ConfigLoader
@@ -54,6 +55,41 @@ def _sdk_to_dict(obj: Any) -> Dict[str, Any]:
         except Exception:
             pass
     return d
+
+
+def _list_all_batches(client: Any) -> List[Dict[str, Any]]:
+    """
+    List all batches with robust pagination. Returns a list of dicts.
+    Prints pagination progress to the console.
+    """
+    batches: List[Dict[str, Any]] = []
+    after: Optional[str] = None
+    page_index = 0
+    while True:
+        page_index += 1
+        page = client.batches.list(limit=100, after=after) if after else client.batches.list(limit=100)
+        data = getattr(page, "data", None) or page
+        page_items = [_sdk_to_dict(b) for b in data]
+        batches.extend(page_items)
+        # Determine pagination flags
+        has_more = False
+        last_id = None
+        try:
+            has_more = bool(getattr(page, "has_more", False))
+            last_id = getattr(page, "last_id", None)
+        except Exception:
+            # Some SDK versions expose as dict
+            try:
+                has_more = bool(page.get("has_more", False))
+                last_id = page.get("last_id")
+            except Exception:
+                has_more = False
+                last_id = None
+        console_print(f"[INFO] Batches page {page_index}: fetched {len(page_items)} item(s); has_more={has_more}")
+        if not has_more or not last_id:
+            break
+        after = last_id
+    return batches
 
 
 def load_config() -> Tuple[List[Path], Dict[str, Any]]:
@@ -188,10 +224,7 @@ def process_all_batches(
     # Retrieve all batches from OpenAI
     console_print("[INFO] Retrieving list of submitted batches from OpenAI...")
     try:
-        page = client.batches.list(limit=100)
-        # Convert SDK page to dicts
-        data: Iterable[Any] = getattr(page, "data", None) or page
-        batches: List[Dict[str, Any]] = [_sdk_to_dict(b) for b in data]
+        batches = _list_all_batches(client)
         # Create a dictionary of batch ID to batch object for faster lookup
         batch_dict: Dict[str, Dict[str, Any]] = {
             b.get("id"): b for b in batches if isinstance(b, dict) and b.get("id")
@@ -255,6 +288,44 @@ def process_all_batches(
 
                 except json.JSONDecodeError:
                     continue
+
+        # Attempt recovery of missing batch IDs from the debug artifact before classification
+        if not batch_ids:
+            debug_artifact = temp_file.parent / f"{identifier}_batch_submission_debug.json"
+            if debug_artifact.exists():
+                try:
+                    dbg = json.loads(debug_artifact.read_text(encoding="utf-8"))
+                    dbg_ids = [bid for bid in (dbg.get("batch_ids") or []) if isinstance(bid, str)]
+                    to_add = [bid for bid in dbg_ids if bid not in batch_ids]
+                    if to_add:
+                        console_print(
+                            f"[INFO] Recovered {len(to_add)} missing batch id(s) for {temp_file.name} from debug artifact."
+                        )
+                        for bid in to_add:
+                            batch_ids.add(bid)
+                        # Best-effort persist into the JSONL so future runs have them
+                        persist = bool(processing_settings.get("persist_recovered_batch_ids", True))
+                        if persist:
+                            try:
+                                with temp_file.open("a", encoding="utf-8") as wf:
+                                    for bid in to_add:
+                                        rec = {
+                                            "batch_tracking": {
+                                                "batch_id": bid,
+                                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                                "batch_file": str(bid),
+                                            }
+                                        }
+                                        wf.write(json.dumps(rec) + "\n")
+                                console_print(
+                                    f"[INFO] Persisted {len(to_add)} recovered batch id(s) into {temp_file.name}."
+                                )
+                            except Exception as pe:
+                                logger.warning(
+                                    "Failed to persist recovered batch ids for %s: %s", temp_file.name, pe
+                                )
+                except Exception as de:
+                    logger.warning("Failed to read debug artifact %s: %s", debug_artifact.name, de)
 
         is_batched_file = has_batch_session and (
             bool(batch_ids) or has_batch_request or has_batch_metadata

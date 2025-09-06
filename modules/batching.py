@@ -9,7 +9,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from modules.model_capabilities import detect_capabilities
 from modules.utils import console_print
 from modules.config_loader import ConfigLoader
+from modules.config_loader import PROJECT_ROOT
 from modules.structured_outputs import build_structured_text_format
+from modules.prompt_utils import render_prompt_with_schema
 
 logger = logging.getLogger(__name__)
 
@@ -51,41 +53,6 @@ def get_batch_chunk_size() -> int:
             return DEFAULT_BATCH_CHUNK_SIZE
     except Exception:
         return DEFAULT_BATCH_CHUNK_SIZE
-
-
-def _render_prompt_with_schema(prompt_text: str, schema_obj: Dict[str, Any]) -> str:
-    """
-    Render the system prompt with the latest schema content injected.
-    Supports either a placeholder token "{{TRANSCRIPTION_SCHEMA}}" or
-    replacing any existing JSON object that follows the text marker
-    "The JSON schema:".
-    """
-    try:
-        schema_str = json.dumps(schema_obj, indent=2, ensure_ascii=False)
-    except Exception:
-        schema_str = str(schema_obj)
-
-    token = "{{TRANSCRIPTION_SCHEMA}}"
-    if token in prompt_text:
-        return prompt_text.replace(token, schema_str)
-
-    marker = "The JSON schema:"
-    if marker in prompt_text:
-        idx = prompt_text.find(marker)
-        start_brace = prompt_text.find("{", idx)
-        if start_brace != -1:
-            end_brace = prompt_text.rfind("}")
-            if end_brace != -1 and end_brace > start_brace:
-                return (
-                    prompt_text[:start_brace]
-                    + schema_str
-                    + prompt_text[end_brace + 1 :]
-                )
-        # Fallback: append schema after the marker
-        return prompt_text + "\n" + schema_str
-
-    # Fallback: append a full section
-    return prompt_text + "\n\nThe JSON schema:\n" + schema_str
 
 
 def encode_image_to_data_url(image_path: Path) -> str:
@@ -239,16 +206,35 @@ def create_batch_request_line(
     Tuple[str, Dict[str, Any]]
         (json_line_for_api, local_metadata_record)
     """
-    # Load system prompt
-    if system_prompt_path is None:
-        system_prompt_path = Path("system_prompt/system_prompt.txt")
+    # Resolve prompt/schema paths with PROJECT_ROOT defaults and optional overrides
+    if system_prompt_path is None or schema_path is None:
+        try:
+            cfg = ConfigLoader()
+            cfg.load_configs()
+            pcfg = cfg.get_paths_config()
+            general = pcfg.get("general", {})
+        except Exception:
+            general = {}
+
+        if system_prompt_path is None:
+            override_prompt = general.get("transcription_prompt_path")
+            system_prompt_path = (
+                Path(override_prompt)
+                if override_prompt
+                else (PROJECT_ROOT / "system_prompt" / "system_prompt.txt")
+            )
+        if schema_path is None:
+            override_schema = general.get("transcription_schema_path")
+            schema_path = (
+                Path(override_schema)
+                if override_schema
+                else (PROJECT_ROOT / "schemas" / "transcription_schema.json")
+            )
+
     if not system_prompt_path.exists():
         raise FileNotFoundError(f"System prompt not found at {system_prompt_path}")
     system_prompt = system_prompt_path.read_text(encoding="utf-8").strip()
 
-    # Load transcription schema
-    if schema_path is None:
-        schema_path = Path("schemas/transcription_schema.json")
     if not schema_path.exists():
         raise FileNotFoundError(f"Schema file not found at {schema_path}")
     with schema_path.open("r", encoding="utf-8") as sfile:
@@ -273,13 +259,13 @@ def create_batch_request_line(
     except Exception:
         inject_schema_into_prompt = True
     if inject_schema_into_prompt:
-        system_prompt = _render_prompt_with_schema(system_prompt, loaded_schema)
+        system_prompt = render_prompt_with_schema(system_prompt, loaded_schema)
 
     # Load image processing config for llm_detail
     try:
         cfg = ConfigLoader()
         cfg.load_configs()
-        image_cfg = cfg.get_image_processing_config().get("image_processing", {})
+        image_cfg = cfg.get_image_processing_config().get("api_image_processing", {})
         raw_detail = str(image_cfg.get("llm_detail", "high")).lower().strip()
         llm_detail: Optional[str]
         if raw_detail in ("low", "high"):

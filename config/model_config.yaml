@@ -6,7 +6,7 @@ transcription_model:
   reasoning:                 # GPT-5-series and o3, o3-mini, o1, o1-mini, and o4-mini only.
   # We recommend using gpt-5-mini with high reasoning effort and medium verbosity
   # for a good balance of cost and quality.
-    effort: high
+    effort: medium
   text:                      # GPT-5-series only
     verbosity: medium
   # classic sampler controls are used only for non-reasoning models like GPT-4o/4.1

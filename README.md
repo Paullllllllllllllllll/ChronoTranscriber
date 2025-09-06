@@ -34,7 +34,11 @@ The project reads three YAML files from `config/`:
   - `file_paths` for `PDFs` and `Images` (separate `input`/`output`).  
   - `allow_relative_paths` with `base_directory`.  
   - `input_paths_is_output_path` to co-locate results.  
-  - `keep_preprocessed_images`, `retain_temporary_jsonl`, `logs_dir`.
+  - `keep_preprocessed_images`, `retain_temporary_jsonl`, `logs_dir`.  
+  - Optional overrides for prompt/schema:  
+    - `transcription_prompt_path`: path to `system_prompt.txt` (absolute or relative to `base_directory` when `allow_relative_paths: true`).  
+    - `transcription_schema_path`: path to the transcription JSON Schema (absolute or relative as above).  
+    If unspecified, defaults are resolved relative to the repository root: `system_prompt/system_prompt.txt` and `schemas/transcription_schema.json`.
 
 ---
 
@@ -76,7 +80,7 @@ Chrono Transcriber can submit large image sets as OpenAI **Batches** against the
 - **How it works**  
   - Images are base64-encoded as `data:` URLs and paired with a **system prompt** containing your JSON Schema (injected automatically).  
   - Requests are chunked, size-aware (≤150 MB per part to allow headroom under the 180 MB limit), and tagged with stable `custom_id`s and per-image metadata (image name, page number, order index).  
-  - After submission, the tool writes a local **`batch_submission_debug.json`** (count of batches and their IDs) to support “lost batch id” recovery.
+  - After submission, the tool writes a local debug artifact next to the job’s temp JSONL: **`<job>_batch_submission_debug.json`** containing the batch IDs, image count, chunk size, and timestamp. The checker can use this to repair missing batch IDs without resubmission.
 
 - **Monitoring & finalisation**  
   - Run `check_batches.py` to poll status for all temp JSONL files, diagnose failures, and download results when **all** batches of a source are complete.  
@@ -120,7 +124,7 @@ Chrono Transcriber can submit large image sets as OpenAI **Batches** against the
 ## Utilities
 
 - **`check_batches.py`**: scans for temp JSONL files, repairs missing batch IDs using `batch_submission_debug.json`, diagnoses API/model issues, downloads results, and merges them in the right order before (optionally) cleaning up.  
-- **`cancel_batches.py`**: lists batches, shows a summary, and cancels all non-terminal jobs; terminal ones are skipped with a report.
+- **`cancel_batches.py`**: lists batches with robust pagination, shows a summary (skipping terminal ones: completed/expired/cancelled/failed), and cancels all non-terminal jobs; terminal ones are skipped with a report.
 
 ---
 

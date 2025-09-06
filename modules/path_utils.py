@@ -39,6 +39,13 @@ def validate_paths(paths_config: Dict[str, Any]) -> None:
 			f"[ERROR] The 'transcription_prompt_path' path '{prompt_path}' is not absolute. Please use an absolute path or enable allow_relative_paths in paths_config.yaml.")
 		error_found = True
 
+	# Validate transcription_schema_path if present
+	schema_path = general.get("transcription_schema_path")
+	if schema_path and not Path(schema_path).is_absolute():
+		console_print(
+			f"[ERROR] The 'transcription_schema_path' path '{schema_path}' is not absolute. Please use an absolute path or enable allow_relative_paths in paths_config.yaml.")
+		error_found = True
+
 	# Validate file paths for PDFs and Images
 	file_paths = paths_config.get("file_paths", {})
 	for category in ["PDFs", "Images"]:

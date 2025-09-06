@@ -209,6 +209,31 @@ class ConfigLoader:
                     else (PROJECT_ROOT / abs_p).resolve()
                 )
 
+        # Optional overrides: transcription_prompt_path, transcription_schema_path
+        prompt_path_raw = general.get("transcription_prompt_path")
+        if prompt_path_raw:
+            if allow_rel:
+                general["transcription_prompt_path"] = self._to_abs(prompt_path_raw, base_path)
+            else:
+                abs_p = _expand_path_str(str(prompt_path_raw))
+                general["transcription_prompt_path"] = str(
+                    abs_p.resolve()
+                    if abs_p.is_absolute()
+                    else (PROJECT_ROOT / abs_p).resolve()
+                )
+
+        schema_path_raw = general.get("transcription_schema_path")
+        if schema_path_raw:
+            if allow_rel:
+                general["transcription_schema_path"] = self._to_abs(schema_path_raw, base_path)
+            else:
+                abs_p = _expand_path_str(str(schema_path_raw))
+                general["transcription_schema_path"] = str(
+                    abs_p.resolve()
+                    if abs_p.is_absolute()
+                    else (PROJECT_ROOT / abs_p).resolve()
+                )
+
         # reflect resolved base_directory (as absolute)
         general["base_directory"] = str(base_path)
         out["general"] = general

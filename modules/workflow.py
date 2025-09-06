@@ -309,6 +309,21 @@ class WorkflowManager:
                 except Exception as e:
                     logger.warning("Post-submission logging failed for %s: %s", pdf_path.name, e)
 
+                # Write batch submission debug artifact (best-effort)
+                try:
+                    debug_payload = {
+                        "source": pdf_path.name,
+                        "submitted_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        "expected_batches": int(expected_batches),
+                        "batch_ids": [getattr(r, 'id', None) for r in batch_responses if getattr(r, 'id', None)],
+                        "total_images": int(total_images),
+                        "chunk_size": int(chunk_size),
+                    }
+                    debug_path = parent_folder / f"{pdf_path.stem}_batch_submission_debug.json"
+                    debug_path.write_text(json.dumps(debug_payload, indent=2), encoding='utf-8')
+                except Exception as e:
+                    logger.warning("Failed to write batch submission debug artifact for %s: %s", pdf_path.name, e)
+
                 # Mark submitted in session (best-effort)
                 try:
                     async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as f:
@@ -419,9 +434,14 @@ class WorkflowManager:
             )
             console_print(
                 f"[INFO] Batch telemetry -> images={total_images}, chunk_size={chunk_size}, expected_batch_files={expected_batches}")
-
             console_print(
                 f"[INFO] Submitting batch job for {total_images} images...")
+            # Early marker to standardize with PDF flow
+            try:
+                async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as f:
+                    await f.write(json.dumps({"batch_session": {"status": "submitting"}}) + "\n")
+            except Exception:
+                logger.warning("Could not write early batch_session marker (folder)")
 
             # Record image metadata in the JSONL file before batch submission
             try:
@@ -475,6 +495,21 @@ class WorkflowManager:
                             await f.write(json.dumps(tracking_record) + "\n")
                 except Exception as e:
                     logger.warning("Post-submission logging failed for folder %s: %s", folder.name, e)
+
+                # Write batch submission debug artifact (best-effort)
+                try:
+                    debug_payload = {
+                        "source": folder.name,
+                        "submitted_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        "expected_batches": int(expected_batches),
+                        "batch_ids": [getattr(r, 'id', None) for r in batch_responses if getattr(r, 'id', None)],
+                        "total_images": int(total_images),
+                        "chunk_size": int(chunk_size),
+                    }
+                    debug_path = parent_folder / f"{folder.name}_batch_submission_debug.json"
+                    debug_path.write_text(json.dumps(debug_payload, indent=2), encoding='utf-8')
+                except Exception as e:
+                    logger.warning("Failed to write batch submission debug artifact for folder %s: %s", folder.name, e)
 
                 # Mark submitted in session (best-effort)
                 try:

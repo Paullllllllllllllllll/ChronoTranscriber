@@ -14,9 +14,10 @@ import aiofiles
 import aiohttp
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-from modules.config_loader import ConfigLoader
+from modules.config_loader import ConfigLoader, PROJECT_ROOT
 from modules.model_capabilities import Capabilities, detect_capabilities
 from modules.structured_outputs import build_structured_text_format
+from modules.prompt_utils import render_prompt_with_schema
 
 logger = logging.getLogger(__name__)
 
@@ -280,7 +281,6 @@ class OpenAIExtractor:
             retry_if_exception_type(TransientOpenAIError)
             | retry_if_exception_type(aiohttp.ClientError)
             | retry_if_exception_type(asyncio.TimeoutError)
-            | retry_if_exception_type(asyncio.CancelledError)
         ),
     )
     async def process_image(
@@ -420,10 +420,21 @@ class OpenAITranscriber:
             # Fallback to model capability default if misconfigured
             self.llm_detail = "auto"
 
-        # Load system prompt & schema from fixed paths
-        root_dir = Path(__file__).resolve().parent.parent
-        self.system_prompt_path = root_dir / "system_prompt" / "system_prompt.txt"
-        self.schema_path = root_dir / "schemas" / "transcription_schema.json"
+        # Resolve prompt/schema with PROJECT_ROOT defaults and optional overrides
+        pcfg = cfg.get_paths_config()
+        general = pcfg.get("general", {})
+        override_prompt = general.get("transcription_prompt_path")
+        override_schema = general.get("transcription_schema_path")
+        self.system_prompt_path = (
+            Path(override_prompt)
+            if override_prompt
+            else (PROJECT_ROOT / "system_prompt" / "system_prompt.txt")
+        )
+        self.schema_path = (
+            Path(override_schema)
+            if override_schema
+            else (PROJECT_ROOT / "schemas" / "transcription_schema.json")
+        )
 
         if not self.system_prompt_path.exists():
             raise FileNotFoundError(f"System prompt missing: {self.system_prompt_path}")
@@ -445,49 +456,10 @@ class OpenAITranscriber:
                 self.transcription_schema = loaded_schema
 
         # Render system prompt with current schema content
-        self.system_prompt_text = self._render_prompt_with_schema(
-            raw_prompt, full_schema_obj
-        )
+        self.system_prompt_text = render_prompt_with_schema(raw_prompt, full_schema_obj)
 
     async def close(self) -> None:
         await self.extractor.close()
-
-    @staticmethod
-    def _render_prompt_with_schema(
-        prompt_text: str, schema_obj: Dict[str, Any]
-    ) -> str:
-        """
-        Render the system prompt with the latest schema content injected.
-        Supports a placeholder token "{{TRANSCRIPTION_SCHEMA}}" or replaces
-        any JSON block that follows the marker line "The JSON schema:".
-        """
-        try:
-            schema_str = json.dumps(schema_obj, indent=2, ensure_ascii=False)
-        except Exception:
-            schema_str = str(schema_obj)
-
-        token = "{{TRANSCRIPTION_SCHEMA}}"
-        if token in prompt_text:
-            return prompt_text.replace(token, schema_str)
-
-        marker = "The JSON schema:"
-        if marker in prompt_text:
-            idx = prompt_text.find(marker)
-            start_brace = prompt_text.find("{", idx)
-            if start_brace != -1:
-                # Try to find a matching closing brace after the start
-                end_brace = prompt_text.rfind("}")
-                if end_brace != -1 and end_brace > start_brace:
-                    return (
-                        prompt_text[:start_brace]
-                        + schema_str
-                        + prompt_text[end_brace + 1 :]
-                    )
-            # Fallback: append schema after the marker
-            return prompt_text + "\n" + schema_str
-
-        # Fallback: append schema section at the end
-        return prompt_text + "\n\nThe JSON schema:\n" + schema_str
 
     @staticmethod
     async def _encode_image_to_data_url(image_path: Path, mime_type: str) -> str:
@@ -506,7 +478,6 @@ class OpenAITranscriber:
             retry_if_exception_type(TransientOpenAIError)
             | retry_if_exception_type(aiohttp.ClientError)
             | retry_if_exception_type(asyncio.TimeoutError)
-            | retry_if_exception_type(asyncio.CancelledError)
         ),
     )
     async def transcribe_image(self, image_path: Path) -> Dict[str, Any]:

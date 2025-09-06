@@ -382,18 +382,7 @@ async def _repair_sync_mode(
 
     repairs_dir = job.parent_folder / "repairs"
     repairs_dir.mkdir(parents=True, exist_ok=True)
-
-    _write_repair_jsonl_line(
-        repair_jsonl_path,
-        {
-            "repair_session": {
-                "identifier": job.identifier,
-                "mode": "synchronous",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "targets": len(targets),
-            }
-        },
-    )
+    # Do not write a duplicate repair_session marker here; already recorded above.
 
     async with open_transcriber(api_key=api_key, model=model_name) as trans:
         write_lock = asyncio.Lock()

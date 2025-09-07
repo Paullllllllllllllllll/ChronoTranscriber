@@ -30,6 +30,15 @@ class ImageEntry:
     page_number: Optional[int] = None
 
 
+@dataclass
+class Job:
+    parent_folder: Path
+    identifier: str
+    final_txt_path: Path
+    temp_jsonl_path: Optional[Path]
+    kind: str  # "PDF" or "Images"
+
+
 def extract_image_name_from_failure_line(line: str) -> Optional[str]:
     """
     Extract the image file name from a placeholder line such as:
@@ -167,3 +176,49 @@ def backup_file(path: Path) -> Path:
 def write_repair_jsonl_line(path: Path, record: Dict[str, Any]) -> None:
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record) + "\n")
+
+
+def discover_jobs(paths_config: Dict[str, Any]) -> List[Job]:
+    """
+    Discover repairable jobs by scanning the configured output folders for
+    *_transcription.txt files and locating their corresponding temporary JSONL.
+
+    Returns a list of Job records sorted by parent folder path.
+    """
+    jobs: List[Job] = []
+
+    def scan_root(root: Optional[str], kind: str) -> None:
+        if not root:
+            return
+        root_path = Path(root)
+        if not root_path.exists():
+            return
+        for p in root_path.rglob("*_transcription.txt"):
+            parent = p.parent
+            identifier = p.stem.replace("_transcription", "").strip()
+            temp = parent / f"{identifier}_transcription.jsonl"
+            jobs.append(
+                Job(
+                    parent_folder=parent,
+                    identifier=identifier,
+                    final_txt_path=p,
+                    temp_jsonl_path=temp if temp.exists() else None,
+                    kind=kind,
+                )
+            )
+
+    file_paths = paths_config.get("file_paths", {})
+    pdf_out = file_paths.get("PDFs", {}).get("output", None)
+    img_out = file_paths.get("Images", {}).get("output", None)
+    scan_root(pdf_out, "PDF")
+    scan_root(img_out, "Images")
+    jobs.sort(key=lambda j: str(j.parent_folder))
+    return jobs
+
+
+def read_final_lines(final_txt_path: Path) -> List[str]:
+    """
+    Read a final transcription file and return its lines without trailing newlines.
+    """
+    content = final_txt_path.read_text(encoding="utf-8")
+    return content.splitlines()

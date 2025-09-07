@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import re
 import sys
 import time
 from dataclasses import dataclass
@@ -37,6 +36,8 @@ from openai import OpenAI
 
 # Centralized repair helpers (delegate wrappers below)
 from modules.repair_utils import (
+    Job,
+    ImageEntry,
     extract_image_name_from_failure_line as ru_extract_image_name_from_failure_line,
     is_failure_line as ru_is_failure_line,
     collect_image_entries_from_jsonl as ru_collect_image_entries_from_jsonl,
@@ -44,27 +45,14 @@ from modules.repair_utils import (
     resolve_image_path as ru_resolve_image_path,
     backup_file as ru_backup_file,
     write_repair_jsonl_line as ru_write_repair_jsonl_line,
+    discover_jobs as ru_discover_jobs,
+    read_final_lines as ru_read_final_lines,
 )
 
 logger = setup_logger(__name__)
 
 
-@dataclass
-class Job:
-    parent_folder: Path
-    identifier: str
-    final_txt_path: Path
-    temp_jsonl_path: Optional[Path]
-    kind: str  # "PDF" or "Images"
-
-
-@dataclass
-class ImageEntry:
-    order_index: int
-    image_name: str
-    pre_processed_image: Optional[str]
-    custom_id: Optional[str]
-    page_number: Optional[int] = None
+# Using Job and ImageEntry from modules.repair_utils
 
 
 @dataclass
@@ -76,12 +64,7 @@ class RepairTarget:
     line_index: int
 
 
-# Fixed regex: ensure trailing ']' and remove stray literal '$'
-FAILURE_PATTERNS = [
-    re.compile(r"^\[transcription error:\s*.+\]$", re.IGNORECASE),
-    re.compile(r"^\[Transcription not possible.*\]$", re.IGNORECASE),
-]
-NO_TEXT_PATTERN = re.compile(r"^\[No transcribable text.*\]$", re.IGNORECASE)
+# Failure patterns centralized in modules.repair_utils
 
 
 def _extract_image_name_from_failure_line(line: str) -> Optional[str]:
@@ -98,40 +81,11 @@ def _load_configs() -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
 
 
 def _discover_jobs(paths_config: Dict[str, Any]) -> List[Job]:
-    jobs: List[Job] = []
-
-    def scan_root(root: Optional[str], kind: str) -> None:
-        if not root:
-            return
-        root_path = Path(root)
-        if not root_path.exists():
-            return
-        for p in root_path.rglob("*_transcription.txt"):
-            parent = p.parent
-            identifier = p.stem.replace("_transcription", "").strip()
-            temp = parent / f"{identifier}_transcription.jsonl"
-            jobs.append(
-                Job(
-                    parent_folder=parent,
-                    identifier=identifier,
-                    final_txt_path=p,
-                    temp_jsonl_path=temp if temp.exists() else None,
-                    kind=kind,
-                )
-            )
-
-    pdf_out = paths_config.get("file_paths", {}).get("PDFs", {}).get("output", None)
-    img_out = paths_config.get("file_paths", {}).get("Images", {}).get("output", None)
-    scan_root(pdf_out, "PDF")
-    scan_root(img_out, "Images")
-    jobs.sort(key=lambda j: str(j.parent_folder))
-    return jobs
+    return ru_discover_jobs(paths_config)
 
 
 def _read_final_lines(final_txt_path: Path) -> List[str]:
-    content = final_txt_path.read_text(encoding="utf-8")
-    lines = content.splitlines()
-    return lines
+    return ru_read_final_lines(final_txt_path)
 
 
 def _is_failure_line(line: str) -> bool:

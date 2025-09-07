@@ -1,9 +1,11 @@
 # modules/pdf_utils.py
 
+from __future__ import annotations
+
 import logging
 import hashlib
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict, Any
 import fitz
 import asyncio
 from PIL import Image
@@ -251,7 +253,7 @@ class PDFProcessor:
 
     @staticmethod
     def _process_single_page_tesseract(pdf_path: Path, page_index: int, target_dpi: int,
-                                       out_path: Path, tess_cfg: Dict, embed_dpi: bool) -> bool:
+                                       out_path: Path, tess_cfg: Dict[str, Any], embed_dpi: bool) -> bool:
         """
         Thread worker: open PDF, render a single page, preprocess for Tesseract, and write output.
         Returns True on success.

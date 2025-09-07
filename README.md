@@ -137,10 +137,22 @@ Chrono Transcriber can submit large image sets as OpenAI **Batches** against the
 
 ---
 
+## Operations Layer
+
+Chrono Transcriber now separates orchestration logic from CLI entry points:
+
+- High-level operations live under `modules/operations/` (e.g., `batch_check.py`, `repair.py`).
+- Entry scripts in `main/` (e.g., `check_batches.py`, `repair_transcriptions.py`) are thin CLIs that delegate to these modules.
+
+This refactor improves testability, modularity, and maintainability without changing how you run the tools.
+
+---
+
 ## Utilities
 
 - **`check_batches.py`**: scans for temp JSONL files, repairs missing batch IDs using `batch_submission_debug.json`, diagnoses API/model issues, downloads results, and merges them in the right order before (optionally) cleaning up.  
 - **`cancel_batches.py`**: lists batches with robust pagination, shows a summary (skipping terminal ones: completed/expired/cancelled/failed), and cancels all non-terminal jobs; terminal ones are skipped with a report.
+ - **`repair_transcriptions.py`**: guides an interactive repair workflow for failed or placeholder transcriptions (e.g., `[transcription error: ...]`, `[No transcribable text]`, `[Transcription not possible]`). Supports synchronous (Responses API) and batched repair. Writes `repairs/<identifier>_temporary_repair.jsonl` and safely patches the final transcription text. This entry script is a thin CLI that delegates to `modules/operations/repair.py`.
 
 ---
 

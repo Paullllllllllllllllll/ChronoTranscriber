@@ -1,5 +1,7 @@
 # modules/image_utils.py
 
+from __future__ import annotations
+
 import shutil
 from PIL import Image, ImageOps
 from pathlib import Path

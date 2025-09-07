@@ -7,3 +7,9 @@ organized for reusability and testability. The entry-point scripts in
 
 from .batch_check import process_all_batches, run_batch_finalization
 from .repair import main as repair_main
+
+__all__ = [
+    "process_all_batches",
+    "run_batch_finalization",
+    "repair_main",
+]

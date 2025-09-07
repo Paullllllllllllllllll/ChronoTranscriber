@@ -139,6 +139,26 @@ class UserPrompt:
             console_print("[ERROR] Invalid selection. Please try again.")
 
     @staticmethod
+    def prompt_choice(prompt: str, options: List[Tuple[str, str]], allow_quit: bool = True) -> str:
+        """
+        Display a simple numbered menu and return the selected option value.
+        This mirrors the legacy _prompt_choice used in repair scripts.
+        """
+        console_print(f"\n{prompt}")
+        console_print("-" * 80)
+        for i, (_, desc) in enumerate(options, 1):
+            console_print(f"  {i}. {desc}")
+        if allow_quit:
+            console_print("\n(Type 'q' to exit)")
+        while True:
+            val = safe_input("Enter your choice: ").strip()
+            if allow_quit:
+                check_exit(val)
+            if val.isdigit() and 1 <= int(val) <= len(options):
+                return options[int(val) - 1][0]
+            console_print("[ERROR] Invalid selection. Try again.")
+
+    @staticmethod
     def select_option(prompt: str, options: List[str]) -> str:
         console_print(prompt)
         for idx, option in enumerate(options, 1):

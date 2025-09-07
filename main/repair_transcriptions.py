@@ -30,6 +30,7 @@ from modules.text_processing import extract_transcribed_text
 from modules.openai_utils import open_transcriber
 from modules.concurrency import run_concurrent_transcription_tasks
 from modules.openai_sdk_utils import sdk_to_dict, coerce_file_id
+from modules.ui.core import UserPrompt
 
 # Use the official OpenAI SDK directly for batch status and files
 from openai import OpenAI
@@ -110,18 +111,6 @@ def _resolve_image_path(parent_folder: Path, entry: ImageEntry) -> Optional[Path
     return ru_resolve_image_path(parent_folder, entry)
 
 
-def _prompt_choice(prompt: str, options: List[Tuple[str, str]]) -> str:
-    console_print(f"\n{prompt}")
-    console_print("-" * 80)
-    for i, (_, desc) in enumerate(options, 1):
-        console_print(f"  {i}. {desc}")
-    console_print("\n(Type 'q' to exit)")
-    while True:
-        val = safe_input("Enter your choice: ").strip()
-        check_exit(val)
-        if val.isdigit() and 1 <= int(val) <= len(options):
-            return options[int(val) - 1][0]
-        console_print("[ERROR] Invalid selection. Try again.")
 
 
 def _backup_file(path: Path) -> Path:
@@ -612,21 +601,13 @@ async def main() -> None:
         console_print("[INFO] No completed transcription jobs found.")
         return
 
-    console_print("\nSelect a transcription to repair:")
-    for i, j in enumerate(jobs, 1):
-        console_print(f"  {i}. [{j.kind}] {j.parent_folder.name} -> {j.final_txt_path.name}")
-    console_print("\n(Type 'q' to exit)")
-
-    job_sel = None
-    while job_sel is None:
-        s = safe_input("Enter your choice: ").strip()
-        check_exit(s)
-        if s.isdigit():
-            k = int(s)
-            if 1 <= k <= len(jobs):
-                job_sel = jobs[k - 1]
-                break
-        console_print("[ERROR] Invalid selection. Try again.")
+    # Build options and delegate selection to centralized UI helper
+    job_options: List[Tuple[str, str]] = []
+    for idx, j in enumerate(jobs, 1):
+        desc = f"[{j.kind}] {j.parent_folder.name} -> {j.final_txt_path.name}"
+        job_options.append((str(idx), desc))
+    selected_idx = UserPrompt.prompt_choice("Select a transcription to repair:", job_options)
+    job_sel = jobs[int(selected_idx) - 1]
 
     image_entries = _collect_image_entries_from_jsonl(job_sel.temp_jsonl_path)
     if not image_entries:
@@ -639,7 +620,7 @@ async def main() -> None:
 
     console_print("\nWhich failure classes should be included for repair?")
     include_no_text = (
-        _prompt_choice(
+        UserPrompt.prompt_choice(
             "Include '[No transcribable text]' lines in repair set?",
             [("y", "Yes"), ("n", "No")],
         )
@@ -655,7 +636,7 @@ async def main() -> None:
     console_print("First 10 indices: " + ", ".join(map(str, failure_indices[:10])))
 
     use_all = (
-        _prompt_choice(
+        UserPrompt.prompt_choice(
             "Repair all detected lines, or select a subset?",
             [("all", "Repair all detected failures"), ("subset", "Select a subset by indices")],
         )
@@ -679,7 +660,7 @@ async def main() -> None:
             except Exception:
                 console_print("[ERROR] Invalid format. Try again.")
 
-    mode = _prompt_choice(
+    mode = UserPrompt.prompt_choice(
         "Choose repair mode",
         [
             ("sync", "Non-batched (synchronous) repair via OpenAI Responses API"),

@@ -1,28 +1,23 @@
-# repair_transcriptions.py
-# Guided "repair" workflow for failed OpenAI OCR transcriptions (sync and batch).
-# Creates repairs/<identifier>_temporary_repair.jsonl with either direct API
-# responses (sync) or batch-tracking records (batch). Replaces only failed lines
-# in the existing final _transcription.txt, preserving order and backing up the
-# original file.
+"""Repair operations for failed or placeholder transcriptions.
+
+This module encapsulates the interactive repair workflow previously embedded in
+`main/repair_transcriptions.py`. It keeps a clean separation of orchestration
+logic from the CLI entry point so it can be imported and tested.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import os
-import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-# Ensure repo root is on path (mirrors unified_transcriber pattern)
-repo_root = str(Path(__file__).resolve().parents[1])
-if repo_root not in sys.path:
-    sys.path.insert(0, repo_root)
+from openai import OpenAI
 
-# Repo modules
 from modules.logger import setup_logger
 from modules.config_loader import ConfigLoader
 from modules.utils import console_print, safe_input, check_exit
@@ -31,12 +26,8 @@ from modules.openai_utils import open_transcriber
 from modules.concurrency import run_concurrent_transcription_tasks
 from modules.openai_sdk_utils import sdk_to_dict, coerce_file_id
 from modules.ui.core import UserPrompt
-from modules.operations import repair as repair_ops
 
-# Use the official OpenAI SDK directly for batch status and files
-from openai import OpenAI
-
-# Centralized repair helpers (delegate wrappers below)
+# Centralized repair helpers
 from modules.repair_utils import (
     Job,
     ImageEntry,
@@ -110,7 +101,6 @@ def _find_failure_indices(
 
 def _resolve_image_path(parent_folder: Path, entry: ImageEntry) -> Optional[Path]:
     return ru_resolve_image_path(parent_folder, entry)
-
 
 
 
@@ -579,7 +569,6 @@ async def _repair_batch_mode(
     backup = _backup_file(job.final_txt_path)
     job.final_txt_path.write_text("\n".join(final_lines), encoding="utf-8")
 
-    # No explicit status summary here (optional to add)
     console_print(
         f"[SUCCESS] Batch repair complete for '{job.identifier}'. "
         f"Backup written to: {backup.name}"
@@ -587,6 +576,13 @@ async def _repair_batch_mode(
 
 
 async def main() -> None:
+    """Interactive repair workflow entrypoint.
+
+    - Discovers completed jobs by scanning configured output folders.
+    - Lets the user select which transcription to repair.
+    - Identifies failed lines (and optionally "no text" lines).
+    - Performs either synchronous or batched repair and updates the final file.
+    """
     console_print("\n" + "=" * 80)
     console_print("  REPAIR TRANSCRIPTIONS")
     console_print("=" * 80)
@@ -698,16 +694,3 @@ async def main() -> None:
     console_print(
         f"[INFO] Repair log: {repair_jsonl_path.relative_to(job_sel.parent_folder)}"
     )
-
-
-if __name__ == "__main__":
-    try:
-        # Delegate to centralized operations module
-        asyncio.run(repair_ops.main())
-    except KeyboardInterrupt:
-        console_print("\n[INFO] Repair interrupted by user.")
-        sys.exit(0)
-    except Exception as e:
-        logger.exception("Unexpected error in repair_transcriptions: %s", e)
-        console_print(f"[ERROR] Unexpected error: {e}")
-        sys.exit(1)

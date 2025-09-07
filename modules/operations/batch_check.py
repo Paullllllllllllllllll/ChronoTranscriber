@@ -1,46 +1,44 @@
-# check_batches.py
+"""Batch finalization operations.
+
+This module encapsulates the logic to scan local JSONL artifacts, verify that
+all OpenAI Batch jobs are completed, download their results, merge outputs in
+page order, and write final transcription files. It keeps side-effectful UI
+printing and logging, but is importable by tests and thin CLIs.
 """
-Script to check whether batch jobs have finished successfully (i.e.,
-are marked as completed) and—if so—to download and process them.
-Temporary .jsonl files and image folders will only be deleted if the final
-output is successfully written and all batches in a JSONL file are completed.
-"""
+
+from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
-from typing import Tuple, Dict, Any, List, Set, Optional, Iterable
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from datetime import datetime, timezone
 
 from openai import OpenAI
-from modules.config_loader import ConfigLoader
-from modules.logger import setup_logger
-from modules.text_processing import process_batch_output, extract_transcribed_text
-from modules.path_utils import validate_paths
-from modules.utils import console_print
-from modules.ui.core import UserPrompt
-from modules.openai_sdk_utils import (
-    sdk_to_dict,
-    list_all_batches,
-    coerce_file_id,
-)
 
 from modules.batch_utils import diagnose_batch_failure, extract_custom_id_mapping
-from modules.operations.batch_check import run_batch_finalization
+from modules.config_loader import ConfigLoader
+from modules.logger import setup_logger
+from modules.openai_sdk_utils import coerce_file_id, list_all_batches, sdk_to_dict
+from modules.path_utils import validate_paths
+from modules.text_processing import extract_transcribed_text, process_batch_output
+from modules.ui.core import UserPrompt
+from modules.utils import console_print
 
 logger = setup_logger(__name__)
 
 
 def load_config() -> Tuple[List[Path], Dict[str, Any]]:
-    """
-    Load and parse configuration YAML files. Identify directories to scan and
-    retrieve general processing settings (e.g., concurrency limits, keep_raw_images flag).
+    """Load YAML configuration and return (scan_dirs, processing_settings).
+
+    - Ensures file paths exist (creates input/output directories on demand)
+    - Validates configured paths
     """
     config_loader = ConfigLoader()
     config_loader.load_configs()
     paths_config = config_loader.get_paths_config()
 
-    # Add path validation with the new function
+    # Validate configured paths
     validate_paths(paths_config)
 
     processing_settings = paths_config.get("general", {})
@@ -58,28 +56,14 @@ def load_config() -> Tuple[List[Path], Dict[str, Any]]:
     return scan_dirs, processing_settings
 
 
-def diagnose_batch_failure(batch_id: str, client: OpenAI) -> str:
-    # Delegated to centralized utility in modules.batch_utils
-    from modules.batch_utils import diagnose_batch_failure as _diag
-    return _diag(batch_id, client)
-
-
-def extract_custom_id_mapping(
-    temp_file: Path,
-) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, int]]:
-    # Delegated to centralized utility in modules.batch_utils
-    from modules.batch_utils import extract_custom_id_mapping as _extract
-    return _extract(temp_file)
-
-
 def process_all_batches(
     root_folder: Path, processing_settings: Dict[str, Any], client: OpenAI
 ) -> None:
-    """
-    Scans the root folder for *_transcription.jsonl files, locates batch IDs
-    within those files, checks if ALL batches for a file are completed, and if so,
-    downloads the results and writes them to a final text file while preserving
-    the original image order.
+    """Finalize all completed batch jobs for a given root folder.
+
+    Scans for ``*_transcription.jsonl`` files, retrieves batch summaries,
+    safeguards ordering using custom_id metadata, and writes a final
+    ``*_transcription.txt`` when all parts are available.
     """
     console_print(
         f"\n[INFO] Scanning directory '{root_folder}' for temporary batch files..."
@@ -94,7 +78,6 @@ def process_all_batches(
     console_print("[INFO] Retrieving list of submitted batches from OpenAI...")
     try:
         batches = list_all_batches(client)
-        # Create a dictionary of batch ID to batch object for faster lookup
         batch_dict: Dict[str, Dict[str, Any]] = {
             b.get("id"): b for b in batches if isinstance(b, dict) and b.get("id")
         }
@@ -108,9 +91,7 @@ def process_all_batches(
 
     # Process each temporary file
     for temp_file in temp_files:
-        # Derive a human-readable identifier for this job
         identifier = temp_file.stem.replace("_transcription", "")
-        # Extract all batch IDs from this temporary file
         batch_ids: Set[str] = set()
 
         # Track markers to distinguish batch vs non-batch JSONL
@@ -570,7 +551,6 @@ def process_all_batches(
                 transcriptions = process_batch_output(file_content)
 
                 # In fallback mode, we can't maintain page order reliably
-                # Just append in the order they come
                 for idx, transcription in enumerate(transcriptions):
                     all_transcriptions.append(
                         {"transcription": transcription, "fallback_index": idx}
@@ -611,7 +591,7 @@ def process_all_batches(
             )
 
             def get_sorting_key(transcription_entry):
-                """Returns a sorting key tuple for stable page ordering"""
+                """Return a sorting key tuple for stable page ordering."""
                 # 1) order_info attached during parsing (authoritative)
                 order_info = transcription_entry.get("order_info")
                 if order_info is not None:
@@ -671,7 +651,7 @@ def process_all_batches(
             try:
                 with final_txt_path.open("w", encoding="utf-8") as fout:
                     for text in ordered_transcriptions:
-                        if text:  # Only write non-empty transcriptions
+                        if text:
                             fout.write(text + "\n")
                 logger.info(
                     f"All batches for {temp_file.name} processed and saved to {final_txt_path}"
@@ -708,9 +688,7 @@ def process_all_batches(
 
 
 def diagnose_api_issues() -> None:
-    """
-    Provide diagnostics on common API issues.
-    """
+    """Print quick diagnostics for API key presence and SDK connectivity."""
     console_print("\n=== API Issue Diagnostics ===")
 
     # Check API key
@@ -726,7 +704,6 @@ def diagnose_api_issues() -> None:
         client = OpenAI()
         models_page = client.models.list()
         models_data: Iterable[Any] = getattr(models_page, "data", None) or []
-        has_gpt4o = any("gpt-4o" in (getattr(m, "id", "") or "") for m in models_data)
         total_models = len(list(models_data))
         console_print(f"[INFO] API Connection successful: {total_models} models available")
     except Exception as e:
@@ -741,14 +718,15 @@ def diagnose_api_issues() -> None:
         console_print(f"[ERROR] Batch API access failed: {e}")
 
 
-def main() -> None:
-    """
-    Entrypoint for checking all directories for batch outputs and finalizing them.
-    """
-    # Delegate to centralized operations module to perform diagnostics,
-    # scan directories, and finalize batch outputs.
-    run_batch_finalization(run_diagnostics=True)
+def run_batch_finalization(run_diagnostics: bool = True) -> None:
+    """High-level entrypoint used by the CLI to finalize batch results."""
+    scan_dirs, processing_settings = load_config()
+    client = OpenAI()
 
+    if run_diagnostics:
+        diagnose_api_issues()
 
-if __name__ == "__main__":
-    main()
+    for directory in scan_dirs:
+        process_all_batches(directory, processing_settings, client)
+    console_print("\n[INFO] Batch results processing complete across all directories.")
+    logger.info("Batch results processing complete across all directories.")

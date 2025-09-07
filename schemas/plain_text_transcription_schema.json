@@ -18,7 +18,7 @@
       },
       "transcription_not_possible": {
         "type": "boolean",
-        "description": "True if and only if transcription is entirely impossible; otherwise, false."
+        "description": "True *if and only* if transcription is entirely impossible; otherwise, false."
       }
     },
     "required": [

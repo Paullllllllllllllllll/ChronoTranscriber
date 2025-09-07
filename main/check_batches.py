@@ -25,6 +25,8 @@ from modules.openai_sdk_utils import (
     coerce_file_id,
 )
 
+from modules.batch_utils import diagnose_batch_failure, extract_custom_id_mapping
+
 logger = setup_logger(__name__)
 
 
@@ -56,87 +58,17 @@ def load_config() -> Tuple[List[Path], Dict[str, Any]]:
 
 
 def diagnose_batch_failure(batch_id: str, client: OpenAI) -> str:
-    """
-    Attempts to diagnose why a batch might have failed.
-    Returns a diagnostic message.
-    """
-    try:
-        batch_obj = client.batches.retrieve(batch_id)
-        batch = sdk_to_dict(batch_obj)
-        status = str(batch.get("status", "")).lower()
-
-        if status == "failed":
-            return (
-                f"Batch {batch_id} failed. Check your OpenAI dashboard for "
-                f"specific error details."
-            )
-        elif status == "cancelled":
-            return f"Batch {batch_id} was cancelled."
-        elif status == "expired":
-            return f"Batch {batch_id} expired (not completed within 24 hours)."
-        else:
-            return f"Batch {batch_id} has status '{status}'."
-    except Exception as e:
-        error_message = str(e).lower()
-        if "not found" in error_message:
-            return (
-                f"Batch {batch_id} not found in OpenAI. It may have been deleted "
-                f"or belong to a different API key."
-            )
-        elif "unauthorized" in error_message:
-            return "API key unauthorized. Check your OpenAI API key permissions."
-        elif "quota" in error_message:
-            return "API quota exceeded. Check your usage limits."
-        else:
-            return f"Error checking batch {batch_id}: {e}"
+    # Delegated to centralized utility in modules.batch_utils
+    from modules.batch_utils import diagnose_batch_failure as _diag
+    return _diag(batch_id, client)
 
 
 def extract_custom_id_mapping(
     temp_file: Path,
 ) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, int]]:
-    """
-    Extract mapping between custom_ids and image information from the JSONL file.
-    Collects metadata from both batch_request entries and image_metadata entries.
-
-    Returns:
-        Tuple containing:
-        - Dict[str, Dict[str, Any]]: Mapping of custom_id to image information
-        - Dict[str, int]: Mapping of custom_id to order index
-    """
-    custom_id_map = {}
-    batch_order = {}
-
-    try:
-        with temp_file.open("r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    record = json.loads(line)
-
-                    # Process batch_request records from batching.py
-                    if "batch_request" in record:
-                        request_data = record["batch_request"]
-                        custom_id = request_data.get("custom_id")
-                        image_info = request_data.get("image_info", {})
-                        if custom_id and image_info:
-                            custom_id_map[custom_id] = image_info
-                            if "order_index" in image_info:
-                                batch_order[custom_id] = image_info["order_index"]
-
-                    # Process image_metadata records from workflow.py
-                    elif "image_metadata" in record:
-                        metadata = record["image_metadata"]
-                        custom_id = metadata.get("custom_id")
-                        if custom_id:
-                            custom_id_map[custom_id] = metadata
-                            if "order_index" in metadata:
-                                batch_order[custom_id] = metadata["order_index"]
-
-                except json.JSONDecodeError:
-                    continue
-    except Exception as e:
-        logger.error(f"Error extracting custom_id mapping from {temp_file}: {e}")
-
-    return custom_id_map, batch_order
+    # Delegated to centralized utility in modules.batch_utils
+    from modules.batch_utils import extract_custom_id_mapping as _extract
+    return _extract(temp_file)
 
 
 def process_all_batches(

@@ -25,7 +25,7 @@ if parent_dir not in sys.path:
 from modules.config_loader import ConfigLoader
 from modules.logger import setup_logger
 from modules.openai_utils import open_transcriber
-from modules.user_interface import UserPrompt, UserConfiguration
+from modules.ui.core import UserPrompt, UserConfiguration
 from modules.path_utils import validate_paths
 from modules.utils import console_print
 from modules.workflow import WorkflowManager

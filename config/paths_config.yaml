@@ -9,7 +9,8 @@ general:
 
 file_paths:
   PDFs:
-    input: 'C:\Users\pagoetz\Documents\Arbeit\Doktor\Forschung\Data\culinary_bibliographies\raw_pdfs'  # Input directory for PDFs
+    input: 'C:\Users\pagoetz\Documents\Arbeit\Doktor\Forschung\Data\culinary_bibliographies\raw_pdfs'
+    output: 'C:\Users\pagoetz\Documents\Arbeit\Doktor\Forschung\Data\culinary_bibliographies\transcribed_pdfs_gpt_5_mini'# Input directory for PDFs
   Images:
     input: 'C:\Users\pagoetz\Documents\Arbeit\Doktor\Forschung\Data\culinary_bibliographies\test_input'  # Input directory for image folders
     output: 'C:\Users\pagoetz\Documents\Arbeit\Doktor\Forschung\Data\culinary_bibliographies\test_output'  # Output directory for processed folders

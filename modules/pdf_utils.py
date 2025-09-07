@@ -330,33 +330,6 @@ class PDFProcessor:
             temp_jsonl_path.touch()
         return parent_folder, output_txt_path, temp_jsonl_path
 
-    def choose_transcription_method(self) -> Tuple[Dict[str, str], List[str]]:
-        """
-        Determines the valid transcription methods based on whether the PDF is native.
-
-        Returns:
-            Tuple[Dict[str, str], List[str]]: A tuple containing:
-              - valid_methods: A dictionary mapping user choices to method identifiers.
-              - method_options: A list of descriptive options to display.
-        """
-        valid_methods = {}
-        method_options = []
-
-        # If the PDF is native, method "1" = "native"
-        if self.is_native_pdf():
-            valid_methods["1"] = "native"
-            method_options.append("1. Native text extraction")
-
-        # Method "2" = Tesseract
-        valid_methods["2"] = "tesseract"
-        method_options.append("2. Tesseract")
-
-        # Method "3" = GPT
-        valid_methods["3"] = "gpt"
-        method_options.append("3. GPT")
-
-        return valid_methods, method_options
-
 
 def native_extract_pdf_text(pdf_path: Path) -> str:
     """

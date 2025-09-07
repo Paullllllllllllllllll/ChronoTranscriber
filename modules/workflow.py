@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
 
 from modules.logger import setup_logger
-from modules.user_interface import UserConfiguration
+from modules.ui.core import UserConfiguration
 from modules.pdf_utils import PDFProcessor, native_extract_pdf_text
 from modules.image_utils import ImageProcessor
 from modules.batching import get_batch_chunk_size

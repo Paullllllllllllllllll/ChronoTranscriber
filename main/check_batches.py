@@ -18,78 +18,14 @@ from modules.logger import setup_logger
 from modules.text_processing import process_batch_output, extract_transcribed_text
 from modules.path_utils import validate_paths
 from modules.utils import console_print
-from modules.user_interface import UserPrompt
+from modules.ui.core import UserPrompt
+from modules.openai_sdk_utils import (
+    sdk_to_dict,
+    list_all_batches,
+    coerce_file_id,
+)
 
 logger = setup_logger(__name__)
-
-
-def _sdk_to_dict(obj: Any) -> Dict[str, Any]:
-    """
-    Convert an OpenAI SDK object into a plain dict when possible.
-    Falls back to returning obj if it's already a dict.
-    """
-    if isinstance(obj, dict):
-        return obj
-    for attr in ("model_dump", "to_dict"):
-        fn = getattr(obj, attr, None)
-        if callable(fn):
-            try:
-                return fn()
-            except Exception:
-                pass
-    try:
-        j = getattr(obj, "json", None)
-        if callable(j):
-            return json.loads(j())
-    except Exception:
-        pass
-    # Last resort: best-effort attribute extraction
-    d = {}
-    for name in dir(obj):
-        if name.startswith("_"):
-            continue
-        try:
-            val = getattr(obj, name)
-            if not callable(val):
-                d[name] = val
-        except Exception:
-            pass
-    return d
-
-
-def _list_all_batches(client: Any) -> List[Dict[str, Any]]:
-    """
-    List all batches with robust pagination. Returns a list of dicts.
-    Prints pagination progress to the console.
-    """
-    batches: List[Dict[str, Any]] = []
-    after: Optional[str] = None
-    page_index = 0
-    while True:
-        page_index += 1
-        page = client.batches.list(limit=100, after=after) if after else client.batches.list(limit=100)
-        data = getattr(page, "data", None) or page
-        page_items = [_sdk_to_dict(b) for b in data]
-        batches.extend(page_items)
-        # Determine pagination flags
-        has_more = False
-        last_id = None
-        try:
-            has_more = bool(getattr(page, "has_more", False))
-            last_id = getattr(page, "last_id", None)
-        except Exception:
-            # Some SDK versions expose as dict
-            try:
-                has_more = bool(page.get("has_more", False))
-                last_id = page.get("last_id")
-            except Exception:
-                has_more = False
-                last_id = None
-        console_print(f"[INFO] Batches page {page_index}: fetched {len(page_items)} item(s); has_more={has_more}")
-        if not has_more or not last_id:
-            break
-        after = last_id
-    return batches
 
 
 def load_config() -> Tuple[List[Path], Dict[str, Any]]:
@@ -126,7 +62,7 @@ def diagnose_batch_failure(batch_id: str, client: OpenAI) -> str:
     """
     try:
         batch_obj = client.batches.retrieve(batch_id)
-        batch = _sdk_to_dict(batch_obj)
+        batch = sdk_to_dict(batch_obj)
         status = str(batch.get("status", "")).lower()
 
         if status == "failed":
@@ -224,7 +160,7 @@ def process_all_batches(
     # Retrieve all batches from OpenAI
     console_print("[INFO] Retrieving list of submitted batches from OpenAI...")
     try:
-        batches = _list_all_batches(client)
+        batches = list_all_batches(client)
         # Create a dictionary of batch ID to batch object for faster lookup
         batch_dict: Dict[str, Dict[str, Any]] = {
             b.get("id"): b for b in batches if isinstance(b, dict) and b.get("id")
@@ -372,7 +308,7 @@ def process_all_batches(
                 # Attempt to retrieve individually (handles pagination and older batches)
                 try:
                     b_obj = client.batches.retrieve(batch_id)
-                    batch = _sdk_to_dict(b_obj)
+                    batch = sdk_to_dict(b_obj)
                     if isinstance(batch, dict) and batch.get("id"):
                         batch_dict[batch_id] = batch
                     else:
@@ -405,31 +341,19 @@ def process_all_batches(
                     f"Batch {batch_id} has status '{status}' - not yet completed."
                 )
 
-        # Display progress information for this temp file
-        console_print(f"\n----- Processing File: {temp_file.name} -----")
-        console_print(f"Found {len(batch_ids)} batch ID(s)")
+        # Display progress information for this temp file (standardized UI helper)
+        UserPrompt.display_batch_processing_progress(
+            temp_file=temp_file,
+            batch_ids=batch_ids,
+            completed_count=completed_count,
+            missing_count=len(missing_batches),
+        )
 
         if not all_completed:
-            if missing_batches:
-                console_print(
-                    f"Completed: {completed_count} | Failed: {failed_count} | In Progress: "
-                    f"{len(batch_ids) - completed_count - failed_count - len(missing_batches)} | "
-                    f"Missing: {len(missing_batches)}"
-                )
-                console_print(
-                    f"[WARN] {len(missing_batches)} batch ID(s) were not found in the API response"
-                )
-            else:
-                console_print(
-                    f"Completed: {completed_count} | Failed: {failed_count} | In Progress: "
-                    f"{len(batch_ids) - completed_count - failed_count}"
-                )
-
             if failed_count > 0:
                 console_print(
                     f"[WARN] {failed_count} batches have failed. Check the OpenAI dashboard for details."
                 )
-
             continue
 
         # All batches are completed, now download and process them
@@ -448,36 +372,21 @@ def process_all_batches(
             batch = batch_dict[batch_id]
 
             # Resolve the output file id robustly
-            output_file_id = batch.get("output_file_id")
+            output_file_id = coerce_file_id(batch.get("output_file_id"))
 
             if not output_file_id:
                 # Refresh batch details (list endpoint may omit some fields)
                 try:
-                    refreshed = _sdk_to_dict(client.batches.retrieve(batch_id))
+                    refreshed = sdk_to_dict(client.batches.retrieve(batch_id))
                     if isinstance(refreshed, dict) and refreshed.get("id"):
                         batch = refreshed
                         batch_dict[batch_id] = refreshed
-                        output_file_id = batch.get("output_file_id")
+                        output_file_id = coerce_file_id(batch.get("output_file_id"))
                 except Exception as e:
                     logger.warning("Could not refresh batch %s: %s", batch_id, e)
 
             if not output_file_id:
                 # Try alternate field shapes just in case
-                def _coerce_file_id(candidate: Any) -> Optional[str]:
-                    if isinstance(candidate, str) and candidate:
-                        return candidate
-                    if isinstance(candidate, dict):
-                        cid = candidate.get("id") or candidate.get("file_id")
-                        return cid if isinstance(cid, str) and cid else None
-                    if isinstance(candidate, list) and candidate:
-                        first = candidate[0]
-                        if isinstance(first, str) and first:
-                            return first
-                        if isinstance(first, dict):
-                            cid = first.get("id") or first.get("file_id")
-                            return cid if isinstance(cid, str) and cid else None
-                    return None
-
                 for key in (
                     "output_file_id",
                     "output_file",
@@ -487,7 +396,7 @@ def process_all_batches(
                     "results_file_id",
                     "result_file_ids",
                 ):
-                    output_file_id = _coerce_file_id(batch.get(key))
+                    output_file_id = coerce_file_id(batch.get(key))
                     if output_file_id:
                         break
 
@@ -495,28 +404,13 @@ def process_all_batches(
                 # Try alternate diagnostics: error_file_id may contain per-request errors
                 error_file_id = None
 
-                def _coerce_file_id(candidate: Any) -> Optional[str]:
-                    if isinstance(candidate, str) and candidate:
-                        return candidate
-                    if isinstance(candidate, dict):
-                        cid = candidate.get("id") or candidate.get("file_id")
-                        return cid if isinstance(cid, str) and cid else None
-                    if isinstance(candidate, list) and candidate:
-                        first = candidate[0]
-                        if isinstance(first, str) and first:
-                            return first
-                        if isinstance(first, dict):
-                            cid = first.get("id") or first.get("file_id")
-                            return cid if isinstance(cid, str) and cid else None
-                    return None
-
                 for key in (
                     "error_file_id",
                     "error_file",
                     "errors_file_id",
                     "error_file_ids",
                 ):
-                    error_file_id = _coerce_file_id(batch.get(key))
+                    error_file_id = coerce_file_id(batch.get(key))
                     if error_file_id:
                         break
 
@@ -902,7 +796,6 @@ def diagnose_api_issues() -> None:
         has_gpt4o = any("gpt-4o" in (getattr(m, "id", "") or "") for m in models_data)
         total_models = len(list(models_data))
         console_print(f"[INFO] API Connection successful: {total_models} models available")
-        console_print(f"[INFO] GPT-4o models available: {'Yes' if has_gpt4o else 'No'}")
     except Exception as e:
         console_print(f"[ERROR] Failed to list models: {e}")
 

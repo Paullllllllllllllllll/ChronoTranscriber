@@ -18,14 +18,10 @@ from modules.config_loader import ConfigLoader, PROJECT_ROOT
 from modules.model_capabilities import Capabilities, detect_capabilities
 from modules.structured_outputs import build_structured_text_format
 from modules.prompt_utils import render_prompt_with_schema
+from modules.constants import SUPPORTED_IMAGE_FORMATS
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_IMAGE_FORMATS: Dict[str, str] = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-}
 
 
 # ---------- Exceptions (retry control) ----------

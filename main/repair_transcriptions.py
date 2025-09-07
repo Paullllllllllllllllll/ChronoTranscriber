@@ -30,6 +30,7 @@ from modules.utils import console_print, safe_input, check_exit
 from modules.text_processing import extract_transcribed_text
 from modules.openai_utils import open_transcriber
 from modules.concurrency import run_concurrent_transcription_tasks
+from modules.openai_sdk_utils import sdk_to_dict, coerce_file_id
 
 # Use the official OpenAI SDK directly for batch status and files
 from openai import OpenAI
@@ -467,12 +468,7 @@ def _await_batches_blocking(
         all_terminal = True
         for bid in batch_ids:
             try:
-                b_obj = client.batches.retrieve(bid)
-                b = (
-                    b_obj.model_dump()
-                    if hasattr(b_obj, "model_dump")
-                    else json.loads(b_obj.json())
-                )
+                b = sdk_to_dict(client.batches.retrieve(bid))
                 status = str(b.get("status", "")).lower()
                 status_map[bid] = status
                 if status not in terminal:
@@ -499,7 +495,21 @@ def _parse_batch_outputs_for_repairs(
         try:
             if str(b.get("status", "")).lower() != "completed":
                 continue
-            output_file_id = b.get("output_file_id")
+            # Robustly resolve output file id across possible shapes
+            output_file_id = coerce_file_id(b.get("output_file_id"))
+            if not output_file_id:
+                for key in (
+                    "output_file_id",
+                    "output_file",
+                    "output_file_ids",
+                    "response_file_id",
+                    "result_file_id",
+                    "results_file_id",
+                    "result_file_ids",
+                ):
+                    output_file_id = coerce_file_id(b.get(key))
+                    if output_file_id:
+                        break
             if not output_file_id:
                 continue
             resp = client.files.content(output_file_id)
@@ -640,12 +650,7 @@ async def _repair_batch_mode(
     batches = []
     for bid in batch_ids:
         try:
-            b_obj = client.batches.retrieve(bid)
-            b_dict = (
-                b_obj.model_dump()
-                if hasattr(b_obj, "model_dump")
-                else json.loads(b_obj.json())
-            )
+            b_dict = sdk_to_dict(client.batches.retrieve(bid))
             batches.append(b_dict)
         except Exception as e:
             logger.warning("Could not retrieve batch %s: %s", bid, e)

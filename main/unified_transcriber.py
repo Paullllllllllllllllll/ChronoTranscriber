@@ -192,7 +192,8 @@ async def main():
 		async with open_transcriber(
 				api_key=api_key,
 				model=model_config.get("transcription_model", {}).get("name",
-				                                                      "gpt-4o")
+				                                                      "gpt-4o"),
+				schema_path=user_config.selected_schema_path,
 		) as t:
 			transcriber = t
 			await workflow_manager.process_selected_items(transcriber)

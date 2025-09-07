@@ -11,7 +11,7 @@ A pipeline to transcribe historical documents (PDFs or image folders) using eith
    - **Tesseract** (local).  
    - **OpenAI Responses** (vision models), including GPT-4o, GPT-4.1, **GPT-5** / **GPT-5-mini**, and **o-series** (o1/o3) with automatic capability checks.  
 4. **Batch mode** for VLM OCR at scale, with direct data-URL image embedding (no external hosting), chunking, and order-preserving merge.  
-5. **Structured outputs** using a JSON Schema injected into the system prompt, ensuring predictable extraction and robust downstream parsing.
+5. **Structured outputs** using a JSON Schema injected into the system prompt, ensuring predictable extraction and robust downstream parsing. You can now choose among multiple schemas at runtime.
 
 ---
 
@@ -38,7 +38,21 @@ The project reads three YAML files from `config/`:
   - Optional overrides for prompt/schema:  
     - `transcription_prompt_path`: path to `system_prompt.txt` (absolute or relative to `base_directory` when `allow_relative_paths: true`).  
     - `transcription_schema_path`: path to the transcription JSON Schema (absolute or relative as above).  
-    If unspecified, defaults are resolved relative to the repository root: `system_prompt/system_prompt.txt` and `schemas/transcription_schema.json`.
+    If unspecified, defaults are resolved relative to the repository root: `system_prompt/system_prompt.txt` and `schemas/markdown_transcription_schema.json`.
+
+### Custom Transcription Schemas
+
+- Place your custom schema files under `schemas/`.
+- Each schema JSON should follow the same overall structure as `schemas/markdown_transcription_schema.json`:
+  - Top-level wrapper with fields like `name`, `strict`, and `schema` (the actual JSON Schema). The wrapper is optional but recommended. If `schema` is omitted, the root object is treated as the JSON Schema.
+  - The JSON Schema must be an `object` with properties: `image_analysis`, `transcription`, `no_transcribable_text`, `transcription_not_possible`.
+  - Only the field descriptions (instructions to the model) are expected to vary between schemas.
+
+Included schemas:
+- `schemas/markdown_transcription_schema.json` (default) — instructs the model to produce a Markdown-formatted transcription, including LaTeX for equations, markdown headings, etc.
+- `schemas/plain_text_transcription_schema.json` — instructs the model to produce plain-text transcription without formatting.
+
+At runtime, `main/unified_transcriber.py` will prompt you to select a schema by its `name` (taken from each schema file's `name` field). If the field is missing, the filename is used.
 
 ---
 
@@ -60,6 +74,7 @@ The project reads three YAML files from `config/`:
 3. Choose OCR backend:  
    - **Tesseract** for purely local processing.  
    - **OpenAI Responses** for VLM OCR (streaming single requests) or **Batch** for large jobs.  
+  - When choosing the GPT backend, you will be asked to select a JSON Schema from `schemas/` by name.
 4. Outputs are written to `file_paths.PDFs.output` (or to input directories if `input_paths_is_output_path: true`).
 
 ### B. Transcribing Image Folders
@@ -67,6 +82,7 @@ The project reads three YAML files from `config/`:
 1. Place folders of page images under `file_paths.Images.input`.  
 2. Run the main entry point and select **Image Folder** mode.  
 3. Select backend and (optionally) Batch.  
+4. When choosing the GPT backend, select a JSON Schema by name.
 4. Outputs are written to `file_paths.Images.output` (or co-located).
 
 > **Supported formats:** PNG and JPEG are packaged directly into Requests/Batch via base64-encoded `data:` URLs.

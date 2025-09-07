@@ -11,6 +11,8 @@ import sys
 
 from modules.logger import setup_logger
 from modules.utils import console_print, check_exit, safe_input
+from modules.schema_utils import list_schema_options
+from modules.config_loader import PROJECT_ROOT
 
 logger = setup_logger(__name__)
 
@@ -26,6 +28,9 @@ class UserConfiguration:
     use_batch_processing: bool = False
     selected_items: List[Path] = None  # files or folders to process
     process_all: bool = False  # flag to process all files/folders
+    # Schema selection (GPT only)
+    selected_schema_name: Optional[str] = None
+    selected_schema_path: Optional[Path] = None
 
     def __post_init__(self) -> None:
         if self.selected_items is None:
@@ -38,9 +43,14 @@ class UserConfiguration:
             "gpt": "GPT-based transcription",
         }.get(self.transcription_method or "", self.transcription_method)
         batch_text = " with batch processing" if self.use_batch_processing else ""
+        schema_text = (
+            f", Schema: {self.selected_schema_name}"
+            if self.transcription_method == "gpt" and self.selected_schema_name
+            else ""
+        )
         return (
             f"Processing type: {self.processing_type}, "
-            f"Method: {method_name}{batch_text}, "
+            f"Method: {method_name}{batch_text}{schema_text}, "
             f"Process all: {self.process_all}, "
             f"Selected items: {len(self.selected_items)}"
         )
@@ -87,6 +97,8 @@ class UserPrompt:
                 "Batch (asynchronous)" if user_config.use_batch_processing else "Synchronous"
             )
             console_print(f"  - Processing mode: {batch_mode}")
+            if user_config.selected_schema_name:
+                console_print(f"  - Schema: {user_config.selected_schema_name}")
 
         console_print("\nSelected items (first 5 shown):")
         for i, item in enumerate(user_config.selected_items[:5]):
@@ -203,6 +215,48 @@ class UserPrompt:
                     "[ERROR] OPENAI_API_KEY is required for GPT transcription. Please set it and try again."
                 )
                 sys.exit(1)
+
+            # After enabling GPT, select a transcription schema
+            UserPrompt.configure_schema_selection(user_config)
+
+    @staticmethod
+    def configure_schema_selection(user_config: UserConfiguration) -> None:
+        """
+        Let the user pick a transcription schema by its `name` from schemas/.
+        Stores both the selected name and the Path.
+        """
+        if user_config.transcription_method != "gpt":
+            return
+
+        options = list_schema_options()
+        if not options:
+            # Fallback to default markdown schema path
+            default_schema = (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json").resolve()
+            user_config.selected_schema_name = "markdown_transcription_schema"
+            user_config.selected_schema_path = default_schema
+            console_print(
+                f"[INFO] No schemas discovered under schemas/. Falling back to default: {default_schema.name}"
+            )
+            return
+
+        if len(options) == 1:
+            only_name, only_path = options[0]
+            user_config.selected_schema_name = only_name
+            user_config.selected_schema_path = only_path
+            console_print(f"[INFO] Using the only available schema: {only_name} ({only_path.name})")
+            return
+
+        # Build UI choices: (value, description)
+        value_to_path: Dict[str, Path] = {name: path for name, path in options}
+        choices: List[Tuple[str, str]] = [
+            (name, f"{name} ({path.name})") for name, path in options
+        ]
+        selected_name = UserPrompt.enhanced_select_option(
+            "Which transcription schema would you like to use?",
+            choices,
+        )
+        user_config.selected_schema_name = selected_name
+        user_config.selected_schema_path = value_to_path[selected_name]
 
     # --- Selection flows ---
 

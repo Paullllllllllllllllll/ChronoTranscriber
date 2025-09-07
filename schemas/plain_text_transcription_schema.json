@@ -1,0 +1,32 @@
+{
+  "name": "plain_text_transcription_schema",
+  "strict": true,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "image_analysis": {
+        "type": "string",
+        "description": "Return a brief summary of what you can see on the image, listing all formatting elements and visible text. Identify the position of page number(s) and footnote(s) on the image precisely."
+      },
+      "transcription": {
+        "type": ["string", "null"],
+        "description": "- Task: Return a verbatim transcription of the provided image as plain text.\n- Scope — include everything: Transcribe all visible text and structural elements (headers, footers, page numbers, tables, etc.) as text.\n- Plain text only: Do NOT use markdown, LaTeX, or any special formatting. Output raw text only.\n- Images or diagrams: Indicate their presence with a brief plain-text note in brackets, e.g., [Image: diagram of a cell].\n- Layout preservation: Preserve line breaks where they appear in the image.\n- Multi-column text: Transcribe multi-column text as seen on the image, divided by tabs or spaces.\n- Cross-page continuity: Preserve sentences that continue from the previous or to the next page exactly as shown.\n- Output format: Provide only the transcription text. If no transcribable text is found, output null.\n- No fabrication: Do not hallucinate. Keep spelling, punctuation, and wording verbatim."
+      },
+      "no_transcribable_text": {
+        "type": "boolean",
+        "description": "True if the image contains no transcribable text; otherwise, false."
+      },
+      "transcription_not_possible": {
+        "type": "boolean",
+        "description": "True if and only if transcription is entirely impossible; otherwise, false."
+      }
+    },
+    "required": [
+      "image_analysis",
+      "transcription",
+      "no_transcribable_text",
+      "transcription_not_possible"
+    ],
+    "additionalProperties": false
+  }
+}

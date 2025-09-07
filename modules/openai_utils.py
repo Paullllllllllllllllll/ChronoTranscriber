@@ -371,7 +371,14 @@ class OpenAITranscriber:
     but internally routes to the Responses API via `OpenAIExtractor`.
     """
 
-    def __init__(self, api_key: str, model: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: Optional[str] = None,
+        *,
+        schema_path: Optional[Path] = None,
+        system_prompt_path: Optional[Path] = None,
+    ) -> None:
         cfg = ConfigLoader()
         cfg.load_configs()
 
@@ -416,20 +423,28 @@ class OpenAITranscriber:
             # Fallback to model capability default if misconfigured
             self.llm_detail = "auto"
 
-        # Resolve prompt/schema with PROJECT_ROOT defaults and optional overrides
+        # Resolve prompt/schema with priority: explicit args -> config overrides -> defaults
         pcfg = cfg.get_paths_config()
         general = pcfg.get("general", {})
         override_prompt = general.get("transcription_prompt_path")
         override_schema = general.get("transcription_schema_path")
         self.system_prompt_path = (
-            Path(override_prompt)
-            if override_prompt
-            else (PROJECT_ROOT / "system_prompt" / "system_prompt.txt")
+            Path(system_prompt_path)
+            if system_prompt_path is not None
+            else (
+                Path(override_prompt)
+                if override_prompt
+                else (PROJECT_ROOT / "system_prompt" / "system_prompt.txt")
+            )
         )
         self.schema_path = (
-            Path(override_schema)
-            if override_schema
-            else (PROJECT_ROOT / "schemas" / "transcription_schema.json")
+            Path(schema_path)
+            if schema_path is not None
+            else (
+                Path(override_schema)
+                if override_schema
+                else (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json")
+            )
         )
 
         if not self.system_prompt_path.exists():
@@ -505,12 +520,21 @@ class OpenAITranscriber:
 
 @asynccontextmanager
 async def open_transcriber(
-    api_key: str, model: Optional[str] = None
+    api_key: str,
+    model: Optional[str] = None,
+    *,
+    schema_path: Optional[Path] = None,
+    system_prompt_path: Optional[Path] = None,
 ) -> AsyncGenerator[OpenAITranscriber, None]:
     """
     Context manager matching legacy import sites.
     """
-    transcriber = OpenAITranscriber(api_key=api_key, model=model)
+    transcriber = OpenAITranscriber(
+        api_key=api_key,
+        model=model,
+        schema_path=schema_path,
+        system_prompt_path=system_prompt_path,
+    )
     try:
         yield transcriber
     finally:

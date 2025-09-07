@@ -282,7 +282,8 @@ class WorkflowManager:
                     batching.process_batch_transcription,
                     processed_image_files,
                     "",
-                    self.model_config.get("transcription_model", {})
+                    self.model_config.get("transcription_model", {}),
+                    schema_path=self.user_config.selected_schema_path,
                 )
             except Exception as e:
                 logger.exception(
@@ -469,7 +470,8 @@ class WorkflowManager:
                     batching.process_batch_transcription,
                     processed_files,
                     "",
-                    self.model_config.get("transcription_model", {})
+                    self.model_config.get("transcription_model", {}),
+                    schema_path=self.user_config.selected_schema_path,
                 )
             except Exception as e:
                 logger.exception(

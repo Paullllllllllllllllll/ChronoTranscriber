@@ -224,7 +224,7 @@ def create_batch_request_line(
             schema_path = (
                 Path(override_schema)
                 if override_schema
-                else (PROJECT_ROOT / "schemas" / "transcription_schema.json")
+                else (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json")
             )
 
     if not system_prompt_path.exists():
@@ -352,6 +352,8 @@ def process_batch_transcription(
     image_files: List[Path],
     prompt_text: str,  # kept for signature parity
     model_config: Dict[str, Any],
+    *,
+    schema_path: Optional[Path] = None,
 ) -> Tuple[List[Any], List[Dict[str, Any]]]:
     """
     Prepare and submit batched image transcriptions using the Responses API.
@@ -408,6 +410,7 @@ def process_batch_transcription(
                     image_url=data_url,
                     image_info=image_info,
                     model_config=model_config,
+                    schema_path=schema_path,
                 )
                 batch_request_lines.append(request_line)
                 metadata_records.append(metadata_record)

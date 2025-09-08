@@ -11,15 +11,15 @@ import aiofiles
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
 
-from modules.logger import setup_logger
+from modules.infra.logger import setup_logger
 from modules.ui.core import UserConfiguration
-from modules.pdf_utils import PDFProcessor, native_extract_pdf_text
-from modules.image_utils import ImageProcessor
-from modules.batching import get_batch_chunk_size
-from modules.openai_utils import transcribe_image_with_openai
-from modules.concurrency import run_concurrent_transcription_tasks
-from modules.text_processing import extract_transcribed_text
-from modules.utils import console_print
+from modules.processing.pdf_utils import PDFProcessor, native_extract_pdf_text
+from modules.processing.image_utils import ImageProcessor
+from modules.llm.batch.batching import get_batch_chunk_size
+from modules.llm.openai_utils import transcribe_image_with_openai
+from modules.infra.concurrency import run_concurrent_transcription_tasks
+from modules.processing.text_processing import extract_transcribed_text
+from modules.core.utils import console_print
 
 logger = setup_logger(__name__)
 
@@ -233,7 +233,7 @@ class WorkflowManager:
 
         # Handle GPT batch mode
         if method == "gpt" and self.user_config.use_batch_processing:
-            from modules import batching
+            from modules.llm.batch import batching
             total_images = len(processed_image_files)
             chunk_size = get_batch_chunk_size()
             expected_batches = math.ceil(total_images / max(1, chunk_size))
@@ -424,7 +424,7 @@ class WorkflowManager:
 
         # Handle batch mode for GPT
         if method == "gpt" and self.user_config.use_batch_processing:
-            from modules import batching
+            from modules.llm.batch import batching
             total_images = len(processed_files)
             chunk_size = get_batch_chunk_size()
             expected_batches = math.ceil(total_images / max(1, chunk_size))

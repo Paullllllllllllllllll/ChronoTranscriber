@@ -8,12 +8,11 @@ Terminal statuses: completed, expired, cancelled, failed.
 from __future__ import annotations
 
 import sys
-from typing import Any, Dict, List, Optional
 
-from modules.logger import setup_logger
-from modules.utils import console_print
+from modules.infra.logger import setup_logger
+from modules.core.utils import console_print
 from modules.ui.core import UserPrompt
-from modules.openai_sdk_utils import sdk_to_dict, list_all_batches
+from modules.llm.openai_sdk_utils import sdk_to_dict, list_all_batches
 
 logger = setup_logger(__name__)
 TERMINAL_STATUSES = {"completed", "expired", "cancelled", "failed"}

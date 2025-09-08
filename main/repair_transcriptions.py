@@ -1,4 +1,4 @@
-﻿# repair_transcriptions.py
+# repair_transcriptions.py
 # Thin CLI delegator to operations.repair
 
 from __future__ import annotations
@@ -6,8 +6,8 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from modules.logger import setup_logger
-from modules.utils import console_print
+from modules.infra.logger import setup_logger
+from modules.core.utils import console_print
 from modules.operations import repair as repair_ops
 
 logger = setup_logger(__name__)

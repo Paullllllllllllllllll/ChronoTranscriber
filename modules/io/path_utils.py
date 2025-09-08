@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Any
 
-from modules.utils import console_print
+from modules.core.utils import console_print
 
 
 def validate_paths(paths_config: Dict[str, Any]) -> None:

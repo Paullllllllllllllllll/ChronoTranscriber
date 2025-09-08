@@ -11,10 +11,44 @@ from typing import Optional
 
 import yaml
 
-from modules.model_capabilities import ensure_image_support
+from modules.llm.model_capabilities import ensure_image_support
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+def _is_repo_root(candidate: Path) -> bool:
+    """
+    Heuristic to detect the repository root by looking for sentinel files/dirs.
+    Prefers a directory that contains a top-level 'config/' and 'schemas/'.
+    Falls back to presence of both README.md and requirements.txt.
+    """
+    try:
+        if (candidate / "config").is_dir() and (candidate / "schemas").is_dir():
+            return True
+        if (candidate / "README.md").exists() and (candidate / "requirements.txt").exists():
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _compute_project_root() -> Path:
+    """
+    Compute the project root robustly regardless of where this file lives within 'modules/'.
+    Walk up parents to find a directory that looks like the repo root.
+    """
+    here = Path(__file__).resolve()
+    # Iterate through candidate parents including the parent of the file itself.
+    for cand in [here.parent, *here.parents]:
+        if _is_repo_root(cand):
+            return cand.resolve()
+    # Fallback: assume repository root is 2 levels up (ChronoTranscriber/)
+    # This works for typical layouts like: repo/modules/config/config_loader.py
+    try:
+        return here.parents[2]
+    except IndexError:
+        return here.parents[-1]
+
+
+PROJECT_ROOT = _compute_project_root()
 
 
 def _expand_path_str(p: str) -> Path:

@@ -22,13 +22,13 @@ parent_dir = str(Path(__file__).resolve().parent.parent)
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-from modules.config_loader import ConfigLoader
-from modules.logger import setup_logger
-from modules.openai_utils import open_transcriber
+from modules.config.config_loader import ConfigLoader
+from modules.infra.logger import setup_logger
+from modules.llm.openai_utils import open_transcriber
 from modules.ui.core import UserPrompt, UserConfiguration
-from modules.path_utils import validate_paths
-from modules.utils import console_print
-from modules.workflow import WorkflowManager
+from modules.io.path_utils import validate_paths
+from modules.core.utils import console_print
+from modules.core.workflow import WorkflowManager
 
 logger = setup_logger(__name__)
 

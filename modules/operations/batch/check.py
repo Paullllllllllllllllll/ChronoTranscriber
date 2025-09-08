@@ -11,19 +11,19 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Set, Tuple
 from datetime import datetime, timezone
 
 from openai import OpenAI
 
-from modules.batch_utils import diagnose_batch_failure, extract_custom_id_mapping
-from modules.config_loader import ConfigLoader
-from modules.logger import setup_logger
-from modules.openai_sdk_utils import coerce_file_id, list_all_batches, sdk_to_dict
-from modules.path_utils import validate_paths
-from modules.text_processing import extract_transcribed_text, process_batch_output
+from modules.llm.batch.batch_utils import diagnose_batch_failure, extract_custom_id_mapping
+from modules.config.config_loader import ConfigLoader
+from modules.infra.logger import setup_logger
+from modules.llm.openai_sdk_utils import coerce_file_id, list_all_batches, sdk_to_dict
+from modules.io.path_utils import validate_paths
+from modules.processing.text_processing import extract_transcribed_text, process_batch_output
 from modules.ui.core import UserPrompt
-from modules.utils import console_print
+from modules.core.utils import console_print
 
 logger = setup_logger(__name__)
 

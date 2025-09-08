@@ -6,13 +6,13 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from modules.model_capabilities import detect_capabilities
-from modules.utils import console_print
-from modules.config_loader import ConfigLoader
-from modules.config_loader import PROJECT_ROOT
-from modules.structured_outputs import build_structured_text_format
-from modules.prompt_utils import render_prompt_with_schema
-from modules.constants import SUPPORTED_IMAGE_FORMATS
+from modules.llm.model_capabilities import detect_capabilities
+from modules.core.utils import console_print
+from modules.config.config_loader import ConfigLoader
+from modules.config.config_loader import PROJECT_ROOT
+from modules.llm.structured_outputs import build_structured_text_format
+from modules.llm.prompt_utils import render_prompt_with_schema
+from modules.config.constants import SUPPORTED_IMAGE_FORMATS
 
 logger = logging.getLogger(__name__)
 

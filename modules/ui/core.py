@@ -9,10 +9,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import os
 import sys
 
-from modules.logger import setup_logger
-from modules.utils import console_print, check_exit, safe_input
-from modules.schema_utils import list_schema_options
-from modules.config_loader import PROJECT_ROOT
+from modules.infra.logger import setup_logger
+from modules.core.utils import console_print, check_exit, safe_input
+from modules.llm.schema_utils import list_schema_options
+from modules.config.config_loader import PROJECT_ROOT
 
 logger = setup_logger(__name__)
 
@@ -405,7 +405,7 @@ class UserPrompt:
 
     @staticmethod
     def select_images_workflow(user_config: UserConfiguration, image_input_dir: Path) -> None:
-        from modules.image_utils import SUPPORTED_IMAGE_EXTENSIONS
+        from modules.processing.image_utils import SUPPORTED_IMAGE_EXTENSIONS
 
         source_dir = image_input_dir
         subfolders = [f for f in source_dir.iterdir() if f.is_dir()]

@@ -5,8 +5,8 @@ organized for reusability and testability. The entry-point scripts in
 `main/` import and delegate to these modules, keeping the CLI layers thin.
 """
 
-from .batch_check import process_all_batches, run_batch_finalization
-from .repair import main as repair_main
+from modules.operations.batch.check import process_all_batches, run_batch_finalization
+from .repair.run import main as repair_main
 
 __all__ = [
     "process_all_batches",

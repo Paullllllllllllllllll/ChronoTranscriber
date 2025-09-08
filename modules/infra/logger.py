@@ -2,8 +2,7 @@
 
 import logging
 from pathlib import Path
-from modules.config_loader import ConfigLoader, PROJECT_ROOT
-from typing import Any
+from modules.config.config_loader import ConfigLoader, PROJECT_ROOT
 
 
 def setup_logger(name: str) -> logging.Logger:

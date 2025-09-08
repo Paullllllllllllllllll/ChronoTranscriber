@@ -18,17 +18,17 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from openai import OpenAI
 
-from modules.logger import setup_logger
-from modules.config_loader import ConfigLoader
-from modules.utils import console_print, safe_input, check_exit
-from modules.text_processing import extract_transcribed_text
-from modules.openai_utils import open_transcriber
-from modules.concurrency import run_concurrent_transcription_tasks
-from modules.openai_sdk_utils import sdk_to_dict, coerce_file_id
+from modules.infra.logger import setup_logger
+from modules.config.config_loader import ConfigLoader
+from modules.core.utils import console_print, safe_input, check_exit
+from modules.processing.text_processing import extract_transcribed_text
+from modules.llm.openai_utils import open_transcriber
+from modules.infra.concurrency import run_concurrent_transcription_tasks
+from modules.llm.openai_sdk_utils import sdk_to_dict, coerce_file_id
 from modules.ui.core import UserPrompt
 
 # Centralized repair helpers
-from modules.repair_utils import (
+from modules.operations.repair.utils import (
     Job,
     ImageEntry,
     extract_image_name_from_failure_line as ru_extract_image_name_from_failure_line,
@@ -120,7 +120,7 @@ async def _repair_sync_mode(
     final_lines: List[str],
     repair_jsonl_path: Path,
 ) -> None:
-    from modules.openai_utils import transcribe_image_with_openai
+    from modules.llm.openai_utils import transcribe_image_with_openai
 
     # Build mapping by image_name for robust lookup
     name_to_entry: Dict[str, ImageEntry] = {e.image_name: e for e in image_entries}
@@ -434,7 +434,7 @@ async def _repair_batch_mode(
 
     console_print(f"[INFO] Batch repair of {len(targets)} page(s) for '{job.identifier}'.")
 
-    from modules import batching
+    from modules.llm.batch import batching
 
     try:
         batch_responses, metadata_records = await asyncio.to_thread(

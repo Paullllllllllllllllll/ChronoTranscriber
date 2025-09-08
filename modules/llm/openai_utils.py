@@ -14,11 +14,11 @@ import aiofiles
 import aiohttp
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-from modules.config_loader import ConfigLoader, PROJECT_ROOT
-from modules.model_capabilities import Capabilities, detect_capabilities
-from modules.structured_outputs import build_structured_text_format
-from modules.prompt_utils import render_prompt_with_schema
-from modules.constants import SUPPORTED_IMAGE_FORMATS
+from modules.config.config_loader import ConfigLoader, PROJECT_ROOT
+from modules.llm.model_capabilities import Capabilities, detect_capabilities
+from modules.llm.structured_outputs import build_structured_text_format
+from modules.llm.prompt_utils import render_prompt_with_schema
+from modules.config.constants import SUPPORTED_IMAGE_FORMATS
 
 logger = logging.getLogger(__name__)
 

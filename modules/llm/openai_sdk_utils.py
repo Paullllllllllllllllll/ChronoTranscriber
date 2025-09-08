@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
-from modules.utils import console_print
+from modules.core.utils import console_print
 
 
 def sdk_to_dict(obj: Any) -> Dict[str, Any]:

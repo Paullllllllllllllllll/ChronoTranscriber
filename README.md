@@ -172,4 +172,4 @@ This refactor improves testability, modularity, and maintainability without chan
 
 ### License
 
-Private; do not distribute without permission.
+MIT License.

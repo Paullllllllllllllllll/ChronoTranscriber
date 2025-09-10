@@ -4,6 +4,9 @@ When provided with an image, your task is to output an image transcription stric
 Notes:
 - Try to always provide a transcription, even if it is not possible to transcribe the image perfectly.
 - If you really cannot transcribe the image at all or the page is empty, set transcription_not_possible or no_transcribable_text to true.
+- If the image is from a culinary bibliography, note the following:
+  (1) The number next to the title is in the top header is a bibliography number, not a page number; the page number is in the bottom left or bottom right of the image.
+  (2) If the bibliographic information is presented as a table, transcribe it in markdown formatting, using a vertical line | to separate each column, and three or more dashes --- to create each column’s header.
 
 The JSON schema:
 {{TRANSCRIPTION_SCHEMA}}

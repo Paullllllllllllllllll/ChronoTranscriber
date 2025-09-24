@@ -15,10 +15,11 @@ logger = logging.getLogger(__name__)
 
 # Regex patterns used to detect failure placeholders in final text
 FAILURE_PATTERNS = [
-    re.compile(r"^\[transcription error:\s*.+\]$", re.IGNORECASE),
-    re.compile(r"^\[Transcription not possible.*\]$", re.IGNORECASE),
+    # Allow optional leading "Page N:" or "Image name:" prefixes before the bracket
+    re.compile(r"^(?:[^\[]+?:\s*)?\[\s*transcription\s+error.*\]$", re.IGNORECASE),
+    re.compile(r"^(?:[^\[]+?:\s*)?\[\s*Transcription\s+not\s+possible.*\]$", re.IGNORECASE),
 ]
-NO_TEXT_PATTERN = re.compile(r"^\[No transcribable text.*\]$", re.IGNORECASE)
+NO_TEXT_PATTERN = re.compile(r"^(?:[^\[]+?:\s*)?\[\s*No\s+transcribable\s+text.*\]$", re.IGNORECASE)
 
 
 @dataclass
@@ -47,13 +48,20 @@ def extract_image_name_from_failure_line(line: str) -> Optional[str]:
       - "[transcription error: scan_03.png; status 400; code invalid_image]"
     Returns the extracted image name if found, else None.
     """
+    # Strip any leading "Page N:" or "Image xyz:" prefixes
+    core = re.sub(r"^[^\[]*?:\s*", "", line.strip())
     pattern = re.compile(
         r"^\[(?:transcription error|Transcription not possible|No transcribable text):\s*([^;]+)",
         re.IGNORECASE,
     )
-    m = pattern.match(line.strip())
+    m = pattern.match(core)
     if m:
-        return m.group(1).strip()
+        # Some lines do not include a semicolon and end with a closing bracket,
+        # which gets captured into group(1). Strip common trailing artifacts.
+        name = m.group(1).strip()
+        name = name.rstrip("]\")' ")  # remove trailing ], quotes, and spaces
+        name = name.lstrip("'\" ")      # remove leading quotes/spaces if any
+        return name
     return None
 
 

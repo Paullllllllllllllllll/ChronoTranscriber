@@ -404,6 +404,7 @@ def process_batch_transcription(
                 image_info = {
                     "image_name": image_file.name,
                     "order_index": global_idx,
+                    "page_number": global_idx + 1,
                 }
                 request_line, metadata_record = create_batch_request_line(
                     custom_id=custom_id,

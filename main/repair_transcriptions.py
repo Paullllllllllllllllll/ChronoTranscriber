@@ -8,18 +8,18 @@ import sys
 
 from modules.infra.logger import setup_logger
 from modules.core.utils import console_print
-from modules.operations import repair as repair_ops
+from modules.operations.repair.run import main as repair_main
 
 logger = setup_logger(__name__)
 
 
 async def main() -> None:
-    await repair_ops.main()
+    await repair_main()
 
 
 if __name__ == "__main__":
     try:
-        asyncio.run(repair_ops.main())
+        asyncio.run(repair_main())
     except KeyboardInterrupt:
         console_print("\n[INFO] Repair interrupted by user.")
         sys.exit(0)

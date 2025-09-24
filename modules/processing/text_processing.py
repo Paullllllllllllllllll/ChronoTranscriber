@@ -10,6 +10,54 @@ import re
 
 logger = logging.getLogger(__name__)
 
+# --- Global placeholder detection (exported) ---
+# Allow optional leading header like "image_name:" before the bracket
+_PLACEHOLDER_RE_ERROR = re.compile(r"^(?:[^\[]+?:\s*)?\[\s*transcription\s+error.*\]$", re.IGNORECASE)
+_PLACEHOLDER_RE_NO_TEXT = re.compile(r"^(?:[^\[]+?:\s*)?\[\s*No\s+transcribable\s+text.*\]$", re.IGNORECASE)
+_PLACEHOLDER_RE_NOT_POSSIBLE = re.compile(r"^(?:[^\[]+?:\s*)?\[\s*Transcription\s+not\s+possible.*\]$", re.IGNORECASE)
+
+
+def detect_transcription_cause(text: str) -> str:
+    """Detect the cause type of a transcription line.
+
+    Returns one of: 'api_error' | 'no_text' | 'not_possible' | 'ok'
+    """
+    s = (text or "").strip()
+    if _PLACEHOLDER_RE_ERROR.match(s):
+        return "api_error"
+    if _PLACEHOLDER_RE_NO_TEXT.match(s):
+        return "no_text"
+    if _PLACEHOLDER_RE_NOT_POSSIBLE.match(s):
+        return "not_possible"
+    return "ok"
+
+
+def format_page_line(text: str, page_number: Optional[int], image_name: Optional[str]) -> str:
+    """Return a unified, page-identified output for final files.
+
+    - Prefer the image file name as the header: '<image_name>:'
+    - If image_name is missing, fall back to 'Page {n}:' when available,
+      otherwise '[unknown image]:'
+    - If the text is a known placeholder (error/no_text/not_possible), keep it inline on the header line.
+    - Otherwise, emit a header line followed by the page transcription on the next line(s).
+    """
+    # Prefer image filename for tracking/debugging
+    safe_name = (image_name or "").strip()
+    if safe_name:
+        header = f"{safe_name}:"
+    elif isinstance(page_number, int) and page_number > 0:
+        header = f"Page {page_number}:"
+    else:
+        header = "[unknown image]:"
+
+    s = (text or "").strip()
+    cause = detect_transcription_cause(s)
+    if cause in {"api_error", "no_text", "not_possible"}:
+        # Keep placeholder inline with header
+        return f"{header} {s}"
+    # For normal text, return only the transcription without any header
+    return s
+
 
 def _extract_from_responses_object(data: Dict[str, Any]) -> str:
     """
@@ -139,13 +187,11 @@ def extract_transcribed_text(result: Dict[str, Any], image_name: str = "") -> st
                         return str(parsed["transcription"]).strip()
             return content
         logger.error("Empty content field in response for %s: %s", image_name, json.dumps(result))
-        img = image_name or "[unknown image]"
-        return f"[transcription error: {img}]"
+        return "[transcription error]"
 
     # Last resort: log and return raw JSON
     logger.error("Unrecognized response shape for image %s: %s", image_name, json.dumps(result))
-    img = image_name or "[unknown image]"
-    return f"[transcription error: {img}]"
+    return "[transcription error]"
 
 
 def process_batch_output(file_content: bytes) -> List[str]:
@@ -197,8 +243,8 @@ def process_batch_output(file_content: bytes) -> List[str]:
             data = obj
 
         if data is None:
-            image_name = obj.get("file_name") or obj.get("image_name") or "[unknown image]"
-            transcriptions.append(f"[transcription error: {image_name}]")
+            # Page/image identification will be added by the caller via format_page_line()
+            transcriptions.append("[transcription error]")
             continue
 
         transcription = extract_transcribed_text(data, obj.get("image_name", ""))

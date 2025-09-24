@@ -21,7 +21,7 @@ from openai import OpenAI
 from modules.infra.logger import setup_logger
 from modules.config.config_loader import ConfigLoader
 from modules.core.utils import console_print, safe_input, check_exit
-from modules.processing.text_processing import extract_transcribed_text
+from modules.processing.text_processing import extract_transcribed_text, format_page_line, detect_transcription_cause
 from modules.llm.openai_utils import open_transcriber
 from modules.infra.concurrency import run_concurrent_transcription_tasks
 from modules.llm.openai_sdk_utils import sdk_to_dict, coerce_file_id
@@ -55,6 +55,7 @@ class RepairTarget:
     image_path: Path
     custom_id: Optional[str]
     line_index: int
+    page_number: Optional[int] = None
 
 
 # Failure patterns centralized in modules.repair_utils
@@ -154,6 +155,13 @@ async def _repair_sync_mode(
             )
             continue
 
+        # Compute page number from metadata if available
+        pn: Optional[int] = None
+        if entry and isinstance(entry.page_number, int):
+            pn = entry.page_number
+        elif resolved_order_index is not None and resolved_order_index >= 0:
+            pn = resolved_order_index + 1
+
         targets.append(
             RepairTarget(
                 order_index=resolved_order_index,
@@ -161,6 +169,7 @@ async def _repair_sync_mode(
                 image_path=resolved_path,
                 custom_id=None,
                 line_index=idx,
+                page_number=pn,
             )
         )
 
@@ -195,7 +204,7 @@ async def _repair_sync_mode(
             return line_index, text, raw
         except Exception as e:
             logger.error("Sync repair failed for %s: %s", image_name, e)
-            return line_index, f"[transcription error: {image_name}]", {}
+            return line_index, "[transcription error]", {}
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -227,16 +236,8 @@ async def _repair_sync_mode(
             img_name = next(
                 (t.image_name for t in targets if t.line_index == line_index), None
             )
-            # Normalize placeholders to include image name for traceability
-            normalized_text = (
-                f"[Transcription not possible: {img_name}]"
-                if text == "[Transcription not possible]" and img_name
-                else (
-                    f"[No transcribable text: {img_name}]"
-                    if text == "[No transcribable text]" and img_name
-                    else text
-                )
-            )
+            # Keep placeholders minimal; page/image context will be added during formatting
+            normalized_text = text
             record = {
                 "repair_response": {
                     "line_index": line_index,
@@ -245,6 +246,10 @@ async def _repair_sync_mode(
                         None,
                     ),
                     "image_name": img_name,
+                    "page_number": next(
+                        (t.page_number for t in targets if t.line_index == line_index),
+                        None,
+                    ),
                     "raw_response": raw,
                     "text": normalized_text,
                     "raw_text": text,
@@ -264,19 +269,17 @@ async def _repair_sync_mode(
             on_result=on_result,
         )
 
-    # Apply edits to final_lines by order_index (sync path preserves 1:1 mapping)
-    # Quick lookup for normalization
+    # Apply edits to final_lines with unified page-aware formatting
     target_by_line: Dict[int, RepairTarget] = {t.line_index: t for t in targets}
 
     for line_index, text, _raw in results:
         if 0 <= line_index < len(final_lines):
             t = target_by_line.get(line_index)
-            if t and text == "[Transcription not possible]":
-                final_lines[line_index] = f"[Transcription not possible: {t.image_name}]"
-            elif t and text == "[No transcribable text]":
-                final_lines[line_index] = f"[No transcribable text: {t.image_name}]"
-            else:
-                final_lines[line_index] = text
+            if t:
+                pn = t.page_number if isinstance(t.page_number, int) else (
+                    t.order_index + 1 if isinstance(t.order_index, int) and t.order_index >= 0 else None
+                )
+                final_lines[line_index] = format_page_line(text, pn, t.image_name)
 
     backup = _backup_file(job.final_txt_path)
     job.final_txt_path.write_text("\n".join(final_lines), encoding="utf-8")
@@ -545,26 +548,17 @@ async def _repair_batch_mode(
                     "order_index": oi,
                     "line_index": li,
                     "image_name": img_name,
-                    "text": (
-                        f"[Transcription not possible: {img_name}]"
-                        if text == "[Transcription not possible]"
-                        else (
-                            f"[No transcribable text: {img_name}]"
-                            if text == "[No transcribable text]"
-                            else text
-                        )
-                    ),
+                    "text": text,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             },
         )
         if isinstance(li, int) and 0 <= li < len(final_lines):
-            if text == "[Transcription not possible]":
-                final_lines[li] = f"[Transcription not possible: {img_name}]"
-            elif text == "[No transcribable text]":
-                final_lines[li] = f"[No transcribable text: {img_name}]"
-            else:
-                final_lines[li] = text
+            # Compute best-effort page number
+            pn = None
+            if isinstance(oi, int) and oi >= 0:
+                pn = oi + 1
+            final_lines[li] = format_page_line(text, pn, img_name)
 
     backup = _backup_file(job.final_txt_path)
     job.final_txt_path.write_text("\n".join(final_lines), encoding="utf-8")
@@ -616,15 +610,45 @@ async def main() -> None:
     final_lines = _read_final_lines(job_sel.final_txt_path)
 
     console_print("\nWhich failure classes should be included for repair?")
+    include_api_errors = (
+        UserPrompt.prompt_choice(
+            "Include '[transcription error]' lines?",
+            [("y", "Yes"), ("n", "No")],
+        )
+        == "y"
+    )
+    include_not_possible = (
+        UserPrompt.prompt_choice(
+            "Include '[Transcription not possible]' lines?",
+            [("y", "Yes"), ("n", "No")],
+        )
+        == "y"
+    )
     include_no_text = (
         UserPrompt.prompt_choice(
-            "Include '[No transcribable text]' lines in repair set?",
+            "Include '[No transcribable text]' lines?",
             [("y", "Yes"), ("n", "No")],
         )
         == "y"
     )
 
-    failure_indices = _find_failure_indices(final_lines, include_no_text)
+    selected_causes = set()
+    if include_api_errors:
+        selected_causes.add("api_error")
+    if include_not_possible:
+        selected_causes.add("not_possible")
+    if include_no_text:
+        selected_causes.add("no_text")
+
+    if not selected_causes:
+        console_print("[INFO] No failure classes selected; nothing to repair.")
+        return
+
+    # Detect causes on the already-formatted final lines (supports 'image_name:' prefix)
+    failure_indices = [
+        i for i, ln in enumerate(final_lines)
+        if detect_transcription_cause((ln or "").strip()) in selected_causes
+    ]
     if not failure_indices:
         console_print("[INFO] No failed lines detected; nothing to repair.")
         return

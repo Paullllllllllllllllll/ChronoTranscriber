@@ -18,7 +18,7 @@ from modules.processing.image_utils import ImageProcessor
 from modules.llm.batch.batching import get_batch_chunk_size
 from modules.llm.openai_utils import transcribe_image_with_openai
 from modules.infra.concurrency import run_concurrent_transcription_tasks
-from modules.processing.text_processing import extract_transcribed_text
+from modules.processing.text_processing import extract_transcribed_text, format_page_line
 from modules.core.utils import console_print
 
 logger = setup_logger(__name__)
@@ -755,11 +755,20 @@ class WorkflowManager:
                 console_print(f"[ERROR] Concurrency error for {source_name}.")
                 return
 
-        # Combine the transcription text in page order
+        # Combine the transcription text in page order with unified page headers
         try:
-            combined_text = "\n".join(
-                [res[2] for res in results if res and res[2] is not None])
+            # results tuple: (img_path_str, image_name, text, raw_response, order_index)
+            ordered = sorted(
+                [r for r in results if r and r[2] is not None], key=lambda r: r[4]
+            )
+            lines: List[str] = []
+            for (_p, image_name, text_chunk, _raw, order_index) in ordered:
+                page_number = int(order_index) + 1 if isinstance(order_index, int) else None
+                lines.append(format_page_line(text_chunk, page_number, image_name))
+            combined_text = "\n".join(lines)
             output_txt_path.write_text(combined_text, encoding='utf-8')
         except Exception as e:
             logger.exception(
-                f"Error writing combined text for {source_name}: {e}")
+                f"Error writing combined transcription output for {source_name}: {e}")
+            console_print(f"[ERROR] Failed to write combined output for {source_name}.")
+            return

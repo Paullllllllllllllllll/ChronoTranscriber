@@ -21,7 +21,11 @@ from modules.config.config_loader import ConfigLoader
 from modules.infra.logger import setup_logger
 from modules.llm.openai_sdk_utils import coerce_file_id, list_all_batches, sdk_to_dict
 from modules.io.path_utils import validate_paths
-from modules.processing.text_processing import extract_transcribed_text, process_batch_output
+from modules.processing.text_processing import (
+    extract_transcribed_text,
+    process_batch_output,
+    format_page_line,
+)
 from modules.ui.core import UserPrompt
 from modules.core.utils import console_print
 
@@ -420,7 +424,7 @@ def process_all_batches(
                                     "message"
                                 ) or (error_obj or {}).get("error")
                                 diag_text = (
-                                    f"[transcription error: {image_name}; status {status_code}"
+                                    f"[transcription error; status {status_code}"
                                 )
                                 if err_code:
                                     diag_text += f"; code {err_code}"
@@ -456,7 +460,7 @@ def process_all_batches(
                                 err_message = error_obj.get("message") or error_obj.get(
                                     "error"
                                 )
-                                diag_text = f"[transcription error: {image_name}"
+                                diag_text = f"[transcription error"
                                 if err_code:
                                     diag_text += f"; code {err_code}"
                                 if err_message:
@@ -500,9 +504,7 @@ def process_all_batches(
                             UserPrompt.print_transcription_not_possible(
                                 image_name=image_name, page_number=page_number
                             )
-                            transcription_text = (
-                                f"[Transcription not possible: {image_name}]"
-                            )
+                            transcription_text = "[Transcription not possible]"
                             entry = {
                                 "custom_id": custom_id,
                                 "transcription": transcription_text,
@@ -515,9 +517,7 @@ def process_all_batches(
                             UserPrompt.print_no_transcribable_text(
                                 image_name=image_name, page_number=page_number
                             )
-                            transcription_text = (
-                                f"[No transcribable text: {image_name}]"
-                            )
+                            transcription_text = "[No transcribable text]"
                             entry = {
                                 "custom_id": custom_id,
                                 "transcription": transcription_text,
@@ -642,17 +642,21 @@ def process_all_batches(
             if np_entries:
                 UserPrompt.display_transcription_not_possible_summary(len(np_entries))
 
-            # Extract just the transcription text in sorted order
-            ordered_transcriptions = [
-                t.get("transcription", "") for t in all_transcriptions
-            ]
+            # Build page-identified lines in sorted order
+            ordered_lines = []
+            for t in all_transcriptions:
+                tx = t.get("transcription", "")
+                info = t.get("image_info", {}) or {}
+                pn = info.get("page_number")
+                iname = info.get("image_name")
+                ordered_lines.append(format_page_line(tx, pn, iname))
 
             processing_success = False
             try:
                 with final_txt_path.open("w", encoding="utf-8") as fout:
-                    for text in ordered_transcriptions:
-                        if text:
-                            fout.write(text + "\n")
+                    for line in ordered_lines:
+                        if line:
+                            fout.write(line + "\n")
                 logger.info(
                     f"All batches for {temp_file.name} processed and saved to {final_txt_path}"
                 )

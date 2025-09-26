@@ -12,7 +12,7 @@ from typing import Any, AsyncGenerator, Dict, Optional, Tuple
 
 import aiofiles
 import aiohttp
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential, wait_random
 
 from modules.config.config_loader import ConfigLoader, PROJECT_ROOT
 from modules.llm.model_capabilities import Capabilities, detect_capabilities
@@ -41,8 +41,44 @@ class NonRetryableOpenAIError(Exception):
 
 # ---------- Retry wait helpers ----------
 
-_WAIT_IMAGE_BASE = wait_exponential(multiplier=1, min=4, max=60)
-_WAIT_TRANSCRIBE_BASE = wait_exponential(multiplier=1, min=4, max=10)
+def _load_retry_policy() -> Tuple[int, float, float, float]:
+    """Load retry attempts and wait window from concurrency configuration.
+
+    Returns
+    -------
+    tuple
+        (attempts, wait_min_seconds, wait_max_seconds, jitter_max_seconds)
+    """
+    try:
+        conc_cfg = ConfigLoader().get_concurrency_config() or {}
+        trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get("transcription", {}) or {}
+        retry_cfg = (trans_cfg.get("retry", {}) or {})
+        attempts = int(retry_cfg.get("attempts", 5))
+        wait_min = float(retry_cfg.get("wait_min_seconds", 4))
+        wait_max = float(retry_cfg.get("wait_max_seconds", 60))
+        jitter_max = float(retry_cfg.get("jitter_max_seconds", 1))
+        # Sanity bounds
+        if attempts <= 0:
+            attempts = 1
+        if wait_min < 0:
+            wait_min = 0
+        if wait_max < wait_min:
+            wait_max = wait_min
+        if jitter_max < 0:
+            jitter_max = 0
+        return attempts, wait_min, wait_max, jitter_max
+    except Exception:
+        # Fallback to sensible defaults matching prior behavior
+        return 5, 4.0, 60.0, 1.0
+
+
+_RETRY_ATTEMPTS, _RETRY_WAIT_MIN, _RETRY_WAIT_MAX, _RETRY_JITTER_MAX = _load_retry_policy()
+
+# Base exponential wait, augmented with small random jitter to avoid synchronized retries.
+_WAIT_IMAGE_BASE = (
+    wait_exponential(multiplier=1, min=_RETRY_WAIT_MIN, max=_RETRY_WAIT_MAX)
+    + wait_random(0, _RETRY_JITTER_MAX)
+)
 
 
 def _wait_with_server_hint_factory(base_wait):
@@ -272,7 +308,7 @@ class OpenAIExtractor:
 
     @retry(
         wait=_wait_with_server_hint_factory(_WAIT_IMAGE_BASE),
-        stop=stop_after_attempt(5),
+        stop=stop_after_attempt(_RETRY_ATTEMPTS),
         retry=(
             retry_if_exception_type(TransientOpenAIError)
             | retry_if_exception_type(aiohttp.ClientError)
@@ -482,15 +518,6 @@ class OpenAITranscriber:
         encoded = base64.b64encode(content).decode("utf-8")
         return f"data:{mime_type};base64,{encoded}"
 
-    @retry(
-        wait=_wait_with_server_hint_factory(_WAIT_TRANSCRIBE_BASE),
-        stop=stop_after_attempt(7),
-        retry=(
-            retry_if_exception_type(TransientOpenAIError)
-            | retry_if_exception_type(aiohttp.ClientError)
-            | retry_if_exception_type(asyncio.TimeoutError)
-        ),
-    )
     async def transcribe_image(self, image_path: Path) -> Dict[str, Any]:
         """
         Backward-compatible call used by workflow.

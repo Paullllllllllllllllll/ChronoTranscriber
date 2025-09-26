@@ -6,6 +6,14 @@ concurrency:
     service_tier: flex        # Controls OpenAI Responses service tier, allowed
     # tiers: 'auto', 'default', 'flex', and 'priority'
     batch_chunk_size: 50         # Number of requests per batch part file (used by Batch API)
+    retry:
+      # Maximum number of retry attempts for each image request (applies to Responses API calls)
+      attempts: 5
+      # Exponential backoff lower and upper bounds (seconds)
+      wait_min_seconds: 4
+      wait_max_secon  ds: 60
+      # Random jitter added to each backoff duration to reduce synchronized retries (seconds)
+      jitter_max_seconds: 1
   image_processing:
     concurrency_limit: 24  # Maximum number of concurrent image processing tasks
     delay_between_tasks: 0  # No delay for image processing tasks

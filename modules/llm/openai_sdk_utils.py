@@ -1,4 +1,8 @@
-# modules/openai_sdk_utils.py
+"""OpenAI SDK utility functions for batch operations and object conversions.
+
+Provides helper functions for working with OpenAI SDK objects, including
+batch listing with pagination and object-to-dict conversions.
+"""
 
 from __future__ import annotations
 

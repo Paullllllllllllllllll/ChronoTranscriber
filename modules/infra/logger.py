@@ -1,7 +1,13 @@
-# modules/logger.py
+"""Logging infrastructure for the application.
+
+Provides centralized logger configuration with file and console handlers.
+"""
+
+from __future__ import annotations
 
 import logging
 from pathlib import Path
+
 from modules.config.config_loader import ConfigLoader, PROJECT_ROOT
 
 
@@ -9,11 +15,15 @@ def setup_logger(name: str) -> logging.Logger:
     """
     Set up and return a logger with file and console handlers.
 
-    Parameters:
-        name (str): Name of the logger.
+    Logs are written to the configured logs directory (from paths_config.yaml)
+    or PROJECT_ROOT/logs as a fallback. Console handler only shows warnings
+    and errors, while the file handler captures all INFO level and above.
+
+    Args:
+        name: Name of the logger (typically __name__ from the calling module).
 
     Returns:
-        logging.Logger: The configured logger.
+        Configured logger instance.
     """
     # Be resilient: try reading paths_config for logs_dir; fall back to
     # PROJECT_ROOT/logs if anything fails.

@@ -1,4 +1,7 @@
-# modules/batch_utils.py
+"""Batch processing utilities for OpenAI Batch API operations.
+
+Provides diagnostic tools and metadata extraction for batch job management.
+"""
 
 from __future__ import annotations
 
@@ -16,16 +19,11 @@ def diagnose_batch_failure(batch_id: str, client: Any) -> str:
     """
     Diagnose a batch failure by retrieving its status from the OpenAI API.
 
-    Parameters
-    ----------
-    batch_id : str
-        The ID of the batch to diagnose.
-    client : Any
-        An initialized OpenAI client (from openai import OpenAI).
+    Args:
+        batch_id: The ID of the batch to diagnose.
+        client: An initialized OpenAI client instance.
 
-    Returns
-    -------
-    str
+    Returns:
         A human-readable diagnostic message about the batch status or error.
     """
     try:
@@ -67,15 +65,11 @@ def extract_custom_id_mapping(
     workflow.py) lines and builds a map of custom_id -> image_info, and a separate
     ordering map of custom_id -> order_index.
 
-    Parameters
-    ----------
-    temp_file : Path
-        The path to the temporary transcription JSONL file.
+    Args:
+        temp_file: Path to the temporary transcription JSONL file.
 
-    Returns
-    -------
-    Tuple[Dict[str, Dict[str, Any]], Dict[str, int]]
-        (custom_id -> image_info, custom_id -> order_index)
+    Returns:
+        Tuple of (custom_id -> image_info dict, custom_id -> order_index dict).
     """
     custom_id_map: Dict[str, Dict[str, Any]] = {}
     batch_order: Dict[str, int] = {}

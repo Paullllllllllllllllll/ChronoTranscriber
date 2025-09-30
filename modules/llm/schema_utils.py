@@ -1,3 +1,9 @@
+"""JSON schema loading and validation utilities.
+
+Provides functions for loading and validating JSON schemas used for
+structured outputs in transcription tasks.
+"""
+
 from __future__ import annotations
 
 import json

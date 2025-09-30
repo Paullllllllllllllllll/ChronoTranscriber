@@ -1,8 +1,8 @@
 """
-cancel_batches.py
+CLI script to cancel all non-terminal batch jobs.
 
-Cancel all non-terminal batches using robust pagination and clear summaries.
-Terminal statuses: completed, expired, cancelled, failed.
+Retrieves all batches from OpenAI and cancels those not in terminal states
+(completed, expired, cancelled, failed).
 """
 
 from __future__ import annotations

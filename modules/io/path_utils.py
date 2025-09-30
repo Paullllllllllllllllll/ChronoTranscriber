@@ -1,4 +1,10 @@
-# modules/path_utils.py
+"""Path validation utilities for configuration files.
+
+Validates that paths meet the requirements specified in paths_config.yaml.
+"""
+
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 from typing import Dict, Any
@@ -10,11 +16,15 @@ def validate_paths(paths_config: Dict[str, Any]) -> None:
     """
     Validate path configurations based on the allow_relative_paths setting.
 
-    If allow_relative_paths is enabled, paths should already be resolved.
-    Otherwise, verify that all paths are absolute.
+    If allow_relative_paths is enabled, paths should already be resolved by
+    ConfigLoader. Otherwise, this function verifies that all paths are absolute
+    and exits with an error if any relative paths are found.
 
-    Parameters:
-        paths_config (Dict[str, Any]): The loaded paths configuration.
+    Args:
+        paths_config: The loaded paths configuration dictionary.
+
+    Raises:
+        SystemExit: If validation fails and paths are not absolute.
     """
     general = paths_config.get("general", {})
     allow_relative_paths = general.get("allow_relative_paths", False)

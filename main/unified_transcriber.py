@@ -1,14 +1,11 @@
 # unified_transcriber.py
-
 """
-This script orchestrates the transcription of historical documents by:
-- Loading configuration from YAML files.
-- Guiding users through a structured workflow:
-  1. Choose between PDF or image processing
-  2. Select transcription method (native, Tesseract OCR, or GPT-based)
-  3. Configure batch processing options if applicable
-  4. Select specific files or folders to process
-- Processing documents based on user selections, with appropriate logging
+Main CLI script for the ChronoTranscriber application.
+
+Orchestrates the transcription of historical documents by:
+- Loading configuration from YAML files
+- Guiding users through a structured workflow
+- Processing documents based on user selections with appropriate logging
 """
 
 import os
@@ -16,11 +13,6 @@ import sys
 import asyncio
 import traceback
 from pathlib import Path
-
-# Add parent directory to path to help with module imports
-parent_dir = str(Path(__file__).resolve().parent.parent)
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
 
 from modules.config.config_loader import ConfigLoader
 from modules.infra.logger import setup_logger

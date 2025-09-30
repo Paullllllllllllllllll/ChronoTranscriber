@@ -1,8 +1,11 @@
-# modules/constants.py
+"""Centralized constants used across the application.
 
-# Centralized constants used across modules
+Defines supported image formats and their MIME types for encoding.
+"""
 
-# Supported image extensions and their MIME types for data: URLs
+from __future__ import annotations
+
+# Supported image extensions and their MIME types for data URLs
 SUPPORTED_IMAGE_FORMATS = {
     ".png": "image/png",
     ".jpg": "image/jpeg",

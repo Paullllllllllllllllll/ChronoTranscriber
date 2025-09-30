@@ -1,5 +1,9 @@
 # repair_transcriptions.py
-# Thin CLI delegator to operations.repair
+"""
+CLI script for repairing transcription batches.
+
+This is a thin delegator to the operations.repair module.
+"""
 
 from __future__ import annotations
 
@@ -11,10 +15,6 @@ from modules.core.utils import console_print
 from modules.operations.repair.run import main as repair_main
 
 logger = setup_logger(__name__)
-
-
-async def main() -> None:
-    await repair_main()
 
 
 if __name__ == "__main__":

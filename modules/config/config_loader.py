@@ -1,4 +1,10 @@
-# modules/config_loader.py
+"""Configuration loader module for YAML-based settings.
+
+Provides robust configuration loading with path resolution, environment variable
+expansion, and validation of model capabilities. Handles multiple configuration
+files including model_config, paths_config, concurrency_config, and
+image_processing_config.
+"""
 
 from __future__ import annotations
 

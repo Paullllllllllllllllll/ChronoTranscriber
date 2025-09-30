@@ -1,4 +1,9 @@
-# modules/prompt_utils.py
+"""Prompt template rendering utilities.
+
+Provides functions for rendering prompt templates with schema information
+for transcription tasks.
+"""
+
 from __future__ import annotations
 
 import json

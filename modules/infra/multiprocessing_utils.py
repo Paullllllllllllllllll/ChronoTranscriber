@@ -1,15 +1,27 @@
-# modules/multiprocessing_utils.py
+"""Multiprocessing utilities for CPU-bound parallel tasks.
 
+Provides process pool management for parallel execution of functions.
+"""
+
+from __future__ import annotations
+
+import logging
 from multiprocessing import Pool, cpu_count
 from typing import Callable, List, Any, Tuple
-import logging
 
 logger = logging.getLogger(__name__)
 
 
 def wrapper(func: Callable[..., Any], args: Tuple[Any, ...]) -> Any:
     """
-    Unpack arguments and call the target function.
+    Unpack arguments and call the target function with error handling.
+
+    Args:
+        func: The function to call.
+        args: Arguments to pass to the function.
+
+    Returns:
+        The result of the function call, or None if an error occurred.
     """
     try:
         return func(*args)
@@ -24,10 +36,15 @@ def run_multiprocessing_tasks(
     processes: int | None = None,
 ) -> List[Any]:
     """
-    Run the given function over a list of argument tuples using multiprocessing.
+    Run function over argument tuples using multiprocessing.
+
+    Args:
+        func: The function to execute.
+        args_list: List of argument tuples to pass to the function.
+        processes: Number of processes to use (default: cpu_count - 1).
 
     Returns:
-        List[Any]: List of results.
+        List of results from all function calls.
     """
     if processes is None:
         processes = max(1, cpu_count() - 1)

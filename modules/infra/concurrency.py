@@ -1,4 +1,9 @@
-# modules/concurrency.py
+"""Concurrency utilities for async task management.
+
+Provides semaphore-based concurrency control for async operations.
+"""
+
+from __future__ import annotations
 
 import asyncio
 import logging
@@ -15,16 +20,17 @@ async def run_concurrent_transcription_tasks(
     on_result: Optional[Callable[[Any], Awaitable[None]]] = None,
 ) -> List[Any]:
     """
-    Run the given asynchronous function concurrently over a list of argument tuples, respecting a concurrency limit.
+    Run async function concurrently over argument tuples with concurrency control.
 
-    Parameters:
-        corofunc (Callable[..., Awaitable[Any]]): The async function to execute.
-        args_list (List[Tuple[Any, ...]]): The list of argument tuples.
-        concurrency_limit (int): Maximum number of concurrent tasks.
-        delay (float): Delay in seconds between task starts.
+    Args:
+        corofunc: The async function to execute.
+        args_list: List of argument tuples to pass to the function.
+        concurrency_limit: Maximum number of concurrent tasks (default: 20).
+        delay: Delay in seconds between task starts (default: 0).
+        on_result: Optional async callback to process each result immediately.
 
     Returns:
-        List[Any]: List of results.
+        List of results from all task executions.
     """
     semaphore = asyncio.Semaphore(concurrency_limit)
 

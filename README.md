@@ -30,6 +30,7 @@ ChronoTranscriber is designed for researchers, archivists, and digital humanitie
 - **Page Ordering**: Maintain correct page sequence for multi-page documents with intelligent ordering strategies
 - **Image Preprocessing**: Apply deskewing, denoising, binarization, and other enhancements for optimal OCR results
 - **Configurable Reliability**: Fine-tune layered retry policies for both API errors and model-level transcription outcomes
+- **Context-Aware Prompts**: Provide optional domain guidance via `additional_context/additional_context.txt`; when no context is supplied the system inserts the literal "Empty" marker to keep prompts fail-safe
 
 ## Features
 
@@ -56,7 +57,8 @@ ChronoTranscriber is designed for researchers, archivists, and digital humanitie
   - GPT-5 series: reasoning effort and text verbosity controls
   - o-series (o1, o3): reasoning capabilities with automatic feature detection
   - Classic models: temperature, top_p, frequency_penalty, and presence_penalty controls
-- **Automatic Capability Detection**: The system validates model capabilities and adjusts parameters accordingly
+-- **Automatic Capability Detection**: The system validates model capabilities and adjusts parameters accordingly
+- **Minimal User Prompts**: Requests send only the text "The image:" alongside the vision payload so that all instructions remain in the system prompt
 
 ### Structured Outputs
 
@@ -362,6 +364,10 @@ transcription_failures:
   wait_min_seconds: 2
   wait_max_seconds: 30
   jitter_max_seconds: 1
+
+### Additional Context Guidance
+
+ChronoTranscriber ships with an optional domain context file at `additional_context/additional_context.txt`. When you supply content in this file, it is injected into the system prompt where the `{{ADDITIONAL_CONTEXT}}` marker appears. If you prefer to run without extra guidance, leave the file empty or skip context selection; the pipeline automatically inserts the literal word `Empty` so the marker resolves safely and the model receives an explicit signal that no context is provided. Context updates do not require code changes—edit the file and restart your run to apply the new guidance.
 ```
 
 ### Custom Transcription Schemas
@@ -433,6 +439,7 @@ The transcriber will guide you through the following steps:
 4. **Select JSON Schema** (GPT only)
    - Choose from available schemas in `schemas/` directory
    - Schemas control output format (markdown, plain text, or custom)
+   - Optionally preview additional context guidance before confirming
 
 5. **Select Files/Folders**
    - Browse available PDFs or image folders
@@ -440,7 +447,13 @@ The transcriber will guide you through the following steps:
 
 6. **Review and Confirm**
    - Review your selections
-   - Confirm to start processing
+   - Confirm to start processing (context selection remains optional)
+
+#### Providing Additional Context
+
+- __Edit__: Update `additional_context/additional_context.txt` with any project-specific transcription notes (e.g., terminology, date ranges, formatting expectations).
+- __Skip__: To run without a domain primer, leave the file blank or choose not to load context; the prompt will receive the literal word `Empty`, ensuring downstream logic remains deterministic.
+- __Refresh__: Modify the file between runs to iterate on instructions without editing code. Changes take effect the next time the prompt is assembled for either synchronous or batch processing.
 
 #### Retry Behavior and Observability
 

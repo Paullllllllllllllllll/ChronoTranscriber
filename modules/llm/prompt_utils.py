@@ -47,3 +47,32 @@ def render_prompt_with_schema(prompt_text: str, schema_obj: Dict[str, Any]) -> s
 
     # No token or marker found: append a new section at the end
     return prompt_text + "\n\nThe JSON schema:\n" + schema_str
+
+
+def inject_additional_context(prompt_text: str, context: str) -> str:
+    """
+    Inject additional context into a prompt using the {{ADDITIONAL_CONTEXT}} marker.
+    
+    If the marker exists, it is replaced with the provided context.
+    If the marker does not exist, the prompt is returned unchanged (fail-safe behavior).
+    If context is empty or None, the marker is replaced with "Empty".
+    
+    Parameters
+    ----------
+    prompt_text : str
+        The prompt template text containing the marker
+    context : str
+        The additional context to inject
+        
+    Returns
+    -------
+    str
+        The prompt with context injected or marker removed
+    """
+    marker = "{{ADDITIONAL_CONTEXT}}"
+    if marker not in prompt_text:
+        return prompt_text
+    
+    # Replace marker with context (or "Empty" if no context provided)
+    context_text = context.strip() if context else "Empty"
+    return prompt_text.replace(marker, context_text)

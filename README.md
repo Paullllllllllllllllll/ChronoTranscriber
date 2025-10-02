@@ -29,6 +29,7 @@ ChronoTranscriber is designed for researchers, archivists, and digital humanitie
 - **Recoverable Workflows**: Monitor batch progress, repair failed transcriptions, and safely resume interrupted jobs
 - **Page Ordering**: Maintain correct page sequence for multi-page documents with intelligent ordering strategies
 - **Image Preprocessing**: Apply deskewing, denoising, binarization, and other enhancements for optimal OCR results
+- **Configurable Reliability**: Fine-tune layered retry policies for both API errors and model-level transcription outcomes
 
 ## Features
 
@@ -63,6 +64,13 @@ ChronoTranscriber is designed for researchers, archivists, and digital humanitie
 - **Multiple Schema Support**: Choose between markdown formatting or plain text output
 - **Custom Schemas**: Create your own schemas for specialized transcription needs
 - **Fallback Parsing**: Graceful handling of malformed responses with automatic fallback to raw text
+
+### Reliability & Retry Control
+
+- **Multi-tier Retry Strategy**: Automatic exponential backoff for transient API errors (429, 5xx, network timeouts) with jitter to avoid synchronized retries
+- **Transcription-aware Retries**: Optional, per-condition retries when the model returns `no_transcribable_text` or `transcription_not_possible`, configurable in `config/concurrency_config.yaml`
+- **Retry Hints**: Honors server-provided `Retry-After` headers and logs each attempt for clear observability
+- **Safe Defaults**: Sensible baseline retry settings ship out of the box, with the ability to disable or tighten retries per project requirements
 
 ### Batch Processing
 
@@ -307,20 +315,27 @@ Controls parallel processing and retry behavior.
 ```yaml
 concurrency:
   transcription:
-    concurrency_limit: 150
-    delay_between_tasks: 0.05
+    concurrency_limit: 250
+    delay_between_tasks: 0.005
     service_tier: flex  # Options: auto, default, flex, priority
     batch_chunk_size: 50
     
     retry:
-      attempts: 5
+      attempts: 10
       wait_min_seconds: 4
       wait_max_seconds: 60
       jitter_max_seconds: 1
+      
+      transcription_failures:
+        no_transcribable_text_retries: 1
+        transcription_not_possible_retries: 3
+        wait_min_seconds: 2
+        wait_max_seconds: 30
+        jitter_max_seconds: 1
   
   image_processing:
     concurrency_limit: 24
-    delay_between_tasks: 0
+    delay_between_tasks: 0.0005
 ```
 
 **Key Parameters**:
@@ -329,11 +344,25 @@ concurrency:
 - **`delay_between_tasks`**: Delay in seconds between starting tasks
 - **`service_tier`**: OpenAI service tier for rate limiting (auto, default, flex, priority)
 - **`batch_chunk_size`**: Number of requests per batch part file (affects chunking)
-- **Retry settings**: Exponential backoff configuration for failed requests
+- **Retry settings**: Exponential backoff configuration for transient API failures
   - `attempts`: Maximum retry attempts per request
   - `wait_min_seconds`: Minimum wait time before retry
   - `wait_max_seconds`: Maximum wait time before retry
   - `jitter_max_seconds`: Random jitter to prevent synchronized retries
+- **`transcription_failures`**: Optional retries applied when the model responds with `no_transcribable_text` or `transcription_not_possible`
+  - Individual counters (`*_retries`) let you disable or tighten retries per condition (set to `0` to accept the first response)
+  - Independent wait controls mirror the primary retry strategy, enabling faster follow-up attempts without altering API retry behavior
+
+**Tuning Example**: Disable transcription-specific retries while keeping API retries enabled
+
+```yaml
+transcription_failures:
+  no_transcribable_text_retries: 0
+  transcription_not_possible_retries: 0
+  wait_min_seconds: 2
+  wait_max_seconds: 30
+  jitter_max_seconds: 1
+```
 
 ### Custom Transcription Schemas
 
@@ -412,6 +441,15 @@ The transcriber will guide you through the following steps:
 6. **Review and Confirm**
    - Review your selections
    - Confirm to start processing
+
+#### Retry Behavior and Observability
+
+ChronoTranscriber applies a layered retry strategy automatically during GPT-based transcription.
+
+- **General API errors** (429, 5xx, network timeouts) retry with exponential backoff and jitter as configured in `config/concurrency_config.yaml`.
+- **Transcription outcomes** flagged as `no_transcribable_text` or `transcription_not_possible` can trigger additional retries when enabled via `transcription_failures` settings.
+- **Logs** emitted in the console and `logs_dir` include attempt counts and wait durations so you can audit retry activity.
+- **Tuning**: Increase `wait_min_seconds`/`wait_max_seconds` for aggressive rate limits, or set individual retry counters to `0` to accept the first model response.
 
 #### Example Session: PDF with GPT Batch
 

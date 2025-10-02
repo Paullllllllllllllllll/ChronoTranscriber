@@ -173,8 +173,9 @@ class ConfigLoader:
 
     def get_model_config(self) -> Dict[str, Any]:
         """
-        Return the raw configuration dictionary. This preserves legacy callers while
-        ensuring that image capability was validated in `load_configs()`.
+        Return the model configuration dictionary.
+        
+        Image capability is validated during load_configs().
         """
         return self._raw.copy()
 

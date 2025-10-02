@@ -141,8 +141,9 @@ class UserPrompt:
     @staticmethod
     def prompt_choice(prompt: str, options: List[Tuple[str, str]], allow_quit: bool = True) -> str:
         """
-        Display a simple numbered menu and return the selected option value.
-        This mirrors the legacy _prompt_choice used in repair scripts.
+        Display a numbered menu and return the selected option value.
+        
+        Provides interactive selection from a list of options with optional quit functionality.
         """
         console_print(f"\n{prompt}")
         console_print("-" * 80)

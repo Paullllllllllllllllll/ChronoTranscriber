@@ -4,6 +4,7 @@ import base64
 import json
 import logging
 import asyncio
+import random
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from contextlib import asynccontextmanager
@@ -23,7 +24,6 @@ from modules.config.constants import SUPPORTED_IMAGE_FORMATS
 logger = logging.getLogger(__name__)
 
 
-
 # ---------- Exceptions (retry control) ----------
 
 
@@ -37,6 +37,19 @@ class TransientOpenAIError(Exception):
 
 class NonRetryableOpenAIError(Exception):
     """Error category that should not be retried (e.g., 4xx other than 429)."""
+
+
+class TranscriptionFailureError(Exception):
+    """Raised when the model returns a transcription failure indicator.
+    
+    Used to trigger retries for specific transcription outcomes like:
+    - no_transcribable_text: true
+    - transcription_not_possible: true
+    """
+    
+    def __init__(self, message: str, failure_type: str) -> None:
+        super().__init__(message)
+        self.failure_type = failure_type  # 'no_transcribable_text' or 'transcription_not_possible'
 
 
 # ---------- Retry wait helpers ----------
@@ -72,12 +85,65 @@ def _load_retry_policy() -> Tuple[int, float, float, float]:
         return 5, 4.0, 60.0, 1.0
 
 
+def _load_transcription_failure_retry_policy() -> Tuple[int, int, float, float, float]:
+    """Load transcription failure retry configuration.
+    
+    Returns
+    -------
+    tuple
+        (no_text_retries, not_possible_retries, wait_min, wait_max, jitter_max)
+    """
+    try:
+        conc_cfg = ConfigLoader().get_concurrency_config() or {}
+        trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get("transcription", {}) or {}
+        retry_cfg = (trans_cfg.get("retry", {}) or {})
+        tf_cfg = (retry_cfg.get("transcription_failures", {}) or {})
+        
+        no_text_retries = int(tf_cfg.get("no_transcribable_text_retries", 0))
+        not_possible_retries = int(tf_cfg.get("transcription_not_possible_retries", 0))
+        wait_min = float(tf_cfg.get("wait_min_seconds", 2))
+        wait_max = float(tf_cfg.get("wait_max_seconds", 30))
+        jitter_max = float(tf_cfg.get("jitter_max_seconds", 1))
+        
+        # Sanity bounds
+        if no_text_retries < 0:
+            no_text_retries = 0
+        if not_possible_retries < 0:
+            not_possible_retries = 0
+        if wait_min < 0:
+            wait_min = 0
+        if wait_max < wait_min:
+            wait_max = wait_min
+        if jitter_max < 0:
+            jitter_max = 0
+            
+        return no_text_retries, not_possible_retries, wait_min, wait_max, jitter_max
+    except Exception:
+        # Fallback: no retries for transcription failures
+        return 0, 0, 2.0, 30.0, 1.0
+
+
 _RETRY_ATTEMPTS, _RETRY_WAIT_MIN, _RETRY_WAIT_MAX, _RETRY_JITTER_MAX = _load_retry_policy()
+
+# Load transcription failure retry configuration
+(
+    _TF_NO_TEXT_RETRIES,
+    _TF_NOT_POSSIBLE_RETRIES,
+    _TF_WAIT_MIN,
+    _TF_WAIT_MAX,
+    _TF_JITTER_MAX,
+) = _load_transcription_failure_retry_policy()
 
 # Base exponential wait, augmented with small random jitter to avoid synchronized retries.
 _WAIT_IMAGE_BASE = (
     wait_exponential(multiplier=1, min=_RETRY_WAIT_MIN, max=_RETRY_WAIT_MAX)
     + wait_random(0, _RETRY_JITTER_MAX)
+)
+
+# Wait strategy for transcription failure retries
+_WAIT_TF_BASE = (
+    wait_exponential(multiplier=1, min=_TF_WAIT_MIN, max=_TF_WAIT_MAX)
+    + wait_random(0, _TF_JITTER_MAX)
 )
 
 
@@ -95,6 +161,46 @@ def _wait_with_server_hint_factory(base_wait):
         return base_wait(retry_state)
 
     return _wait
+
+
+def _check_transcription_failure(content_text: str, raw_response: Dict[str, Any]) -> Optional[str]:
+    """Check if the response indicates a transcription failure.
+    
+    Returns
+    -------
+    Optional[str]
+        The failure type ('no_transcribable_text' or 'transcription_not_possible') if detected, None otherwise.
+    """
+    # Try to parse the response as JSON
+    parsed = None
+    if content_text:
+        stripped = content_text.strip()
+        if stripped.startswith("{"):
+            try:
+                parsed = json.loads(stripped)
+            except json.JSONDecodeError:
+                # Try to salvage the last valid JSON object
+                last_close = stripped.rfind("}")
+                if last_close != -1:
+                    i = last_close
+                    while i >= 0:
+                        if stripped[i] == "{":
+                            candidate = stripped[i:last_close + 1]
+                            try:
+                                parsed = json.loads(candidate)
+                                break
+                            except json.JSONDecodeError:
+                                pass
+                        i -= 1
+    
+    # Check for failure flags in parsed JSON
+    if isinstance(parsed, dict):
+        if parsed.get("no_transcribable_text", False):
+            return "no_transcribable_text"
+        if parsed.get("transcription_not_possible", False):
+            return "transcription_not_possible"
+    
+    return None
 
 
 # ---------- Responses API adapter ----------
@@ -131,7 +237,7 @@ class OpenAIExtractor:
 
         self.caps: Capabilities = detect_capabilities(model)
 
-        # Load model configuration dictionary (preserving legacy structure)
+        # Load model configuration dictionary
         if model_config is None:
             cl = ConfigLoader()
             cl.load_configs()
@@ -141,7 +247,7 @@ class OpenAIExtractor:
 
         tm = mc.get("transcription_model") or mc.get("extraction_model") or {}
 
-        # Token budget: Responses uses max_output_tokens (fallbacks for backward-compat)
+        # Token budget: Responses API uses max_output_tokens (with fallbacks for flexibility)
         self.max_output_tokens: int = int(
             tm.get("max_output_tokens")
             if tm.get("max_output_tokens") is not None
@@ -393,18 +499,109 @@ class OpenAIExtractor:
         content_text = self._collect_output_text(data)
         return content_text, data
 
+    async def process_image_with_transcription_retry(
+        self,
+        *,
+        system_message: str,
+        image_data_url: str,
+        json_schema: Optional[Dict[str, Any]] = None,
+        user_instruction: str = "Please transcribe the text from this image.",
+        detail: Optional[str] = None,
+    ) -> Tuple[str, Dict[str, Any]]:
+        """
+        Call Responses API with an image and retry on transcription failures.
+        
+        This wraps process_image() and adds an additional retry layer for transcription-specific
+        failures (no_transcribable_text, transcription_not_possible) based on configuration.
+        
+        The retry strategy follows OpenAI's recommendations:
+        - General API errors (429, 5xx, timeouts) are handled by process_image with exponential backoff
+        - Transcription failures are retried separately with their own configurable limits
+        
+        Returns
+        -------
+        tuple[str, dict]
+            (content_text, raw_response_dict)
+        """
+        # Track retry attempts for each failure type
+        no_text_attempts = 0
+        not_possible_attempts = 0
+        
+        while True:
+            # Call the API (with its own retry logic for transient errors)
+            content_text, raw_response = await self.process_image(
+                system_message=system_message,
+                image_data_url=image_data_url,
+                json_schema=json_schema,
+                user_instruction=user_instruction,
+                detail=detail,
+            )
+            
+            # Check if the response indicates a transcription failure
+            failure_type = _check_transcription_failure(content_text, raw_response)
+            
+            if failure_type is None:
+                # Success - return the result
+                return content_text, raw_response
+            
+            # Determine if we should retry based on the failure type and configured limits
+            should_retry = False
+            wait_time = 0.0
+            
+            if failure_type == "no_transcribable_text":
+                if no_text_attempts < _TF_NO_TEXT_RETRIES:
+                    should_retry = True
+                    no_text_attempts += 1
+                    # Calculate exponential backoff with jitter
+                    base_wait = min(_TF_WAIT_MIN * (2 ** (no_text_attempts - 1)), _TF_WAIT_MAX)
+                    wait_time = base_wait + random.uniform(0, _TF_JITTER_MAX)
+                    logger.warning(
+                        "Transcription returned no_transcribable_text=true (attempt %d/%d). "
+                        "Retrying after %.2f seconds...",
+                        no_text_attempts,
+                        _TF_NO_TEXT_RETRIES,
+                        wait_time,
+                    )
+            elif failure_type == "transcription_not_possible":
+                if not_possible_attempts < _TF_NOT_POSSIBLE_RETRIES:
+                    should_retry = True
+                    not_possible_attempts += 1
+                    # Calculate exponential backoff with jitter
+                    base_wait = min(_TF_WAIT_MIN * (2 ** (not_possible_attempts - 1)), _TF_WAIT_MAX)
+                    wait_time = base_wait + random.uniform(0, _TF_JITTER_MAX)
+                    logger.warning(
+                        "Transcription returned transcription_not_possible=true (attempt %d/%d). "
+                        "Retrying after %.2f seconds...",
+                        not_possible_attempts,
+                        _TF_NOT_POSSIBLE_RETRIES,
+                        wait_time,
+                    )
+            
+            if not should_retry:
+                # Exhausted retries or retries disabled - return the failure response
+                logger.info(
+                    "Transcription failure (%s) - no more retries configured. Returning response.",
+                    failure_type,
+                )
+                return content_text, raw_response
+            
+            # Wait before retrying
+            await asyncio.sleep(wait_time)
 
-# ---------- Backward-compatible façade (same public interface) ----------
+
+# ---------- Public transcriber interface ----------
 
 
 class OpenAITranscriber:
     """
-    Backward-compatible façade used by existing workflow code.
+    High-level transcriber interface for the ChronoTranscriber workflow.
 
-    Preserves:
-      - constructor signature (api_key, model)
-      - `transcribe_image(Path)` method
-    but internally routes to the Responses API via `OpenAIExtractor`.
+    Encapsulates:
+      - Configuration loading (model, prompts, schema)
+      - Image encoding to data URLs
+      - Transcription via OpenAI Responses API with retry logic
+    
+    Used by workflow orchestration and repair operations.
     """
 
     def __init__(
@@ -423,7 +620,7 @@ class OpenAITranscriber:
         self.model = model or tm.get("name", "gpt-4o-2024-08-06")
 
         self.api_key = api_key
-        # service_tier now sourced from concurrency_config.yaml
+        # service_tier sourced from concurrency_config.yaml with fallback to model_config.yaml
         try:
             cc = cfg.get_concurrency_config()
             st = (
@@ -433,7 +630,6 @@ class OpenAITranscriber:
             )
         except Exception:
             st = None
-        # Backward-compat fallback to model_config.yaml if present
         self.service_tier: Optional[str] = st if st is not None else tm.get("service_tier")
 
         self.extractor = OpenAIExtractor(
@@ -508,6 +704,30 @@ class OpenAITranscriber:
     async def close(self) -> None:
         await self.extractor.close()
 
+    async def transcribe_image(self, image_path: Path) -> Dict[str, Any]:
+        """
+        Transcribe an image file using the OpenAI Responses API.
+
+        Returns
+        -------
+        dict
+            Raw Responses API response dictionary.
+        """
+        mime = SUPPORTED_IMAGE_FORMATS.get(image_path.suffix.lower())
+        if not mime:
+            raise ValueError(f"Unsupported image format: {image_path.suffix}")
+
+        data_url = await self._encode_image_to_data_url(image_path, mime)
+
+        _, data = await self.extractor.process_image_with_transcription_retry(
+            system_message=self.system_prompt_text,
+            image_data_url=data_url,
+            json_schema=self.transcription_schema,
+            user_instruction="Please analyze and transcribe the text from this image according to the provided instructions.",
+            detail=self.llm_detail,
+        )
+        return data
+
     @staticmethod
     async def _encode_image_to_data_url(image_path: Path, mime_type: str) -> str:
         """
@@ -518,33 +738,6 @@ class OpenAITranscriber:
         encoded = base64.b64encode(content).decode("utf-8")
         return f"data:{mime_type};base64,{encoded}"
 
-    async def transcribe_image(self, image_path: Path) -> Dict[str, Any]:
-        """
-        Backward-compatible call used by workflow.
-
-        Returns
-        -------
-        dict
-            Raw Responses dict (safest for downstream parsers).
-        """
-        mime = SUPPORTED_IMAGE_FORMATS.get(image_path.suffix.lower())
-        if not mime:
-            raise ValueError(f"Unsupported image format: {image_path.suffix}")
-
-        data_url = await self._encode_image_to_data_url(image_path, mime)
-
-        _, data = await self.extractor.process_image(
-            system_message=self.system_prompt_text,
-            image_data_url=data_url,
-            # Pass bare JSON Schema; helper will wrap if needed
-            json_schema=self.transcription_schema,
-            user_instruction="Please analyze and transcribe the text from this image according to the provided instructions.",
-            # Use configured detail; 'auto' will omit the field
-            detail=self.llm_detail,
-        )
-        return data
-
-
 @asynccontextmanager
 async def open_transcriber(
     api_key: str,
@@ -554,7 +747,9 @@ async def open_transcriber(
     system_prompt_path: Optional[Path] = None,
 ) -> AsyncGenerator[OpenAITranscriber, None]:
     """
-    Context manager matching legacy import sites.
+    Context manager for OpenAITranscriber with automatic cleanup.
+    
+    Ensures the underlying HTTP session is properly closed.
     """
     transcriber = OpenAITranscriber(
         api_key=api_key,
@@ -572,6 +767,8 @@ async def transcribe_image_with_openai(
     image_path: Path, transcriber: OpenAITranscriber
 ) -> Dict[str, Any]:
     """
-    Legacy helper retained for callers in the workflow.
+    Convenience helper for transcribing a single image.
+    
+    Used by workflow orchestration code.
     """
     return await transcriber.transcribe_image(image_path)

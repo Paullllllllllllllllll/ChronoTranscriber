@@ -145,7 +145,7 @@ def _build_responses_body_for_image(
         )
     except Exception:
         st = None
-    # Backward-compat: fall back to model_config if concurrency_config missing
+    # Fallback: use model_config if service_tier not in concurrency_config
     effective_service_tier = st if st is not None else tm.get("service_tier")
     if effective_service_tier:
         allowed_service_tiers = {"auto", "default", "flex", "priority"}

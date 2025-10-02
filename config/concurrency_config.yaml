@@ -1,19 +1,37 @@
 # Concurrency settings for transcription and image processing tasks
 concurrency:
   transcription:
-    concurrency_limit: 150  # Maximum number of concurrent transcription tasks
+    concurrency_limit: 500  # Maximum number of concurrent transcription tasks
     delay_between_tasks: 0.05  # Delay (in seconds) between starting transcription tasks
     service_tier: flex        # Controls OpenAI Responses service tier, allowed
     # tiers: 'auto', 'default', 'flex', and 'priority'
     batch_chunk_size: 50         # Number of requests per batch part file (used by Batch API)
     retry:
-      # Maximum number of retry attempts for each image request (applies to Responses API calls)
-      attempts: 5
+      # General API error retries (applies to Responses API calls)
+      # Maximum number of retry attempts for transient API errors (429, 5xx, timeouts)
+      attempts: 10
       # Exponential backoff lower and upper bounds (seconds)
-      wait_min_seconds: 4
-      wait_max_secon  ds: 60
+      wait_min_seconds: 1
+      wait_max_seconds: 30
       # Random jitter added to each backoff duration to reduce synchronized retries (seconds)
-      jitter_max_seconds: 1
+      jitter_max_seconds: 0.5
+      
+      # Transcription-specific retries
+      # Additional retries when model returns specific failure indicators in the response
+      # These are separate from general API error retries and apply after a successful API call
+      # but when the model indicates it cannot transcribe the content
+      transcription_failures:
+        # Retry when model returns no_transcribable_text: true
+        # Set to 0 to accept the first response without retrying
+        no_transcribable_text_retries: 0
+        # Retry when model returns transcription_not_possible: true  
+        # Set to 0 to accept the first response without retrying
+        transcription_not_possible_retries: 3
+        # Wait time between transcription failure retries (seconds)
+        # Uses same exponential backoff strategy as general retries
+        wait_min_seconds: 1
+        wait_max_seconds: 30
+        jitter_max_seconds: 0.5
   image_processing:
     concurrency_limit: 24  # Maximum number of concurrent image processing tasks
-    delay_between_tasks: 0  # No delay for image processing tasks
+    delay_between_tasks: 0.0005  # No delay for image processing tasks

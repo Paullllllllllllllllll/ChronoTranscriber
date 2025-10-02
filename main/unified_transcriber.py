@@ -7,21 +7,17 @@ Supports two modes:
 2. CLI mode: Command-line arguments for automation (interactive_mode: false)
 """
 
-import os
 import sys
 import asyncio
 import traceback
 from pathlib import Path
-import argparse
 
-from modules.config.config_loader import ConfigLoader
+from modules.config.config_loader import ConfigLoader, PROJECT_ROOT
 from modules.infra.logger import setup_logger
 from modules.llm.openai_utils import open_transcriber
 from modules.ui import (
     UserConfiguration,
     WorkflowUI,
-    NavigationAction,
-    print_header,
     print_info,
     print_success,
     print_error,
@@ -36,8 +32,8 @@ from modules.core.cli_args import (
     validate_input_path,
     validate_output_path,
 )
+from modules.core.mode_selector import run_with_mode_detection
 from modules.llm.schema_utils import list_schema_options
-from modules.config.config_loader import PROJECT_ROOT
 
 logger = setup_logger(__name__)
 
@@ -203,7 +199,7 @@ async def process_documents(
         concurrency_config: Concurrency configuration
         image_processing_config: Image processing configuration
     """
-    print_header("PROCESSING", "Starting document processing...")
+    print_info("PROCESSING", "Starting document processing...")
     
     # Create workflow manager
     workflow_manager = WorkflowManager(
@@ -235,30 +231,57 @@ async def process_documents(
         await workflow_manager.process_selected_items()
 
 
-async def main():
-    """
-    Main function supporting both interactive and CLI modes.
-    """
-    try:
-        # Load configurations
-        config_loader = ConfigLoader()
-        config_loader.load_configs()
-    except Exception as e:
-        logger.critical(f"Failed to load configurations: {e}")
-        print_error(f"Failed to load configurations: {e}")
-        sys.exit(1)
-    
-    # Get configuration values
+async def transcribe_interactive() -> None:
+    """Handle interactive mode transcription workflow."""
+    # Load configurations
+    config_loader = ConfigLoader()
+    config_loader.load_configs()
     paths_config = config_loader.get_paths_config()
-    interactive_mode = paths_config.get("general", {}).get("interactive_mode", True)
     
     # Validate paths
-    try:
-        validate_paths(paths_config)
-    except Exception as e:
-        logger.error(f"Path validation failed: {e}")
-        print_error(f"Path validation failed: {e}")
-        sys.exit(1)
+    validate_paths(paths_config)
+    
+    # Get directory paths from config
+    pdf_input_dir = Path(
+        paths_config.get('file_paths', {}).get('PDFs', {}).get('input', 'pdfs_in')
+    )
+    image_input_dir = Path(
+        paths_config.get('file_paths', {}).get('Images', {}).get('input', 'images_in')
+    )
+    
+    # Ensure directories exist for interactive mode
+    pdf_input_dir.mkdir(parents=True, exist_ok=True)
+    image_input_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create user configuration through interactive workflow
+    user_config = await configure_user_workflow_interactive(pdf_input_dir, image_input_dir)
+    
+    # Process documents
+    await process_documents(
+        user_config,
+        paths_config,
+        config_loader.get_model_config(),
+        config_loader.get_concurrency_config(),
+        config_loader.get_image_processing_config()
+    )
+    
+    # Display completion summary
+    WorkflowUI.display_completion_summary(user_config)
+
+
+async def transcribe_cli(args, paths_config: dict) -> None:
+    """Handle CLI mode transcription workflow.
+    
+    Args:
+        args: Parsed command-line arguments
+        paths_config: Paths configuration dictionary
+    """
+    # Load additional configurations
+    config_loader = ConfigLoader()
+    config_loader.load_configs()
+    
+    # Validate paths
+    validate_paths(paths_config)
     
     # Get directory paths from config
     pdf_input_dir = Path(
@@ -274,77 +297,52 @@ async def main():
         paths_config.get('file_paths', {}).get('Images', {}).get('output', 'images_out')
     )
     
-    # Additional configs
-    model_config = config_loader.get_model_config()
-    concurrency_config = config_loader.get_concurrency_config()
-    image_processing_config = config_loader.get_image_processing_config()
+    # Determine base directories based on processing type
+    if args.type == "images":
+        base_input_dir = image_input_dir
+        base_output_dir = image_output_dir
+    else:
+        base_input_dir = pdf_input_dir
+        base_output_dir = pdf_output_dir
     
-    # Determine mode and get user configuration
-    if interactive_mode:
-        # Interactive mode with prompts
-        pdf_input_dir.mkdir(parents=True, exist_ok=True)
-        image_input_dir.mkdir(parents=True, exist_ok=True)
-        
-        user_config = await configure_user_workflow_interactive(pdf_input_dir, image_input_dir)
-        
-        # Process documents
-        await process_documents(
-            user_config,
-            paths_config,
-            model_config,
-            concurrency_config,
-            image_processing_config
+    # Create configuration from CLI arguments
+    user_config = create_config_from_cli_args(args, base_input_dir, base_output_dir)
+    
+    # Process documents
+    await process_documents(
+        user_config,
+        paths_config,
+        config_loader.get_model_config(),
+        config_loader.get_concurrency_config(),
+        config_loader.get_image_processing_config()
+    )
+    
+    print_success("Processing complete!")
+
+
+async def main() -> None:
+    """Main entry point supporting both interactive and CLI modes."""
+    try:
+        # Use centralized mode detection
+        config_loader, interactive_mode, args, paths_config = run_with_mode_detection(
+            interactive_handler=transcribe_interactive,
+            cli_handler=transcribe_cli,
+            parser_factory=create_transcriber_parser,
+            script_name="unified_transcriber"
         )
         
-        # Display completion summary
-        WorkflowUI.display_completion_summary(user_config)
-    else:
-        # CLI mode with arguments
-        parser = create_transcriber_parser()
-        args = parser.parse_args()
-        
-        try:
-            # Determine base directories based on processing type
-            if args.type == "images":
-                base_input_dir = image_input_dir
-                base_output_dir = image_output_dir
-            else:
-                base_input_dir = pdf_input_dir
-                base_output_dir = pdf_output_dir
+        # Route to appropriate handler
+        if interactive_mode:
+            await transcribe_interactive()
+        else:
+            await transcribe_cli(args, paths_config)
             
-            # Create configuration from CLI arguments
-            user_config = create_config_from_cli_args(args, base_input_dir, base_output_dir)
-            
-            # Process documents
-            await process_documents(
-                user_config,
-                paths_config,
-                model_config,
-                concurrency_config,
-                image_processing_config
-            )
-            
-            print_success("Processing complete!")
-            
-        except ValueError as e:
-            print_error(f"Invalid arguments: {e}")
-            sys.exit(1)
-        except Exception as e:
-            logger.exception(f"Error in CLI mode: {e}")
-            print_error(f"Error: {e}")
-            sys.exit(1)
-
-
-# --------------------------------------------------
-# Entry Point
-# --------------------------------------------------
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
     except KeyboardInterrupt:
         print_info("\nProcessing interrupted by user.")
         sys.exit(0)
+    except ValueError as e:
+        print_error(f"Invalid arguments: {e}")
+        sys.exit(1)
     except Exception as e:
         logger.exception(f"Unexpected error: {e}")
         print_error(f"An unexpected error occurred: {e}")
@@ -352,3 +350,11 @@ if __name__ == "__main__":
         if logger.level <= 10:  # DEBUG level
             ui_print(f"\nTraceback:\n{traceback.format_exc()}", PromptStyle.DIM)
         sys.exit(1)
+
+
+# --------------------------------------------------
+# Entry Point
+# --------------------------------------------------
+
+if __name__ == "__main__":
+    asyncio.run(main())

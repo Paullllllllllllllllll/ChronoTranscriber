@@ -12,39 +12,49 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from modules.config.config_loader import ConfigLoader
 from modules.operations.batch.check import run_batch_finalization
 from modules.core.cli_args import create_check_batches_parser, resolve_path, validate_input_path
+from modules.core.mode_selector import run_sync_with_mode_detection
+
+
+def check_batches_interactive() -> None:
+    """Check batches in interactive mode with diagnostics enabled."""
+    run_batch_finalization(run_diagnostics=True)
+
+
+def check_batches_cli(args, paths_config: dict) -> None:
+    """Check batches in CLI mode with command-line arguments.
+    
+    Args:
+        args: Parsed command-line arguments
+        paths_config: Paths configuration dictionary
+    """
+    # If directory specified, override paths_config
+    if args.directory:
+        scan_dir = resolve_path(args.directory, Path.cwd())
+        validate_input_path(scan_dir)
+        # TODO: Would need to modify run_batch_finalization to accept custom directory
+        # For now, still use default behavior with optional diagnostics flag
+    
+    run_diagnostics = not args.no_diagnostics
+    run_batch_finalization(run_diagnostics=run_diagnostics)
 
 
 def main() -> None:
-    """
-    Entrypoint for checking all directories for batch outputs and finalizing them.
-    Supports both interactive and CLI modes.
-    """
-    # Load configuration to check mode
-    config_loader = ConfigLoader()
-    config_loader.load_configs()
-    paths_config = config_loader.get_paths_config()
-    interactive_mode = paths_config.get("general", {}).get("interactive_mode", True)
+    """Main entry point supporting both interactive and CLI modes."""
+    # Use centralized mode detection
+    config_loader, interactive_mode, args, paths_config = run_sync_with_mode_detection(
+        interactive_handler=check_batches_interactive,
+        cli_handler=check_batches_cli,
+        parser_factory=create_check_batches_parser,
+        script_name="check_batches"
+    )
     
+    # Route to appropriate handler
     if interactive_mode:
-        # Interactive mode - use default behavior
-        run_batch_finalization(run_diagnostics=True)
+        check_batches_interactive()
     else:
-        # CLI mode - parse arguments
-        parser = create_check_batches_parser()
-        args = parser.parse_args()
-        
-        # If directory specified, override paths_config
-        if args.directory:
-            scan_dir = resolve_path(args.directory, Path.cwd())
-            validate_input_path(scan_dir)
-            # TODO: Would need to modify run_batch_finalization to accept custom directory
-            # For now, still use default behavior with optional diagnostics flag
-        
-        run_diagnostics = not args.no_diagnostics
-        run_batch_finalization(run_diagnostics=run_diagnostics)
+        check_batches_cli(args, paths_config)
 
 
 if __name__ == "__main__":

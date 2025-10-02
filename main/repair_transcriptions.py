@@ -13,30 +13,29 @@ import asyncio
 import sys
 
 from modules.infra.logger import setup_logger
-from modules.config.config_loader import ConfigLoader
 from modules.ui import print_info, print_error
 from modules.operations.repair.run import main as repair_main_interactive, main_cli
 from modules.core.cli_args import create_repair_parser
+from modules.core.mode_selector import run_with_mode_detection
 
 logger = setup_logger(__name__)
 
 
-async def main():
+async def main() -> None:
     """Main entry point supporting both interactive and CLI modes."""
     try:
-        # Load configuration to check mode
-        config_loader = ConfigLoader()
-        config_loader.load_configs()
-        paths_config = config_loader.get_paths_config()
-        interactive_mode = paths_config.get("general", {}).get("interactive_mode", True)
+        # Use centralized mode detection
+        config_loader, interactive_mode, args, paths_config = run_with_mode_detection(
+            interactive_handler=repair_main_interactive,
+            cli_handler=main_cli,
+            parser_factory=create_repair_parser,
+            script_name="repair_transcriptions"
+        )
         
+        # Route to appropriate handler
         if interactive_mode:
-            # Interactive mode with prompts
             await repair_main_interactive()
         else:
-            # CLI mode with arguments
-            parser = create_repair_parser()
-            args = parser.parse_args()
             await main_cli(args, paths_config)
             
     except KeyboardInterrupt:

@@ -9,15 +9,13 @@ Supports two modes:
 from __future__ import annotations
 
 import sys
-from typing import List, Optional
+from typing import List
 
 from modules.infra.logger import setup_logger
-from modules.config.config_loader import ConfigLoader
 from modules.ui import (
     print_header,
     print_info,
     print_success,
-    print_warning,
     print_error,
     ui_print,
     PromptStyle,
@@ -26,6 +24,7 @@ from modules.ui import (
 from modules.ui.core import UserPrompt
 from modules.llm.openai_sdk_utils import sdk_to_dict, list_all_batches
 from modules.core.cli_args import create_cancel_batches_parser
+from modules.core.mode_selector import run_sync_with_mode_detection
 
 logger = setup_logger(__name__)
 TERMINAL_STATUSES = {"completed", "expired", "cancelled", "failed"}
@@ -90,11 +89,12 @@ def cancel_batches_interactive() -> None:
     UserPrompt.display_batch_cancellation_results(cancelled_batches, skipped_batches)
 
 
-def cancel_batches_cli(args) -> None:
+def cancel_batches_cli(args, paths_config: dict) -> None:
     """Cancel batches in CLI mode with arguments.
     
     Args:
         args: Parsed command-line arguments
+        paths_config: Paths configuration dictionary (unused but kept for signature consistency)
     """
     try:
         from openai import OpenAI  # type: ignore
@@ -168,20 +168,19 @@ def cancel_batches_cli(args) -> None:
 def main() -> None:
     """Main entry point supporting both interactive and CLI modes."""
     try:
-        # Load configuration to check mode
-        config_loader = ConfigLoader()
-        config_loader.load_configs()
-        paths_config = config_loader.get_paths_config()
-        interactive_mode = paths_config.get("general", {}).get("interactive_mode", True)
+        # Use centralized mode detection
+        config_loader, interactive_mode, args, paths_config = run_sync_with_mode_detection(
+            interactive_handler=cancel_batches_interactive,
+            cli_handler=cancel_batches_cli,
+            parser_factory=create_cancel_batches_parser,
+            script_name="cancel_batches"
+        )
         
+        # Route to appropriate handler
         if interactive_mode:
-            # Interactive mode
             cancel_batches_interactive()
         else:
-            # CLI mode
-            parser = create_cancel_batches_parser()
-            args = parser.parse_args()
-            cancel_batches_cli(args)
+            cancel_batches_cli(args, paths_config)
             
     except KeyboardInterrupt:
         print_info("\nCancellation interrupted by user.")

@@ -147,10 +147,21 @@ def _build_responses_body_for_image(
         st = None
     # Fallback: use model_config if service_tier not in concurrency_config
     effective_service_tier = st if st is not None else tm.get("service_tier")
+    
+    # IMPORTANT: Flex processing is only available for synchronous API calls, NOT batch API
+    # If flex is configured, use "auto" instead for batch requests
     if effective_service_tier:
-        allowed_service_tiers = {"auto", "default", "flex", "priority"}
-        if str(effective_service_tier) in allowed_service_tiers:
-            body["service_tier"] = str(effective_service_tier)
+        allowed_service_tiers = {"auto", "default", "priority"}
+        tier_str = str(effective_service_tier)
+        
+        # Replace "flex" with "auto" for batch processing since flex is not supported
+        if tier_str == "flex":
+            logger.info(
+                "Batch API does not support service_tier='flex'. Using 'auto' instead."
+            )
+            body["service_tier"] = "auto"
+        elif tier_str in allowed_service_tiers:
+            body["service_tier"] = tier_str
         else:
             logger.warning(
                 "Ignoring unsupported service_tier=%s for model %s",

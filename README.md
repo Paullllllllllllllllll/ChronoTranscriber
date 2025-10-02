@@ -10,6 +10,8 @@ A comprehensive pipeline for transcribing historical documents from PDFs or imag
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Usage](#usage)
+  - [Interactive Mode](#interactive-mode)
+  - [CLI Mode](#cli-mode)
 - [Batch Processing](#batch-processing)
 - [Utilities](#utilities)
 - [Architecture](#architecture)
@@ -21,9 +23,18 @@ A comprehensive pipeline for transcribing historical documents from PDFs or imag
 
 ChronoTranscriber is designed for researchers, archivists, and digital humanities professionals who need to transcribe historical documents at scale. The tool supports multiple processing backends, provides fine-grained control over image preprocessing, and ensures reproducible results through structured JSON outputs.
 
+The application offers two modes of operation to accommodate different workflows and user preferences:
+
+**Interactive Mode** provides a guided, step-by-step experience with visual prompts and navigation support. Users are walked through each decision point with clear explanations and can navigate backward or quit at any time. This mode is ideal for researchers who prefer an intuitive interface and want to make informed decisions at each stage of the transcription process.
+
+**CLI Mode** enables command-line operation with full argument support for automation, scripting, and integration into existing pipelines. All functionality is accessible via flags and parameters, with comprehensive help documentation and proper exit codes for shell scripting. This mode is designed for advanced users, batch processing workflows, and unattended operation.
+
+The mode is controlled by a single configuration flag (`interactive_mode` in `config/paths_config.yaml`), allowing users to switch seamlessly between workflows based on their current needs.
+
 ### Key Capabilities
 
 - **Dual OCR Backends**: Choose between local Tesseract OCR or cloud-based vision-language models (VLMs) from OpenAI
+- **Flexible Operation Modes**: Interactive guided workflows or command-line automation
 - **Batch Processing**: Submit hundreds or thousands of pages as asynchronous batch jobs via OpenAI's Batch API
 - **Structured Outputs**: Enforce consistent transcription format using customizable JSON schemas
 - **Recoverable Workflows**: Monitor batch progress, repair failed transcriptions, and safely resume interrupted jobs
@@ -33,6 +44,42 @@ ChronoTranscriber is designed for researchers, archivists, and digital humanitie
 - **Context-Aware Prompts**: Provide optional domain guidance via `additional_context/additional_context.txt`; when no context is supplied the system inserts the literal "Empty" marker to keep prompts fail-safe
 
 ## Features
+
+### Operation Modes
+
+ChronoTranscriber supports two distinct modes to accommodate different user needs and workflows:
+
+#### Interactive Mode
+
+Designed for users who prefer guided workflows with clear explanations and visual feedback.
+
+**Features:**
+- Step-by-step prompts with plain-language descriptions
+- Visual progress indicators and color-coded status messages (green for success, yellow for warnings, red for errors)
+- Navigation support: go back to previous steps or quit at any time by entering 'b' or 'q'
+- Multi-selection with intuitive input (e.g., "1,3,5" for specific items, "1-5" for ranges, or "all" for everything)
+- Automatic validation with helpful error messages
+- Confirmation screens before starting long-running operations
+- No command-line arguments required; all configuration is done through prompts
+
+**Best for:** Researchers, archivists, and users new to the tool who want guidance through the transcription process.
+
+#### CLI Mode
+
+Designed for advanced users who need automation, scripting capabilities, and integration with existing tools.
+
+**Features:**
+- Full command-line argument support for all operations
+- Comprehensive `--help` documentation for each script
+- Path resolution supporting both absolute and relative paths
+- Exit codes for shell scripting (0 for success, 1 for errors)
+- Unattended operation for batch processing and automation
+- Integration-friendly with proper logging and error reporting
+- All interactive mode features accessible via flags and parameters
+
+**Best for:** Advanced users, automated workflows, continuous integration pipelines, and large-scale processing tasks.
+
+**Mode Selection:** Set `interactive_mode: true` or `false` in `config/paths_config.yaml` under the `general` section. The default is `true` for backward compatibility.
 
 ### Document Processing
 
@@ -202,24 +249,22 @@ transcription_model:
 - **`max_output_tokens`**: Maximum tokens the model can generate per request
 - **`reasoning.effort`**: Controls reasoning depth for GPT-5 and o-series models (low, medium, high)
 - **`text.verbosity`**: Controls response verbosity for GPT-5 models (low, medium, high)
-- **Sampler controls**: Only applied to non-reasoning models (GPT-4o, GPT-4.1)
-  - `temperature`: Controls randomness (0.0-2.0)
-  - `top_p`: Nucleus sampling probability (0.0-1.0)
-  - `frequency_penalty`: Penalizes token repetition (-2.0 to 2.0)
-  - `presence_penalty`: Penalizes repeated topics (-2.0 to 2.0)
+- **`temperature`**: Controls randomness (0.0-2.0)
+- **`top_p`**: Nucleus sampling probability (0.0-1.0)
+- **`frequency_penalty`**: Penalizes token repetition (-2.0 to 2.0)
+- **`presence_penalty`**: Penalizes repeated topics (-2.0 to 2.0)
 
 ### 2. Paths Configuration (`paths_config.yaml`)
 
-Defines input/output directories and path resolution behavior.
+Defines input/output directories, operation mode, and path resolution behavior.
 
 ```yaml
 general:
+  interactive_mode: true  # Toggle between interactive prompts (true) or CLI mode (false)
   retain_temporary_jsonl: true
   input_paths_is_output_path: false
   logs_dir: './logs'
   keep_preprocessed_images: true
-  allow_relative_paths: false
-  base_directory: "."
 
 file_paths:
   PDFs:
@@ -232,12 +277,13 @@ file_paths:
 
 **Key Parameters**:
 
+- **`interactive_mode`**: Controls operation mode
+  - `true`: Interactive mode with step-by-step prompts and navigation (default)
+  - `false`: CLI mode with command-line arguments for automation
 - **`retain_temporary_jsonl`**: Keep temporary JSONL files after batch processing completes
 - **`input_paths_is_output_path`**: Write outputs to the same directory as inputs
 - **`logs_dir`**: Directory for log files
 - **`keep_preprocessed_images`**: Retain preprocessed images after transcription
-- **`allow_relative_paths`**: Enable relative path resolution based on `base_directory`
-- **`base_directory`**: Base directory for resolving relative paths when enabled
 - **`transcription_prompt_path`** (optional): Custom system prompt file path
 - **`transcription_schema_path`** (optional): Custom JSON schema file path
 
@@ -344,7 +390,12 @@ concurrency:
 
 - **`concurrency_limit`**: Maximum number of concurrent tasks
 - **`delay_between_tasks`**: Delay in seconds between starting tasks
-- **`service_tier`**: OpenAI service tier for rate limiting (auto, default, flex, priority)
+- **`service_tier`**: OpenAI service tier for rate limiting and processing speed
+  - Options: `auto`, `default`, `flex`, `priority`
+  - Note: Service tiers apply only to synchronous API calls; batch processing automatically omits this parameter as service tiers are not supported in batch mode
+  - `flex`: Faster processing at full price (synchronous only)
+  - `priority`: Highest priority processing (synchronous only)
+  - `auto`: Automatic tier selection
 - **`batch_chunk_size`**: Number of requests per batch part file (affects chunking)
 - **Retry settings**: Exponential backoff configuration for transient API failures
   - `attempts`: Maximum retry attempts per request
@@ -355,19 +406,9 @@ concurrency:
   - Individual counters (`*_retries`) let you disable or tighten retries per condition (set to `0` to accept the first response)
   - Independent wait controls mirror the primary retry strategy, enabling faster follow-up attempts without altering API retry behavior
 
-**Tuning Example**: Disable transcription-specific retries while keeping API retries enabled
-
-```yaml
-transcription_failures:
-  no_transcribable_text_retries: 0
-  transcription_not_possible_retries: 0
-  wait_min_seconds: 2
-  wait_max_seconds: 30
-  jitter_max_seconds: 1
-
 ### Additional Context Guidance
 
-ChronoTranscriber ships with an optional domain context file at `additional_context/additional_context.txt`. When content exists, the CLI prompts you to opt in before each GPT run; accepting loads the file into the system prompt at the `{{ADDITIONAL_CONTEXT}}` marker. If you decline or the file is missing, the pipeline inserts the literal word `Empty` so the marker resolves safely and the model receives an explicit signal that no context is provided. Context updates do not require code changes—edit the file and rerun the workflow to apply the new guidance.
+ChronoTranscriber ships with an optional domain context file at `additional_context/additional_context.txt`. When content exists, the CLI prompts you to opt in before each GPT run; accepting loads the file into the system prompt at the `{{ADDITIONAL_CONTEXT}}` marker. If you decline or the file is missing, the pipeline inserts the literal word `Empty` so the prompt will receive an explicit signal that no context is provided. Context updates do not require code changes—edit the file and rerun the workflow to apply the new guidance.
 ```
 
 ### Custom Transcription Schemas

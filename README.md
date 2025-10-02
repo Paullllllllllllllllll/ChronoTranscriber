@@ -367,7 +367,7 @@ transcription_failures:
 
 ### Additional Context Guidance
 
-ChronoTranscriber ships with an optional domain context file at `additional_context/additional_context.txt`. When you supply content in this file, it is injected into the system prompt where the `{{ADDITIONAL_CONTEXT}}` marker appears. If you prefer to run without extra guidance, leave the file empty or skip context selection; the pipeline automatically inserts the literal word `Empty` so the marker resolves safely and the model receives an explicit signal that no context is provided. Context updates do not require code changes—edit the file and restart your run to apply the new guidance.
+ChronoTranscriber ships with an optional domain context file at `additional_context/additional_context.txt`. When content exists, the CLI prompts you to opt in before each GPT run; accepting loads the file into the system prompt at the `{{ADDITIONAL_CONTEXT}}` marker. If you decline or the file is missing, the pipeline inserts the literal word `Empty` so the marker resolves safely and the model receives an explicit signal that no context is provided. Context updates do not require code changes—edit the file and rerun the workflow to apply the new guidance.
 ```
 
 ### Custom Transcription Schemas
@@ -439,7 +439,11 @@ The transcriber will guide you through the following steps:
 4. **Select JSON Schema** (GPT only)
    - Choose from available schemas in `schemas/` directory
    - Schemas control output format (markdown, plain text, or custom)
-   - Optionally preview additional context guidance before confirming
+   - Review the summary of any guidance stored in `additional_context/additional_context.txt`
+
+   After you confirm the schema, the CLI prompts:
+   - __Use context__: Load `additional_context/additional_context.txt` into the system prompt when present.
+   - __Skip context__: Leave the file unused; the prompt will receive the literal word `Empty`.
 
 5. **Select Files/Folders**
    - Browse available PDFs or image folders
@@ -447,7 +451,7 @@ The transcriber will guide you through the following steps:
 
 6. **Review and Confirm**
    - Review your selections
-   - Confirm to start processing (context selection remains optional)
+   - Confirm to start processing; the summary reflects whether additional context is enabled
 
 #### Providing Additional Context
 

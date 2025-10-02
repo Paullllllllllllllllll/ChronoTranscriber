@@ -31,6 +31,8 @@ class UserConfiguration:
     # Schema selection (GPT only)
     selected_schema_name: Optional[str] = None
     selected_schema_path: Optional[Path] = None
+    # Additional context (GPT only)
+    additional_context_path: Optional[Path] = None
 
     def __post_init__(self) -> None:
         if self.selected_items is None:
@@ -239,6 +241,9 @@ class UserPrompt:
 
             # After enabling GPT, select a transcription schema
             UserPrompt.configure_schema_selection(user_config)
+            
+            # After schema selection, prompt for additional context
+            UserPrompt.configure_additional_context(user_config)
 
     @staticmethod
     def configure_schema_selection(user_config: UserConfiguration) -> None:
@@ -278,6 +283,41 @@ class UserPrompt:
         )
         user_config.selected_schema_name = selected_name
         user_config.selected_schema_path = value_to_path[selected_name]
+
+    @staticmethod
+    def configure_additional_context(user_config: UserConfiguration) -> None:
+        """
+        Prompt user to optionally use additional context for transcription.
+        Stores the path if user opts in, otherwise leaves it None (which triggers "Empty" injection).
+        """
+        if user_config.transcription_method != "gpt":
+            return
+
+        # Check if additional_context.txt exists
+        context_file = PROJECT_ROOT / "additional_context" / "additional_context.txt"
+        
+        if not context_file.exists():
+            console_print(
+                f"[INFO] No additional context file found at {context_file}. Skipping context selection."
+            )
+            user_config.additional_context_path = None
+            return
+
+        # Prompt user
+        use_context = UserPrompt.enhanced_select_option(
+            "Would you like to use additional context to guide transcription?",
+            [
+                ("yes", "Yes - Use domain-specific guidance from additional_context.txt"),
+                ("no", "No - Proceed without additional context (marker will be set to 'Empty')"),
+            ],
+        )
+        
+        if use_context == "yes":
+            user_config.additional_context_path = context_file
+            console_print(f"[INFO] Additional context will be loaded from: {context_file.name}")
+        else:
+            user_config.additional_context_path = None
+            console_print("[INFO] No additional context selected. Prompt will use 'Empty' marker.")
 
     # --- Selection flows ---
 

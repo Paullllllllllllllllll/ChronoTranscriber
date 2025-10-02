@@ -372,6 +372,7 @@ def process_batch_transcription(
     model_config: Dict[str, Any],
     *,
     schema_path: Optional[Path] = None,
+    additional_context_path: Optional[Path] = None,
 ) -> Tuple[List[Any], List[Dict[str, Any]]]:
     """
     Prepare and submit batched image transcriptions using the Responses API.
@@ -430,6 +431,7 @@ def process_batch_transcription(
                     image_info=image_info,
                     model_config=model_config,
                     schema_path=schema_path,
+                    additional_context_path=additional_context_path,
                 )
                 batch_request_lines.append(request_line)
                 metadata_records.append(metadata_record)

@@ -186,6 +186,7 @@ async def main():
                 model=model_config.get("transcription_model", {}).get("name",
                                                       "gpt-4o"),
                 schema_path=user_config.selected_schema_path,
+                additional_context_path=user_config.additional_context_path,
             ) as t:
             transcriber = t
             await workflow_manager.process_selected_items(transcriber)

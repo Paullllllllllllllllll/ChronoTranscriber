@@ -285,6 +285,7 @@ class WorkflowManager:
                     "",
                     self.model_config.get("transcription_model", {}),
                     schema_path=self.user_config.selected_schema_path,
+                    additional_context_path=self.user_config.additional_context_path,
                 )
             except Exception as e:
                 logger.exception(
@@ -473,6 +474,7 @@ class WorkflowManager:
                     "",
                     self.model_config.get("transcription_model", {}),
                     schema_path=self.user_config.selected_schema_path,
+                    additional_context_path=self.user_config.additional_context_path,
                 )
             except Exception as e:
                 logger.exception(

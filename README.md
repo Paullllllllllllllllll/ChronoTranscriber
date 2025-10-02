@@ -595,16 +595,29 @@ ChronoTranscriber/
 └── requirements.txt
 ```
 
-### Module Overview
+### Module Structure
+
+ChronoTranscriber follows a modular architecture with clear separation of concerns:
 
 - `modules/config/`: Configuration loading and validation
-- `modules/core/`: Core utilities including console printing, workflow management, and shared functions
+- `modules/core/`: Core utilities including console printing, workflow management, path handling, and shared functions
 - `modules/infra/`: Infrastructure layer providing logging, concurrency control, and async task management
 - `modules/io/`: File I/O operations including path validation, directory scanning, and output management
 - `modules/llm/`: LLM interaction layer including OpenAI SDK utilities, batch processing, model validation, and structured output parsing
 - `modules/operations/`: High-level operation orchestration (batch checking, repair workflows)
 - `modules/processing/`: Document processing including PDF rendering, image preprocessing, and text formatting
 - `modules/ui/`: User interface components including interactive prompts and status displays
+
+### Windows Path Length Handling
+
+ChronoTranscriber implements robust handling for Windows MAX_PATH (260 character) limitations:
+
+- Safe Directory Naming: Long document names are automatically truncated with content-based hashes for directory structures
+- Preserved File Names: Output files retain their original proper names without hash suffixes
+- Automatic Path Resolution: The system uses extended-length path syntax when needed on Windows 10 1607+
+- Hybrid Strategy: Directories use hash-based safe names (e.g., `Long_document_name-a3f8d9e2/`) while files preserve original names (e.g., `Long document name_transcription.txt`)
+
+This approach ensures reliable processing of documents with long filenames while maintaining human-readable output files. The implementation follows production-ready patterns similar to npm and Git for handling filesystem limitations.
 
 ### Operations Layer
 

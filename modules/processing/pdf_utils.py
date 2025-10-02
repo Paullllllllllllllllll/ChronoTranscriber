@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import hashlib
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 import fitz
@@ -12,6 +11,7 @@ from PIL import Image
 
 from modules.config.config_loader import ConfigLoader
 from modules.processing.image_utils import ImageProcessor
+from modules.core.path_utils import create_safe_directory_name
 
 logger = logging.getLogger(__name__)
 
@@ -285,51 +285,22 @@ class PDFProcessor:
               - output_txt_path: File path for the final transcription text.
               - temp_jsonl_path: File path for temporary JSONL records.
         """
-        def _sanitize(name: str) -> str:
-            # Remove/replace characters not allowed on Windows filenames
-            invalid = '<>:"/\\|?*'
-            cleaned = ''.join('_' if ch in invalid or ord(ch) < 32 else ch for ch in name)
-            # Collapse excessive whitespace
-            cleaned = cleaned.strip()
-            return cleaned
-
-        original_stem = self.pdf_path.stem
-        cleaned_stem = _sanitize(original_stem)
-
-        # Compute a conservative max total path length (Windows MAX_PATH ~260)
-        # Path shape: base / stem / stem + suffix
-        base_len = len(str(pdf_output_dir))
-        suffix = "_transcription.jsonl"
-        # Reserve a safety margin (20 chars)
-        MAX_TOTAL = 240
-
-        def _truncate_with_hash(name: str, target_len: int) -> str:
-            if target_len <= 0:
-                # Fallback to a short hash if the base path is extremely long
-                return hashlib.sha1(name.encode('utf-8')).hexdigest()[:12]
-            if len(name) <= target_len:
-                return name
-            h = hashlib.sha1(name.encode('utf-8')).hexdigest()[:8]
-            # Leave room for '-' + hash
-            core_len = max(8, target_len - 9)
-            return name[:core_len] + '-' + h
-
-        # Estimate total and truncate if necessary
-        total_estimate = base_len + 1 + len(cleaned_stem) + 1 + len(cleaned_stem) + len(suffix)
-        if total_estimate > MAX_TOTAL:
-            # Allowed per occurrence of stem (appears twice):
-            allowed_for_stems = MAX_TOTAL - base_len - len(suffix) - 2  # two separators
-            per_stem = max(16, allowed_for_stems // 2)
-            safe_stem = _truncate_with_hash(cleaned_stem, per_stem)
-        else:
-            safe_stem = cleaned_stem
-
-        parent_folder = pdf_output_dir / safe_stem
+        # Use the new path_utils to create a safe directory name with hash
+        # The directory name will be truncated with hash if too long
+        safe_dir_name = create_safe_directory_name(self.pdf_path.stem)
+        
+        # Create parent folder with safe directory name
+        parent_folder = pdf_output_dir / safe_dir_name
         parent_folder.mkdir(parents=True, exist_ok=True)
-        output_txt_path = parent_folder / f"{safe_stem}_transcription.txt"
-        temp_jsonl_path = parent_folder / f"{safe_stem}_transcription.jsonl"
+        
+        # IMPORTANT: Use original PDF stem for output files (not the hashed directory name)
+        # This preserves proper file naming while handling path length limits via directory structure
+        output_txt_path = parent_folder / f"{self.pdf_path.stem}_transcription.txt"
+        temp_jsonl_path = parent_folder / f"{self.pdf_path.stem}_transcription.jsonl"
+        
         if not temp_jsonl_path.exists():
             temp_jsonl_path.touch()
+        
         return parent_folder, output_txt_path, temp_jsonl_path
 
 

@@ -18,7 +18,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 from modules.config.config_loader import ConfigLoader, PROJECT_ROOT
 from modules.llm.model_capabilities import Capabilities, detect_capabilities
 from modules.llm.structured_outputs import build_structured_text_format
-from modules.llm.prompt_utils import render_prompt_with_schema
+from modules.llm.prompt_utils import render_prompt_with_schema, inject_additional_context
 from modules.config.constants import SUPPORTED_IMAGE_FORMATS
 
 logger = logging.getLogger(__name__)
@@ -611,6 +611,7 @@ class OpenAITranscriber:
         *,
         schema_path: Optional[Path] = None,
         system_prompt_path: Optional[Path] = None,
+        additional_context_path: Optional[Path] = None,
     ) -> None:
         cfg = ConfigLoader()
         cfg.load_configs()
@@ -700,6 +701,25 @@ class OpenAITranscriber:
 
         # Render system prompt with current schema content
         self.system_prompt_text = render_prompt_with_schema(raw_prompt, full_schema_obj)
+        
+        # Inject additional context if provided (fail-safe: no context = empty replacement)
+        if additional_context_path is not None and additional_context_path.exists():
+            try:
+                additional_context = additional_context_path.read_text(encoding="utf-8").strip()
+                self.system_prompt_text = inject_additional_context(
+                    self.system_prompt_text, additional_context
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to load additional context from %s: %s",
+                    additional_context_path,
+                    e,
+                )
+                # Fail-safe: remove marker with empty string
+                self.system_prompt_text = inject_additional_context(self.system_prompt_text, "")
+        else:
+            # No context provided: remove marker with empty string
+            self.system_prompt_text = inject_additional_context(self.system_prompt_text, "")
 
     async def close(self) -> None:
         await self.extractor.close()
@@ -723,7 +743,7 @@ class OpenAITranscriber:
             system_message=self.system_prompt_text,
             image_data_url=data_url,
             json_schema=self.transcription_schema,
-            user_instruction="Please analyze and transcribe the text from this image according to the provided instructions.",
+            user_instruction="The image:",
             detail=self.llm_detail,
         )
         return data
@@ -745,6 +765,7 @@ async def open_transcriber(
     *,
     schema_path: Optional[Path] = None,
     system_prompt_path: Optional[Path] = None,
+    additional_context_path: Optional[Path] = None,
 ) -> AsyncGenerator[OpenAITranscriber, None]:
     """
     Context manager for OpenAITranscriber with automatic cleanup.
@@ -756,6 +777,7 @@ async def open_transcriber(
         model=model,
         schema_path=schema_path,
         system_prompt_path=system_prompt_path,
+        additional_context_path=additional_context_path,
     )
     try:
         yield transcriber

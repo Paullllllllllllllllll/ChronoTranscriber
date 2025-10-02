@@ -11,7 +11,7 @@ from modules.core.utils import console_print
 from modules.config.config_loader import ConfigLoader
 from modules.config.config_loader import PROJECT_ROOT
 from modules.llm.structured_outputs import build_structured_text_format
-from modules.llm.prompt_utils import render_prompt_with_schema
+from modules.llm.prompt_utils import render_prompt_with_schema, inject_additional_context
 from modules.config.constants import SUPPORTED_IMAGE_FORMATS
 
 logger = logging.getLogger(__name__)
@@ -103,7 +103,7 @@ def _build_responses_body_for_image(
                 "content": [
                     {
                         "type": "input_text",
-                        "text": "Please transcribe the text from this image.",
+                        "text": "The image:",
                     },
                     {
                         "type": "input_image",
@@ -193,6 +193,7 @@ def create_batch_request_line(
     model_config: Dict[str, Any],
     system_prompt_path: Optional[Path] = None,
     schema_path: Optional[Path] = None,
+    additional_context_path: Optional[Path] = None,
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Create a Responses API batch request line for an image transcription task.
@@ -256,6 +257,23 @@ def create_batch_request_line(
         inject_schema_into_prompt = True
     if inject_schema_into_prompt:
         system_prompt = render_prompt_with_schema(system_prompt, loaded_schema)
+
+    # Inject additional context if provided (fail-safe: no context = empty replacement)
+    if additional_context_path is not None and additional_context_path.exists():
+        try:
+            additional_context = additional_context_path.read_text(encoding="utf-8").strip()
+            system_prompt = inject_additional_context(system_prompt, additional_context)
+        except Exception as e:
+            logger.warning(
+                "Failed to load additional context from %s: %s",
+                additional_context_path,
+                e,
+            )
+            # Fail-safe: remove marker with empty string
+            system_prompt = inject_additional_context(system_prompt, "")
+    else:
+        # No context provided: remove marker with empty string
+        system_prompt = inject_additional_context(system_prompt, "")
 
     # Load image processing config for llm_detail
     try:

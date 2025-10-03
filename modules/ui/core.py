@@ -513,9 +513,14 @@ class UserPrompt:
         ui_print("\n" + PromptStyle.DOUBLE_LINE * 80, PromptStyle.HEADER)
         ui_print("  BATCH SUMMARY", PromptStyle.HEADER)
         ui_print(PromptStyle.DOUBLE_LINE * 80, PromptStyle.HEADER)
-        ui_print(f"\n  Total batches: {len(batches)}", PromptStyle.INFO)
+        ui_print(f"\n  Total batches: {len(batches)}", PromptStyle.HIGHLIGHT)
         for status, batch_list in sorted(status_groups.items()):
-            ui_print(f"    • {status.capitalize()}: {len(batch_list)} batch(es)")
+            # Color-code by status
+            status_color = PromptStyle.SUCCESS if status == "completed" else \
+                          PromptStyle.ERROR if status in ["failed", "cancelled"] else \
+                          PromptStyle.WARNING if status in ["validating", "in_progress", "finalizing"] else \
+                          PromptStyle.INFO
+            ui_print(f"    • {status.capitalize()}: {len(batch_list)} batch(es)", status_color)
         
         in_progress_statuses = {"validating", "in_progress", "finalizing"}
         for status in in_progress_statuses:
@@ -597,15 +602,20 @@ class UserPrompt:
         temp_file: Path, batch_ids: List[str], completed_count: int, missing_count: int
     ) -> None:
         ui_print(f"\n{PromptStyle.SINGLE_LINE * 80}", PromptStyle.DIM)
-        ui_print(f"  Processing: {temp_file.name}", PromptStyle.INFO)
+        ui_print(f"  Processing: {temp_file.name}", PromptStyle.HIGHLIGHT)
         ui_print(f"{PromptStyle.SINGLE_LINE * 80}", PromptStyle.DIM)
-        ui_print(f"  Found {len(batch_ids)} batch ID(s)")
+        ui_print(f"  Found {len(batch_ids)} batch ID(s)", PromptStyle.INFO)
         
         if completed_count == len(batch_ids):
             print_success("All batches completed!")
         else:
             in_progress = len(batch_ids) - completed_count - missing_count
-            ui_print(f"  Completed: {completed_count} | Pending: {in_progress} | Missing: {missing_count}")
+            ui_print(f"  Completed: ", PromptStyle.INFO, end="")
+            ui_print(f"{completed_count}", PromptStyle.SUCCESS, end="")
+            ui_print(f" | Pending: ", PromptStyle.INFO, end="")
+            ui_print(f"{in_progress}", PromptStyle.WARNING, end="")
+            ui_print(f" | Missing: ", PromptStyle.INFO, end="")
+            ui_print(f"{missing_count}", PromptStyle.ERROR if missing_count > 0 else PromptStyle.DIM)
             if missing_count > 0:
                 print_warning(f"{missing_count} batch ID(s) were not found in the API response")
             if completed_count < len(batch_ids) - missing_count:
@@ -621,9 +631,9 @@ class UserPrompt:
         ui_print("\n" + PromptStyle.DOUBLE_LINE * 80, PromptStyle.HEADER)
         ui_print("  CANCELLATION SUMMARY", PromptStyle.HEADER)
         ui_print(PromptStyle.DOUBLE_LINE * 80, PromptStyle.HEADER)
-        ui_print(f"\n  Total batches found: {len(cancelled_batches) + len(skipped_batches)}")
-        ui_print(f"  Skipped (terminal status): {len(skipped_batches)}")
-        ui_print(f"  Attempted to cancel: {len(cancelled_batches)}")
+        ui_print(f"\n  Total batches found: {len(cancelled_batches) + len(skipped_batches)}", PromptStyle.INFO)
+        ui_print(f"  Skipped (terminal status): {len(skipped_batches)}", PromptStyle.DIM)
+        ui_print(f"  Attempted to cancel: {len(cancelled_batches)}", PromptStyle.INFO)
         print_success(f"Successfully cancelled: {success_count}")
         
         if fail_count > 0:

@@ -11,6 +11,13 @@ from enum import Enum
 from typing import Any, Callable, List, Optional, Tuple
 from dataclasses import dataclass
 
+# Initialize colorama for Windows color support
+try:
+    import colorama
+    colorama.just_fix_windows_console()
+except ImportError:
+    pass  # colorama not available, colors may not work on Windows
+
 from modules.infra.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -38,20 +45,22 @@ class PromptStyle:
     SINGLE_LINE = "-"
     LIGHT_LINE = "."
     
-    # Colors (basic terminal support)
-    HEADER = "\033[1;36m"  # Cyan bold
-    INFO = "\033[0;36m"     # Cyan
-    SUCCESS = "\033[0;32m"  # Green
-    WARNING = "\033[0;33m"  # Yellow
-    ERROR = "\033[0;31m"    # Red
-    PROMPT = "\033[1;37m"   # White bold
-    DIM = "\033[0;90m"      # Gray
-    RESET = "\033[0m"       # Reset
+    # ANSI Color codes - now work on Windows thanks to colorama
+    HEADER = "\033[1;36m"      # Cyan bold (headers, titles)
+    INFO = "\033[0;36m"        # Cyan (informational messages)
+    SUCCESS = "\033[1;32m"     # Green bold (success messages)
+    WARNING = "\033[1;33m"     # Yellow bold (warnings)
+    ERROR = "\033[1;31m"       # Red bold (errors)
+    PROMPT = "\033[1;37m"      # White bold (user prompts)
+    DIM = "\033[2;37m"         # Dimmed white (secondary text)
+    HIGHLIGHT = "\033[1;35m"   # Magenta bold (highlights)
+    RESET = "\033[0m"          # Reset to default
     
     @staticmethod
     def supports_color() -> bool:
         """Check if terminal supports color."""
-        return sys.stdout.isatty()
+        # With colorama, we can safely assume color support
+        return True
     
     @classmethod
     def colorize(cls, text: str, color: str) -> str:
@@ -61,27 +70,28 @@ class PromptStyle:
         return text
 
 
-def ui_print(message: str, style: str = "") -> None:
+def ui_print(message: str, style: str = "", end: str = "\n") -> None:
     """Print a UI message (distinct from logging).
     
     Args:
         message: The message to display
         style: Optional style/color code
+        end: String appended after the message (default: newline)
     """
     try:
         if style and PromptStyle.supports_color():
             # Encode with UTF-8 and handle errors gracefully
             output = f"{style}{message}{PromptStyle.RESET}"
-            print(output, flush=True)
+            print(output, end=end, flush=True)
         else:
-            print(message, flush=True)
+            print(message, end=end, flush=True)
     except UnicodeEncodeError:
         # Fallback to ASCII if encoding fails
         safe_message = message.encode('ascii', 'replace').decode('ascii')
         if style and PromptStyle.supports_color():
-            print(f"{style}{safe_message}{PromptStyle.RESET}", flush=True)
+            print(f"{style}{safe_message}{PromptStyle.RESET}", end=end, flush=True)
         else:
-            print(safe_message, flush=True)
+            print(safe_message, end=end, flush=True)
 
 
 def ui_input(prompt: str, style: str = PromptStyle.PROMPT) -> str:
@@ -117,8 +127,9 @@ def print_header(title: str, subtitle: str = "") -> None:
     ui_print("\n" + PromptStyle.DOUBLE_LINE * width, PromptStyle.HEADER)
     ui_print(f"  {title}", PromptStyle.HEADER)
     if subtitle:
-        ui_print(f"  {subtitle}", PromptStyle.DIM)
+        ui_print(f"  {subtitle}", PromptStyle.INFO)
     ui_print(PromptStyle.DOUBLE_LINE * width, PromptStyle.HEADER)
+    ui_print("")  # Extra spacing
 
 
 def print_separator(char: str = PromptStyle.SINGLE_LINE, width: int = 80) -> None:
@@ -159,7 +170,7 @@ def print_navigation_help(allow_back: bool = False) -> None:
     
     if options:
         help_text = " | ".join(options)
-        ui_print(f"\n  {PromptStyle.LIGHT_LINE * 3} {help_text}", PromptStyle.DIM)
+        ui_print(f"  {PromptStyle.LIGHT_LINE * 3} {help_text}", PromptStyle.DIM)
 
 
 def handle_navigation_input(user_input: str, allow_back: bool = False) -> Optional[NavigationAction]:
@@ -354,13 +365,14 @@ def prompt_multiselect(
             description = description[:67] + "..."
         ui_print(f"  {idx}. {description}")
     
-    ui_print(f"\n{PromptStyle.LIGHT_LINE * 3} Selection options:", PromptStyle.DIM)
-    ui_print("  • Enter numbers separated by commas (e.g., '1,3,5')", PromptStyle.DIM)
-    ui_print("  • Enter a range with a dash (e.g., '1-5')", PromptStyle.DIM)
+    ui_print(f"\n  Selection options:", PromptStyle.INFO)
+    ui_print("    • Enter numbers separated by commas (e.g., '1,3,5')", PromptStyle.DIM)
+    ui_print("    • Enter a range with a dash (e.g., '1-5')", PromptStyle.DIM)
     if allow_all:
-        ui_print("  • Enter 'all' to select everything", PromptStyle.DIM)
+        ui_print("    • Enter 'all' to select everything", PromptStyle.DIM)
     
     if allow_back:
+        ui_print("")  # Spacing
         print_navigation_help(allow_back)
     
     while True:

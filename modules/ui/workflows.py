@@ -43,8 +43,8 @@ class WorkflowUI:
             "CHRONO TRANSCRIBER",
             "Historical Document Digitization Tool"
         )
-        ui_print("\n  Transform historical documents into searchable text using", PromptStyle.DIM)
-        ui_print("  state-of-the-art transcription methods tailored to your needs.\n", PromptStyle.DIM)
+        ui_print("  Transform historical documents into searchable text using", PromptStyle.INFO)
+        ui_print("  state-of-the-art transcription methods tailored to your needs.\n", PromptStyle.INFO)
     
     @staticmethod
     def get_processing_type_options() -> List[Tuple[str, str]]:
@@ -259,15 +259,15 @@ class WorkflowUI:
         )
         
         # Display current configuration
-        ui_print("\n  Current Settings:", PromptStyle.INFO)
+        ui_print("  Current Settings:", PromptStyle.HIGHLIGHT)
         print_separator(PromptStyle.LIGHT_LINE, 80)
-        ui_print(f"    • Document type: {config.processing_type.capitalize()}")
-        ui_print(f"    • Transcription method: {config.transcription_method.capitalize()}")
+        ui_print(f"    • Document type: {config.processing_type.capitalize()}", PromptStyle.INFO)
+        ui_print(f"    • Transcription method: {config.transcription_method.capitalize()}", PromptStyle.INFO)
         if config.transcription_method == "gpt":
             mode = "Batch (asynchronous)" if config.use_batch_processing else "Synchronous"
-            ui_print(f"    • Processing mode: {mode}")
+            ui_print(f"    • Processing mode: {mode}", PromptStyle.INFO)
             if config.selected_schema_name:
-                ui_print(f"    • Schema: {config.selected_schema_name}")
+                ui_print(f"    • Schema: {config.selected_schema_name}", PromptStyle.INFO)
         print_separator(PromptStyle.LIGHT_LINE, 80)
         ui_print("")
         
@@ -443,22 +443,24 @@ class WorkflowUI:
         print_header("PROCESSING SUMMARY", "Review your selections")
         
         item_type = "image folder(s)" if config.processing_type == "images" else "PDF file(s)"
-        ui_print(f"\n  Ready to process {len(config.selected_items)} {item_type}\n")
+        ui_print(f"  Ready to process ", PromptStyle.INFO, end="")
+        ui_print(f"{len(config.selected_items)}", PromptStyle.HIGHLIGHT, end="")
+        ui_print(f" {item_type}\n", PromptStyle.INFO)
         
-        ui_print("  Configuration:", PromptStyle.INFO)
+        ui_print("  Configuration:", PromptStyle.HIGHLIGHT)
         print_separator(PromptStyle.LIGHT_LINE, 80)
-        ui_print(f"    • Document type: {config.processing_type.capitalize()}")
-        ui_print(f"    • Transcription method: {config.transcription_method.capitalize()}")
+        ui_print(f"    • Document type: {config.processing_type.capitalize()}", PromptStyle.INFO)
+        ui_print(f"    • Transcription method: {config.transcription_method.capitalize()}", PromptStyle.INFO)
         
         if config.transcription_method == "gpt":
             mode = "Batch (asynchronous)" if config.use_batch_processing else "Synchronous"
-            ui_print(f"    • Processing mode: {mode}")
+            ui_print(f"    • Processing mode: {mode}", PromptStyle.INFO)
             if config.selected_schema_name:
-                ui_print(f"    • Schema: {config.selected_schema_name}")
+                ui_print(f"    • Schema: {config.selected_schema_name}", PromptStyle.INFO)
         
         print_separator(PromptStyle.LIGHT_LINE, 80)
         
-        ui_print("\n  Selected items (first 5 shown):")
+        ui_print("\n  Selected items (first 5 shown):", PromptStyle.INFO)
         for i, item in enumerate(config.selected_items[:5], 1):
             ui_print(f"    {i}. {item.name}", PromptStyle.DIM)
         
@@ -485,9 +487,13 @@ class WorkflowUI:
         
         if config.use_batch_processing and config.transcription_method == "gpt":
             print_success("Batch processing jobs have been submitted!")
-            print_info("To check batch status, run: python main/check_batches.py")
-            print_info("To cancel pending batches, run: python main/cancel_batches.py")
+            ui_print("")
+            ui_print("  Next steps:", PromptStyle.HIGHLIGHT)
+            ui_print("    • Check batch status: ", PromptStyle.DIM, end="")
+            ui_print("python main/check_batches.py", PromptStyle.INFO)
+            ui_print("    • Cancel pending batches: ", PromptStyle.DIM, end="")
+            ui_print("python main/cancel_batches.py", PromptStyle.INFO)
         else:
             print_success("All selected items have been processed.")
         
-        ui_print("\n  Thank you for using ChronoTranscriber!\n", PromptStyle.INFO)
+        ui_print("\n  Thank you for using ChronoTranscriber!\n", PromptStyle.HIGHLIGHT)

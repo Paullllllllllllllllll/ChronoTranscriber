@@ -527,6 +527,21 @@ What It Does:
 
 ## Utilities
 
+### Cost Analysis
+
+ChronoTranscriber can estimate OpenAI token usage costs across the temporary JSONL files generated during GPT-powered transcription and batch workflows. The utility lives at `main/cost_analysis.py` and reads every `*_temp.jsonl` file in the directories defined under `file_paths` within `config/paths_config.yaml`.
+
+- **Interactive mode** (default when `interactive_mode: true`):
+  - Run with `.venv\Scripts\python.exe -m main.cost_analysis`
+  - Guided prompts display aggregate totals, per-file statistics, and optional CSV export.
+- **CLI mode** (when `interactive_mode: false`):
+  - Run with `.venv\Scripts\python.exe -m main.cost_analysis [--save-csv] [--output PATH] [--quiet]`
+  - `--save-csv` writes `cost_analysis.csv` to the first file’s directory by default.
+  - `--output` overrides the CSV path.
+  - `--quiet` suppresses detailed console output but still performs the analysis and optional export.
+
+Behind the scenes, `modules/operations/cost_analysis.py` aggregates token usage (prompt, cached, completion, reasoning), normalizes supported model names, and applies both standard and 50%-discount pricing tiers. Results are rendered using the shared UI helpers in `modules/ui/cost_display.py`, ensuring consistent styling in interactive sessions while providing uncluttered output for CLI runs.
+
 ### Repair Transcriptions
 
 The repair utility allows you to fix failed or placeholder transcriptions.

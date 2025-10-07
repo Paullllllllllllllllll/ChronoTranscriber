@@ -8,6 +8,7 @@ Supports two modes:
 """
 
 import sys
+import os
 import asyncio
 import traceback
 from pathlib import Path

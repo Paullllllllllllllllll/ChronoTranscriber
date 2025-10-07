@@ -35,3 +35,9 @@ concurrency:
   image_processing:
     concurrency_limit: 24  # Maximum number of concurrent image processing tasks
     delay_between_tasks: 0.0005  # No delay for image processing tasks
+
+# Daily Token Limit
+# Tracks OpenAI API token usage and enforces configurable daily limits with automatic midnight reset
+daily_token_limit:
+  enabled: false  # Enable daily token limit enforcement (set to true to activate)
+  daily_tokens: 9000000  # Maximum tokens per day (9 million default)

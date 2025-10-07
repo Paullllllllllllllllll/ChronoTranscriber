@@ -5,6 +5,7 @@ import json
 import shutil
 import datetime
 import math
+import time
 from PIL import Image
 import pytesseract
 import aiofiles
@@ -22,6 +23,72 @@ from modules.processing.text_processing import extract_transcribed_text, format_
 from modules.core.utils import console_print
 
 logger = setup_logger(__name__)
+
+
+async def _check_and_wait_for_token_limit(concurrency_config: Dict[str, Any]) -> bool:
+    """
+    Check if daily token limit is reached and wait until next day if needed.
+    
+    Args:
+        concurrency_config: Concurrency configuration dictionary
+    
+    Returns:
+        True if processing can continue, False if user cancelled wait.
+    """
+    token_cfg = concurrency_config.get("daily_token_limit", {})
+    enabled = bool(token_cfg.get("enabled", False))
+    
+    if not enabled:
+        return True
+    
+    from modules.token_tracker import get_token_tracker
+    token_tracker = get_token_tracker()
+    
+    if not token_tracker.is_limit_reached():
+        return True
+    
+    # Token limit reached - need to wait until next day
+    stats = token_tracker.get_stats()
+    reset_time = token_tracker.get_reset_time()
+    seconds_until_reset = token_tracker.get_seconds_until_reset()
+    
+    logger.warning(
+        f"Daily token limit reached: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} tokens used"
+    )
+    console_print(
+        f"\n[WARNING] Daily token limit reached: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} tokens used"
+    )
+    console_print(
+        f"[INFO] Waiting until {reset_time.strftime('%Y-%m-%d %H:%M:%S')} "
+        f"({seconds_until_reset // 3600}h {(seconds_until_reset % 3600) // 60}m) "
+        "for token limit reset..."
+    )
+    console_print("[INFO] Press Ctrl+C to cancel and exit.")
+    
+    try:
+        # Sleep in smaller intervals to allow for interruption
+        sleep_interval = 1  # Check every second for responsiveness
+        elapsed = 0
+        
+        while elapsed < seconds_until_reset:
+            interval = min(sleep_interval, max(0, seconds_until_reset - elapsed))
+            await asyncio.sleep(interval)
+            elapsed += interval
+            
+            # Re-check if it's a new day
+            if not token_tracker.is_limit_reached():
+                logger.info("Token limit has been reset. Resuming processing.")
+                console_print("[SUCCESS] Token limit has been reset. Resuming processing.")
+                return True
+        
+        logger.info("Token limit has been reset. Resuming processing.")
+        console_print("[SUCCESS] Token limit has been reset. Resuming processing.")
+        return True
+        
+    except KeyboardInterrupt:
+        logger.info("Wait cancelled by user (KeyboardInterrupt).")
+        console_print("\n[INFO] Wait cancelled by user.")
+        return False
 
 
 class WorkflowManager:
@@ -123,8 +190,33 @@ class WorkflowManager:
         total_items = len(self.user_config.selected_items)
         console_print(
             f"[INFO] Beginning processing of {total_items} item(s)...")
+        
+        # Display initial token usage if enabled
+        token_cfg = self.concurrency_config.get("daily_token_limit", {})
+        if token_cfg.get("enabled", False):
+            from modules.token_tracker import get_token_tracker
+            token_tracker = get_token_tracker()
+            stats = token_tracker.get_stats()
+            logger.info(
+                f"Token usage: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
+                f"({stats['usage_percentage']:.1f}%) - "
+                f"{stats['tokens_remaining']:,} tokens remaining today"
+            )
+            console_print(
+                f"[INFO] Daily token usage: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
+                f"({stats['usage_percentage']:.1f}%)"
+            )
 
+        processed_count = 0
         for idx, item in enumerate(self.user_config.selected_items, 1):
+            # Check token limit before starting each new item (only for GPT method)
+            if self.user_config.transcription_method == "gpt":
+                if not await _check_and_wait_for_token_limit(self.concurrency_config):
+                    # User cancelled wait - stop processing
+                    logger.info(f"Processing stopped by user. Processed {processed_count}/{total_items} items.")
+                    console_print(f"\n[INFO] Processing stopped. Completed {processed_count}/{total_items} items.")
+                    break
+            
             console_print(
                 f"\n[INFO] Processing item {idx}/{total_items}: {item.name}")
 
@@ -141,10 +233,34 @@ class WorkflowManager:
                     transcriber
                 )
 
+            processed_count += 1
             console_print(f"[INFO] Completed item {idx}/{total_items}")
+            
+            # Log token usage after each item if enabled
+            if token_cfg.get("enabled", False) and self.user_config.transcription_method == "gpt":
+                token_tracker = get_token_tracker()
+                stats = token_tracker.get_stats()
+                logger.info(
+                    f"Token usage after item {idx}/{total_items}: "
+                    f"{stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
+                    f"({stats['usage_percentage']:.1f}%)"
+                )
 
         console_print(
-            f"[INFO] All {total_items} item(s) processed successfully.")
+            f"[INFO] All {processed_count}/{total_items} item(s) processed successfully.")
+        
+        # Final token usage statistics
+        if token_cfg.get("enabled", False) and self.user_config.transcription_method == "gpt":
+            token_tracker = get_token_tracker()
+            stats = token_tracker.get_stats()
+            logger.info(
+                f"Final token usage: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
+                f"({stats['usage_percentage']:.1f}%)"
+            )
+            console_print(
+                f"[INFO] Final daily token usage: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
+                f"({stats['usage_percentage']:.1f}%)"
+            )
 
     async def process_single_pdf(self, pdf_path: Path,
                                  transcriber: Optional[Any]) -> None:

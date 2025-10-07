@@ -349,7 +349,27 @@ class OpenAIExtractor:
                     )
                 logger.error("Non-retryable OpenAI error (%s): %s", resp.status, error_text)
                 raise NonRetryableOpenAIError(f"{resp.status}: {error_text}")
-            return await resp.json()
+            
+            # Parse response and capture token usage
+            data = await resp.json()
+            
+            # Report token usage immediately after successful API call
+            try:
+                usage = data.get("usage")
+                if isinstance(usage, dict):
+                    total_tokens = usage.get("total_tokens")
+                    if isinstance(total_tokens, int) and total_tokens > 0:
+                        from modules.token_tracker import get_token_tracker
+                        token_tracker = get_token_tracker()
+                        token_tracker.add_tokens(total_tokens)
+                        logger.debug(
+                            f"[TOKEN] API call consumed {total_tokens:,} tokens "
+                            f"(daily total: {token_tracker.get_tokens_used_today():,})"
+                        )
+            except Exception as e:
+                logger.warning(f"Error reporting token usage: {e}")
+            
+            return data
 
     def _build_base_payload(self) -> Dict[str, Any]:
         payload: Dict[str, Any] = {

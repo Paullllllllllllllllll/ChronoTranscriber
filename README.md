@@ -527,37 +527,96 @@ What It Does:
 
 ## Utilities
 
-### Cost Analysis
+### Token Cost Analysis
 
-ChronoTranscriber can estimate OpenAI token usage costs across the temporary JSONL files generated during GPT-powered transcription and batch workflows. The utility lives at `main/cost_analysis.py` and reads every `*_temp.jsonl` file in the directories defined under `file_paths` within `config/paths_config.yaml`.
+ChronoMiner bundles a lightweight analytics utility that inspects preserved temporary `.jsonl` responses and produces detailed cost estimates for every processed file. The workflow is implemented in `main/cost_analysis.py`, which orchestrates helper logic contained in `modules/operations/cost_analysis.py` and formatted output helpers in `modules/ui/cost_display.py`.
 
-- **Interactive mode** (default when `interactive_mode: true`):
-  - Run with `.venv\Scripts\python.exe -m main.cost_analysis`
-  - Guided prompts display aggregate totals, per-file statistics, and optional CSV export.
-- **CLI mode** (when `interactive_mode: false`):
-  - Run with `.venv\Scripts\python.exe -m main.cost_analysis [--save-csv] [--output PATH] [--quiet]`
-  - `--save-csv` writes `cost_analysis.csv` to the first file’s directory by default.
-  - `--output` overrides the CSV path.
-  - `--quiet` suppresses detailed console output but still performs the analysis and optional export.
+#### When to Run It
 
-Behind the scenes, `modules/operations/cost_analysis.py` aggregates token usage (prompt, cached, completion, reasoning), normalizes supported model names, and applies both standard and 50%-discount pricing tiers. Results are rendered using the shared UI helpers in `modules/ui/cost_display.py`, ensuring consistent styling in interactive sessions while providing uncluttered output for CLI runs.
+- Preserve temporary `.jsonl` files (`retain_temporary_jsonl: true` in `config/paths_config.yaml`).
+- After processing is complete, run the analysis to quantify spend across synchronous and batch jobs.
+- Use the report to validate budgeting assumptions or to decide whether to switch schemas or models.
 
-### Repair Transcriptions
+#### Execution Modes
 
-The repair utility allows you to fix failed or placeholder transcriptions.
+- **Interactive UI:** `python -m main.cost_analysis`
+  - Mirrors the standard UI look and feel.
+  - Automatically locates `.jsonl` files based on schema path configuration.
+  - Displays aggregated token totals, per-file summaries, and optional CSV export prompts.
+- **CLI Mode:** `python -m main.cost_analysis --save-csv --output path/to/report.csv`
+  - Suitable for automation or scheduled reporting.
+  - Flags:
+    - `--save-csv`: Persist results to CSV (defaults to the folder that contains the first `.jsonl`).
+    - `--output`: Override the target CSV path.
+    - `--quiet`: Suppress console breakdown and emit only essential status messages.
 
-```bash
-python main/repair_transcriptions.py
+#### Output Features
+
+- Aggregated totals for uncached input tokens, cached tokens, output tokens, reasoning tokens, and overall totals.
+- Dual pricing: standard per-million-token rates and an automatic 50% discount column that models batched/flex billing tiers.
+- Model normalization: date-stamped variants (e.g., `gpt-5-mini-2025-08-07`) are mapped to their parent pricing profile before calculations.
+- CSV export includes a per-file ledger plus a consolidated summary row that mirrors the on-screen totals.
+
+#### Supported Pricing Profiles (USD per 1M tokens)
+
+| Model | Input | Cached Input | Output |
+| --- | --- | --- | --- |
+| gpt-5 | 1.25 | 0.125 | 10.00 |
+| gpt-5-mini | 0.25 | 0.025 | 2.00 |
+| gpt-5-nano | 0.05 | 0.005 | 0.40 |
+| gpt-5-chat-latest | 1.25 | 0.125 | 10.00 |
+| gpt-5-codex | 1.25 | 0.125 | 10.00 |
+| gpt-4.1 | 2.00 | 0.50 | 8.00 |
+| gpt-4.1-mini | 0.40 | 0.10 | 1.60 |
+| gpt-4.1-nano | 0.10 | 0.025 | 0.40 |
+| gpt-4o | 2.50 | 1.25 | 10.00 |
+| gpt-4o-2024-05-13 | 5.00 | - | 15.00 |
+| gpt-4o-mini | 0.15 | 0.075 | 0.60 |
+| gpt-4o-realtime-preview | 5.00 | 2.50 | 20.00 |
+| gpt-4o-mini-realtime-preview | 0.60 | 0.30 | 2.40 |
+| gpt-4o-audio-preview | 2.50 | - | 10.00 |
+| gpt-4o-mini-audio-preview | 0.15 | - | 0.60 |
+| gpt-4o-search-preview | 2.50 | - | 10.00 |
+| gpt-4o-mini-search-preview | 0.15 | - | 0.60 |
+| gpt-audio | 2.50 | 0.00 | 10.00 |
+| o1 | 15.00 | 7.50 | 60.00 |
+| o1-pro | 150.00 | - | 600.00 |
+| o1-mini | 1.10 | 0.55 | 4.40 |
+| o3 | 2.00 | 0.50 | 8.00 |
+| o3-pro | 20.00 | 0.00 | 80.00 |
+| o3-mini | 1.10 | 0.55 | 4.40 |
+| o3-deep-research | 10.00 | 2.50 | 40.00 |
+| o4-mini | 1.10 | 0.275 | 4.40 |
+| o4-mini-deep-research | 2.00 | 0.50 | 8.00 |
+| codex-mini-latest | 1.50 | 0.375 | 6.00 |
+| computer-use-preview | 3.00 | - | 12.00 |
+| gpt-image-1 | 5.00 | 1.25 | - |
+
+> See: https://platform.openai.com/docs/pricing for more information.
+> **Note:** Cached input pricing is denoted with `-` wherever OpenAI has not published a discounted tier. The analytics tool automatically treats missing values as zero in the CSV export.
+
+### Daily Token Limit
+
+ChronoTranscriber can automatically track daily OpenAI Responses usage and pause processing when a configurable token budget is exhausted. The feature is disabled by default and is controlled via `config/concurrency_config.yaml`:
+
+```yaml
+daily_token_limit:
+  enabled: true          # Set to true to activate enforcement
+  daily_tokens: 9000000  # Maximum tokens allowed per calendar day
 ```
 
-What It Does:
+#### How It Works
 
-- Scans transcription outputs for error markers (`[transcription error: ...]`, `[No transcribable text]`, `[Transcription not possible]`)
-- Presents list of documents with issues
-- Allows you to select documents for repair
-- Supports both synchronous and batch repair modes
-- Creates repair JSONL files in `repairs/` directory
-- Safely patches the original transcription file
+- **Automatic tracking:** Every successful Responses API call reports `usage.total_tokens`, which are summed in `modules/token_tracker.py` with thread-safe persistence.
+- **Midnight reset:** The tracker stores state in `.chronotranscriber_token_state.json` and resets at local midnight without manual intervention.
+- **Pre-flight checks:** `WorkflowManager.process_selected_items()` verifies the remaining budget before each GPT-driven document. When the limit is exhausted, the workflow waits until the next reset or until the operator cancels with `Ctrl+C`.
+- **Live telemetry:** Running totals are emitted to the log and console at the start of processing, after each item, and once the session completes, helping teams monitor burn-in-place.
+
+#### Recommended Usage
+
+1. Enable the block above and adjust `daily_tokens` to match your allocation.
+2. Keep `.chronotranscriber_token_state.json` under version-control ignore lists so local usage does not pollute repositories.
+3. Delete the state file or edit the JSON manually if you need to reset counts ahead of the daily rollover.
 
 ### API Diagnostics
 

@@ -9,8 +9,8 @@ Supports two modes:
 from __future__ import annotations
 
 import sys
-from typing import List
 
+from modules.config.constants import TERMINAL_BATCH_STATUSES
 from modules.infra.logger import setup_logger
 from modules.ui import (
     print_header,
@@ -27,7 +27,6 @@ from modules.core.cli_args import create_cancel_batches_parser
 from modules.core.mode_selector import run_sync_with_mode_detection
 
 logger = setup_logger(__name__)
-TERMINAL_STATUSES = {"completed", "expired", "cancelled", "failed"}
 
 
 def cancel_batches_interactive() -> None:
@@ -72,7 +71,7 @@ def cancel_batches_interactive() -> None:
         if not batch_id:
             continue
 
-        if status in TERMINAL_STATUSES:
+        if status in TERMINAL_BATCH_STATUSES:
             logger.info(f"Skipping batch {batch_id} with terminal status '{status}'.")
             skipped_batches.append((batch_id, status))
             continue
@@ -127,7 +126,7 @@ def cancel_batches_cli(args, paths_config: dict) -> None:
             bd = sdk_to_dict(b)
             batch_id = bd.get("id") or getattr(b, "id", None)
             status = (str(bd.get("status") or getattr(b, "status", "") or "")).lower()
-            if batch_id and status not in TERMINAL_STATUSES:
+            if batch_id and status not in TERMINAL_BATCH_STATUSES:
                 batch_ids_to_cancel.append(batch_id)
         
         print_info(f"Found {len(batch_ids_to_cancel)} non-terminal batch(es) to cancel.")

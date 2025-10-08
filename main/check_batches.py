@@ -29,15 +29,15 @@ def check_batches_cli(args, paths_config: dict) -> None:
         args: Parsed command-line arguments
         paths_config: Paths configuration dictionary
     """
-    # If directory specified, override paths_config
-    if args.directory:
-        scan_dir = resolve_path(args.directory, Path.cwd())
-        validate_input_path(scan_dir)
-        # TODO: Would need to modify run_batch_finalization to accept custom directory
-        # For now, still use default behavior with optional diagnostics flag
-    
     run_diagnostics = not args.no_diagnostics
-    run_batch_finalization(run_diagnostics=run_diagnostics)
+    custom_directory = None
+    
+    # If directory specified, validate and use it
+    if args.directory:
+        custom_directory = resolve_path(args.directory, Path.cwd())
+        validate_input_path(custom_directory)
+    
+    run_batch_finalization(run_diagnostics=run_diagnostics, custom_directory=custom_directory)
 
 
 def main() -> None:

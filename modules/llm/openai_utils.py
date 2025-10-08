@@ -787,10 +787,19 @@ async def open_transcriber(
     system_prompt_path: Optional[Path] = None,
     additional_context_path: Optional[Path] = None,
 ) -> AsyncGenerator[OpenAITranscriber, None]:
-    """
-    Context manager for OpenAITranscriber with automatic cleanup.
+    """Context manager for OpenAITranscriber with automatic cleanup.
     
     Ensures the underlying HTTP session is properly closed.
+    
+    Args:
+        api_key: OpenAI API key
+        model: Model name (default: from config)
+        schema_path: Path to JSON schema file (default: from config)
+        system_prompt_path: Path to system prompt file (default: from config)
+        additional_context_path: Optional additional context file path
+    
+    Yields:
+        OpenAITranscriber instance with managed lifecycle
     """
     transcriber = OpenAITranscriber(
         api_key=api_key,
@@ -808,9 +817,15 @@ async def open_transcriber(
 async def transcribe_image_with_openai(
     image_path: Path, transcriber: OpenAITranscriber
 ) -> Dict[str, Any]:
-    """
-    Convenience helper for transcribing a single image.
+    """Convenience helper for transcribing a single image.
     
     Used by workflow orchestration code.
+    
+    Args:
+        image_path: Path to the image file to transcribe
+        transcriber: Initialized OpenAITranscriber instance
+    
+    Returns:
+        Dictionary containing transcription response data
     """
     return await transcriber.transcribe_image(image_path)

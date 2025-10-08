@@ -7,9 +7,12 @@ Supports two modes:
 2. CLI mode: Command-line arguments for automation (interactive_mode: false)
 """
 
+from __future__ import annotations
+
 import sys
 import os
 import asyncio
+import logging
 import traceback
 from pathlib import Path
 
@@ -348,7 +351,7 @@ async def main() -> None:
         logger.exception(f"Unexpected error: {e}")
         print_error(f"An unexpected error occurred: {e}")
         print_info("Check the logs for more details.")
-        if logger.level <= 10:  # DEBUG level
+        if logger.isEnabledFor(logging.DEBUG):
             ui_print(f"\nTraceback:\n{traceback.format_exc()}", PromptStyle.DIM)
         sys.exit(1)
 

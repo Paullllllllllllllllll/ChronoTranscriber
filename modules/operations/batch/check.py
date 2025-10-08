@@ -722,9 +722,25 @@ def diagnose_api_issues() -> None:
         console_print(f"[ERROR] Batch API access failed: {e}")
 
 
-def run_batch_finalization(run_diagnostics: bool = True) -> None:
-    """High-level entrypoint used by the CLI to finalize batch results."""
-    scan_dirs, processing_settings = load_config()
+def run_batch_finalization(run_diagnostics: bool = True, custom_directory: Path | None = None) -> None:
+    """High-level entrypoint used by the CLI to finalize batch results.
+    
+    Args:
+        run_diagnostics: Whether to run API diagnostics before processing
+        custom_directory: Optional custom directory to scan instead of config defaults
+    """
+    if custom_directory:
+        # Use the specified directory instead of loading from config
+        scan_dirs = [custom_directory]
+        # Load minimal processing settings from config
+        config_loader = ConfigLoader()
+        config_loader.load_configs()
+        paths_config = config_loader.get_paths_config()
+        processing_settings = paths_config.get("general", {})
+    else:
+        # Load standard configuration
+        scan_dirs, processing_settings = load_config()
+    
     client = OpenAI()
 
     if run_diagnostics:

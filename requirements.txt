@@ -5,6 +5,7 @@ aiosignal==1.4.0
 annotated-types==0.7.0
 anyio==4.11.0
 attrs==25.3.0
+EbookLib==0.18
 certifi==2025.8.3
 charset-normalizer==3.4.3
 colorama==0.4.6

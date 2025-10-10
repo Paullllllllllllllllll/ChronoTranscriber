@@ -50,16 +50,16 @@ Examples:
     
     parser.add_argument(
         "--type", "-t",
-        choices=["images", "pdfs"],
+        choices=["images", "pdfs", "epubs"],
         required=True,
-        help="Type of documents to process: 'images' or 'pdfs'."
+        help="Type of documents to process: 'images', 'pdfs', or 'epubs'."
     )
     
     parser.add_argument(
         "--method", "-m",
         choices=["native", "tesseract", "gpt"],
         required=True,
-        help="Transcription method: 'native' (PDF text extraction), 'tesseract' (OCR), or 'gpt' (AI transcription)."
+        help="Transcription method. Use 'native' for PDFs/EPUBs, 'tesseract' for OCR, or 'gpt' for AI transcription."
     )
     
     # Optional arguments for GPT

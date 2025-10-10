@@ -1,20 +1,22 @@
 # modules/workflow.py
 from __future__ import annotations
+
 import asyncio
-import json
-import shutil
 import datetime
+import json
 import math
+import shutil
 import time
 from PIL import Image
 import pytesseract
 import aiofiles
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Tuple
+from typing import Any, List, Optional, Dict, Tuple
 
 from modules.infra.logger import setup_logger
 from modules.ui.core import UserConfiguration
 from modules.processing.pdf_utils import PDFProcessor, native_extract_pdf_text
+from modules.processing.epub_utils import EPUBProcessor, EPUBTextExtraction
 from modules.processing.image_utils import ImageProcessor
 from modules.llm.batch.batching import get_batch_chunk_size
 from modules.llm.openai_utils import transcribe_image_with_openai
@@ -133,6 +135,9 @@ class WorkflowManager:
         image_output_dir = Path(
             paths_config.get('file_paths', {}).get('Images', {}).get('output',
                                                                      'images_out'))
+        epub_output_dir = Path(
+            paths_config.get('file_paths', {}).get('EPUBs', {}).get('output',
+                                                                    'epubs_out'))
 
         if self.processing_settings.get("input_paths_is_output_path", False):
             pdf_input_dir = Path(
@@ -143,13 +148,18 @@ class WorkflowManager:
                     'input', 'images_in'))
             self.pdf_output_dir = pdf_input_dir
             self.image_output_dir = image_input_dir
+            self.epub_output_dir = Path(
+                paths_config.get('file_paths', {}).get('EPUBs', {}).get('input', 'epubs_in')
+            )
         else:
             self.pdf_output_dir = pdf_output_dir
             self.image_output_dir = image_output_dir
+            self.epub_output_dir = epub_output_dir
 
         # Ensure directories exist
         self.pdf_output_dir.mkdir(parents=True, exist_ok=True)
         self.image_output_dir.mkdir(parents=True, exist_ok=True)
+        self.epub_output_dir.mkdir(parents=True, exist_ok=True)
 
     def _ensure_tesseract_available(self) -> bool:
         """
@@ -226,12 +236,14 @@ class WorkflowManager:
                     item,
                     transcriber
                 )
-            else:
+            elif self.user_config.processing_type == "pdfs":
                 # Process PDF file
                 await self.process_single_pdf(
                     item,
                     transcriber
                 )
+            else:
+                await self.process_single_epub(item)
 
             processed_count += 1
             console_print(f"[INFO] Completed item {idx}/{total_items}")
@@ -261,6 +273,32 @@ class WorkflowManager:
                 f"[INFO] Final daily token usage: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
                 f"({stats['usage_percentage']:.1f}%)"
             )
+
+    async def process_single_epub(self, epub_path: Path) -> None:
+        """Extract and save text from a single EPUB file."""
+        console_print(f"\n[INFO] Processing EPUB: {epub_path.name}")
+
+        processor = EPUBProcessor(epub_path)
+        try:
+            extraction: EPUBTextExtraction = processor.extract_text()
+        except Exception as exc:
+            logger.exception("Failed to extract EPUB %s: %s", epub_path.name, exc)
+            console_print(f"[ERROR] Failed to extract text from {epub_path.name}.")
+            return
+
+        _parent_folder, output_txt_path = processor.prepare_output_folder(self.epub_output_dir)
+        output_txt_path.parent.mkdir(parents=True, exist_ok=True)
+
+        rendered_text = extraction.to_plain_text()
+        try:
+            output_txt_path.write_text(rendered_text, encoding="utf-8")
+        except Exception as exc:
+            logger.exception("Failed to write EPUB transcription for %s: %s", epub_path.name, exc)
+            console_print(f"[ERROR] Failed to write output for {epub_path.name}.")
+            return
+
+        console_print(
+            f"[SUCCESS] Extracted text from '{epub_path.name}' -> {output_txt_path.name}")
 
     async def process_single_pdf(self, pdf_path: Path,
                                  transcriber: Optional[Any]) -> None:

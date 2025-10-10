@@ -52,6 +52,7 @@ class WorkflowUI:
         return [
             ("images", "Image Folders — Process collections of images organized in folders"),
             ("pdfs", "PDF Documents — Process PDF files or scanned documents"),
+            ("epubs", "EPUB Documents — Extract text directly from EPUB ebooks"),
         ]
     
     @staticmethod
@@ -62,6 +63,10 @@ class WorkflowUI:
                 ("native", "Native PDF Extraction — Fast extraction from searchable PDFs"),
                 ("tesseract", "Tesseract OCR — Open-source OCR for printed text"),
                 ("gpt", "GPT Transcription — AI-powered transcription for complex documents"),
+            ]
+        if processing_type == "epubs":
+            return [
+                ("native", "Native EPUB Extraction — Extract XHTML text from EPUB chapters"),
             ]
         return [
             ("tesseract", "Tesseract OCR — Open-source OCR for printed text"),
@@ -273,8 +278,61 @@ class WorkflowUI:
         
         if config.processing_type == "images":
             return WorkflowUI._select_image_folders(config, base_dir)
-        else:
+        if config.processing_type == "pdfs":
             return WorkflowUI._select_pdf_files(config, base_dir)
+        return WorkflowUI._select_epub_files(config, base_dir)
+
+    @staticmethod
+    def _select_epub_files(config: UserConfiguration, epub_dir: Path) -> bool:
+        """Select EPUB files for processing."""
+        result = prompt_select(
+            "How would you like to select EPUBs for processing?",
+            [
+                ("all", "Process all EPUBs (including subfolders)"),
+                ("specific", "Select specific EPUB files"),
+            ],
+            allow_back=True
+        )
+
+        if result.action == NavigationAction.BACK:
+            return False
+
+        if result.value == "all":
+            all_epubs = list(epub_dir.rglob("*.epub"))
+            if not all_epubs:
+                print_error(f"No EPUB files found in {epub_dir} or its subfolders.")
+                sys.exit(1)
+            config.selected_items = all_epubs
+            config.process_all = True
+            print_success(f"Selected all {len(all_epubs)} EPUB(s) for processing.")
+            return True
+
+        # Select specific EPUB files
+        epub_files = list(epub_dir.glob("*.epub"))
+        if not epub_files:
+            print_error(f"No EPUB files found in {epub_dir}.")
+            return False
+
+        file_items = [(str(f), f.name) for f in epub_files]
+        selection_result = prompt_multiselect(
+            f"Select EPUB files to process ({len(epub_files)} available):",
+            file_items,
+            allow_all=True,
+            allow_back=True
+        )
+
+        if selection_result.action == NavigationAction.BACK:
+            return False
+
+        selected_paths = [Path(p) for p in selection_result.value]
+        if not selected_paths:
+            print_warning("No EPUB files selected. Nothing to process.")
+            return False
+
+        config.selected_items = selected_paths
+        config.process_all = len(selected_paths) == len(epub_files)
+        print_success(f"Selected {len(selected_paths)} EPUB file(s) for processing.")
+        return True
     
     @staticmethod
     def _select_image_folders(config: UserConfiguration, image_dir: Path) -> bool:

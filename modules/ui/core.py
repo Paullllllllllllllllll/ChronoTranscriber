@@ -32,7 +32,7 @@ class UserConfiguration:
     Stores user's processing preferences to avoid re-prompting during workflow.
     """
 
-    processing_type: Optional[str] = None  # "images" or "pdfs"
+    processing_type: Optional[str] = None  # "images", "pdfs", or "epubs"
     transcription_method: Optional[str] = None  # "native", "tesseract", or "gpt"
     use_batch_processing: bool = False
     selected_items: List[Path] = None  # files or folders to process
@@ -97,7 +97,12 @@ class UserPrompt:
         console_print("  PROCESSING SUMMARY")
         console_print("=" * 80)
 
-        item_type = "image folder(s)" if user_config.processing_type == "images" else "PDF file(s)"
+        if user_config.processing_type == "images":
+            item_type = "image folder(s)"
+        elif user_config.processing_type == "epubs":
+            item_type = "EPUB file(s)"
+        else:
+            item_type = "PDF file(s)"
         console_print(
             f"\nReady to process {len(user_config.selected_items)} {item_type} with the following settings:"
         )
@@ -186,6 +191,7 @@ class UserPrompt:
         return [
             ("images", "Image Folders - Process collections of image files organized in folders"),
             ("pdfs", "PDF Documents - Process PDF files containing documents or scanned pages"),
+            ("epubs", "EPUB Documents - Extract text from EPUB ebooks"),
         ]
 
     @staticmethod
@@ -195,6 +201,10 @@ class UserPrompt:
                 ("native", "Native PDF extraction - Fast extraction from searchable PDFs (text-based, not scanned)"),
                 ("tesseract", "Tesseract OCR - Open-source OCR suited for printed text and scanned documents"),
                 ("gpt", "GPT Transcription - High-quality AI-powered transcription ideal for complex documents"),
+            ]
+        if processing_type == "epubs":
+            return [
+                ("native", "Native EPUB extraction - Extract text directly from EPUB chapters"),
             ]
         return [
             ("tesseract", "Tesseract OCR - Open-source OCR suited for printed text and straightforward layouts"),

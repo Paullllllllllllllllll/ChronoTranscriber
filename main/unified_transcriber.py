@@ -58,7 +58,11 @@ def create_config_from_cli_args(args, base_input_dir: Path, base_output_dir: Pat
     # Set processing type and method
     config.processing_type = args.type
     config.transcription_method = args.method
-    
+
+    # EPUBs currently support native extraction only
+    if config.processing_type == "epubs" and config.transcription_method != "native":
+        raise ValueError("EPUB processing only supports the 'native' method.")
+
     # Set batch processing (only for GPT)
     if args.method == "gpt":
         config.use_batch_processing = args.batch
@@ -110,7 +114,7 @@ def create_config_from_cli_args(args, base_input_dir: Path, base_output_dir: Pat
                 config.selected_items = [input_path]
         else:
             raise ValueError(f"For image processing, input must be a directory: {input_path}")
-    else:
+    elif config.processing_type == "pdfs":
         # For PDFs, collect PDF files
         if input_path.is_dir():
             if args.files:
@@ -127,6 +131,19 @@ def create_config_from_cli_args(args, base_input_dir: Path, base_output_dir: Pat
             config.selected_items = [input_path]
         else:
             raise ValueError(f"Input path does not exist: {input_path}")
+    else:
+        # For EPUBs, collect EPUB files
+        if input_path.is_dir():
+            if args.files:
+                config.selected_items = [input_path / f for f in args.files]
+            elif args.recursive:
+                config.selected_items = list(input_path.rglob("*.epub"))
+            else:
+                config.selected_items = list(input_path.glob("*.epub"))
+        elif input_path.is_file():
+            config.selected_items = [input_path]
+        else:
+            raise ValueError(f"Input path does not exist: {input_path}")
     
     if not config.selected_items:
         raise ValueError(f"No items found to process in: {input_path}")
@@ -135,8 +152,9 @@ def create_config_from_cli_args(args, base_input_dir: Path, base_output_dir: Pat
 
 
 async def configure_user_workflow_interactive(
-    pdf_input_dir: Path, 
-    image_input_dir: Path
+    pdf_input_dir: Path,
+    image_input_dir: Path,
+    epub_input_dir: Path,
 ) -> UserConfiguration:
     """
     Guide user through configuration with navigation support (interactive mode).
@@ -172,7 +190,13 @@ async def configure_user_workflow_interactive(
                 current_step = "transcription_method"
         
         elif current_step == "item_selection":
-            base_dir = image_input_dir if config.processing_type == "images" else pdf_input_dir
+            if config.processing_type == "images":
+                base_dir = image_input_dir
+            elif config.processing_type == "pdfs":
+                base_dir = pdf_input_dir
+            else:
+                base_dir = epub_input_dir
+
             if WorkflowUI.select_items_for_processing(config, base_dir):
                 current_step = "summary"
             else:
@@ -252,13 +276,17 @@ async def transcribe_interactive() -> None:
     image_input_dir = Path(
         paths_config.get('file_paths', {}).get('Images', {}).get('input', 'images_in')
     )
+    epub_input_dir = Path(
+        paths_config.get('file_paths', {}).get('EPUBs', {}).get('input', 'epubs_in')
+    )
     
     # Ensure directories exist for interactive mode
     pdf_input_dir.mkdir(parents=True, exist_ok=True)
     image_input_dir.mkdir(parents=True, exist_ok=True)
+    epub_input_dir.mkdir(parents=True, exist_ok=True)
     
     # Create user configuration through interactive workflow
-    user_config = await configure_user_workflow_interactive(pdf_input_dir, image_input_dir)
+    user_config = await configure_user_workflow_interactive(pdf_input_dir, image_input_dir, epub_input_dir)
     
     # Process documents
     await process_documents(
@@ -300,14 +328,23 @@ async def transcribe_cli(args, paths_config: dict) -> None:
     image_output_dir = Path(
         paths_config.get('file_paths', {}).get('Images', {}).get('output', 'images_out')
     )
+    epub_input_dir = Path(
+        paths_config.get('file_paths', {}).get('EPUBs', {}).get('input', 'epubs_in')
+    )
+    epub_output_dir = Path(
+        paths_config.get('file_paths', {}).get('EPUBs', {}).get('output', 'epubs_out')
+    )
     
     # Determine base directories based on processing type
     if args.type == "images":
         base_input_dir = image_input_dir
         base_output_dir = image_output_dir
-    else:
+    elif args.type == "pdfs":
         base_input_dir = pdf_input_dir
         base_output_dir = pdf_output_dir
+    else:
+        base_input_dir = epub_input_dir
+        base_output_dir = epub_output_dir
     
     # Create configuration from CLI arguments
     user_config = create_config_from_cli_args(args, base_input_dir, base_output_dir)

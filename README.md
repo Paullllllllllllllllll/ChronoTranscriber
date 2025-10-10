@@ -1,6 +1,6 @@
 # ChronoTranscriber
 
-A powerful Python-based tool designed for researchers and archivists to transcribe historical documents from PDFs or image folders using either local OCR (Tesseract) or modern vision-language models via OpenAI's API. ChronoTranscriber provides structured JSON outputs, scalable batch processing, and robust error recovery for large-scale document digitization projects.
+A Python-based tool designed for researchers and archivists to transcribe historical documents from PDFs or image folders using either local OCR (Tesseract) or modern vision-language models via OpenAI's API. ChronoTranscriber provides structured JSON outputs, scalable batch processing, and robust error recovery for large-scale document digitization projects.
 
 ## Table of Contents
 

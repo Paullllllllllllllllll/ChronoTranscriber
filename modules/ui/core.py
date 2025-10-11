@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import os
 import sys
@@ -26,6 +26,10 @@ from modules.ui.prompts import (
 logger = setup_logger(__name__)
 
 
+if TYPE_CHECKING:
+    from modules.core.auto_selector import AutoSelector
+
+
 @dataclass
 class UserConfiguration:
     """
@@ -44,6 +48,7 @@ class UserConfiguration:
     additional_context_path: Optional[Path] = None
     # Auto mode decisions (when processing_type == "auto")
     auto_decisions: Optional[List[Any]] = None  # List of FileDecision objects
+    auto_selector: Optional["AutoSelector"] = None  # Cached selector instance for auto mode
 
     def __post_init__(self) -> None:
         if self.selected_items is None:

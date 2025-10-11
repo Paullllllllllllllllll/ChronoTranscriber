@@ -25,12 +25,14 @@ from modules.ui import (
     WorkflowUI,
     print_info,
     print_success,
+    print_warning,
     print_error,
     ui_print,
     PromptStyle,
 )
 from modules.io.path_utils import validate_paths
 from modules.core.workflow import WorkflowManager
+from modules.core.auto_selector import AutoSelector
 from modules.core.cli_args import (
     create_transcriber_parser,
     resolve_path,
@@ -56,11 +58,10 @@ def create_config_from_cli_args(args, base_input_dir: Path, base_output_dir: Pat
         UserConfiguration object
     """
     config = UserConfiguration()
-    
+    config.auto_selector = AutoSelector(paths_config)
+
     # Handle auto mode
     if args.auto:
-        from modules.core.auto_selector import AutoSelector
-        
         # Use Auto input/output paths from config
         auto_input = Path(paths_config.get('file_paths', {}).get('Auto', {}).get('input', base_input_dir))
         auto_output = Path(paths_config.get('file_paths', {}).get('Auto', {}).get('output', base_output_dir))
@@ -74,9 +75,8 @@ def create_config_from_cli_args(args, base_input_dir: Path, base_output_dir: Pat
         validate_input_path(auto_input)
         validate_output_path(auto_output)
         
-        # Create auto selector and generate decisions
-        selector = AutoSelector(paths_config)
-        decisions = selector.create_decisions(auto_input)
+        # Generate decisions using shared selector
+        decisions = config.auto_selector.create_decisions(auto_input)
         
         if not decisions:
             raise ValueError(f"No processable files found in auto mode input directory: {auto_input}")
@@ -195,6 +195,7 @@ async def configure_user_workflow_interactive(
     image_input_dir: Path,
     epub_input_dir: Path,
     auto_input_dir: Path,
+    paths_config: dict,
 ) -> UserConfiguration:
     """
     Guide user through configuration with navigation support (interactive mode).
@@ -249,7 +250,7 @@ async def configure_user_workflow_interactive(
             else:
                 base_dir = epub_input_dir
 
-            if WorkflowUI.select_items_for_processing(config, base_dir):
+            if WorkflowUI.select_items_for_processing(config, base_dir, paths_config):
                 current_step = "summary"
             else:
                 # Auto mode goes back to processing_type, others to batch_processing
@@ -282,12 +283,16 @@ async def process_auto_mode(
     from modules.core.auto_selector import AutoSelector, FileDecision
     
     print_info("AUTO MODE", "Processing files with automatic method selection...")
-    
-    decisions = user_config.auto_decisions
+
+    decisions = user_config.auto_decisions or []
+    if not decisions:
+        print_warning("No auto mode decisions available. Nothing to process.")
+        return
+
     output_dir = user_config.selected_items[0]  # Default output directory
-    
-    # Display decision summary
-    selector = AutoSelector(paths_config)
+
+    selector = user_config.auto_selector or AutoSelector(paths_config)
+    user_config.auto_selector = selector
     selector.print_decision_summary(decisions)
     
     # Check if we should use input paths as output paths
@@ -475,7 +480,11 @@ async def transcribe_interactive() -> None:
     
     # Create user configuration through interactive workflow
     user_config = await configure_user_workflow_interactive(
-        pdf_input_dir, image_input_dir, epub_input_dir, auto_input_dir
+        pdf_input_dir,
+        image_input_dir,
+        epub_input_dir,
+        auto_input_dir,
+        paths_config,
     )
     
     # Process documents

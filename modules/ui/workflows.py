@@ -256,7 +256,11 @@ class WorkflowUI:
         return True
     
     @staticmethod
-    def select_items_for_processing(config: UserConfiguration, base_dir: Path) -> bool:
+    def select_items_for_processing(
+        config: UserConfiguration,
+        base_dir: Path,
+        paths_config: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         """Select items for processing based on configuration.
         
         Returns:
@@ -264,7 +268,7 @@ class WorkflowUI:
         """
         # Handle auto mode separately
         if config.processing_type == "auto":
-            return WorkflowUI._configure_auto_mode(config, base_dir)
+            return WorkflowUI._configure_auto_mode(config, base_dir, paths_config)
         
         print_header(
             f"DOCUMENT SELECTION — {config.processing_type.upper()}",
@@ -500,7 +504,11 @@ class WorkflowUI:
         return True
     
     @staticmethod
-    def _configure_auto_mode(config: UserConfiguration, base_dir: Path) -> bool:
+    def _configure_auto_mode(
+        config: UserConfiguration,
+        base_dir: Path,
+        paths_config: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         """Configure auto mode processing.
         
         Args:
@@ -512,21 +520,22 @@ class WorkflowUI:
         """
         from modules.core.auto_selector import AutoSelector
         from modules.config.config_loader import ConfigLoader
-        
+
         print_header("AUTO MODE CONFIGURATION", "Automatic file detection and method selection")
-        
-        # Load paths config
-        config_loader = ConfigLoader()
-        config_loader.load_configs()
-        paths_config = config_loader.get_paths_config()
-        
-        # Create auto selector
-        selector = AutoSelector(paths_config)
+
+        selector = config.auto_selector
+        if selector is None:
+            if paths_config is None:
+                config_loader = ConfigLoader()
+                config_loader.load_configs()
+                paths_config = config_loader.get_paths_config()
+            selector = AutoSelector(paths_config or {})
+            config.auto_selector = selector
         
         # Scan directory and create decisions
         print_info(f"Scanning directory: {base_dir}")
         decisions = selector.create_decisions(base_dir)
-        
+
         if not decisions:
             print_error(f"No processable files found in {base_dir}")
             print_info("Please add files and try again.")

@@ -219,7 +219,7 @@ class AutoSelector:
             decisions: List of FileDecision objects
         """
         from modules.ui.prompts import print_header, print_info, print_separator, ui_print, PromptStyle
-        
+
         print_header("AUTO MODE DECISIONS", f"{len(decisions)} files discovered")
         
         if not decisions:

@@ -1,6 +1,6 @@
 # ChronoTranscriber
 
-A Python-based tool designed for researchers and archivists to transcribe historical documents from PDFs or image folders using either local OCR (Tesseract) or modern vision-language models via OpenAI's API. ChronoTranscriber provides structured JSON outputs, scalable batch processing, and robust error recovery for large-scale document digitization projects.
+A Python-based tool designed for researchers and archivists to transcribe historical documents from PDFs, EPUB ebooks, or image folders using either local OCR (Tesseract) or modern vision-language models via OpenAI's API. ChronoTranscriber provides structured JSON outputs, scalable batch processing, and robust error recovery for large-scale document digitization projects.
 
 ## Table of Contents
 
@@ -14,47 +14,31 @@ A Python-based tool designed for researchers and archivists to transcribe histor
 - [Utilities](#utilities)
 - [Architecture](#architecture)
 - [Troubleshooting](#troubleshooting)
-- [Contributing](#contributing)
 - [License](#license)
 
 ## Overview
 
-ChronoTranscriber is designed for researchers and archivists who need to (cheaply and comfortably) transcribe historical documents at scale. The tool supports multiple processing backends, provides fine-grained control over image preprocessing, and ensures reproducible results through structured JSON outputs. Also works well (or even better) with non-historical documents (academic papers, books, etc.).
+ChronoTranscriber is designed for researchers and archivists who need to (cheaply and comfortably) transcribe historical documents at scale. The tool supports multiple processing backends, provides fine-grained control over image preprocessing, and ensures reproducible results through structured JSON outputs. Also works well (or even better) with non-historical documents (academic papers, books, ebooks, etc.).
 Meant to be used in conjunction with [ChronoMiner](https://github.com/Paullllllllllllllllll/ChronoMiner) and [ChronoDownloader](https://github.com/Paullllllllllllllllll/ChronoDownloader) for a full historical document retrieval, transcription and data extraction pipeline.
 
 ### Execution Modes
 
 ChronoTranscriber supports two execution modes to accommodate different workflows and user preferences:
-
-**Interactive Mode** provides a guided, step-by-step experience with visual prompts and navigation support. Users are walked through each decision point with clear explanations and can navigate backward or quit at any time. This mode is ideal for researchers who prefer an intuitive interface and want to make informed decisions at each stage of the transcription process.
-
-**CLI Mode** enables command-line operation with full argument support for automation, scripting, and integration into existing pipelines. All functionality is accessible via flags and parameters, with comprehensive help documentation and proper exit codes for shell scripting. This mode is designed for advanced users, batch processing workflows, and unattended operation.
-
-The mode is controlled by the `interactive_mode` flag in `config/paths_config.yaml`, allowing users to switch seamlessly between workflows based on their current needs.
-
-### Key Capabilities
-
-- Dual OCR Backends: Choose between local Tesseract OCR or cloud-based vision-language models from OpenAI
-- Flexible Operation Modes: Interactive guided workflows or command-line automation
-- Batch Processing: Submit hundreds or thousands of pages as asynchronous batch jobs via OpenAI's Batch API
-- Structured Outputs: Enforce consistent transcription format using customizable JSON schemas
-- Recoverable Workflows: Monitor batch progress, repair failed transcriptions, and safely resume interrupted jobs
-- Page Ordering: Maintain correct page sequence for multi-page documents with intelligent ordering strategies
-- Image Preprocessing: Apply deskewing, denoising, binarization, and other enhancements for optimal OCR results
-- Configurable Reliability: Fine-tune layered retry policies for both API errors and model-level transcription outcomes
-- Context-Aware Prompts: Provide optional domain guidance via `additional_context/additional_context.txt`
-
-## Features
-
+{{ ... }}
 ### Document Processing
 
 - PDF Transcription: Process PDF documents with automatic text extraction fallback or page-to-image rendering
+- EPUB Extraction: Natively extract structured text chapters from EPUB ebooks without OCR
+  - Supports EPUB 2.0 and EPUB 3.0
+  - Automatically detects and extracts text from EPUB chapters
+  - Preserves EPUB chapter structure and metadata
 - Image Folder Transcription: Process directories containing scanned page images (PNG, JPEG)
 - Multi-Page Support: Preserve page ordering and handle documents with hundreds or thousands of pages
 - Preprocessing Pipeline: Configurable image enhancement including grayscale conversion, transparency handling, deskewing, denoising, and binarization
 
 ### OCR Backends
 
+{{ ... }}
 #### Tesseract (Local)
 - Fully offline processing with no external API calls
 - Configurable engine modes and page segmentation
@@ -178,7 +162,7 @@ For persistent configuration, add the environment variable to your system settin
 
 ### Configure File Paths
 
-Edit `config/paths_config.yaml` to specify your input and output directories for PDFs and images.
+Edit `config/paths_config.yaml` to specify your input and output directories for PDFs, EPUBs, and images.
 
 ## Configuration
 
@@ -238,6 +222,9 @@ file_paths:
   Images:
     input: './input/images'
     output: './output/images'
+  EPUBs:
+    input: './input/epubs'
+    output: './output/epubs'
 ```
 
 Key Parameters:

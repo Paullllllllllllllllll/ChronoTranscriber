@@ -216,9 +216,12 @@ general:
   input_paths_is_output_path: false
   logs_dir: './logs'
   keep_preprocessed_images: true
-  auto_mode_pdf_force_ocr: true
-  auto_mode_pdf_ocr_backend: 'tesseract'
-  auto_mode_image_method: 'tesseract'
+  # Auto mode: PDF processing settings
+  auto_mode_pdf_use_ocr_for_scanned: true
+  auto_mode_pdf_use_ocr_for_searchable: false
+  auto_mode_pdf_ocr_method: 'tesseract'
+  # Auto mode: Image processing settings
+  auto_mode_image_ocr_method: 'tesseract'
 
 file_paths:
   PDFs:
@@ -242,9 +245,10 @@ Key Parameters:
 - `input_paths_is_output_path`: Write outputs to the same directory as inputs (auto mode honors this when all files share a parent)
 - `logs_dir`: Directory for log files
 - `keep_preprocessed_images`: Retain preprocessed images after transcription
-- `auto_mode_pdf_force_ocr`: When true, non-searchable PDFs detected in auto mode use the configured OCR backend instead of native extraction
-- `auto_mode_pdf_ocr_backend`: OCR backend used for scanned PDFs in auto mode (`tesseract` or `gpt`)
-- `auto_mode_image_method`: Preferred method for images discovered in auto mode (`tesseract` or `gpt`)
+- `auto_mode_pdf_use_ocr_for_scanned`: Force OCR for scanned/non-searchable PDFs (if false, attempts native extraction)
+- `auto_mode_pdf_use_ocr_for_searchable`: Force OCR even for searchable PDFs, bypassing native text extraction
+- `auto_mode_pdf_ocr_method`: OCR method to use when OCR is forced for PDFs (`tesseract` or `gpt`)
+- `auto_mode_image_ocr_method`: OCR method for images (`tesseract` or `gpt`; automatically falls back if unavailable)
 - `transcription_prompt_path` (optional): Custom system prompt file path
 - `transcription_schema_path` (optional): Custom JSON schema file path
 

@@ -5,10 +5,12 @@ general:
   input_paths_is_output_path: true  # Use input paths as output paths if true
   logs_dir: ''  # Directory for log files
   keep_preprocessed_images: false  # Retain preprocessed images after processing
-  auto_mode_pdf_force_ocr: true   # If true, non-searchable PDFs use the backend OCR set below; if false, they attempt to
-                                  # use native extraction (likely returns empty/minimal text)
-  auto_mode_pdf_ocr_backend: 'gpt'  # OCR backend for non-searchable PDFs: 'tesseract' or 'gpt' (only used when pdf_force_ocr is true)
-  auto_mode_image_method: 'gpt'  # Preferred method for images: 'tesseract' or 'gpt' (automatically falls back if unavailable)
+  # Auto mode: PDF processing settings
+  auto_mode_pdf_use_ocr_for_scanned: true       # Force OCR for scanned/non-searchable PDFs (if false, attempts native extraction; will likely produce empty output files)
+  auto_mode_pdf_use_ocr_for_searchable: false   # Force OCR even for searchable PDFs (bypasses native text extraction)
+  auto_mode_pdf_ocr_method: 'gpt'               # OCR method when forced: 'tesseract' or 'gpt'
+  # Auto mode: Image processing settings
+  auto_mode_image_ocr_method: 'gpt'             # OCR method for images: 'tesseract' or 'gpt' (falls back if unavailable)
 
 file_paths:
   PDFs:

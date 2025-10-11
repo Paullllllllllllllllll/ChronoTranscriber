@@ -40,16 +40,18 @@ class AutoSelector:
         general = config.get("general", {})
         
         # Load auto mode settings with defaults
-        self.pdf_force_ocr = general.get("auto_mode_pdf_force_ocr", True)
-        self.pdf_ocr_backend = general.get("auto_mode_pdf_ocr_backend", "tesseract")
-        self.image_method = general.get("auto_mode_image_method", "tesseract")
+        self.pdf_use_ocr_for_scanned = general.get("auto_mode_pdf_use_ocr_for_scanned", True)
+        self.pdf_use_ocr_for_searchable = general.get("auto_mode_pdf_use_ocr_for_searchable", False)
+        self.pdf_ocr_method = general.get("auto_mode_pdf_ocr_method", "tesseract")
+        self.image_ocr_method = general.get("auto_mode_image_ocr_method", "tesseract")
         
         # Check GPT availability
         self.gpt_available = bool(os.getenv("OPENAI_API_KEY"))
         
         logger.info(
-            f"AutoSelector initialized: pdf_force_ocr={self.pdf_force_ocr}, "
-            f"pdf_ocr_backend={self.pdf_ocr_backend}, image_method={self.image_method}, "
+            f"AutoSelector initialized: pdf_use_ocr_for_scanned={self.pdf_use_ocr_for_scanned}, "
+            f"pdf_use_ocr_for_searchable={self.pdf_use_ocr_for_searchable}, "
+            f"pdf_ocr_method={self.pdf_ocr_method}, image_ocr_method={self.image_ocr_method}, "
             f"gpt_available={self.gpt_available}"
         )
     
@@ -98,59 +100,61 @@ class AutoSelector:
     
     def decide_pdf_method(self, pdf_path: Path) -> Tuple[str, str]:
         """Decide transcription method for a PDF.
-        
         Args:
             pdf_path: Path to PDF file
             
         Returns:
             Tuple of (method, reason)
         """
+
         processor = PDFProcessor(pdf_path)
-        
+
         # Check if PDF has native text
         is_native = processor.is_native_pdf()
-        
+
         if is_native:
-            return "native", "PDF contains searchable text"
-        
-        # PDF is scanned/non-searchable
-        if not self.pdf_force_ocr:
-            return "native", "Non-searchable PDF, but force_ocr disabled"
-        
-        # Need OCR - check backend availability
-        if self.pdf_ocr_backend == "gpt":
+            if not self.pdf_use_ocr_for_searchable:
+                return "native", "PDF contains searchable text"
+            force_context = "Searchable PDF forced to OCR"
+        else:
+            if not self.pdf_use_ocr_for_scanned:
+                return "native", "Non-searchable PDF detected, OCR forcing disabled"
+            force_context = "Non-searchable PDF"
+
+        method = self.pdf_ocr_method
+
+        if method == "gpt":
             if self.gpt_available:
-                return "gpt", "Non-searchable PDF, using GPT OCR backend"
+                return "gpt", f"{force_context} using GPT OCR"
             else:
                 logger.warning(
-                    f"GPT backend requested but API key not available for {pdf_path.name}. "
+                    f"GPT OCR requested but API key not available for {pdf_path.name}. "
                     "Falling back to Tesseract."
                 )
-                return "tesseract", "Non-searchable PDF, GPT unavailable, using Tesseract fallback"
+                return "tesseract", f"{force_context}, GPT unavailable, using Tesseract fallback"
         else:
-            return "tesseract", f"Non-searchable PDF, using {self.pdf_ocr_backend} OCR backend"
+            return "tesseract", f"{force_context} using {method} OCR"
     
     def decide_image_method(self, image_path: Path) -> Tuple[str, str]:
         """Decide transcription method for an image or image folder.
         
         Args:
-            image_path: Path to image file or folder
-            
+            image_path: Path to an image file or directory containing images
         Returns:
             Tuple of (method, reason)
         """
         # Check preferred method availability
-        if self.image_method == "gpt":
+        if self.image_ocr_method == "gpt":
             if self.gpt_available:
-                return "gpt", "Preferred image method: GPT"
+                return "gpt", "Image OCR using GPT"
             else:
                 logger.warning(
-                    f"GPT method preferred but API key not available for {image_path.name}. "
+                    f"GPT OCR requested but API key not available for {image_path.name}. "
                     "Falling back to Tesseract."
                 )
                 return "tesseract", "GPT unavailable, using Tesseract fallback"
         else:
-            return "tesseract", f"Preferred image method: {self.image_method}"
+            return "tesseract", f"Image OCR using {self.image_ocr_method}"
     
     def decide_epub_method(self, epub_path: Path) -> Tuple[str, str]:
         """Decide transcription method for an EPUB.

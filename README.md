@@ -10,6 +10,7 @@ A Python-based tool designed for researchers and archivists to transcribe histor
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Usage](#usage)
+  - [Auto Mode](#auto-mode)
 - [Batch Processing](#batch-processing)
 - [Utilities](#utilities)
 - [Architecture](#architecture)
@@ -33,6 +34,7 @@ ChronoTranscriber supports two execution modes to accommodate different workflow
   - Automatically detects and extracts text from EPUB chapters
   - Preserves EPUB chapter structure and metadata
 - Image Folder Transcription: Process directories containing scanned page images (PNG, JPEG)
+- Auto Mode Discovery: Scan a mixed directory and automatically choose native, Tesseract, or GPT transcription per file
 - Multi-Page Support: Preserve page ordering and handle documents with hundreds or thousands of pages
 - Preprocessing Pipeline: Configurable image enhancement including grayscale conversion, transparency handling, deskewing, denoising, and binarization
 
@@ -214,6 +216,9 @@ general:
   input_paths_is_output_path: false
   logs_dir: './logs'
   keep_preprocessed_images: true
+  auto_mode_pdf_force_ocr: true
+  auto_mode_pdf_ocr_backend: 'tesseract'
+  auto_mode_image_method: 'tesseract'
 
 file_paths:
   PDFs:
@@ -225,15 +230,21 @@ file_paths:
   EPUBs:
     input: './input/epubs'
     output: './output/epubs'
+  Auto:
+    input: './input/auto'
+    output: './output/auto'
 ```
 
 Key Parameters:
 
 - `interactive_mode`: Controls operation mode (true for interactive prompts, false for CLI mode)
 - `retain_temporary_jsonl`: Keep temporary JSONL files after batch processing completes
-- `input_paths_is_output_path`: Write outputs to the same directory as inputs
+- `input_paths_is_output_path`: Write outputs to the same directory as inputs (auto mode honors this when all files share a parent)
 - `logs_dir`: Directory for log files
 - `keep_preprocessed_images`: Retain preprocessed images after transcription
+- `auto_mode_pdf_force_ocr`: When true, non-searchable PDFs detected in auto mode use the configured OCR backend instead of native extraction
+- `auto_mode_pdf_ocr_backend`: OCR backend used for scanned PDFs in auto mode (`tesseract` or `gpt`)
+- `auto_mode_image_method`: Preferred method for images discovered in auto mode (`tesseract` or `gpt`)
 - `transcription_prompt_path` (optional): Custom system prompt file path
 - `transcription_schema_path` (optional): Custom JSON schema file path
 

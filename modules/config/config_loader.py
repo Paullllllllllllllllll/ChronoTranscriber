@@ -283,7 +283,7 @@ class ConfigLoader:
 
         # file_paths
         file_paths = dict(out.get("file_paths", {}))
-        for section in ("PDFs", "Images", "EPUBs"):
+        for section in ("PDFs", "Images", "EPUBs", "Auto"):
             if section in file_paths and isinstance(file_paths[section], dict):
                 sec = dict(file_paths[section])
                 for k in ("input", "output"):

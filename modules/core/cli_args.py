@@ -37,29 +37,35 @@ Examples:
     parser.add_argument(
         "--input", "-i",
         type=str,
-        required=True,
+        required=False,
         help="Input path (relative or absolute). For images: folder containing subfolders. For PDFs: folder with PDF files."
     )
     
     parser.add_argument(
         "--output", "-o",
         type=str,
-        required=True,
+        required=False,
         help="Output path (relative or absolute) where results will be saved."
     )
     
     parser.add_argument(
         "--type", "-t",
         choices=["images", "pdfs", "epubs"],
-        required=True,
+        required=False,
         help="Type of documents to process: 'images', 'pdfs', or 'epubs'."
     )
     
     parser.add_argument(
         "--method", "-m",
         choices=["native", "tesseract", "gpt"],
-        required=True,
+        required=False,
         help="Transcription method. Use 'native' for PDFs/EPUBs, 'tesseract' for OCR, or 'gpt' for AI transcription."
+    )
+
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="Use auto mode. If set, type/method/input/output may be omitted and are inferred from configuration."
     )
     
     # Optional arguments for GPT

@@ -32,7 +32,7 @@ class UserConfiguration:
     Stores user's processing preferences to avoid re-prompting during workflow.
     """
 
-    processing_type: Optional[str] = None  # "images", "pdfs", or "epubs"
+    processing_type: Optional[str] = None  # "images", "pdfs", "epubs", or "auto"
     transcription_method: Optional[str] = None  # "native", "tesseract", or "gpt"
     use_batch_processing: bool = False
     selected_items: List[Path] = None  # files or folders to process
@@ -42,12 +42,18 @@ class UserConfiguration:
     selected_schema_path: Optional[Path] = None
     # Additional context (GPT only)
     additional_context_path: Optional[Path] = None
+    # Auto mode decisions (when processing_type == "auto")
+    auto_decisions: Optional[List[Any]] = None  # List of FileDecision objects
 
     def __post_init__(self) -> None:
         if self.selected_items is None:
             self.selected_items = []
 
     def __str__(self) -> str:
+        if self.processing_type == "auto":
+            decision_count = len(self.auto_decisions) if self.auto_decisions else 0
+            return f"Processing type: auto, Decisions: {decision_count} files"
+        
         method_name = {
             "native": "Native PDF extraction",
             "tesseract": "Tesseract OCR",

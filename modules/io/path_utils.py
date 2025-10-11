@@ -56,9 +56,9 @@ def validate_paths(paths_config: Dict[str, Any]) -> None:
             f"[ERROR] The 'transcription_schema_path' path '{schema_path}' is not absolute. Please use an absolute path or enable allow_relative_paths in paths_config.yaml.")
         error_found = True
 
-    # Validate file paths for PDFs and Images
+    # Validate file paths for configured resource sections
     file_paths = paths_config.get("file_paths", {})
-    for category in ["PDFs", "Images"]:
+    for category in ["PDFs", "Images", "EPUBs", "Auto"]:
         if category in file_paths:
             for path_key in ["input", "output"]:
                 path_value = file_paths[category].get(path_key)

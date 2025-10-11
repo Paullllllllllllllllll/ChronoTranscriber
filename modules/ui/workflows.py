@@ -50,6 +50,7 @@ class WorkflowUI:
     def get_processing_type_options() -> List[Tuple[str, str]]:
         """Get processing type options."""
         return [
+            ("auto", "Auto Mode — Automatically detect and process mixed file types"),
             ("images", "Image Folders — Process collections of images organized in folders"),
             ("pdfs", "PDF Documents — Process PDF files or scanned documents"),
             ("epubs", "EPUB Documents — Extract text directly from EPUB ebooks"),
@@ -84,6 +85,9 @@ class WorkflowUI:
     @staticmethod
     def configure_processing_type(config: UserConfiguration) -> bool:
         """Configure processing type with navigation.
+        
+        Args:
+            config: UserConfiguration object
         
         Returns:
             True if configured successfully, False if user wants to go back/quit
@@ -258,6 +262,10 @@ class WorkflowUI:
         Returns:
             True if items selected successfully, False if user wants to go back
         """
+        # Handle auto mode separately
+        if config.processing_type == "auto":
+            return WorkflowUI._configure_auto_mode(config, base_dir)
+        
         print_header(
             f"DOCUMENT SELECTION — {config.processing_type.upper()}",
             "Choose which items to process"
@@ -492,12 +500,70 @@ class WorkflowUI:
         return True
     
     @staticmethod
+    def _configure_auto_mode(config: UserConfiguration, base_dir: Path) -> bool:
+        """Configure auto mode processing.
+        
+        Args:
+            config: UserConfiguration object
+            base_dir: Base directory to scan (from Auto paths config)
+        
+        Returns:
+            True if configured successfully, False if user wants to go back
+        """
+        from modules.core.auto_selector import AutoSelector
+        from modules.config.config_loader import ConfigLoader
+        
+        print_header("AUTO MODE CONFIGURATION", "Automatic file detection and method selection")
+        
+        # Load paths config
+        config_loader = ConfigLoader()
+        config_loader.load_configs()
+        paths_config = config_loader.get_paths_config()
+        
+        # Create auto selector
+        selector = AutoSelector(paths_config)
+        
+        # Scan directory and create decisions
+        print_info(f"Scanning directory: {base_dir}")
+        decisions = selector.create_decisions(base_dir)
+        
+        if not decisions:
+            print_error(f"No processable files found in {base_dir}")
+            print_info("Please add files and try again.")
+            return False
+        
+        # Display decision summary
+        selector.print_decision_summary(decisions)
+        
+        # Confirm with user
+        result = prompt_yes_no(
+            f"Proceed with processing {len(decisions)} file(s) using auto mode?",
+            default=True,
+            allow_back=True
+        )
+        
+        if result.action == NavigationAction.BACK:
+            return False
+        
+        if result.action == NavigationAction.CONTINUE and result.value:
+            # Store decisions and output directory
+            config.auto_decisions = decisions
+            config.selected_items = [base_dir]  # Will be used as output dir
+            return True
+        
+        return False
+    
+    @staticmethod
     def display_processing_summary(config: UserConfiguration) -> bool:
         """Display processing summary and confirm.
         
         Returns:
             True if user confirms, False if they want to go back
         """
+        # Skip summary for auto mode (already shown in _configure_auto_mode)
+        if config.processing_type == "auto":
+            return True
+        
         print_header("PROCESSING SUMMARY", "Review your selections")
         
         item_type = "image folder(s)" if config.processing_type == "images" else "PDF file(s)"

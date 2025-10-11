@@ -15,6 +15,7 @@ import asyncio
 import logging
 import traceback
 from pathlib import Path
+from copy import deepcopy
 
 from modules.config.config_loader import ConfigLoader, PROJECT_ROOT
 from modules.infra.logger import setup_logger
@@ -42,18 +43,56 @@ from modules.llm.schema_utils import list_schema_options
 logger = setup_logger(__name__)
 
 
-def create_config_from_cli_args(args, base_input_dir: Path, base_output_dir: Path) -> UserConfiguration:
+def create_config_from_cli_args(args, base_input_dir: Path, base_output_dir: Path, paths_config: dict) -> UserConfiguration:
     """Create UserConfiguration from CLI arguments.
     
     Args:
         args: Parsed command-line arguments
         base_input_dir: Base directory for relative input paths
         base_output_dir: Base directory for relative output paths
+        paths_config: Paths configuration dictionary
         
     Returns:
         UserConfiguration object
     """
     config = UserConfiguration()
+    
+    # Handle auto mode
+    if args.auto:
+        from modules.core.auto_selector import AutoSelector
+        
+        # Use Auto input/output paths from config
+        auto_input = Path(paths_config.get('file_paths', {}).get('Auto', {}).get('input', base_input_dir))
+        auto_output = Path(paths_config.get('file_paths', {}).get('Auto', {}).get('output', base_output_dir))
+        
+        # Override with CLI args if provided
+        if args.input:
+            auto_input = resolve_path(args.input, auto_input)
+        if args.output:
+            auto_output = resolve_path(args.output, auto_output)
+        
+        validate_input_path(auto_input)
+        validate_output_path(auto_output)
+        
+        # Create auto selector and generate decisions
+        selector = AutoSelector(paths_config)
+        decisions = selector.create_decisions(auto_input)
+        
+        if not decisions:
+            raise ValueError(f"No processable files found in auto mode input directory: {auto_input}")
+        
+        # Store decisions in config
+        config.processing_type = "auto"
+        config.auto_decisions = decisions
+        
+        # Set output directory for auto mode
+        config.selected_items = [auto_output]  # Store output path
+        
+        return config
+    
+    # Validate non-auto mode has required arguments
+    if not args.type or not args.method:
+        raise ValueError("--type and --method are required unless using --auto mode")
     
     # Set processing type and method
     config.processing_type = args.type
@@ -155,9 +194,16 @@ async def configure_user_workflow_interactive(
     pdf_input_dir: Path,
     image_input_dir: Path,
     epub_input_dir: Path,
+    auto_input_dir: Path,
 ) -> UserConfiguration:
     """
     Guide user through configuration with navigation support (interactive mode).
+    
+    Args:
+        pdf_input_dir: PDF input directory
+        image_input_dir: Image input directory
+        epub_input_dir: EPUB input directory
+        auto_input_dir: Auto mode input directory
     
     Returns:
         UserConfiguration object with all settings
@@ -173,7 +219,11 @@ async def configure_user_workflow_interactive(
     while True:
         if current_step == "processing_type":
             if WorkflowUI.configure_processing_type(config):
-                current_step = "transcription_method"
+                # Auto mode skips method/batch selection
+                if config.processing_type == "auto":
+                    current_step = "item_selection"
+                else:
+                    current_step = "transcription_method"
             else:
                 current_step = "processing_type"
         
@@ -190,7 +240,9 @@ async def configure_user_workflow_interactive(
                 current_step = "transcription_method"
         
         elif current_step == "item_selection":
-            if config.processing_type == "images":
+            if config.processing_type == "auto":
+                base_dir = auto_input_dir
+            elif config.processing_type == "images":
                 base_dir = image_input_dir
             elif config.processing_type == "pdfs":
                 base_dir = pdf_input_dir
@@ -200,7 +252,8 @@ async def configure_user_workflow_interactive(
             if WorkflowUI.select_items_for_processing(config, base_dir):
                 current_step = "summary"
             else:
-                current_step = "batch_processing"
+                # Auto mode goes back to processing_type, others to batch_processing
+                current_step = "processing_type" if config.processing_type == "auto" else "batch_processing"
         
         elif current_step == "summary":
             confirmed = WorkflowUI.display_processing_summary(config)
@@ -208,6 +261,133 @@ async def configure_user_workflow_interactive(
                 return config
             else:
                 current_step = "item_selection"
+
+
+async def process_auto_mode(
+    user_config: UserConfiguration,
+    paths_config: dict,
+    model_config: dict,
+    concurrency_config: dict,
+    image_processing_config: dict,
+) -> None:
+    """Process documents in auto mode with per-file method decisions.
+    
+    Args:
+        user_config: User configuration with auto_decisions
+        paths_config: Paths configuration
+        model_config: Model configuration
+        concurrency_config: Concurrency configuration
+        image_processing_config: Image processing configuration
+    """
+    from modules.core.auto_selector import AutoSelector, FileDecision
+    
+    print_info("AUTO MODE", "Processing files with automatic method selection...")
+    
+    decisions = user_config.auto_decisions
+    output_dir = user_config.selected_items[0]  # Default output directory
+    
+    # Display decision summary
+    selector = AutoSelector(paths_config)
+    selector.print_decision_summary(decisions)
+    
+    # Check if we should use input paths as output paths
+    use_input_as_output = paths_config.get('general', {}).get('input_paths_is_output_path', False)
+    
+    # Group decisions by method for efficient processing
+    by_method = {}
+    for decision in decisions:
+        if decision.method not in by_method:
+            by_method[decision.method] = []
+        by_method[decision.method].append(decision)
+    
+    # Process each method group
+    for method, items in by_method.items():
+        print_info(f"Processing {len(items)} file(s) with {method.upper()} method...")
+
+        # Create a temporary UserConfiguration for this method
+        temp_config = UserConfiguration()
+        temp_config.transcription_method = method
+        temp_config.use_batch_processing = False  # Auto mode uses synchronous
+        temp_config.selected_items = [d.file_path for d in items]
+
+        first_item = items[0]
+        if first_item.file_type == "pdf":
+            temp_config.processing_type = "pdfs"
+        elif first_item.file_type in ("image", "image_folder"):
+            temp_config.processing_type = "images"
+        else:
+            temp_config.processing_type = "epubs"
+
+        # Determine per-group paths configuration
+        group_paths_config = paths_config
+        override_with_auto_output = not use_input_as_output
+
+        if use_input_as_output:
+            parents: set[Path] = set()
+            for decision in items:
+                if temp_config.processing_type == "images" and decision.file_path.is_dir():
+                    parents.add(decision.file_path)
+                else:
+                    parents.add(decision.file_path.parent)
+
+            if len(parents) == 1:
+                parent_dir = next(iter(parents))
+                group_paths_config = deepcopy(paths_config)
+                file_paths_cfg = group_paths_config.setdefault('file_paths', {})
+
+                if temp_config.processing_type == "pdfs":
+                    pdf_cfg = file_paths_cfg.setdefault('PDFs', {})
+                    pdf_cfg['input'] = str(parent_dir)
+                    pdf_cfg['output'] = str(parent_dir)
+                elif temp_config.processing_type == "images":
+                    image_cfg = file_paths_cfg.setdefault('Images', {})
+                    image_cfg['input'] = str(parent_dir)
+                    image_cfg['output'] = str(parent_dir)
+                elif temp_config.processing_type == "epubs":
+                    epub_cfg = file_paths_cfg.setdefault('EPUBs', {})
+                    epub_cfg['input'] = str(parent_dir)
+                    epub_cfg['output'] = str(parent_dir)
+
+                override_with_auto_output = False
+            else:
+                override_with_auto_output = True
+
+        # Create workflow manager for this batch
+        workflow_manager = WorkflowManager(
+            temp_config,
+            group_paths_config,
+            model_config,
+            concurrency_config,
+            image_processing_config
+        )
+
+        if override_with_auto_output:
+            workflow_manager.pdf_output_dir = output_dir
+            workflow_manager.image_output_dir = output_dir
+            workflow_manager.epub_output_dir = output_dir
+        transcriber = None
+        if method == "gpt":
+            api_key = os.getenv('OPENAI_API_KEY')
+            if not api_key:
+                print_error("OPENAI_API_KEY required for GPT transcription. Skipping GPT files.")
+                continue
+            
+            # Use default schema for auto mode
+            from modules.config.config_loader import PROJECT_ROOT
+            default_schema = (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json").resolve()
+            
+            async with open_transcriber(
+                api_key=api_key,
+                model=model_config.get("transcription_model", {}).get("name", "gpt-4o"),
+                schema_path=default_schema,
+                additional_context_path=None,
+            ) as t:
+                transcriber = t
+                await workflow_manager.process_selected_items(transcriber)
+        else:
+            await workflow_manager.process_selected_items()
+    
+    print_success("Auto mode processing complete!")
 
 
 async def process_documents(
@@ -279,26 +459,48 @@ async def transcribe_interactive() -> None:
     epub_input_dir = Path(
         paths_config.get('file_paths', {}).get('EPUBs', {}).get('input', 'epubs_in')
     )
+    auto_input_dir = Path(
+        paths_config.get('file_paths', {}).get('Auto', {}).get('input', 'auto_in')
+    )
+    auto_output_dir = Path(
+        paths_config.get('file_paths', {}).get('Auto', {}).get('output', 'auto_out')
+    )
     
     # Ensure directories exist for interactive mode
     pdf_input_dir.mkdir(parents=True, exist_ok=True)
     image_input_dir.mkdir(parents=True, exist_ok=True)
     epub_input_dir.mkdir(parents=True, exist_ok=True)
+    auto_input_dir.mkdir(parents=True, exist_ok=True)
+    auto_output_dir.mkdir(parents=True, exist_ok=True)
     
     # Create user configuration through interactive workflow
-    user_config = await configure_user_workflow_interactive(pdf_input_dir, image_input_dir, epub_input_dir)
-    
-    # Process documents
-    await process_documents(
-        user_config,
-        paths_config,
-        config_loader.get_model_config(),
-        config_loader.get_concurrency_config(),
-        config_loader.get_image_processing_config()
+    user_config = await configure_user_workflow_interactive(
+        pdf_input_dir, image_input_dir, epub_input_dir, auto_input_dir
     )
     
+    # Process documents
+    if user_config.processing_type == "auto":
+        # Override output directory with Auto output
+        user_config.selected_items = [auto_output_dir]
+        await process_auto_mode(
+            user_config,
+            paths_config,
+            config_loader.get_model_config(),
+            config_loader.get_concurrency_config(),
+            config_loader.get_image_processing_config()
+        )
+    else:
+        await process_documents(
+            user_config,
+            paths_config,
+            config_loader.get_model_config(),
+            config_loader.get_concurrency_config(),
+            config_loader.get_image_processing_config()
+        )
+    
     # Display completion summary
-    WorkflowUI.display_completion_summary(user_config)
+    if user_config.processing_type != "auto":  # Auto mode prints its own summary
+        WorkflowUI.display_completion_summary(user_config)
 
 
 async def transcribe_cli(args, paths_config: dict) -> None:
@@ -336,7 +538,11 @@ async def transcribe_cli(args, paths_config: dict) -> None:
     )
     
     # Determine base directories based on processing type
-    if args.type == "images":
+    if args.auto:
+        # Auto mode uses Auto paths from config
+        base_input_dir = Path(paths_config.get('file_paths', {}).get('Auto', {}).get('input', 'auto_in'))
+        base_output_dir = Path(paths_config.get('file_paths', {}).get('Auto', {}).get('output', 'auto_out'))
+    elif args.type == "images":
         base_input_dir = image_input_dir
         base_output_dir = image_output_dir
     elif args.type == "pdfs":
@@ -347,16 +553,25 @@ async def transcribe_cli(args, paths_config: dict) -> None:
         base_output_dir = epub_output_dir
     
     # Create configuration from CLI arguments
-    user_config = create_config_from_cli_args(args, base_input_dir, base_output_dir)
+    user_config = create_config_from_cli_args(args, base_input_dir, base_output_dir, paths_config)
     
     # Process documents
-    await process_documents(
-        user_config,
-        paths_config,
-        config_loader.get_model_config(),
-        config_loader.get_concurrency_config(),
-        config_loader.get_image_processing_config()
-    )
+    if user_config.processing_type == "auto":
+        await process_auto_mode(
+            user_config,
+            paths_config,
+            config_loader.get_model_config(),
+            config_loader.get_concurrency_config(),
+            config_loader.get_image_processing_config()
+        )
+    else:
+        await process_documents(
+            user_config,
+            paths_config,
+            config_loader.get_model_config(),
+            config_loader.get_concurrency_config(),
+            config_loader.get_image_processing_config()
+        )
     
     print_success("Processing complete!")
 

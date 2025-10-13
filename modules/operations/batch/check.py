@@ -17,17 +17,18 @@ from datetime import datetime, timezone
 from openai import OpenAI
 
 from modules.llm.batch.batch_utils import diagnose_batch_failure, extract_custom_id_mapping
-from modules.config.config_loader import ConfigLoader
+from modules.config.service import get_config_service
 from modules.infra.logger import setup_logger
 from modules.llm.openai_sdk_utils import coerce_file_id, list_all_batches, sdk_to_dict
 from modules.io.path_utils import validate_paths
+from modules.io.directory_utils import collect_scan_directories
 from modules.processing.text_processing import (
     extract_transcribed_text,
     process_batch_output,
     format_page_line,
 )
 from modules.ui.core import UserPrompt
-from modules.core.utils import console_print
+from modules.ui import print_info, print_success, print_warning, print_error
 
 logger = setup_logger(__name__)
 
@@ -38,25 +39,17 @@ def load_config() -> Tuple[List[Path], Dict[str, Any]]:
     - Ensures file paths exist (creates input/output directories on demand)
     - Validates configured paths
     """
-    config_loader = ConfigLoader()
-    config_loader.load_configs()
-    paths_config = config_loader.get_paths_config()
+    config_service = get_config_service()
+    paths_config = config_service.get_paths_config()
 
     # Validate configured paths
     validate_paths(paths_config)
 
     processing_settings = paths_config.get("general", {})
 
-    file_paths = paths_config.get("file_paths", {})
-    scan_dirs: List[Path] = []
-    for _key, folders in file_paths.items():
-        for folder_key in ["input", "output"]:
-            folder_path = folders.get(folder_key)
-            if folder_path:
-                dir_path = Path(folder_path)
-                dir_path.mkdir(parents=True, exist_ok=True)
-                scan_dirs.append(dir_path.resolve())
-    scan_dirs = list(set(scan_dirs))
+    # Use centralized directory collection utility
+    scan_dirs = collect_scan_directories(paths_config)
+    
     return scan_dirs, processing_settings
 
 
@@ -69,24 +62,22 @@ def process_all_batches(
     safeguards ordering using custom_id metadata, and writes a final
     ``*_transcription.txt`` when all parts are available.
     """
-    console_print(
-        f"\n[INFO] Scanning directory '{root_folder}' for temporary batch files..."
-    )
+    print_info(f"Scanning directory '{root_folder}' for temporary batch files...")
     temp_files = list(root_folder.rglob("*_transcription.jsonl"))
     if not temp_files:
-        console_print(f"[INFO] No temporary batch files found in {root_folder}.")
+        print_info(f"No temporary batch files found in {root_folder}.")
         logger.info(f"No temporary batch files found in {root_folder}.")
         return
 
     # Retrieve all batches from OpenAI
-    console_print("[INFO] Retrieving list of submitted batches from OpenAI...")
+    print_info("Retrieving list of submitted batches from OpenAI...")
     try:
         batches = list_all_batches(client)
         batch_dict: Dict[str, Dict[str, Any]] = {
             b.get("id"): b for b in batches if isinstance(b, dict) and b.get("id")
         }
     except Exception as e:
-        console_print(f"[ERROR] Failed to retrieve batches from OpenAI: {e}")
+        print_error(f"Failed to retrieve batches from OpenAI: {e}")
         logger.exception(f"Error retrieving batches: {e}")
         return
 
@@ -152,8 +143,8 @@ def process_all_batches(
                     dbg_ids = [bid for bid in (dbg.get("batch_ids") or []) if isinstance(bid, str)]
                     to_add = [bid for bid in dbg_ids if bid not in batch_ids]
                     if to_add:
-                        console_print(
-                            f"[INFO] Recovered {len(to_add)} missing batch id(s) for {temp_file.name} from debug artifact."
+                        print_info(
+                            f"Recovered {len(to_add)} missing batch id(s) for {temp_file.name} from debug artifact."
                         )
                         for bid in to_add:
                             batch_ids.add(bid)
@@ -171,8 +162,8 @@ def process_all_batches(
                                             }
                                         }
                                         wf.write(json.dumps(rec) + "\n")
-                                console_print(
-                                    f"[INFO] Persisted {len(to_add)} recovered batch id(s) into {temp_file.name}."
+                                print_info(
+                                    f"Persisted {len(to_add)} recovered batch id(s) into {temp_file.name}."
                                 )
                             except Exception as pe:
                                 logger.warning(
@@ -187,29 +178,29 @@ def process_all_batches(
 
         if not is_batched_file:
             if has_batch_session and not batch_ids:
-                console_print(
-                    f"[WARN] {temp_file.name} has a batch_session marker but no batch IDs; skipping. "
+                print_warning(
+                    f"{temp_file.name} has a batch_session marker but no batch IDs; skipping. "
                     f"Use 'main/repair_transcriptions.py' if needed."
                 )
             elif batch_ids:
-                console_print(
-                    f"[WARN] {temp_file.name} contains {len(batch_ids)} batch_tracking entries but no "
+                print_warning(
+                    f"{temp_file.name} contains {len(batch_ids)} batch_tracking entries but no "
                     f"batch_session marker; skipping as non-batched."
                 )
             elif has_batch_metadata or has_batch_request:
-                console_print(
-                    f"[INFO] {temp_file.name} has batch-like metadata but no batch_session marker; "
+                print_info(
+                    f"{temp_file.name} has batch-like metadata but no batch_session marker; "
                     f"treating as non-batched and skipping."
                 )
             else:
-                console_print(
-                    f"[INFO] {temp_file.name} has no batch markers; treating as non-batched and skipping."
+                print_info(
+                    f"{temp_file.name} has no batch markers; treating as non-batched and skipping."
                 )
             continue
 
         if not batch_ids:
-            console_print(
-                f"[WARN] No batch IDs found in {temp_file.name}. This file appears to be batched but "
+            print_warning(
+                f"No batch IDs found in {temp_file.name}. This file appears to be batched but "
                 f"missing tracking entries. Use 'main/repair_transcriptions.py' if you need to "
                 f"reconstruct outputs."
             )
@@ -269,14 +260,14 @@ def process_all_batches(
 
         if not all_completed:
             if failed_count > 0:
-                console_print(
-                    f"[WARN] {failed_count} batches have failed. Check the OpenAI dashboard for details."
+                print_warning(
+                    f"{failed_count} batches have failed. Check the OpenAI dashboard for details."
                 )
             continue
 
         # All batches are completed, now download and process them
-        console_print(
-            f"[INFO] All batches for {temp_file.name} report 'completed'. "
+        print_info(
+            f"All batches for {temp_file.name} report 'completed'. "
             f"Attempting to download and process results..."
         )
 
@@ -332,8 +323,8 @@ def process_all_batches(
                     if error_file_id:
                         break
 
-                console_print(
-                    f"[ERROR] Batch {batch_id} is marked completed but no output_file_id was found. "
+                print_error(
+                    f"Batch {batch_id} is marked completed but no output_file_id was found. "
                     f"Skipping this batch."
                 )
                 logger.warning("Batch %s completed without output_file_id.", batch_id)
@@ -358,8 +349,8 @@ def process_all_batches(
                             err_text = str(err_bytes)
                         with errors_path.open("w", encoding="utf-8") as ef:
                             ef.write(err_text)
-                        console_print(
-                            f"[INFO] Saved error details for batch {batch_id} to {errors_path.name}"
+                        print_info(
+                            f"Saved error details for batch {batch_id} to {errors_path.name}"
                         )
                         logger.info(
                             "Saved error file for %s -> %s", batch_id, errors_path
@@ -377,8 +368,8 @@ def process_all_batches(
                 file_content = file_stream.read()
             except Exception as e:
                 logger.exception(f"Error downloading batch {batch_id}: {e}")
-                console_print(
-                    f"[ERROR] Failed to download output for Batch ID {batch_id}: {e}"
+                print_error(
+                    f"Failed to download output for Batch ID {batch_id}: {e}"
                 )
                 # If any batch fails to download, skip writing the output
                 all_completed = False
@@ -558,8 +549,8 @@ def process_all_batches(
 
         can_write_output = True
         if not all_completed:
-            console_print(
-                f"[WARN] Failed to process all batches for {temp_file.name}. Skipping output writing."
+            print_warning(
+                f"Failed to process all batches for {temp_file.name}. Skipping output writing."
             )
             can_write_output = False
 
@@ -567,8 +558,8 @@ def process_all_batches(
             logger.warning(
                 f"No transcriptions extracted for any batch in {temp_file.name}."
             )
-            console_print(
-                f"[WARN] No transcriptions extracted for any batch in {temp_file.name}. "
+            print_warning(
+                f"No transcriptions extracted for any batch in {temp_file.name}. "
                 f"Skipping this file."
             )
             can_write_output = False
@@ -579,15 +570,15 @@ def process_all_batches(
             final_txt_path = temp_file.parent / f"{identifier}_transcription.txt"
 
             # Apply a multi-level sorting strategy
-            console_print(f"[INFO] Arranging transcriptions in the correct order...")
-            console_print(
-                f"[INFO] Found {len(all_transcriptions)} transcriptions to combine."
+            print_info(f"Arranging transcriptions in the correct order...")
+            print_info(
+                f"Found {len(all_transcriptions)} transcriptions to combine."
             )
-            console_print(
-                f"[INFO] Order tracking data: {len(batch_order)} custom IDs mapped to order indices."
+            print_info(
+                f"Order tracking data: {len(batch_order)} custom IDs mapped to order indices."
             )
-            console_print(
-                f"[INFO] Using multi-level sorting to ensure correct page order."
+            print_info(
+                f"Using multi-level sorting to ensure correct page order."
             )
 
             def get_sorting_key(transcription_entry):
@@ -660,8 +651,8 @@ def process_all_batches(
                 logger.info(
                     f"All batches for {temp_file.name} processed and saved to {final_txt_path}"
                 )
-                console_print(
-                    f"[SUCCESS] Processed all batches for {temp_file.name}. Results saved to "
+                print_success(
+                    f"Processed all batches for {temp_file.name}. Results saved to "
                     f"{final_txt_path.name}"
                 )
                 processing_success = True
@@ -669,8 +660,8 @@ def process_all_batches(
                 logger.exception(
                     f"Error writing final output for {temp_file.name}: {e}"
                 )
-                console_print(
-                    f"[ERROR] Failed to write final output for {temp_file.name}: {e}"
+                print_error(
+                    f"Failed to write final output for {temp_file.name}: {e}"
                 )
 
             # Delete temporary JSONL file if we successfully wrote the final output
@@ -680,28 +671,28 @@ def process_all_batches(
                 try:
                     temp_file.unlink()
                     logger.info(f"Deleted temporary file after processing: {temp_file}")
-                    console_print(f"[CLEANUP] Deleted temporary file: {temp_file.name}")
+                    print_info(f"Deleted temporary file: {temp_file.name}")
                 except Exception as e:
                     logger.exception(f"Error deleting temporary file {temp_file}: {e}")
-                    console_print(
-                        f"[ERROR] Could not delete temporary file {temp_file.name}: {e}"
+                    print_error(
+                        f"Could not delete temporary file {temp_file.name}: {e}"
                     )
 
-    console_print(f"\n[INFO] Completed processing batches in directory: {root_folder}")
+    print_info(f"Completed processing batches in directory: {root_folder}")
     logger.info(f"Batch results processing complete for directory: {root_folder}")
 
 
 def diagnose_api_issues() -> None:
     """Print quick diagnostics for API key presence and SDK connectivity."""
-    console_print("\n=== API Issue Diagnostics ===")
+    print_info("\n=== API Issue Diagnostics ===")
 
     # Check API key
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        console_print("[ERROR] No OpenAI API key found in environment variables")
+        print_error("No OpenAI API key found in environment variables")
     else:
         key_summary = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 10 else "[hidden]"
-        console_print(f"[INFO] OpenAI API key present: {key_summary}")
+        print_info(f"OpenAI API key present: {key_summary}")
 
     # Check for common model issues using SDK
     try:
@@ -709,17 +700,17 @@ def diagnose_api_issues() -> None:
         models_page = client.models.list()
         models_data: Iterable[Any] = getattr(models_page, "data", None) or []
         total_models = len(list(models_data))
-        console_print(f"[INFO] API Connection successful: {total_models} models available")
+        print_info(f"API Connection successful: {total_models} models available")
     except Exception as e:
-        console_print(f"[ERROR] Failed to list models: {e}")
+        print_error(f"Failed to list models: {e}")
 
     # Check for batch issues
     try:
         client = OpenAI()
         _ = client.batches.list(limit=1)
-        console_print("[INFO] Batch API access successful")
+        print_info("Batch API access successful")
     except Exception as e:
-        console_print(f"[ERROR] Batch API access failed: {e}")
+        print_error(f"Batch API access failed: {e}")
 
 
 def run_batch_finalization(run_diagnostics: bool = True, custom_directory: Path | None = None) -> None:
@@ -733,9 +724,7 @@ def run_batch_finalization(run_diagnostics: bool = True, custom_directory: Path 
         # Use the specified directory instead of loading from config
         scan_dirs = [custom_directory]
         # Load minimal processing settings from config
-        config_loader = ConfigLoader()
-        config_loader.load_configs()
-        paths_config = config_loader.get_paths_config()
+        paths_config = get_config_service().get_paths_config()
         processing_settings = paths_config.get("general", {})
     else:
         # Load standard configuration
@@ -748,5 +737,5 @@ def run_batch_finalization(run_diagnostics: bool = True, custom_directory: Path 
 
     for directory in scan_dirs:
         process_all_batches(directory, processing_settings, client)
-    console_print("\n[INFO] Batch results processing complete across all directories.")
+    print_info("Batch results processing complete across all directories.")
     logger.info("Batch results processing complete across all directories.")

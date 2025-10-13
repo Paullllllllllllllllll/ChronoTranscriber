@@ -15,7 +15,8 @@ import aiofiles
 import aiohttp
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential, wait_random
 
-from modules.config.config_loader import ConfigLoader, PROJECT_ROOT
+from modules.config.config_loader import PROJECT_ROOT
+from modules.config.service import get_config_service
 from modules.llm.model_capabilities import Capabilities, detect_capabilities
 from modules.llm.structured_outputs import build_structured_text_format
 from modules.llm.prompt_utils import render_prompt_with_schema, inject_additional_context
@@ -63,7 +64,7 @@ def _load_retry_policy() -> Tuple[int, float, float, float]:
         (attempts, wait_min_seconds, wait_max_seconds, jitter_max_seconds)
     """
     try:
-        conc_cfg = ConfigLoader().get_concurrency_config() or {}
+        conc_cfg = get_config_service().get_concurrency_config() or {}
         trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get("transcription", {}) or {}
         retry_cfg = (trans_cfg.get("retry", {}) or {})
         attempts = int(retry_cfg.get("attempts", 5))
@@ -94,7 +95,7 @@ def _load_transcription_failure_retry_policy() -> Tuple[int, int, float, float, 
         (no_text_retries, not_possible_retries, wait_min, wait_max, jitter_max)
     """
     try:
-        conc_cfg = ConfigLoader().get_concurrency_config() or {}
+        conc_cfg = get_config_service().get_concurrency_config() or {}
         trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get("transcription", {}) or {}
         retry_cfg = (trans_cfg.get("retry", {}) or {})
         tf_cfg = (retry_cfg.get("transcription_failures", {}) or {})
@@ -239,9 +240,7 @@ class OpenAIExtractor:
 
         # Load model configuration dictionary
         if model_config is None:
-            cl = ConfigLoader()
-            cl.load_configs()
-            mc = cl.get_model_config()
+            mc = get_config_service().get_model_config()
         else:
             mc = model_config
 
@@ -300,7 +299,7 @@ class OpenAIExtractor:
         )
         # Align connector pool with configured transcription concurrency to avoid queue wait timeouts
         try:
-            conc_cfg = ConfigLoader().get_concurrency_config()
+            conc_cfg = get_config_service().get_concurrency_config()
             trans_cfg = conc_cfg.get("concurrency", {}).get("transcription", {})
             conn_limit = int(trans_cfg.get("concurrency_limit", 100))
             if conn_limit <= 0:
@@ -633,17 +632,16 @@ class OpenAITranscriber:
         system_prompt_path: Optional[Path] = None,
         additional_context_path: Optional[Path] = None,
     ) -> None:
-        cfg = ConfigLoader()
-        cfg.load_configs()
+        config_service = get_config_service()
 
-        mc = cfg.get_model_config()
+        mc = config_service.get_model_config()
         tm = mc.get("transcription_model", {})
         self.model = model or tm.get("name", "gpt-4o-2024-08-06")
 
         self.api_key = api_key
         # service_tier sourced from concurrency_config.yaml with fallback to model_config.yaml
         try:
-            cc = cfg.get_concurrency_config()
+            cc = config_service.get_concurrency_config()
             st = (
                 (cc.get("concurrency", {}) or {})
                 .get("transcription", {})
@@ -662,7 +660,7 @@ class OpenAITranscriber:
         )
 
         # Load image processing config for LLM image detail
-        ipc = cfg.get_image_processing_config()
+        ipc = config_service.get_image_processing_config()
         self.image_cfg = (
             ipc.get("api_image_processing", {}) if isinstance(ipc, dict) else {}
         )
@@ -677,7 +675,7 @@ class OpenAITranscriber:
             self.llm_detail = "auto"
 
         # Resolve prompt/schema with priority: explicit args -> config overrides -> defaults
-        pcfg = cfg.get_paths_config()
+        pcfg = config_service.get_paths_config()
         general = pcfg.get("general", {})
         override_prompt = general.get("transcription_prompt_path")
         override_schema = general.get("transcription_schema_path")

@@ -15,6 +15,7 @@ A Python-based tool designed for researchers and archivists to transcribe histor
 - [Utilities](#utilities)
 - [Architecture](#architecture)
 - [Troubleshooting](#troubleshooting)
+- [Development](#development)
 - [License](#license)
 
 ## Overview
@@ -844,6 +845,30 @@ Potential areas where contributions would be valuable:
 - Documentation: Tutorials, examples, and use case documentation
 - Performance optimization: Improved concurrent processing or caching
 - Error recovery: Enhanced error handling and recovery mechanisms
+
+## License
+
+## Development
+
+### Recent Refactor (2025-10-13)
+
+The codebase underwent a comprehensive refactor to improve organization, reduce duplication, and enhance maintainability. Key improvements include:
+
+- **Centralized configuration service**: Singleton `ConfigService` eliminates redundant config loading
+- **Modular utilities**: Extracted token guards, Tesseract utilities, JSONL operations, and progress tracking
+- **Better testing support**: New test fixtures and diagnostic utilities
+- **Improved documentation**: Comprehensive refactor summary and migration guide
+
+See [REFACTOR_SUMMARY.md](REFACTOR_SUMMARY.md) for detailed information about the refactor and migration guide for developers.
+
+### Contributing
+
+Contributions are welcome! Please ensure:
+
+- Code follows PEP 8 style guidelines
+- New features include appropriate tests
+- Documentation is updated for API changes
+- Commit messages are clear and descriptive
 
 ## License
 

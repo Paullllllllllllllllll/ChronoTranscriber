@@ -8,8 +8,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from modules.llm.model_capabilities import detect_capabilities
 from modules.core.utils import console_print
-from modules.config.config_loader import ConfigLoader
 from modules.config.config_loader import PROJECT_ROOT
+from modules.config.service import get_config_service
 from modules.llm.structured_outputs import build_structured_text_format
 from modules.llm.prompt_utils import render_prompt_with_schema, inject_additional_context
 from modules.config.constants import SUPPORTED_IMAGE_FORMATS
@@ -31,9 +31,7 @@ def get_batch_chunk_size() -> int:
         batch_chunk_size: 50
     """
     try:
-        cfg = ConfigLoader()
-        cfg.load_configs()
-        cc = cfg.get_concurrency_config() or {}
+        cc = get_config_service().get_concurrency_config() or {}
         val = (
             (cc.get("concurrency", {}) or {})
             .get("transcription", {})
@@ -135,9 +133,7 @@ def _build_responses_body_for_image(
 
     # Optional service tier (now sourced from concurrency_config.yaml)
     try:
-        cfg = ConfigLoader()
-        cfg.load_configs()
-        cc = cfg.get_concurrency_config()
+        cc = get_config_service().get_concurrency_config()
         st = (
             (cc.get("concurrency", {}) or {})
             .get("transcription", {})
@@ -217,9 +213,7 @@ def create_batch_request_line(
     # Resolve prompt/schema paths with PROJECT_ROOT defaults and optional overrides
     if system_prompt_path is None or schema_path is None:
         try:
-            cfg = ConfigLoader()
-            cfg.load_configs()
-            pcfg = cfg.get_paths_config()
+            pcfg = get_config_service().get_paths_config()
             general = pcfg.get("general", {})
         except Exception:
             general = {}
@@ -288,9 +282,7 @@ def create_batch_request_line(
 
     # Load image processing config for llm_detail
     try:
-        cfg = ConfigLoader()
-        cfg.load_configs()
-        image_cfg = cfg.get_image_processing_config().get("api_image_processing", {})
+        image_cfg = get_config_service().get_image_processing_config().get("api_image_processing", {})
         raw_detail = str(image_cfg.get("llm_detail", "high")).lower().strip()
         llm_detail: Optional[str]
         if raw_detail in ("low", "high"):

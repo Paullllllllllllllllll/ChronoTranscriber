@@ -519,16 +519,14 @@ class WorkflowUI:
             True if configured successfully, False if user wants to go back
         """
         from modules.core.auto_selector import AutoSelector
-        from modules.config.config_loader import ConfigLoader
+        from modules.config.service import get_config_service
 
         print_header("AUTO MODE CONFIGURATION", "Automatic file detection and method selection")
 
         selector = config.auto_selector
         if selector is None:
             if paths_config is None:
-                config_loader = ConfigLoader()
-                config_loader.load_configs()
-                paths_config = config_loader.get_paths_config()
+                paths_config = get_config_service().get_paths_config()
             selector = AutoSelector(paths_config or {})
             config.auto_selector = selector
         

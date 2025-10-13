@@ -17,7 +17,8 @@ import traceback
 from pathlib import Path
 from copy import deepcopy
 
-from modules.config.config_loader import ConfigLoader, PROJECT_ROOT
+from modules.config.config_loader import PROJECT_ROOT
+from modules.config.service import get_config_service
 from modules.infra.logger import setup_logger
 from modules.llm.openai_utils import open_transcriber
 from modules.ui import (
@@ -447,9 +448,8 @@ async def process_documents(
 async def transcribe_interactive() -> None:
     """Handle interactive mode transcription workflow."""
     # Load configurations
-    config_loader = ConfigLoader()
-    config_loader.load_configs()
-    paths_config = config_loader.get_paths_config()
+    config_service = get_config_service()
+    paths_config = config_service.get_paths_config()
     
     # Validate paths
     validate_paths(paths_config)
@@ -494,17 +494,17 @@ async def transcribe_interactive() -> None:
         await process_auto_mode(
             user_config,
             paths_config,
-            config_loader.get_model_config(),
-            config_loader.get_concurrency_config(),
-            config_loader.get_image_processing_config()
+            config_service.get_model_config(),
+            config_service.get_concurrency_config(),
+            config_service.get_image_processing_config()
         )
     else:
         await process_documents(
             user_config,
             paths_config,
-            config_loader.get_model_config(),
-            config_loader.get_concurrency_config(),
-            config_loader.get_image_processing_config()
+            config_service.get_model_config(),
+            config_service.get_concurrency_config(),
+            config_service.get_image_processing_config()
         )
     
     # Display completion summary
@@ -520,8 +520,7 @@ async def transcribe_cli(args, paths_config: dict) -> None:
         paths_config: Paths configuration dictionary
     """
     # Load additional configurations
-    config_loader = ConfigLoader()
-    config_loader.load_configs()
+    config_service = get_config_service()
     
     # Validate paths
     validate_paths(paths_config)
@@ -569,17 +568,17 @@ async def transcribe_cli(args, paths_config: dict) -> None:
         await process_auto_mode(
             user_config,
             paths_config,
-            config_loader.get_model_config(),
-            config_loader.get_concurrency_config(),
-            config_loader.get_image_processing_config()
+            config_service.get_model_config(),
+            config_service.get_concurrency_config(),
+            config_service.get_image_processing_config()
         )
     else:
         await process_documents(
             user_config,
             paths_config,
-            config_loader.get_model_config(),
-            config_loader.get_concurrency_config(),
-            config_loader.get_image_processing_config()
+            config_service.get_model_config(),
+            config_service.get_concurrency_config(),
+            config_service.get_image_processing_config()
         )
     
     print_success("Processing complete!")
@@ -589,7 +588,7 @@ async def main() -> None:
     """Main entry point supporting both interactive and CLI modes."""
     try:
         # Use centralized mode detection
-        config_loader, interactive_mode, args, paths_config = run_with_mode_detection(
+        config_service, interactive_mode, args, paths_config = run_with_mode_detection(
             interactive_handler=transcribe_interactive,
             cli_handler=transcribe_cli,
             parser_factory=create_transcriber_parser,

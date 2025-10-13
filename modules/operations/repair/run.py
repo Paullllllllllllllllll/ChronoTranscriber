@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from openai import OpenAI
 
 from modules.infra.logger import setup_logger
-from modules.config.config_loader import ConfigLoader
+from modules.config.service import get_config_service
 from modules.ui import (
     NavigationAction,
     PromptResult,
@@ -79,11 +79,10 @@ def _extract_image_name_from_failure_line(line: str) -> Optional[str]:
 
 
 def _load_configs() -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
-    cfg = ConfigLoader()
-    cfg.load_configs()
-    paths = cfg.get_paths_config()
-    model = cfg.get_model_config()
-    image_proc = cfg.get_image_processing_config()
+    config_service = get_config_service()
+    paths = config_service.get_paths_config()
+    model = config_service.get_model_config()
+    image_proc = config_service.get_image_processing_config()
     return paths, model, image_proc
 
 
@@ -228,9 +227,7 @@ async def _repair_sync_mode(
         "name", "gpt-4o-2024-08-06"
     )
 
-    cl = ConfigLoader()
-    cl.load_configs()
-    conc = cl.get_concurrency_config()
+    conc = get_config_service().get_concurrency_config()
     trans_cfg = conc.get("concurrency", {}).get("transcription", {})
     concurrency_limit = int(trans_cfg.get("concurrency_limit", 8))
     delay_between = float(trans_cfg.get("delay_between_tasks", 0))

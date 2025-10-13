@@ -36,7 +36,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from modules.config.config_loader import ConfigLoader
+from modules.config.service import get_config_service
 
 import logging
 logger = logging.getLogger(__name__)
@@ -329,8 +329,7 @@ def get_token_tracker() -> DailyTokenTracker:
             # Double-check locking
             if _tracker_instance is None:
                 # Load configuration from concurrency_config.yaml
-                cfg_loader = ConfigLoader()
-                conc_cfg = cfg_loader.get_concurrency_config()
+                conc_cfg = get_config_service().get_concurrency_config()
                 token_cfg = conc_cfg.get("daily_token_limit", {})
                 
                 enabled = bool(token_cfg.get("enabled", False))

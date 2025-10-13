@@ -1,6 +1,7 @@
 """Core utilities package.
 
-Provides CLI argument parsing, mode selection, workflow management, and utility functions.
+Provides CLI argument parsing, mode selection, workflow management, token guards,
+and utility functions.
 """
 
 # Avoid circular imports - use direct imports instead of re-exporting
@@ -18,4 +19,5 @@ __all__ = [
     "check_exit",
     "safe_input",
     "WorkflowManager",
+    "check_and_wait_for_token_limit",
 ]

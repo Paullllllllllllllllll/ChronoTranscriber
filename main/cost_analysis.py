@@ -23,7 +23,7 @@ import sys
 from argparse import ArgumentParser
 from pathlib import Path
 
-from modules.config.config_loader import ConfigLoader
+from modules.config.service import get_config_service
 from modules.infra.logger import setup_logger
 from modules.operations.cost_analysis import (
     find_jsonl_files,
@@ -54,9 +54,7 @@ def _run_interactive_mode() -> None:
     logger.info("Starting cost analysis (Interactive Mode)")
     
     # Load configuration
-    config_loader = ConfigLoader()
-    config_loader.load_configs()
-    paths_config = config_loader.get_paths_config()
+    paths_config = get_config_service().get_paths_config()
     # Use file_paths as schemas_paths (PDFs and Images)
     schemas_paths = paths_config.get("file_paths", {})
     

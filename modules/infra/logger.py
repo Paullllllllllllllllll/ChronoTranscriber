@@ -8,7 +8,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from modules.config.config_loader import ConfigLoader, PROJECT_ROOT
+from modules.config.config_loader import PROJECT_ROOT
+from modules.config.service import get_config_service
 
 
 def setup_logger(name: str) -> logging.Logger:
@@ -28,9 +29,8 @@ def setup_logger(name: str) -> logging.Logger:
     # Be resilient: try reading paths_config for logs_dir; fall back to
     # PROJECT_ROOT/logs if anything fails.
     try:
-        config_loader = ConfigLoader()
-        # Do not call load_configs() here; we only need paths_config for logs_dir
-        paths_config = config_loader.get_paths_config()
+        # Get paths_config for logs_dir
+        paths_config = get_config_service().get_paths_config()
         logs_dir_value = paths_config.get("general", {}).get("logs_dir")
         if not logs_dir_value:
             logs_dir = PROJECT_ROOT / "logs"

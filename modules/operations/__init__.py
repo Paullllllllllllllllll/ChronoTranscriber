@@ -10,4 +10,16 @@ __all__ = [
     "process_all_batches",
     "run_batch_finalization",
     "repair_main",
+    # JSONL utilities
+    "read_jsonl_records",
+    "write_jsonl_record",
+    "extract_image_metadata",
+    "extract_batch_ids",
+    "is_batch_jsonl",
+    "backup_file",
+    "find_companion_files",
+    "ImageMetadata",
+    # OpenAI client utilities
+    "get_openai_client",
+    "validate_api_key",
 ]

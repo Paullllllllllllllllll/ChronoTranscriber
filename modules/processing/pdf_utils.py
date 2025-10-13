@@ -9,7 +9,7 @@ import fitz
 import asyncio
 from PIL import Image
 
-from modules.config.config_loader import ConfigLoader
+from modules.config.service import get_config_service
 from modules.processing.image_utils import ImageProcessor
 from modules.core.path_utils import create_safe_directory_name
 
@@ -71,9 +71,7 @@ class PDFProcessor:
         output_dir.mkdir(parents=True, exist_ok=True)
         # Load JPEG quality from config (fallback to 95)
         try:
-            cfg = ConfigLoader()
-            cfg.load_configs()
-            img_cfg = cfg.get_image_processing_config().get('api_image_processing', {})
+            img_cfg = get_config_service().get_image_processing_config().get('api_image_processing', {})
             jpeg_quality = int(img_cfg.get('jpeg_quality', 95))
         except Exception:
             jpeg_quality = 95
@@ -141,9 +139,7 @@ class PDFProcessor:
 
                     # Apply processing directly to the image
                     # Load processing config
-                    config_loader = ConfigLoader()
-                    config_loader.load_configs()
-                    image_cfg = config_loader.get_image_processing_config().get('api_image_processing', {})
+                    image_cfg = get_config_service().get_image_processing_config().get('api_image_processing', {})
 
                     # Handle transparency (if needed)
                     if image_cfg.get('handle_transparency', True):
@@ -198,15 +194,14 @@ class PDFProcessor:
                 self.open_pdf()
 
             # Load Tesseract preprocessing config
-            config_loader = ConfigLoader()
-            config_loader.load_configs()
-            img_cfg = config_loader.get_image_processing_config()
+            config_service = get_config_service()
+            img_cfg = config_service.get_image_processing_config()
             tip_cfg = img_cfg.get('tesseract_image_processing', {})
             preproc_cfg = tip_cfg.get('preprocessing', {})
             output_format = str(preproc_cfg.get('output_format', 'png')).lower()
             embed_dpi = bool(preproc_cfg.get('embed_dpi_metadata', True))
             # Concurrency settings
-            conc_cfg = config_loader.get_concurrency_config()
+            conc_cfg = config_service.get_concurrency_config()
             img_conc = (conc_cfg.get('concurrency', {})
                                  .get('image_processing', {}))
             concurrency_limit = int(img_conc.get('concurrency_limit', 4))

@@ -7,8 +7,6 @@ import json
 import math
 import shutil
 import time
-from PIL import Image
-import pytesseract
 import aiofiles
 from pathlib import Path
 from typing import Any, List, Optional, Dict, Tuple
@@ -18,79 +16,19 @@ from modules.ui.core import UserConfiguration
 from modules.processing.pdf_utils import PDFProcessor, native_extract_pdf_text
 from modules.processing.epub_utils import EPUBProcessor, EPUBTextExtraction
 from modules.processing.image_utils import ImageProcessor
+from modules.processing.tesseract_utils import (
+    configure_tesseract_executable,
+    ensure_tesseract_available,
+    perform_ocr,
+)
 from modules.llm.batch.batching import get_batch_chunk_size
 from modules.llm.openai_utils import transcribe_image_with_openai
 from modules.infra.concurrency import run_concurrent_transcription_tasks
 from modules.processing.text_processing import extract_transcribed_text, format_page_line
 from modules.core.utils import console_print
+from modules.core.token_guard import check_and_wait_for_token_limit
 
 logger = setup_logger(__name__)
-
-
-async def _check_and_wait_for_token_limit(concurrency_config: Dict[str, Any]) -> bool:
-    """
-    Check if daily token limit is reached and wait until next day if needed.
-    
-    Args:
-        concurrency_config: Concurrency configuration dictionary
-    
-    Returns:
-        True if processing can continue, False if user cancelled wait.
-    """
-    token_cfg = concurrency_config.get("daily_token_limit", {})
-    enabled = bool(token_cfg.get("enabled", False))
-    
-    if not enabled:
-        return True
-    
-    from modules.token_tracker import get_token_tracker
-    token_tracker = get_token_tracker()
-    
-    if not token_tracker.is_limit_reached():
-        return True
-    
-    # Token limit reached - need to wait until next day
-    stats = token_tracker.get_stats()
-    reset_time = token_tracker.get_reset_time()
-    seconds_until_reset = token_tracker.get_seconds_until_reset()
-    
-    logger.warning(
-        f"Daily token limit reached: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} tokens used"
-    )
-    console_print(
-        f"\n[WARNING] Daily token limit reached: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} tokens used"
-    )
-    console_print(
-        f"[INFO] Waiting until {reset_time.strftime('%Y-%m-%d %H:%M:%S')} "
-        f"({seconds_until_reset // 3600}h {(seconds_until_reset % 3600) // 60}m) "
-        "for token limit reset..."
-    )
-    console_print("[INFO] Press Ctrl+C to cancel and exit.")
-    
-    try:
-        # Sleep in smaller intervals to allow for interruption
-        sleep_interval = 1  # Check every second for responsiveness
-        elapsed = 0
-        
-        while elapsed < seconds_until_reset:
-            interval = min(sleep_interval, max(0, seconds_until_reset - elapsed))
-            await asyncio.sleep(interval)
-            elapsed += interval
-            
-            # Re-check if it's a new day
-            if not token_tracker.is_limit_reached():
-                logger.info("Token limit has been reset. Resuming processing.")
-                console_print("[SUCCESS] Token limit has been reset. Resuming processing.")
-                return True
-        
-        logger.info("Token limit has been reset. Resuming processing.")
-        console_print("[SUCCESS] Token limit has been reset. Resuming processing.")
-        return True
-        
-    except KeyboardInterrupt:
-        logger.info("Wait cancelled by user (KeyboardInterrupt).")
-        console_print("\n[INFO] Wait cancelled by user.")
-        return False
 
 
 class WorkflowManager:
@@ -113,20 +51,12 @@ class WorkflowManager:
         self.processing_settings = paths_config.get("general", {})
 
         # Configure Tesseract executable if provided
-        self.ocr_config = (self.image_processing_config
-                           .get('tesseract_image_processing', {})
-                           .get('ocr', {}))
-        tess_cmd = (self.ocr_config.get('tesseract_cmd') or '').strip()
-        if tess_cmd:
-            try:
-                cmd_path = Path(tess_cmd)
-                if cmd_path.exists():
-                    pytesseract.pytesseract.tesseract_cmd = str(cmd_path)
-                    logger.info(f"Using Tesseract executable: {cmd_path}")
-                else:
-                    logger.warning(f"Configured tesseract_cmd does not exist: {cmd_path}")
-            except Exception as e:
-                logger.warning(f"Could not set tesseract_cmd '{tess_cmd}': {e}")
+        configure_tesseract_executable(image_processing_config)
+        self.ocr_config = (
+            image_processing_config
+            .get('tesseract_image_processing', {})
+            .get('ocr', {})
+        )
 
         # Set up output directories
         pdf_output_dir = Path(
@@ -162,35 +92,25 @@ class WorkflowManager:
         self.epub_output_dir.mkdir(parents=True, exist_ok=True)
 
     def _ensure_tesseract_available(self) -> bool:
+        """Verify that Tesseract is available.
+        
+        Returns:
+            True if available, False otherwise.
         """
-        Verify that Tesseract is available. Returns True if available, False otherwise.
-        """
-        try:
-            _ = pytesseract.get_tesseract_version()
-            return True
-        except getattr(pytesseract, 'TesseractNotFoundError', Exception):
-            console_print("[ERROR] Tesseract is not installed or not in PATH.\n"
-                          "- Install: https://github.com/tesseract-ocr/tesseract (Windows: official installer)\n"
-                          "- Or set 'tesseract_image_processing.ocr.tesseract_cmd' in config/image_processing_config.yaml to the full path, e.g.:\n"
-                          "  C:\\\\Program Files\\\\Tesseract-OCR\\\\tesseract.exe")
-            return False
-        except Exception as e:
-            logger.error(f"Unexpected error checking Tesseract availability: {e}")
-            return False
+        return ensure_tesseract_available()
 
     async def tesseract_ocr_image(self, img_path: Path,
                                   tesseract_config: str) -> Optional[str]:
+        """Perform OCR on an image using Tesseract.
+        
+        Args:
+            img_path: Path to image file.
+            tesseract_config: Tesseract configuration string.
+            
+        Returns:
+            Extracted text, or placeholder if no text found, or None on error.
         """
-        Perform OCR on an image using Tesseract.
-        Returns the extracted text, or a placeholder if no text is found.
-        """
-        try:
-            with Image.open(img_path) as img:
-                text = pytesseract.image_to_string(img, config=tesseract_config)
-                return text.strip() if text.strip() else "[No transcribable text]"
-        except Exception as e:
-            logger.error(f"Tesseract OCR error on {img_path.name}: {e}")
-            return None
+        return perform_ocr(img_path, tesseract_config)
 
     async def process_selected_items(self,
                                      transcriber: Optional[Any] = None) -> None:
@@ -221,7 +141,7 @@ class WorkflowManager:
         for idx, item in enumerate(self.user_config.selected_items, 1):
             # Check token limit before starting each new item (only for GPT method)
             if self.user_config.transcription_method == "gpt":
-                if not await _check_and_wait_for_token_limit(self.concurrency_config):
+                if not await check_and_wait_for_token_limit(self.concurrency_config):
                     # User cancelled wait - stop processing
                     logger.info(f"Processing stopped by user. Processed {processed_count}/{total_items} items.")
                     console_print(f"\n[INFO] Processing stopped. Completed {processed_count}/{total_items} items.")

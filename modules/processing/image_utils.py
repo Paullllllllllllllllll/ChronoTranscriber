@@ -11,7 +11,7 @@ from deskew import determine_skew
 from skimage.filters import threshold_sauvola
 from modules.core.path_utils import create_safe_directory_name
 
-from modules.config.config_loader import ConfigLoader
+from modules.config.service import get_config_service
 from modules.infra.logger import setup_logger
 from modules.infra.multiprocessing_utils import run_multiprocessing_tasks
 
@@ -28,10 +28,8 @@ class ImageProcessor:
             raise ValueError(f"Unsupported image format: {image_path.suffix}")
         self.image_path = image_path
 
-        config_loader = ConfigLoader()
-        config_loader.load_configs()
         # Full config dict (contains 'image_processing' and 'ocr' sections)
-        self.image_config = config_loader.get_image_processing_config()
+        self.image_config = get_config_service().get_image_processing_config()
         # OpenAI API preprocessing settings
         self.img_cfg = self.image_config.get('api_image_processing', {})
 
@@ -184,9 +182,7 @@ class ImageProcessor:
             List[Optional[str]]: Processing results for each image.
         """
         # Load concurrency settings
-        cfg_loader = ConfigLoader()
-        cfg_loader.load_configs()
-        conc = cfg_loader.get_concurrency_config()
+        conc = get_config_service().get_concurrency_config()
         img_conc = (conc.get('concurrency', {})
                          .get('image_processing', {}))
         processes = int(img_conc.get('concurrency_limit', 12))
@@ -410,15 +406,14 @@ class ImageProcessor:
         """
         Process images for Tesseract (lossless, full resolution) and save as PNG/TIFF.
         """
-        config_loader = ConfigLoader()
-        config_loader.load_configs()
-        tip_cfg = config_loader.get_image_processing_config().get('tesseract_image_processing', {})
+        config_service = get_config_service()
+        tip_cfg = config_service.get_image_processing_config().get('tesseract_image_processing', {})
         preproc_cfg = tip_cfg.get('preprocessing', {})
         output_format = str(preproc_cfg.get('output_format', 'png')).lower()
         target_dpi = int(tip_cfg.get('target_dpi', 300))
         embed_dpi = bool(preproc_cfg.get('embed_dpi_metadata', True))
         # Concurrency settings
-        conc = config_loader.get_concurrency_config()
+        conc = config_service.get_concurrency_config()
         img_conc = (conc.get('concurrency', {})
                          .get('image_processing', {}))
         processes = int(img_conc.get('concurrency_limit', 4))

@@ -10,7 +10,6 @@ A Python-based tool designed for researchers and archivists to transcribe histor
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Usage](#usage)
-  - [Auto Mode](#auto-mode)
 - [Batch Processing](#batch-processing)
 - [Utilities](#utilities)
 - [Architecture](#architecture)
@@ -26,7 +25,9 @@ Meant to be used in conjunction with [ChronoMiner](https://github.com/Paulllllll
 ### Execution Modes
 
 ChronoTranscriber supports two execution modes to accommodate different workflows and user preferences:
-{{ ... }}
+- **Interactive Workflow:** Launch `python main/unified_transcriber.py` with no arguments or keep `general.interactive_mode: true` in `config/paths_config.yaml` to step through a guided UI powered by `modules/ui/workflows.py`. The prompts surface available models, schemas, and preprocessing options while letting you review every choice before execution. Navigation features allow you to go back to previous steps (press 'b') or quit at any time (press 'q').
+- **CLI / Automation Mode:** Provide command-line arguments (see `python main/unified_transcriber.py --help`) or set `general.interactive_mode: false` to run unattended jobs. Argument parsing is handled by `modules/core/cli_args.py`, giving you scriptable control for cron jobs, CI pipelines, and large batch workflows.
+
 ### Document Processing
 
 - PDF Transcription: Process PDF documents with automatic text extraction fallback or page-to-image rendering
@@ -41,7 +42,8 @@ ChronoTranscriber supports two execution modes to accommodate different workflow
 
 ### OCR Backends
 
-{{ ... }}
+ChronoTranscriber exposes two primary OCR backends that can be selected from the interactive prompts, via CLI flags, or by setting defaults in `config/model_config.yaml`. You can mix and match backends per document type, and auto mode will dynamically choose the best fit based on the source file and your configuration.
+
 #### Tesseract (Local)
 - Fully offline processing with no external API calls
 - Configurable engine modes and page segmentation

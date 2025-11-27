@@ -1,3 +1,19 @@
+"""OpenAI Batch API processing utilities.
+
+This module provides batch processing capabilities specifically for OpenAI's Batch API.
+Unlike synchronous transcription (which supports multiple providers via LangChain),
+batch processing is currently OpenAI-specific due to the proprietary nature of the
+Batch API endpoint (/v1/responses).
+
+Note:
+    For synchronous transcription with multi-provider support, use:
+    - ``modules.llm.transcriber.LangChainTranscriber``
+    - ``modules.llm.providers`` for direct provider access
+    
+    Batch processing will remain OpenAI-specific until other providers offer
+    equivalent batch processing APIs.
+"""
+
 from __future__ import annotations
 
 import base64

@@ -22,7 +22,7 @@ from modules.processing.tesseract_utils import (
     perform_ocr,
 )
 from modules.llm.batch.batching import get_batch_chunk_size
-from modules.llm.openai_utils import transcribe_image_with_openai
+from modules.llm import transcribe_image_with_llm as transcribe_image_with_openai
 from modules.infra.concurrency import run_concurrent_transcription_tasks
 from modules.processing.text_processing import extract_transcribed_text, format_page_line
 from modules.core.utils import console_print

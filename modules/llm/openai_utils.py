@@ -1,3 +1,23 @@
+"""OpenAI API utilities using direct aiohttp requests.
+
+.. deprecated::
+    This module is deprecated. Use the LangChain-based providers instead:
+    
+    - ``modules.llm.transcriber.LangChainTranscriber`` for synchronous transcription
+    - ``modules.llm.providers`` for direct provider access
+    
+    This module is maintained for:
+    - Batch API processing (OpenAI-specific feature)
+    - Backward compatibility during migration
+    
+    For new code, use::
+    
+        from modules.llm import LangChainTranscriber, open_transcriber
+        
+        async with open_transcriber() as transcriber:
+            result = await transcriber.transcribe_image(image_path)
+"""
+
 from __future__ import annotations
 
 import base64
@@ -5,6 +25,7 @@ import json
 import logging
 import asyncio
 import random
+import warnings
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from contextlib import asynccontextmanager
@@ -23,6 +44,14 @@ from modules.llm.prompt_utils import render_prompt_with_schema, inject_additiona
 from modules.config.constants import SUPPORTED_IMAGE_FORMATS
 
 logger = logging.getLogger(__name__)
+
+# Emit deprecation warning when module is imported directly
+warnings.warn(
+    "modules.llm.openai_utils is deprecated. "
+    "Use modules.llm.transcriber.LangChainTranscriber instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 # ---------- Exceptions (retry control) ----------

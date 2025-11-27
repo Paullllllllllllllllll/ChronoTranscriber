@@ -20,7 +20,7 @@ from copy import deepcopy
 from modules.config.config_loader import PROJECT_ROOT
 from modules.config.service import get_config_service
 from modules.infra.logger import setup_logger
-from modules.llm.openai_utils import open_transcriber
+from modules.llm import open_transcriber
 from modules.ui import (
     UserConfiguration,
     WorkflowUI,

@@ -1,26 +1,29 @@
 # ChronoTranscriber
 
-A Python-based tool designed for researchers and archivists to transcribe historical documents from PDFs, EPUB ebooks, or image folders using either local OCR (Tesseract) or modern vision-language models via OpenAI's API. ChronoTranscriber provides structured JSON outputs, scalable batch processing, and robust error recovery for large-scale document digitization projects.
+A Python-based tool for researchers and archivists to transcribe historical documents from PDFs, EPUB ebooks, or image folders. ChronoTranscriber supports multiple AI providers (OpenAI, Anthropic, Google, OpenRouter) via LangChain, local OCR with Tesseract, and provides structured JSON outputs with scalable batch processing for large-scale document digitization projects.
 
 ## Table of Contents
 
 - [Overview](#overview)
-- [Features](#features)
+- [Key Features](#key-features)
+- [Supported Providers and Models](#supported-providers-and-models)
 - [System Requirements](#system-requirements)
 - [Installation](#installation)
+- [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [Usage](#usage)
 - [Batch Processing](#batch-processing)
 - [Utilities](#utilities)
 - [Architecture](#architecture)
 - [Troubleshooting](#troubleshooting)
-- [Development](#development)
+- [Contributing](#contributing)
 - [License](#license)
 
 ## Overview
 
-ChronoTranscriber is designed for researchers and archivists who need to (cheaply and comfortably) transcribe historical documents at scale. The tool supports multiple processing backends, provides fine-grained control over image preprocessing, and ensures reproducible results through structured JSON outputs. Also works well (or even better) with non-historical documents (academic papers, books, ebooks, etc.).
-Meant to be used in conjunction with [ChronoMiner](https://github.com/Paullllllllllllllllll/ChronoMiner) and [ChronoDownloader](https://github.com/Paullllllllllllllllll/ChronoDownloader) for a full historical document retrieval, transcription and data extraction pipeline.
+ChronoTranscriber enables researchers and archivists to transcribe historical documents at scale with minimal cost and effort. The tool supports multiple AI providers through a unified LangChain-based architecture, local OCR via Tesseract, and provides fine-grained control over image preprocessing with reproducible results through structured JSON outputs.
+
+The application works equally well with modern documents including academic papers, books, and ebooks. It is designed to integrate with [ChronoMiner](https://github.com/Paullllllllllllllllll/ChronoMiner) and [ChronoDownloader](https://github.com/Paullllllllllllllllll/ChronoDownloader) for a complete historical document retrieval, transcription, and data extraction pipeline.
 
 ### Execution Modes
 
@@ -40,26 +43,74 @@ ChronoTranscriber supports two execution modes to accommodate different workflow
 - Multi-Page Support: Preserve page ordering and handle documents with hundreds or thousands of pages
 - Preprocessing Pipeline: Configurable image enhancement including grayscale conversion, transparency handling, deskewing, denoising, and binarization
 
-### OCR Backends
+## Key Features
 
-ChronoTranscriber exposes two primary OCR backends that can be selected from the interactive prompts, via CLI flags, or by setting defaults in `config/model_config.yaml`. You can mix and match backends per document type, and auto mode will dynamically choose the best fit based on the source file and your configuration.
+### Multi-Provider LLM Support
 
-#### Tesseract (Local)
-- Fully offline processing with no external API calls
-- Configurable engine modes and page segmentation
-- Advanced preprocessing pipeline for improved accuracy
+ChronoTranscriber uses LangChain to provide a unified interface across multiple AI providers. Select your preferred provider and model through configuration or at runtime.
 
-#### OpenAI Vision-Language Models
-- Supported Models: GPT-4o, GPT-4.1, GPT-5, GPT-5-mini, o1, o3, and o-series models
-- Processing Modes: 
-  - Synchronous: Real-time streaming responses
-  - Asynchronous: Batch processing for large jobs
-- Model-Specific Features:
-  - GPT-5 series: Reasoning effort and text verbosity controls
-  - o-series (o1, o3): Reasoning capabilities with automatic feature detection
-  - Classic models: Temperature, top_p, frequency_penalty, and presence_penalty controls
-- Automatic Capability Detection: The system validates model capabilities and adjusts parameters accordingly
-- Minimal User Prompts: Requests send only the text "The image:" alongside the vision payload so that all instructions remain in the system prompt
+### Tesseract Local OCR
+
+For fully offline processing, Tesseract OCR provides configurable engine modes, page segmentation options, and an advanced preprocessing pipeline for improved accuracy without external API calls.
+
+### Intelligent Capability Management
+
+The system automatically detects model capabilities and adjusts parameters accordingly. For reasoning models (GPT-5, o-series, Claude 4.5), unsupported parameters like temperature are automatically filtered. LangChain handles retry logic with exponential backoff, token usage tracking, and structured output parsing.
+
+## Supported Providers and Models
+
+ChronoTranscriber supports four AI providers through LangChain integration. Set the provider in `config/model_config.yaml` or let the system auto-detect from the model name.
+
+### OpenAI
+
+| Model Family | Models | Key Features |
+|--------------|--------|--------------|
+| GPT-5.1 | gpt-5.1, gpt-5.1-mini, gpt-5.1-nano | Adaptive thinking, 256K context |
+| GPT-5 | gpt-5, gpt-5-mini, gpt-5-nano | Reasoning, 256K context |
+| o-series | o4-mini, o3, o3-pro, o3-mini, o1, o1-pro, o1-mini | Advanced reasoning |
+| GPT-4.1 | gpt-4.1, gpt-4.1-mini, gpt-4.1-nano | 1M context, sampler controls |
+| GPT-4o | gpt-4o, gpt-4o-mini | Multimodal, fast |
+
+Environment variable: `OPENAI_API_KEY`
+
+### Anthropic
+
+| Model Family | Models | Key Features |
+|--------------|--------|--------------|
+| Claude 4.5 | claude-sonnet-4-5, claude-opus-4-5, claude-haiku-4-5 | Extended thinking |
+| Claude 4.1 | claude-opus-4-1 | Reasoning support |
+| Claude 4 | claude-sonnet-4, claude-opus-4 | Vision, structured output |
+| Claude 3.5 | claude-3-5-sonnet, claude-3-5-haiku | 200K context |
+
+Environment variable: `ANTHROPIC_API_KEY`
+
+### Google
+
+| Model Family | Models | Key Features |
+|--------------|--------|--------------|
+| Gemini 3 | gemini-3-pro | State-of-the-art reasoning, 2M context |
+| Gemini 2.5 | gemini-2.5-pro, gemini-2.5-flash | Adaptive thinking |
+| Gemini 2.0 | gemini-2.0-flash | Fast, 1M context |
+| Gemini 1.5 | gemini-1.5-pro, gemini-1.5-flash | 2M context |
+
+Environment variable: `GOOGLE_API_KEY`
+
+### OpenRouter
+
+Access 200+ models from multiple providers through a unified API. Model names use provider prefix format (e.g., `openai/gpt-5.1`, `anthropic/claude-sonnet-4-5`, `meta/llama-3.2-90b-vision`).
+
+Environment variable: `OPENROUTER_API_KEY`
+
+### Processing Modes
+
+- **Synchronous**: Real-time responses for interactive workflows
+- **Batch Processing**: Asynchronous processing via OpenAI Batch API for large jobs (OpenAI only)
+
+### Model-Specific Features
+
+- **Reasoning Models** (GPT-5, o-series, Claude 4.5, Gemini 3): Support reasoning effort controls; temperature and sampling parameters are automatically disabled
+- **Classic Models** (GPT-4o, GPT-4.1, Claude 3.5, Gemini 2.0): Support temperature, top_p, frequency_penalty, and presence_penalty controls
+- **Automatic Capability Detection**: Parameters incompatible with selected models are filtered before API calls
 
 ### Structured Outputs
 
@@ -87,31 +138,39 @@ ChronoTranscriber exposes two primary OCR backends that can be selected from the
 
 ### Software Dependencies
 
-- Python: 3.8 or higher
+- Python: 3.10 or higher (3.13 recommended)
 - Tesseract OCR (optional): Required only if using local OCR backend
-  - Windows: Install from official installer and configure path in `image_processing_config.yaml`
+  - Windows: Install from [UB Mannheim](https://github.com/UB-Mannheim/tesseract/wiki) and configure path in `image_processing_config.yaml`
   - Linux: `sudo apt-get install tesseract-ocr`
   - macOS: `brew install tesseract`
 
 ### API Requirements
 
-- OpenAI API Key: Required for using vision-language models and batch processing
-  - Set as environment variable: `OPENAI_API_KEY=your_key_here`
-  - Ensure your account has access to the Responses API and Batch API
+At least one API key is required for AI-powered transcription. Set environment variables for your preferred provider(s):
+
+| Provider | Environment Variable |
+|----------|---------------------|
+| OpenAI | `OPENAI_API_KEY` |
+| Anthropic | `ANTHROPIC_API_KEY` |
+| Google | `GOOGLE_API_KEY` |
+| OpenRouter | `OPENROUTER_API_KEY` |
+
+For OpenAI batch processing, ensure your account has access to the Batch API.
 
 ### Python Packages
 
 All Python dependencies are listed in `requirements.txt`. Key packages include:
 
-- `openai>=1.57.4`: OpenAI SDK for API interactions
-- `PyMuPDF>=1.25.1`: PDF processing
-- `pillow>=11.0.0`: Image manipulation
-- `pytesseract>=0.3.13`: Tesseract OCR wrapper
-- `opencv-python>=4.10.0`: Advanced image processing
-- `scikit-image>=0.25.0`: Scientific image processing
-- `pyyaml>=6.0.2`: Configuration file parsing
-- `aiohttp>=3.11.10`: Asynchronous HTTP requests
-- `tqdm>=4.67.1`: Progress bars
+- `langchain`, `langchain-openai`, `langchain-anthropic`, `langchain-google-genai`: Multi-provider LLM integration
+- `openai`: OpenAI SDK for batch processing
+- `PyMuPDF`: PDF processing
+- `pillow`: Image manipulation
+- `pytesseract`: Tesseract OCR wrapper
+- `opencv-python`: Advanced image processing
+- `scikit-image`: Scientific image processing
+- `pydantic`: Data validation and structured outputs
+- `pyyaml`: Configuration file parsing
+- `aiohttp`, `aiofiles`: Asynchronous I/O
 
 ## Installation
 
@@ -169,28 +228,88 @@ For persistent configuration, add the environment variable to your system settin
 
 Edit `config/paths_config.yaml` to specify your input and output directories for PDFs, EPUBs, and images.
 
+## Quick Start
+
+### Basic Usage
+
+1. Set your API key for your preferred provider:
+
+```bash
+# Choose one:
+export OPENAI_API_KEY="your_key"      # OpenAI
+export ANTHROPIC_API_KEY="your_key"   # Anthropic
+export GOOGLE_API_KEY="your_key"      # Google
+export OPENROUTER_API_KEY="your_key"  # OpenRouter
+```
+
+2. Configure your model in `config/model_config.yaml`:
+
+```yaml
+transcription_model:
+  provider: openai          # or: anthropic, google, openrouter
+  name: gpt-5-mini          # model name
+```
+
+3. Run the transcriber:
+
+```bash
+# Interactive mode (guided prompts)
+python main/unified_transcriber.py
+
+# CLI mode (automation)
+python main/unified_transcriber.py --type pdf --input document.pdf
+```
+
+### Example Workflows
+
+**Transcribe a PDF with OpenAI:**
+```bash
+python main/unified_transcriber.py --type pdf --method gpt --input ./documents/historical.pdf
+```
+
+**Process images with Tesseract (offline):**
+```bash
+python main/unified_transcriber.py --type images --method tesseract --input ./scans/
+```
+
+**Submit a large job for batch processing:**
+```bash
+python main/unified_transcriber.py --type pdf --method gpt --batch --input ./archive/
+```
+
+**Check batch job status:**
+```bash
+python main/check_batches.py
+```
+
 ## Configuration
 
 ChronoTranscriber uses four YAML configuration files located in the `config/` directory. Each file controls a specific aspect of the pipeline.
 
 ### 1. Model Configuration (`model_config.yaml`)
 
-Controls which model to use and its behavioral parameters.
+Controls which provider and model to use with behavioral parameters.
 
 ```yaml
 transcription_model:
-  name: gpt-5-mini  # Options: gpt-4o, gpt-4.1, gpt-5, gpt-5-mini, o1, o3
+  # Provider selection: openai, anthropic, google, openrouter
+  # Auto-detected from model name if not specified
+  provider: openai
+  
+  # Model name (see Supported Providers section for options)
+  name: gpt-5-mini
   max_output_tokens: 128000
   
-  # GPT-5 and o-series only
+  # Reasoning models (GPT-5, o-series, Claude 4.5, Gemini 3)
   reasoning:
     effort: medium  # Options: low, medium, high
   
-  # GPT-5 only
+  # GPT-5 series only
   text:
     verbosity: medium  # Options: low, medium, high
   
-  # Classic models (GPT-4o, GPT-4.1) only
+  # Classic models only (GPT-4o, GPT-4.1, Claude 3.5, Gemini 2.0)
+  # These are automatically disabled for reasoning models
   temperature: 0.01
   top_p: 1.0
   frequency_penalty: 0.01
@@ -199,14 +318,15 @@ transcription_model:
 
 Key Parameters:
 
-- `name`: Model identifier
+- `provider`: AI provider (openai, anthropic, google, openrouter); auto-detected if not specified
+- `name`: Model identifier (provider-specific)
 - `max_output_tokens`: Maximum tokens the model can generate per request
-- `reasoning.effort`: Controls reasoning depth for GPT-5 and o-series models (low, medium, high)
+- `reasoning.effort`: Controls reasoning depth for reasoning models (low, medium, high)
 - `text.verbosity`: Controls response verbosity for GPT-5 models (low, medium, high)
-- `temperature`: Controls randomness (0.0-2.0)
-- `top_p`: Nucleus sampling probability (0.0-1.0)
-- `frequency_penalty`: Penalizes token repetition (-2.0 to 2.0)
-- `presence_penalty`: Penalizes repeated topics (-2.0 to 2.0)
+- `temperature`: Controls randomness (automatically disabled for reasoning models)
+- `top_p`: Nucleus sampling probability (automatically disabled for reasoning models)
+- `frequency_penalty`: Penalizes token repetition (automatically disabled for reasoning models)
+- `presence_penalty`: Penalizes repeated topics (automatically disabled for reasoning models)
 
 ### 2. Paths Configuration (`paths_config.yaml`)
 
@@ -651,17 +771,21 @@ ChronoTranscriber/
 │   ├── model_config.yaml
 │   └── paths_config.yaml
 ├── main/                      # CLI entry points
-│   ├── cancel_batches.py
-│   ├── check_batches.py
-│   ├── repair_transcriptions.py
-│   └── unified_transcriber.py
+│   ├── cancel_batches.py      # Cancel pending batch jobs
+│   ├── check_batches.py       # Monitor and download batch results
+│   ├── cost_analysis.py       # Token usage and cost reporting
+│   ├── repair_transcriptions.py # Repair failed transcriptions
+│   └── unified_transcriber.py # Main transcription workflow
 ├── modules/                   # Core application modules
-│   ├── config/               # Configuration loading
-│   ├── core/                 # Core utilities and workflow
-│   ├── infra/                # Infrastructure (logging, concurrency)
+│   ├── config/               # Configuration loading and service
+│   ├── core/                 # Core utilities, workflow, CLI args
+│   ├── infra/                # Logging, concurrency, async tasks
 │   ├── io/                   # File I/O and path utilities
-│   ├── llm/                  # LLM interaction and batch processing
-│   ├── operations/           # High-level operations (batch check, repair)
+│   ├── llm/                  # LLM integration
+│   │   ├── providers/        # LangChain provider implementations
+│   │   ├── batch/            # OpenAI Batch API processing
+│   │   └── ...               # Transcriber, schemas, capabilities
+│   ├── operations/           # High-level operations
 │   ├── processing/           # Image and PDF processing
 │   └── ui/                   # User interface and prompts
 ├── schemas/                   # JSON schemas for structured outputs
@@ -669,6 +793,8 @@ ChronoTranscriber/
 │   └── plain_text_transcription_schema.json
 ├── system_prompt/             # System prompt templates
 │   └── system_prompt.txt
+├── additional_context/        # Optional domain context
+│   └── additional_context.txt
 ├── LICENSE
 ├── README.md
 └── requirements.txt
@@ -678,14 +804,40 @@ ChronoTranscriber/
 
 ChronoTranscriber follows a modular architecture with clear separation of concerns:
 
-- `modules/config/`: Configuration loading and validation
-- `modules/core/`: Core utilities including console printing, workflow management, path handling, and shared functions
+- `modules/config/`: Configuration loading, validation, and centralized ConfigService
+- `modules/core/`: Core utilities including console printing, workflow management, path handling, and CLI argument parsing
 - `modules/infra/`: Infrastructure layer providing logging, concurrency control, and async task management
 - `modules/io/`: File I/O operations including path validation, directory scanning, and output management
-- `modules/llm/`: LLM interaction layer including OpenAI SDK utilities, batch processing, model validation, and structured output parsing
-- `modules/operations/`: High-level operation orchestration (batch checking, repair workflows)
+- `modules/llm/`: LLM integration layer with the following submodules:
+  - `providers/`: LangChain-based provider implementations (OpenAI, Anthropic, Google, OpenRouter)
+  - `batch/`: OpenAI Batch API processing
+  - `transcriber.py`: High-level transcription interface
+  - `model_capabilities.py`: Model capability detection and parameter filtering
+  - `schemas.py`: Pydantic models for structured outputs
+- `modules/operations/`: High-level operation orchestration (batch checking, repair workflows, cost analysis)
 - `modules/processing/`: Document processing including PDF rendering, image preprocessing, and text formatting
-- `modules/ui/`: User interface components including interactive prompts and status displays
+- `modules/ui/`: User interface components including interactive prompts, styled output, and navigation
+
+### LangChain Provider Architecture
+
+The LLM integration uses LangChain for a unified multi-provider interface:
+
+```
+modules/llm/providers/
+├── base.py              # Abstract BaseProvider class and common interfaces
+├── factory.py           # Provider factory with auto-detection
+├── openai_provider.py   # OpenAI implementation (GPT-5, o-series, GPT-4o)
+├── anthropic_provider.py # Anthropic implementation (Claude family)
+├── google_provider.py   # Google implementation (Gemini family)
+└── openrouter_provider.py # OpenRouter implementation (200+ models)
+```
+
+Each provider handles:
+- Model capability detection and parameter validation
+- Automatic filtering of unsupported parameters via LangChain's `disabled_params`
+- Retry logic with exponential backoff (via LangChain's `max_retries`)
+- Token usage tracking (via LangChain's `response_metadata`)
+- Structured output parsing (via LangChain's `with_structured_output`)
 
 ### Windows Path Length Handling
 
@@ -742,7 +894,31 @@ python main/check_batches.py
 
 #### Model not supported
 
-Solution: Check `modules/llm/model_capabilities.py` for supported models. Ensure your OpenAI account has access to the selected model.
+Solution: Verify your model name matches the provider's expected format:
+- OpenAI: `gpt-5-mini`, `o3`, `gpt-4o`
+- Anthropic: `claude-sonnet-4-5-20250929`, `claude-3-5-sonnet-20241022`
+- Google: `gemini-3-pro`, `gemini-2.5-pro`
+- OpenRouter: `openai/gpt-5.1`, `anthropic/claude-sonnet-4-5`
+
+Check `modules/llm/providers/` for supported models per provider.
+
+#### Provider API key not found
+
+Solution: Set the environment variable for your chosen provider:
+
+```bash
+# Windows PowerShell
+$env:OPENAI_API_KEY="your_key"      # OpenAI
+$env:ANTHROPIC_API_KEY="your_key"   # Anthropic
+$env:GOOGLE_API_KEY="your_key"      # Google
+$env:OPENROUTER_API_KEY="your_key"  # OpenRouter
+
+# Linux/macOS
+export OPENAI_API_KEY=your_key
+export ANTHROPIC_API_KEY=your_key
+export GOOGLE_API_KEY=your_key
+export OPENROUTER_API_KEY=your_key
+```
 
 #### Images not processing correctly
 
@@ -848,24 +1024,29 @@ Potential areas where contributions would be valuable:
 - Performance optimization: Improved concurrent processing or caching
 - Error recovery: Enhanced error handling and recovery mechanisms
 
-## License
-
 ## Development
 
-### Recent Refactor (2025-10-13)
+### Recent Updates
 
-The codebase underwent a comprehensive refactor to improve organization, reduce duplication, and enhance maintainability. Key improvements include:
+**November 2025: Multi-Provider LangChain Integration**
 
-- **Centralized configuration service**: Singleton `ConfigService` eliminates redundant config loading
-- **Modular utilities**: Extracted token guards, Tesseract utilities, JSONL operations, and progress tracking
-- **Better testing support**: New test fixtures and diagnostic utilities
-- **Improved documentation**: Comprehensive refactor summary and migration guide
+ChronoTranscriber now supports multiple AI providers through LangChain:
+- OpenAI, Anthropic, Google, and OpenRouter providers
+- Automatic capability detection and parameter filtering
+- Simplified retry logic handled by LangChain
+- Support for latest models including GPT-5.1, Claude 4.5, and Gemini 3
 
-See [REFACTOR_SUMMARY.md](REFACTOR_SUMMARY.md) for detailed information about the refactor and migration guide for developers.
+**October 2025: Codebase Refactor**
 
-### Contributing
+The codebase underwent a comprehensive refactor to improve organization:
+- Centralized ConfigService eliminates redundant config loading
+- Modular utilities for token guards, Tesseract, and JSONL operations
+- Better testing support with new fixtures and diagnostics
+- Operations layer separates CLI entry points from business logic
 
-Contributions are welcome! Please ensure:
+See [REFACTOR_SUMMARY.md](REFACTOR_SUMMARY.md) for migration guide.
+
+### Development Guidelines
 
 - Code follows PEP 8 style guidelines
 - New features include appropriate tests

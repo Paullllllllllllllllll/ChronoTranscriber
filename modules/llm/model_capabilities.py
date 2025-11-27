@@ -1,4 +1,25 @@
 # modules/model_capabilities.py
+"""Model capability detection and feature gating.
+
+This module provides capability detection for OpenAI models, used primarily for:
+- Batch API processing (OpenAI-specific)
+- Legacy synchronous processing
+
+Note:
+    For LangChain-based synchronous transcription, capability guarding is now
+    handled by LangChain's `disabled_params` feature in the provider classes.
+    See `modules/llm/providers/openai_provider.py` for the LangChain approach.
+    
+    LangChain handles:
+    - Parameter filtering via `disabled_params` (temperature, top_p, etc.)
+    - Automatic retry with exponential backoff
+    - Structured output parsing
+    
+    This module is still used for:
+    - Batch API processing (which bypasses LangChain)
+    - ensure_image_support() fail-fast check
+    - Legacy code compatibility
+"""
 
 from __future__ import annotations
 

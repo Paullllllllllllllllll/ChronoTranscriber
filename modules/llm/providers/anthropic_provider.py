@@ -32,6 +32,55 @@ from modules.config.service import get_config_service
 logger = logging.getLogger(__name__)
 
 
+def _transform_schema_for_anthropic(schema: Dict[str, Any]) -> Dict[str, Any]:
+    """Transform JSON schema to be Anthropic-compatible.
+    
+    Anthropic's SDK doesn't support union types like ["string", "null"].
+    This function converts them to simple types.
+    Also adds required 'title' and 'description' keys for LangChain compatibility.
+    """
+    import copy
+    result = copy.deepcopy(schema)
+    
+    def transform_type(obj: Dict[str, Any]) -> None:
+        if not isinstance(obj, dict):
+            return
+            
+        # Handle union types like ["string", "null"]
+        if "type" in obj and isinstance(obj["type"], list):
+            # Filter out "null" and keep the first non-null type
+            non_null_types = [t for t in obj["type"] if t != "null"]
+            if non_null_types:
+                obj["type"] = non_null_types[0]
+            else:
+                obj["type"] = "string"  # fallback
+        
+        # Recursively handle properties
+        if "properties" in obj and isinstance(obj["properties"], dict):
+            for prop in obj["properties"].values():
+                transform_type(prop)
+        
+        # Handle items in arrays
+        if "items" in obj and isinstance(obj["items"], dict):
+            transform_type(obj["items"])
+        
+        # Handle anyOf/oneOf/allOf
+        for key in ("anyOf", "oneOf", "allOf"):
+            if key in obj and isinstance(obj[key], list):
+                for item in obj[key]:
+                    transform_type(item)
+    
+    transform_type(result)
+    
+    # Add required top-level keys for LangChain/Anthropic compatibility
+    if "title" not in result:
+        result["title"] = "TranscriptionSchema"
+    if "description" not in result:
+        result["description"] = "Schema for document transcription output"
+    
+    return result
+
+
 def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
     """Determine capabilities based on Anthropic model name.
     
@@ -64,7 +113,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             is_reasoning_model=True,  # Extended thinking support
             supports_reasoning_effort=True,
             supports_temperature=True,
-            supports_top_p=True,
+            supports_top_p=False,  # Claude 4.5 doesn't allow both temperature AND top_p
             supports_frequency_penalty=False,
             supports_presence_penalty=False,
             max_context_tokens=200000,
@@ -84,7 +133,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             is_reasoning_model=True,  # Extended thinking support
             supports_reasoning_effort=True,
             supports_temperature=True,
-            supports_top_p=True,
+            supports_top_p=False,  # Claude 4.5 doesn't allow both temperature AND top_p
             supports_frequency_penalty=False,
             supports_presence_penalty=False,
             max_context_tokens=200000,
@@ -92,6 +141,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
         )
     
     # Claude 4.5 Haiku (fastest, cost-efficient)
+    # Note: Claude Haiku 4.5 does NOT support output_format/structured output
     if "claude-haiku-4-5" in m or "claude-haiku-4.5" in m:
         return ProviderCapabilities(
             provider_name="anthropic",
@@ -99,12 +149,12 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_vision=True,
             supports_image_detail=False,
             default_image_detail="auto",
-            supports_structured_output=True,
-            supports_json_mode=True,
+            supports_structured_output=False,  # Haiku 4.5 doesn't support output_format
+            supports_json_mode=False,
             is_reasoning_model=True,  # Extended thinking support
             supports_reasoning_effort=True,
             supports_temperature=True,
-            supports_top_p=True,
+            supports_top_p=False,  # Claude 4.5 doesn't allow both temperature AND top_p
             supports_frequency_penalty=False,
             supports_presence_penalty=False,
             max_context_tokens=200000,
@@ -430,6 +480,9 @@ class AnthropicProvider(BaseProvider):
                 actual_schema = json_schema["schema"]
             else:
                 actual_schema = json_schema
+            
+            # Transform schema for Anthropic compatibility (handle nullable types)
+            actual_schema = _transform_schema_for_anthropic(actual_schema)
             
             llm_to_use = self._llm.with_structured_output(
                 actual_schema,

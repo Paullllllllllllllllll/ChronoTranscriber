@@ -373,17 +373,13 @@ async def process_auto_mode(
             workflow_manager.epub_output_dir = output_dir
         transcriber = None
         if method == "gpt":
-            api_key = os.getenv('OPENAI_API_KEY')
-            if not api_key:
-                print_error("OPENAI_API_KEY required for GPT transcription. Skipping GPT files.")
-                continue
-            
             # Use default schema for auto mode
             from modules.config.config_loader import PROJECT_ROOT
             default_schema = (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json").resolve()
             
+            # Let open_transcriber get the correct API key based on provider config
             async with open_transcriber(
-                api_key=api_key,
+                api_key=None,  # Factory will get correct key based on provider
                 model=model_config.get("transcription_model", {}).get("name", "gpt-4o"),
                 schema_path=default_schema,
                 additional_context_path=None,
@@ -427,13 +423,9 @@ async def process_documents(
     # Initialize transcriber if needed for synchronous GPT processing
     transcriber = None
     if user_config.transcription_method == "gpt" and not user_config.use_batch_processing:
-        api_key = os.getenv('OPENAI_API_KEY')
-        if not api_key:
-            print_error("OPENAI_API_KEY is required for GPT transcription.")
-            sys.exit(1)
-        
+        # Let open_transcriber get the correct API key based on provider config
         async with open_transcriber(
-            api_key=api_key,
+            api_key=None,  # Factory will get correct key based on provider
             model=model_config.get("transcription_model", {}).get("name", "gpt-4o"),
             schema_path=user_config.selected_schema_path,
             additional_context_path=user_config.additional_context_path,

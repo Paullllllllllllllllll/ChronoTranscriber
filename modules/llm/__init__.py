@@ -14,21 +14,16 @@ Note: Imports are lazy to avoid circular import issues with config_loader.
 
 def __getattr__(name: str):
     """Lazy import to avoid circular dependencies."""
-    if name in ("LangChainTranscriber", "open_transcriber", "transcribe_image_with_llm",
-                "OpenAITranscriber", "transcribe_image_with_openai"):
+    if name in ("LangChainTranscriber", "open_transcriber", "transcribe_image_with_llm"):
         from modules.llm.transcriber import (
             LangChainTranscriber,
             open_transcriber,
             transcribe_image_with_llm,
-            OpenAITranscriber,
-            transcribe_image_with_openai,
         )
         return {
             "LangChainTranscriber": LangChainTranscriber,
             "open_transcriber": open_transcriber,
             "transcribe_image_with_llm": transcribe_image_with_llm,
-            "OpenAITranscriber": OpenAITranscriber,
-            "transcribe_image_with_openai": transcribe_image_with_openai,
         }[name]
     
     if name in ("BaseProvider", "ProviderCapabilities", "TranscriptionResult",
@@ -69,7 +64,7 @@ def __getattr__(name: str):
     raise AttributeError(f"module 'modules.llm' has no attribute '{name}'")
 
 __all__ = [
-    # New LangChain API
+    # LangChain API
     "LangChainTranscriber",
     "open_transcriber",
     "transcribe_image_with_llm",
@@ -80,9 +75,6 @@ __all__ = [
     "get_provider",
     "get_available_providers",
     "ProviderType",
-    # Backward compatibility (deprecated)
-    "OpenAITranscriber",
-    "transcribe_image_with_openai",
     # Schema utilities
     "list_schema_options",
     # Model capabilities

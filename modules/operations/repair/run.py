@@ -133,7 +133,7 @@ async def _repair_sync_mode(
     final_lines: List[str],
     repair_jsonl_path: Path,
 ) -> None:
-    from modules.llm import transcribe_image_with_llm as transcribe_image_with_openai
+    from modules.llm import transcribe_image_with_llm
 
     # Build mapping by image_name for robust lookup
     name_to_entry: Dict[str, ImageEntry] = {e.image_name: e for e in image_entries}
@@ -211,7 +211,7 @@ async def _repair_sync_mode(
         img_path: Path, line_index: int, image_name: str, transcriber: Any
     ) -> Tuple[int, str, Dict[str, Any]]:
         try:
-            raw = await transcribe_image_with_openai(img_path, transcriber)
+            raw = await transcribe_image_with_llm(img_path, transcriber)
             text = extract_transcribed_text(raw, image_name)
             return line_index, text, raw
         except Exception as e:

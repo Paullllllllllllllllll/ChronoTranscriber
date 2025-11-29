@@ -22,7 +22,7 @@ from modules.processing.tesseract_utils import (
     perform_ocr,
 )
 from modules.llm.batch.batching import get_batch_chunk_size
-from modules.llm import transcribe_image_with_llm as transcribe_image_with_openai
+from modules.llm import transcribe_image_with_llm
 from modules.infra.concurrency import run_concurrent_transcription_tasks
 from modules.processing.text_processing import extract_transcribed_text, format_page_line
 from modules.core.utils import console_print
@@ -689,9 +689,9 @@ class WorkflowManager:
                             "No transcriber instance provided for GPT usage.")
                         return (str(img_path), image_name,
                                 f"[transcription error: {image_name}]", None, order_index)
-                    result = await transcribe_image_with_openai(img_path, trans)
+                    result = await transcribe_image_with_llm(img_path, trans)
                     logger.debug(
-                        f"OpenAI response for {img_path.name}: {result}")
+                        f"LLM response for {img_path.name}: {result}")
                     try:
                         final_text = extract_transcribed_text(result, image_name)
                     except Exception as e:

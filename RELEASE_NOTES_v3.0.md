@@ -235,13 +235,15 @@ Cost visualization utilities for interactive display.
 - Structured output parsing via `with_structured_output()` with Pydantic models
 - Capability-based parameter filtering via `disabled_params`
 
-**Deprecated Custom Implementations**
+**Removed Legacy Code**
+- `modules/llm/openai_utils.py`: Deprecated and removed (858 lines) - LangChain handles synchronous transcription
 - Custom retry logic → LangChain's built-in retry
 - Manual capability filtering → LangChain's `disabled_params`
 - Custom token extraction → LangChain's response metadata
+- Legacy aliases (`OpenAITranscriber`, `transcribe_image_with_openai`) → Modern naming
 
 **Retained for Batch API**
-- `modules/llm/openai_utils.py`: OpenAI Batch API operations
+- `modules/llm/batch/batching.py`: OpenAI Batch API operations (uses direct API calls)
 - `modules/llm/model_capabilities.py`: Batch API capability detection and `ensure_image_support()`
 
 ### Repository Organization

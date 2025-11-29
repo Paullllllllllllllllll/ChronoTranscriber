@@ -285,8 +285,3 @@ async def transcribe_image_with_llm(
         Dictionary containing transcription response data
     """
     return await transcriber.transcribe_image(image_path)
-
-
-# Backward compatibility aliases
-OpenAITranscriber = LangChainTranscriber
-transcribe_image_with_openai = transcribe_image_with_llm

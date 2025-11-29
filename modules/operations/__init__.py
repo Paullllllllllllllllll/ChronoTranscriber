@@ -6,6 +6,7 @@ organized for reusability and testability. The entry-point scripts in
 """
 
 # Avoid circular imports - use direct imports instead of re-exporting
+# Note: get_openai_client and validate_api_key moved to modules.llm.openai_sdk_utils
 __all__ = [
     "process_all_batches",
     "run_batch_finalization",
@@ -19,7 +20,4 @@ __all__ = [
     "backup_file",
     "find_companion_files",
     "ImageMetadata",
-    # OpenAI client utilities
-    "get_openai_client",
-    "validate_api_key",
 ]

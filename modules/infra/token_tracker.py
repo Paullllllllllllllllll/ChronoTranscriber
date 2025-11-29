@@ -8,7 +8,7 @@ This module provides a thread-safe token tracker that:
 - Thread-safe for concurrent API calls
 
 Usage:
-    from modules.token_tracker import get_token_tracker
+    from modules.infra.token_tracker import get_token_tracker
     
     tracker = get_token_tracker()
     
@@ -30,15 +30,14 @@ Usage:
 from __future__ import annotations
 
 import json
+import logging
 import threading
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
 from modules.config.service import get_config_service
 
-import logging
 logger = logging.getLogger(__name__)
 
 # Default path for token tracker state file

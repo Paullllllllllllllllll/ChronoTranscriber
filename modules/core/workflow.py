@@ -124,7 +124,7 @@ class WorkflowManager:
         # Display initial token usage if enabled
         token_cfg = self.concurrency_config.get("daily_token_limit", {})
         if token_cfg.get("enabled", False):
-            from modules.token_tracker import get_token_tracker
+            from modules.infra.token_tracker import get_token_tracker
             token_tracker = get_token_tracker()
             stats = token_tracker.get_stats()
             logger.info(

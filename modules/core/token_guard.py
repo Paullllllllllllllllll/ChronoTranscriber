@@ -30,7 +30,7 @@ async def check_and_wait_for_token_limit(concurrency_config: Dict[str, Any]) -> 
     if not enabled:
         return True
     
-    from modules.token_tracker import get_token_tracker
+    from modules.infra.token_tracker import get_token_tracker
     token_tracker = get_token_tracker()
     
     if not token_tracker.is_limit_reached():

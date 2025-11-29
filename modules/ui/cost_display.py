@@ -4,6 +4,8 @@
 Display functions for cost analysis results.
 """
 
+from __future__ import annotations
+
 from typing import Optional
 
 from modules.operations.cost_analysis import CostAnalysis

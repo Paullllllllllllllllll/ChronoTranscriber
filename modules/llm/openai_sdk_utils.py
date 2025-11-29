@@ -1,12 +1,13 @@
 """OpenAI SDK utility functions for batch operations and object conversions.
 
 Provides helper functions for working with OpenAI SDK objects, including
-batch listing with pagination and object-to-dict conversions.
+batch listing with pagination, object-to-dict conversions, and client setup.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Dict, List, Optional
 
 from modules.core.utils import console_print
@@ -114,3 +115,38 @@ def coerce_file_id(candidate: Any) -> Optional[str]:
             cid = first.get("id") or first.get("file_id")
             return cid if isinstance(cid, str) and cid else None
     return None
+
+
+def get_openai_client(api_key: Optional[str] = None) -> Any:
+    """Get configured OpenAI client.
+    
+    Args:
+        api_key: Optional API key. If None, uses OPENAI_API_KEY environment variable.
+        
+    Returns:
+        Configured OpenAI client.
+        
+    Raises:
+        ValueError: If no API key is available.
+    """
+    from openai import OpenAI
+    
+    if api_key is None:
+        api_key = os.environ.get("OPENAI_API_KEY")
+    
+    if not api_key:
+        raise ValueError(
+            "OpenAI API key not found. Set OPENAI_API_KEY environment variable "
+            "or pass api_key parameter."
+        )
+    
+    return OpenAI(api_key=api_key)
+
+
+def validate_api_key() -> bool:
+    """Check if OpenAI API key is available.
+    
+    Returns:
+        True if API key is set, False otherwise.
+    """
+    return bool(os.environ.get("OPENAI_API_KEY"))

@@ -539,7 +539,7 @@ class AnthropicProvider(BaseProvider):
             # Track tokens
             if total_tokens > 0:
                 try:
-                    from modules.token_tracker import get_token_tracker
+                    from modules.infra.token_tracker import get_token_tracker
                     token_tracker = get_token_tracker()
                     token_tracker.add_tokens(total_tokens)
                     logger.debug(

@@ -4,6 +4,8 @@
 Cost analysis operations for token usage and pricing calculations.
 """
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
 from typing import Dict, List, Optional, Any

@@ -177,7 +177,7 @@ All Python dependencies are listed in `requirements.txt`. Key packages include:
 ### Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/ChronoTranscriber.git
+git clone https://github.com/Paullllllllllllllllll/ChronoTranscriber.git
 cd ChronoTranscriber
 ```
 
@@ -335,16 +335,16 @@ Defines input/output directories, operation mode, and path resolution behavior.
 ```yaml
 general:
   interactive_mode: true  # Toggle between interactive prompts (true) or CLI mode (false)
-  retain_temporary_jsonl: true
-  input_paths_is_output_path: false
+  retain_temporary_jsonl: false  # Keep temporary JSONL files for debugging
+  input_paths_is_output_path: true  # Write outputs alongside inputs
   logs_dir: './logs'
-  keep_preprocessed_images: true
+  keep_preprocessed_images: false  # Retain preprocessed images after processing
   # Auto mode: PDF processing settings
-  auto_mode_pdf_use_ocr_for_scanned: true
-  auto_mode_pdf_use_ocr_for_searchable: false
-  auto_mode_pdf_ocr_method: 'tesseract'
+  auto_mode_pdf_use_ocr_for_scanned: true  # Force OCR for scanned PDFs
+  auto_mode_pdf_use_ocr_for_searchable: false  # Force OCR even for searchable PDFs
+  auto_mode_pdf_ocr_method: 'gpt'  # OCR method: 'tesseract' or 'gpt'
   # Auto mode: Image processing settings
-  auto_mode_image_ocr_method: 'tesseract'
+  auto_mode_image_ocr_method: 'gpt'  # OCR method for images: 'tesseract' or 'gpt'
 
 file_paths:
   PDFs:
@@ -448,23 +448,23 @@ Controls parallel processing and retry behavior.
 ```yaml
 concurrency:
   transcription:
-    concurrency_limit: 250
-    delay_between_tasks: 0.005
-    service_tier: flex  # Options: auto, default, flex, priority
+    concurrency_limit: 1500
+    delay_between_tasks: 0.05
+    service_tier: default  # Options: auto, default, flex, priority
     batch_chunk_size: 50
     
     retry:
       attempts: 10
-      wait_min_seconds: 4
-      wait_max_seconds: 60
-      jitter_max_seconds: 1
+      wait_min_seconds: 1
+      wait_max_seconds: 30
+      jitter_max_seconds: 0.5
       
       transcription_failures:
-        no_transcribable_text_retries: 1
+        no_transcribable_text_retries: 0
         transcription_not_possible_retries: 3
-        wait_min_seconds: 2
+        wait_min_seconds: 1
         wait_max_seconds: 30
-        jitter_max_seconds: 1
+        jitter_max_seconds: 0.5
   
   image_processing:
     concurrency_limit: 24
@@ -521,6 +521,12 @@ Each schema file should include:
   }
 }
 ```
+
+Available Schemas:
+
+- `markdown_transcription_schema.json` (default): Produces markdown-formatted transcriptions with LaTeX equations, headings, and formatting
+- `plain_text_transcription_schema.json`: Produces plain text transcriptions without formatting
+- `swiss_address_book_schema.json`: Specialized schema for extracting structured address book entries from historical Swiss documents
 
 Creating Custom Schemas:
 
@@ -743,7 +749,32 @@ daily_token_limit:
 2. Keep `.chronotranscriber_token_state.json` under version-control ignore lists so local usage does not pollute repositories.
 3. Delete the state file or edit the JSON manually if you need to reset counts ahead of the daily rollover.
 
-### API Diagnostics
+### System Diagnostics
+
+ChronoTranscriber includes a diagnostics module (`modules/diagnostics/system_check.py`) that verifies system requirements and API connectivity:
+
+System Requirement Checks:
+
+- **Python Version**: Verifies Python 3.8+ is installed
+- **Tesseract OCR**: Checks if Tesseract is available and configured
+- **API Key**: Validates that the required API key environment variable is set
+- **Configuration Files**: Confirms all required YAML configuration files exist
+
+API Connectivity Diagnostics:
+
+- Verifies API key is properly formatted
+- Tests connectivity to the OpenAI API
+- Reports the number of accessible models
+- Provides detailed error messages for troubleshooting
+
+You can access diagnostics programmatically:
+
+```python
+from modules.diagnostics.system_check import generate_diagnostic_report
+print(generate_diagnostic_report())
+```
+
+### API Diagnostics via Batch Checker
 
 Built into `check_batches.py`, the diagnostics tool verifies your API configuration.
 
@@ -790,7 +821,8 @@ ChronoTranscriber/
 │   └── ui/                   # User interface and prompts
 ├── schemas/                   # JSON schemas for structured outputs
 │   ├── markdown_transcription_schema.json
-│   └── plain_text_transcription_schema.json
+│   ├── plain_text_transcription_schema.json
+│   └── swiss_address_book_schema.json
 ├── system_prompt/             # System prompt templates
 │   └── system_prompt.txt
 ├── additional_context/        # Optional domain context
@@ -817,6 +849,8 @@ ChronoTranscriber follows a modular architecture with clear separation of concer
 - `modules/operations/`: High-level operation orchestration (batch checking, repair workflows, cost analysis)
 - `modules/processing/`: Document processing including PDF rendering, image preprocessing, and text formatting
 - `modules/ui/`: User interface components including interactive prompts, styled output, and navigation
+- `modules/diagnostics/`: System health checks including Python version, Tesseract availability, API key validation, and configuration file verification
+- `modules/testing/`: Test fixtures and utilities for development and validation
 
 ### LangChain Provider Architecture
 
@@ -1028,23 +1062,32 @@ Potential areas where contributions would be valuable:
 
 ### Recent Updates
 
-**November 2025: Multi-Provider LangChain Integration**
+**November 2025: Version 3.0 - Multi-Provider LangChain Integration**
 
 ChronoTranscriber now supports multiple AI providers through LangChain:
-- OpenAI, Anthropic, Google, and OpenRouter providers
-- Automatic capability detection and parameter filtering
-- Simplified retry logic handled by LangChain
-- Support for latest models including GPT-5.1, Claude 4.5, and Gemini 3
 
-**October 2025: Codebase Refactor**
+- OpenAI, Anthropic, Google, and OpenRouter providers with unified interface
+- Automatic capability detection and parameter filtering for reasoning models
+- EPUB support for native text extraction from ebooks
+- Auto mode for intelligent method selection based on document type
+- Cost analysis utilities for tracking API usage and spend
+- Daily token budget management with automatic enforcement
+- Additional context injection for domain-specific transcription guidance
+- Swiss address book schema for specialized historical document extraction
+- System diagnostics module for health checks and troubleshooting
 
-The codebase underwent a comprehensive refactor to improve organization:
-- Centralized ConfigService eliminates redundant config loading
-- Modular utilities for token guards, Tesseract, and JSONL operations
-- Better testing support with new fixtures and diagnostics
-- Operations layer separates CLI entry points from business logic
+See [RELEASE_NOTES_v3.0.md](RELEASE_NOTES_v3.0.md) for full details.
 
-See [REFACTOR_SUMMARY.md](REFACTOR_SUMMARY.md) for migration guide.
+**October 2025: Version 2.0 - Dual-Mode Operation**
+
+Major release introducing dual-mode operation:
+
+- Interactive mode with navigation support and visual prompts
+- CLI mode for automation and scripting
+- Critical Windows Unicode encoding fix
+- Batch API service tier compatibility fix
+
+See [RELEASE_NOTES_v2.0.md](RELEASE_NOTES_v2.0.md) for full details.
 
 ### Development Guidelines
 

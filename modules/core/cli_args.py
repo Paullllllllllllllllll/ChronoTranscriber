@@ -243,16 +243,22 @@ Examples:
     return parser
 
 
-def resolve_path(path_str: str, base_path: Optional[Path] = None) -> Path:
+def resolve_path(path_str: Optional[str], base_path: Optional[Path] = None) -> Path:
     """Resolve a path string to an absolute Path object.
     
     Args:
-        path_str: Path string (relative or absolute)
+        path_str: Path string (relative or absolute), or None to use base_path
         base_path: Base path for relative paths (defaults to cwd)
         
     Returns:
         Absolute Path object
     """
+    # If path_str is None, use base_path as default
+    if path_str is None:
+        if base_path:
+            return base_path.resolve()
+        return Path.cwd()
+    
     path = Path(path_str)
     
     if path.is_absolute():

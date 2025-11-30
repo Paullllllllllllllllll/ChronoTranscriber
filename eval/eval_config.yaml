@@ -1,0 +1,106 @@
+# Evaluation Configuration for ChronoTranscriber
+# This file defines models to evaluate and dataset paths
+
+# =============================================================================
+# Dataset Configuration
+# =============================================================================
+dataset:
+  base_path: "test_data"
+  
+  input_path: "test_data/input"
+  output_path: "test_data/output"
+  ground_truth_path: "test_data/ground_truth"
+  
+  categories:
+    - name: "address_books"
+      description: "Swiss address book pages (Basel 1900)"
+      input_type: "images"  # images or pdf
+      
+    - name: "bibliography"
+      description: "European culinary bibliographies"
+      input_type: "pdf"
+      
+    - name: "military_records"
+      description: "Brazilian military enlistment cards"
+      input_type: "pdf"
+
+# =============================================================================
+# Models to Evaluate
+# =============================================================================
+models:
+  # OpenAI Models
+  - name: "gpt_5.1_medium"
+    provider: "openai"
+    model_id: "gpt-5.1"
+    reasoning_effort: "medium"
+    description: "GPT-5.1 with medium reasoning"
+    
+  - name: "gpt_5_mini_medium"
+    provider: "openai"
+    model_id: "gpt-5-mini"
+    reasoning_effort: "medium"
+    description: "GPT-5 Mini with medium reasoning"
+  
+  # Google Models
+  - name: "gemini_3.0_pro_medium"
+    provider: "google"
+    model_id: "gemini-3.0-pro"
+    reasoning_effort: "medium"
+    description: "Gemini 3.0 Pro with medium reasoning"
+    
+  - name: "gemini_2.5_flash"
+    provider: "google"
+    model_id: "gemini-2.5-flash"
+    reasoning_effort: null  # No reasoning mode for flash
+    description: "Gemini 2.5 Flash (no reasoning)"
+  
+  # Anthropic Models
+  - name: "claude_sonnet_4.5_medium"
+    provider: "anthropic"
+    model_id: "claude-sonnet-4.5"
+    reasoning_effort: "medium"
+    description: "Claude Sonnet 4.5 with medium reasoning"
+    
+  - name: "claude_haiku_4.5_medium"
+    provider: "anthropic"
+    model_id: "claude-haiku-4.5"
+    reasoning_effort: "medium"
+    description: "Claude Haiku 4.5 with medium reasoning"
+
+# =============================================================================
+# Evaluation Settings
+# =============================================================================
+evaluation:
+  # Schema to use for transcription
+  schema_path: "schemas/eval_transcription_schema.json"
+  
+  # Normalization settings for metrics
+  normalize_whitespace: true
+  case_sensitive: true  # Keep original case for historical accuracy
+  
+  # Output settings
+  save_per_page_metrics: true
+  save_aggregated_metrics: true
+  output_formats:
+    - "json"
+    - "csv"
+    - "markdown"
+  
+  # Report path
+  reports_path: "reports"
+
+# =============================================================================
+# Runtime Settings
+# =============================================================================
+runtime:
+  # Concurrency for API calls
+  max_concurrent_requests: 5
+  delay_between_requests_ms: 200
+  
+  # Retry settings
+  max_retries: 3
+  retry_delay_seconds: 2
+  
+  # Cost tracking (if available)
+  track_costs: true
+  track_latency: true

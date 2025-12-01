@@ -21,7 +21,10 @@ from modules.ui import (
     PromptStyle,
     confirm_action,
 )
-from modules.ui.core import UserPrompt
+from modules.ui.batch_display import (
+    display_batch_summary,
+    display_batch_cancellation_results,
+)
 from modules.llm.openai_sdk_utils import sdk_to_dict, list_all_batches
 from modules.core.cli_args import create_cancel_batches_parser
 from modules.core.mode_selector import run_sync_with_mode_detection
@@ -53,7 +56,7 @@ def cancel_batches_interactive() -> None:
         return
 
     # Display batch summary
-    UserPrompt.display_batch_summary(batches)
+    display_batch_summary(batches)
 
     if not batches:
         return
@@ -85,7 +88,7 @@ def cancel_batches_interactive() -> None:
             cancelled_batches.append((batch_id, status, False))
 
     # Display cancellation results
-    UserPrompt.display_batch_cancellation_results(cancelled_batches, skipped_batches)
+    display_batch_cancellation_results(cancelled_batches, skipped_batches)
 
 
 def cancel_batches_cli(args, paths_config: dict) -> None:

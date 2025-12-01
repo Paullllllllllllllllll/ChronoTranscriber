@@ -11,7 +11,7 @@ from PIL import Image
 
 from modules.config.service import get_config_service
 from modules.processing.image_utils import ImageProcessor
-from modules.core.path_utils import create_safe_directory_name
+from modules.core.safe_paths import create_safe_directory_name
 
 logger = logging.getLogger(__name__)
 

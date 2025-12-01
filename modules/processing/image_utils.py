@@ -9,16 +9,14 @@ import numpy as np
 import cv2
 from deskew import determine_skew
 from skimage.filters import threshold_sauvola
-from modules.core.path_utils import create_safe_directory_name
+from modules.core.safe_paths import create_safe_directory_name
 
 from modules.config.service import get_config_service
+from modules.config.constants import SUPPORTED_IMAGE_EXTENSIONS
 from modules.infra.logger import setup_logger
 from modules.infra.multiprocessing_utils import run_multiprocessing_tasks
 
 logger = setup_logger(__name__)
-
-SUPPORTED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.tiff', '.tif', '.bmp',
-                              '.gif', '.webp'}
 
 
 class ImageProcessor:

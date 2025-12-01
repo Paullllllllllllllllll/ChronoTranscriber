@@ -1,10 +1,10 @@
 # General settings and file paths configuration
 general:
-  interactive_mode: false  # Run scripts in interactive mode with prompts (true) or as CLI tools with arguments (false)
-  retain_temporary_jsonl: false  # Retain temporary JSONL files after processing
+  interactive_mode: true  # Run scripts in interactive mode with prompts (true) or as CLI tools with arguments (false)
+  retain_temporary_jsonl: true  # Retain temporary JSONL files after processing
   input_paths_is_output_path: true  # Use input paths as output paths if true
   logs_dir: ''  # Directory for log files
-  keep_preprocessed_images: false  # Retain preprocessed images after processing
+  keep_preprocessed_images: true  # Retain preprocessed images after processing
   # Auto mode: PDF processing settings
   auto_mode_pdf_use_ocr_for_scanned: true       # Force OCR for scanned/non-searchable PDFs (if false, attempts native extraction; will likely produce empty output files)
   auto_mode_pdf_use_ocr_for_searchable: false   # Force OCR even for searchable PDFs (bypasses native text extraction)
@@ -14,14 +14,14 @@ general:
 
 file_paths:
   PDFs:
-    input: 'C:\Users\pagoetz\Desktop\test_folder_chrono_transcriber'  # Input directory for PDFs
-    output: 'C:\Users\pagoetz\Desktop\test_folder_chrono_transcriber\output_claude'  # Output directory for PDFs
+    input: ''  # Input directory for PDFs
+    output: ''  # Output directory for PDFs
   Images:
-    input: 'C:\Users\pagoetz\Desktop\test_folder_chrono_transcriber'  # Input directory for image folders
-    output: 'C:\Users\pagoetz\Desktop\test_folder_chrono_transcriber\output_claude'  # Output directory for processed folders
+    input: ''  # Input directory for image folders
+    output: ''  # Output directory for processed folders
   EPUBs:
-    input: 'C:\Users\pagoetz\Desktop\test_folder_chrono_transcriber'  # Input directory for EPUB files (update as needed)
-    output: 'C:\Users\pagoetz\Desktop\test_folder_chrono_transcriber\output_claude'  # Output directory for extracted EPUB text files
+    input: ''  # Input directory for EPUB files (update as needed)
+    output: ''  # Output directory for extracted EPUB text files
   Auto:
-    input: 'C:\Users\pagoetz\Desktop\test_folder_chrono_transcriber'  # Input directory for auto mode (scans for mixed file types)
-    output: 'C:\Users\pagoetz\Desktop\test_folder_chrono_transcriber\output_claude'  # Output directory for auto mode results
+    input: ''  # Input directory for auto mode (scans for mixed file types)
+    output: ''  # Output directory for auto mode results

@@ -10,7 +10,7 @@ import ebooklib
 from ebooklib import epub
 from lxml import html
 
-from modules.core.path_utils import create_safe_directory_name
+from modules.core.safe_paths import create_safe_directory_name
 
 logger = logging.getLogger(__name__)
 

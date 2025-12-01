@@ -31,7 +31,6 @@ from modules.operations.cost_analysis import (
     save_analysis_to_csv,
 )
 from modules.ui import (
-    UserPrompt,
     print_info,
     print_warning,
     print_success,
@@ -39,6 +38,7 @@ from modules.ui import (
     prompt_yes_no,
     PromptResult,
 )
+from modules.ui.workflows import WorkflowUI
 from modules.ui.cost_display import display_analysis
 from modules.core.mode_selector import run_sync_with_mode_detection
 
@@ -48,7 +48,7 @@ logger = setup_logger(__name__)
 
 def _run_interactive_mode() -> None:
     """Run cost analysis in interactive mode."""
-    UserPrompt.display_banner()
+    WorkflowUI.display_welcome()
     
     print_info("Loading configuration...")
     logger.info("Starting cost analysis (Interactive Mode)")

@@ -18,7 +18,11 @@ logger = setup_logger(__name__)
 
 # Model pricing per million tokens (input, cached_input, output)
 # Note: Use 0.0 for cached_input when not available
+# Prices updated: December 2025
 MODEL_PRICING = {
+    # ============================================
+    # OpenAI Models
+    # ============================================
     # GPT-5 family
     "gpt-5": (1.25, 0.125, 10.00),
     "gpt-5-mini": (0.25, 0.025, 2.00),
@@ -51,10 +55,47 @@ MODEL_PRICING = {
     "o3-deep-research": (10.00, 2.50, 40.00),
     "o4-mini": (1.10, 0.275, 4.40),
     "o4-mini-deep-research": (2.00, 0.50, 8.00),
-    # Other models
+    # Other OpenAI models
     "codex-mini-latest": (1.50, 0.375, 6.00),
     "computer-use-preview": (3.00, 0.00, 12.00),
     "gpt-image-1": (5.00, 1.25, 0.00),  # Image generation (no output tokens)
+    
+    # ============================================
+    # Anthropic Claude Models
+    # ============================================
+    # Claude 4.5 family (October 2025)
+    "claude-haiku-4-5": (1.00, 0.10, 5.00),  # 90% cache discount
+    "claude-sonnet-4-5": (3.00, 0.30, 15.00),
+    "claude-opus-4-5": (5.00, 0.50, 25.00),
+    # Claude 4 family
+    "claude-sonnet-4": (3.00, 0.30, 15.00),
+    "claude-opus-4": (15.00, 1.50, 75.00),
+    # Claude 3.5 family
+    "claude-3-5-sonnet": (3.00, 0.30, 15.00),
+    "claude-3-5-sonnet-20241022": (3.00, 0.30, 15.00),
+    "claude-3-5-haiku": (0.80, 0.08, 4.00),
+    "claude-3-5-haiku-20241022": (0.80, 0.08, 4.00),
+    # Claude 3 family (legacy)
+    "claude-3-opus": (15.00, 1.50, 75.00),
+    "claude-3-sonnet": (3.00, 0.30, 15.00),
+    "claude-3-haiku": (0.25, 0.025, 1.25),
+    
+    # ============================================
+    # Google Gemini Models
+    # ============================================
+    # Gemini 3 family (Preview)
+    "gemini-3-pro": (2.00, 0.20, 12.00),
+    "gemini-3-pro-preview": (2.00, 0.20, 12.00),
+    # Gemini 2.5 family
+    "gemini-2.5-pro": (1.25, 0.125, 10.00),
+    "gemini-2.5-flash": (0.30, 0.03, 2.50),
+    "gemini-2.5-flash-lite": (0.10, 0.01, 0.40),
+    # Gemini 2.0 family
+    "gemini-2.0-flash": (0.10, 0.01, 0.40),
+    "gemini-2.0-flash-lite": (0.08, 0.008, 0.30),
+    # Gemini 1.5 family (legacy)
+    "gemini-1.5-pro": (1.25, 0.125, 5.00),
+    "gemini-1.5-flash": (0.075, 0.0075, 0.30),
 }
 
 
@@ -128,6 +169,11 @@ def extract_token_usage_from_record(record: Dict[str, Any]) -> Optional[TokenUsa
     """
     Extract token usage from a single JSONL record.
     
+    Supports multiple JSONL record formats:
+    1. Legacy format: response_data.usage
+    2. Current format: raw_response.usage
+    3. Request metadata fallback
+    
     Args:
         record: Dictionary containing the JSONL record
         
@@ -136,38 +182,58 @@ def extract_token_usage_from_record(record: Dict[str, Any]) -> Optional[TokenUsa
     """
     usage = TokenUsage()
     
-    # Try to get model from response_data or request_metadata
-    response_data = record.get("response_data", {})
-    request_metadata = record.get("request_metadata", {})
+    # Try multiple locations for usage data
+    usage_data = None
     
-    # Extract model
-    if isinstance(response_data, dict):
-        usage.model = response_data.get("model", "")
-    if not usage.model and isinstance(request_metadata, dict):
-        payload = request_metadata.get("payload", {})
-        if isinstance(payload, dict):
-            usage.model = payload.get("model", "")
+    # Priority 1: raw_response.usage (current LangChain format)
+    raw_response = record.get("raw_response", {})
+    if isinstance(raw_response, dict):
+        usage_data = raw_response.get("usage", {})
+        usage.model = raw_response.get("model", "")
     
-    # Extract usage data from response_data
-    if isinstance(response_data, dict):
-        usage_data = response_data.get("usage", {})
-        if isinstance(usage_data, dict):
-            # Try both naming conventions (OpenAI API uses input_tokens/output_tokens)
-            usage.prompt_tokens = usage_data.get("input_tokens", usage_data.get("prompt_tokens", 0))
-            usage.completion_tokens = usage_data.get("output_tokens", usage_data.get("completion_tokens", 0))
-            usage.total_tokens = usage_data.get("total_tokens", 0)
-            
-            # Extract cached tokens from input_tokens_details or prompt_tokens_details
-            input_details = usage_data.get("input_tokens_details", usage_data.get("prompt_tokens_details", {}))
-            if isinstance(input_details, dict):
-                usage.cached_tokens = input_details.get("cached_tokens", 0)
-            
-            # Extract reasoning tokens from output_tokens_details or completion_tokens_details
-            output_details = usage_data.get("output_tokens_details", usage_data.get("completion_tokens_details", {}))
-            if isinstance(output_details, dict):
-                usage.reasoning_tokens = output_details.get("reasoning_tokens", 0)
-            
-            return usage
+    # Priority 2: response_data.usage (legacy format)
+    if not usage_data:
+        response_data = record.get("response_data", {})
+        if isinstance(response_data, dict):
+            usage_data = response_data.get("usage", {})
+            if not usage.model:
+                usage.model = response_data.get("model", "")
+    
+    # Priority 3: request_metadata for model name
+    if not usage.model:
+        request_metadata = record.get("request_metadata", {})
+        if isinstance(request_metadata, dict):
+            payload = request_metadata.get("payload", {})
+            if isinstance(payload, dict):
+                usage.model = payload.get("model", "")
+        
+        # Also check request_context for model name
+        request_context = record.get("request_context", {})
+        if isinstance(request_context, dict) and not usage.model:
+            usage.model = request_context.get("model", "")
+    
+    # Extract usage data if available
+    if isinstance(usage_data, dict):
+        # Try both naming conventions (OpenAI API uses input_tokens/output_tokens)
+        usage.prompt_tokens = usage_data.get("input_tokens", usage_data.get("prompt_tokens", 0)) or 0
+        usage.completion_tokens = usage_data.get("output_tokens", usage_data.get("completion_tokens", 0)) or 0
+        usage.total_tokens = usage_data.get("total_tokens", 0) or 0
+        
+        # Calculate total if not provided
+        if usage.total_tokens == 0 and (usage.prompt_tokens > 0 or usage.completion_tokens > 0):
+            usage.total_tokens = usage.prompt_tokens + usage.completion_tokens
+        
+        # Extract cached tokens from input_tokens_details or prompt_tokens_details
+        input_details = usage_data.get("input_tokens_details", usage_data.get("prompt_tokens_details", {}))
+        if isinstance(input_details, dict):
+            usage.cached_tokens = input_details.get("cached_tokens", 0) or 0
+        
+        # Extract reasoning tokens from output_tokens_details or completion_tokens_details
+        output_details = usage_data.get("output_tokens_details", usage_data.get("completion_tokens_details", {}))
+        if isinstance(output_details, dict):
+            usage.reasoning_tokens = output_details.get("reasoning_tokens", 0) or 0
+        
+        return usage
     
     return None
 
@@ -289,7 +355,7 @@ def analyze_jsonl_file(jsonl_path: Path) -> FileStats:
 
 def find_jsonl_files(paths_config: Dict, schemas_paths: Dict) -> List[Path]:
     """
-    Find all temporary .jsonl files based on configuration.
+    Find all transcription .jsonl files based on configuration.
     
     Args:
         paths_config: Paths configuration dictionary
@@ -301,6 +367,9 @@ def find_jsonl_files(paths_config: Dict, schemas_paths: Dict) -> List[Path]:
     jsonl_files = []
     input_is_output = paths_config.get("general", {}).get("input_paths_is_output_path", True)
     
+    # Patterns to search for (transcription files can have different naming)
+    patterns = ["*_transcription.jsonl", "*_temp.jsonl", "*.jsonl"]
+    
     # Scan schema-specific directories
     for schema_name, schema_config in schemas_paths.items():
         if input_is_output:
@@ -309,19 +378,19 @@ def find_jsonl_files(paths_config: Dict, schemas_paths: Dict) -> List[Path]:
             if input_dir:
                 input_path = Path(input_dir)
                 if input_path.exists():
-                    jsonl_files.extend(input_path.glob("*_temp.jsonl"))
+                    # Search in root and all subdirectories
+                    for pattern in patterns:
+                        jsonl_files.extend(input_path.rglob(pattern))
         else:
             # Files are in output directory
             output_dir = schema_config.get("output")
             if output_dir:
                 output_path = Path(output_dir)
                 if output_path.exists():
-                    # Check both root and temp_jsonl subfolder
-                    jsonl_files.extend(output_path.glob("*_temp.jsonl"))
-                    temp_folder = output_path / "temp_jsonl"
-                    if temp_folder.exists():
-                        jsonl_files.extend(temp_folder.glob("*_temp.jsonl"))
+                    for pattern in patterns:
+                        jsonl_files.extend(output_path.rglob(pattern))
     
+    # Remove duplicates and sort
     return sorted(set(jsonl_files))
 
 

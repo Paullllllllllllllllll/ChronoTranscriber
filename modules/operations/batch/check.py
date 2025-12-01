@@ -27,8 +27,16 @@ from modules.processing.text_processing import (
     process_batch_output,
     format_page_line,
 )
-from modules.ui.core import UserPrompt
 from modules.ui import print_info, print_success, print_warning, print_error
+from modules.ui.batch_display import (
+    display_batch_summary,
+    display_batch_processing_progress,
+    print_transcription_item_error,
+    print_transcription_not_possible,
+    print_no_transcribable_text,
+    display_page_error_summary,
+    display_transcription_not_possible_summary,
+)
 
 logger = setup_logger(__name__)
 
@@ -82,7 +90,7 @@ def process_all_batches(
         return
 
     # Display batch summary (handles dicts or SDK objects)
-    UserPrompt.display_batch_summary(batches)
+    display_batch_summary(batches)
 
     # Process each temporary file
     for temp_file in temp_files:
@@ -251,7 +259,7 @@ def process_all_batches(
                 )
 
         # Display progress information for this temp file (standardized UI helper)
-        UserPrompt.display_batch_processing_progress(
+        display_batch_processing_progress(
             temp_file=temp_file,
             batch_ids=batch_ids,
             completed_count=completed_count,
@@ -422,7 +430,7 @@ def process_all_batches(
                                 if err_message:
                                     diag_text += f"; {err_message}"
                                 diag_text += "]"
-                                UserPrompt.print_transcription_item_error(
+                                print_transcription_item_error(
                                     image_name=image_name,
                                     page_number=page_number,
                                     status_code=status_code,
@@ -457,7 +465,7 @@ def process_all_batches(
                                 if err_message:
                                     diag_text += f"; {err_message}"
                                 diag_text += "]"
-                                UserPrompt.print_transcription_item_error(
+                                print_transcription_item_error(
                                     image_name=image_name,
                                     page_number=page_number,
                                     err_code=err_code,
@@ -492,7 +500,7 @@ def process_all_batches(
                     if transcription_text:
                         # Provide page-aware placeholders for special cases
                         if transcription_text == "[Transcription not possible]":
-                            UserPrompt.print_transcription_not_possible(
+                            print_transcription_not_possible(
                                 image_name=image_name, page_number=page_number
                             )
                             transcription_text = "[Transcription not possible]"
@@ -505,7 +513,7 @@ def process_all_batches(
                                 "warning_type": "transcription_not_possible",
                             }
                         elif transcription_text == "[No transcribable text]":
-                            UserPrompt.print_no_transcribable_text(
+                            print_no_transcribable_text(
                                 image_name=image_name, page_number=page_number
                             )
                             transcription_text = "[No transcribable text]"
@@ -623,7 +631,7 @@ def process_all_batches(
             # Summarize per-page diagnostics to console
             error_entries = [e for e in all_transcriptions if e.get("error")]
             if error_entries:
-                UserPrompt.display_page_error_summary(error_entries)
+                display_page_error_summary(error_entries)
 
             np_entries = [
                 e
@@ -631,7 +639,7 @@ def process_all_batches(
                 if e.get("warning_type") == "transcription_not_possible"
             ]
             if np_entries:
-                UserPrompt.display_transcription_not_possible_summary(len(np_entries))
+                display_transcription_not_possible_summary(len(np_entries))
 
             # Build page-identified lines in sorted order
             ordered_lines = []

@@ -42,6 +42,7 @@ ChronoTranscriber supports two execution modes to accommodate different workflow
 - Auto Mode Discovery: Scan a mixed directory and automatically choose native, Tesseract, or GPT transcription per file
 - Multi-Page Support: Preserve page ordering and handle documents with hundreds or thousands of pages
 - Preprocessing Pipeline: Configurable image enhancement including grayscale conversion, transparency handling, deskewing, denoising, and binarization
+- Post-processing Pipeline: Optional text cleanup that merges hyphenated line breaks, normalizes whitespace, limits blank lines, and wraps output via `config/image_processing_config.yaml`
 
 ## Key Features
 
@@ -440,6 +441,28 @@ Preprocessing Pipeline:
 6. Binarization: Convert to black and white using Sauvola, adaptive, or Otsu thresholding
 7. Morphology: Apply morphological operations to enhance text (optional)
 8. Border Addition: Add white border to prevent text cropping at edges
+
+#### Post-processing (Text Cleanup)
+
+```yaml
+postprocessing:
+  enabled: true
+  merge_hyphenation: false
+  collapse_internal_spaces: true
+  max_blank_lines: 2
+  tab_size: 4
+  wrap_lines: true
+  auto_wrap: true
+  wrap_width: null
+```
+
+Key Behaviors:
+
+- **Single Source of Truth:** Located in `config/image_processing_config.yaml` so visual preprocessing and textual cleanup live together.
+- **Whitespace & Hyphen Control:** Removes stray control characters, collapses long space runs, and optionally rejoins hyphenated line breaks.
+- **Blank-Line Limits:** Caps consecutive blank lines to keep transcripts tidy while preserving intentional paragraph spacing.
+- **Adaptive Wrapping:** When `wrap_lines` and `auto_wrap` are enabled, the pipeline infers a natural width per document; set `wrap_width` for explicit lengths or disable wrapping entirely.
+- **Safe Defaults:** Leave `enabled: false` to emit raw model output verbatim; toggle on when preparing publication-ready transcripts.
 
 ### 4. Concurrency Configuration (`concurrency_config.yaml`)
 

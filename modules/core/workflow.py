@@ -59,8 +59,8 @@ class WorkflowManager:
             .get('ocr', {})
         )
         
-        # Load post-processing configuration
-        self.postprocessing_config = paths_config.get("postprocessing", {})
+        # Load post-processing configuration from image_processing_config
+        self.postprocessing_config = image_processing_config.get("postprocessing", {})
 
         # Set up output directories
         pdf_output_dir = Path(

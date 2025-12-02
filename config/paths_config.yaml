@@ -1,10 +1,10 @@
 # General settings and file paths configuration
 general:
   interactive_mode: true  # Run scripts in interactive mode with prompts (true) or as CLI tools with arguments (false)
-  retain_temporary_jsonl: true  # Retain temporary JSONL files after processing
-  input_paths_is_output_path: true  # Use input paths as output paths if true
-  logs_dir: 'C:\Users\pagoetz\Desktop\working_dir\python_repo_logs\chrono_transcriber_logs'  # Directory for log files
-  keep_preprocessed_images: true  # Retain preprocessed images after processing
+  retain_temporary_jsonl: false  # Retain temporary JSONL files after processing
+  input_paths_is_output_path: false  # Use input paths as output paths if true
+  logs_dir: ''  # Directory for log files
+  keep_preprocessed_images: false  # Retain preprocessed images after processing
   # Auto mode: PDF processing settings
   auto_mode_pdf_use_ocr_for_scanned: true       # Force OCR for scanned/non-searchable PDFs (if false, attempts native extraction; will likely produce empty output files)
   auto_mode_pdf_use_ocr_for_searchable: true   # Force OCR even for searchable PDFs (bypasses native text extraction)
@@ -25,48 +25,3 @@ file_paths:
   Auto:
     input: ''  # Input directory for auto mode (scans for mixed file types)
     output: ''  # Output directory for auto mode results
-
-# Post-processing settings for transcription output cleanup
-# These settings apply to the final transcription text before writing to file.
-# Post-processing cleans up OCR artifacts, normalizes whitespace, and optionally
-# wraps long lines while preserving Markdown formatting and semantic content.
-postprocessing:
-  # Master toggle for post-processing. When false, transcription output is
-  # written as-is without any cleanup. Set to true to enable the pipeline.
-  enabled: false
-  
-  # Merge words that were hyphenated across line breaks (e.g., "politi-\nche"
-  # becomes "politiche"). Uses conservative heuristics to avoid breaking
-  # proper compound words like "Jean-Baptiste". Only merges when both sides
-  # are lowercase word fragments. Recommended for OCR output from scanned books.
-  merge_hyphenation: false
-  
-  # Collapse long runs of internal spaces (3+ spaces) between words down to
-  # exactly 2 spaces. Helps clean up OCR artifacts while preserving some
-  # spacing for tables and formatted content. Set to false to keep original spacing.
-  collapse_internal_spaces: true
-  
-  # Maximum number of consecutive blank lines to keep in the output.
-  # Extra blank lines beyond this limit are removed. Useful for cleaning up
-  # excessive whitespace from OCR output. Set to 0 to remove all blank lines.
-  max_blank_lines: 2
-  
-  # Number of spaces to expand each tab character into. Standard is 4.
-  # Tabs are converted to spaces for consistent formatting across viewers.
-  tab_size: 4
-  
-  # Enable line wrapping for very long lines. When true, lines exceeding the
-  # wrap width are broken at word boundaries. Preserves leading indentation.
-  # Headings, page markers, table rows, and error placeholders are never wrapped.
-  wrap_lines: false
-  
-  # Automatically compute wrap width from the average line length of text blocks.
-  # Only used when wrap_lines is true. Analyzes consecutive non-blank line groups
-  # and uses their mean length as the target width. Useful when documents have
-  # varying natural line lengths. Takes precedence over wrap_width if both set.
-  auto_wrap: false
-  
-  # Explicit target width for line wrapping (in characters). Only used when
-  # wrap_lines is true and auto_wrap is false. Set to null to use default of 80.
-  # Common values: 80 (terminal), 100 (wide editor), 120 (modern screens).
-  wrap_width: null

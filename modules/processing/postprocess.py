@@ -403,7 +403,7 @@ def postprocess_transcription(
     Args:
         text: Transcription text to process.
         config: Post-processing configuration dictionary. If None, uses defaults.
-            Expected keys match paths_config.yaml postprocessing section:
+            Expected keys match image_processing_config.yaml postprocessing section:
             - enabled: bool (master toggle, default True when called directly)
             - merge_hyphenation: bool
             - collapse_internal_spaces: bool

@@ -50,12 +50,13 @@ def load_config() -> Tuple[List[Path], Dict[str, Any], Dict[str, Any]]:
     """
     config_service = get_config_service()
     paths_config = config_service.get_paths_config()
+    image_processing_config = config_service.get_image_processing_config()
 
     # Validate configured paths
     validate_paths(paths_config)
 
     processing_settings = paths_config.get("general", {})
-    postprocessing_config = paths_config.get("postprocessing", {})
+    postprocessing_config = image_processing_config.get("postprocessing", {})
 
     # Use centralized directory collection utility
     scan_dirs = collect_scan_directories(paths_config)
@@ -740,9 +741,11 @@ def run_batch_finalization(run_diagnostics: bool = True, custom_directory: Path 
         # Use the specified directory instead of loading from config
         scan_dirs = [custom_directory]
         # Load minimal processing settings from config
-        paths_config = get_config_service().get_paths_config()
+        config_service = get_config_service()
+        paths_config = config_service.get_paths_config()
+        image_processing_config = config_service.get_image_processing_config()
         processing_settings = paths_config.get("general", {})
-        postprocessing_config = paths_config.get("postprocessing", {})
+        postprocessing_config = image_processing_config.get("postprocessing", {})
     else:
         # Load standard configuration
         scan_dirs, processing_settings, postprocessing_config = load_config()

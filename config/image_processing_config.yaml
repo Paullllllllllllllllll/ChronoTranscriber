@@ -51,3 +51,39 @@ tesseract_image_processing:
     output_format: png             # png|tiff (lossless)
     preserve_resolution: true      # do not resize/box-fit for Tesseract
     embed_dpi_metadata: true       # embed DPI metadata in output files
+
+# 3) Post-processing settings for transcription output cleanup
+# Applied to final transcription text before writing to file. Cleans up OCR
+# artifacts, normalizes whitespace, and optionally wraps long lines while
+# preserving Markdown formatting and semantic content.
+postprocessing:
+  # Master toggle. When false, transcription output is written as-is.
+  enabled: true
+  
+  # Merge hyphenated line breaks (e.g., "politi-\nche" -> "politiche").
+  # Uses conservative heuristics to preserve compound words like "Jean-Baptiste".
+  # Only merges when both sides are lowercase word fragments.
+  merge_hyphenation: false
+  
+  # Collapse 3+ internal spaces between words down to exactly 2 spaces.
+  # Cleans OCR artifacts while preserving spacing for tables/formatted content.
+  collapse_internal_spaces: true
+  
+  # Maximum consecutive blank lines to keep. Extras are removed.
+  # Set to 0 to remove all blank lines.
+  max_blank_lines: 2
+  
+  # Tab expansion width. Tabs become spaces for consistent formatting.
+  tab_size: 4
+  
+  # Line wrapping for long lines. Breaks at word boundaries, preserves indentation.
+  # Headings, page markers, table rows, and error placeholders are never wrapped.
+  wrap_lines: true
+  
+  # Auto-compute wrap width from average line length of text blocks.
+  # Takes precedence over wrap_width when both wrap_lines and auto_wrap are true.
+  auto_wrap: true
+  
+  # Explicit wrap width (characters). Only used when wrap_lines=true and auto_wrap=false.
+  # Common values: 80 (terminal), 100 (wide editor), 120 (modern screens). null=80.
+  wrap_width: null

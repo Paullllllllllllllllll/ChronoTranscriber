@@ -1,10 +1,11 @@
 """Document processing package.
 
-Provides PDF, EPUB, image processing, OCR, and text extraction utilities.
+Provides PDF, EPUB, image processing, OCR, text extraction, and post-processing utilities.
 """
 
 # Avoid circular imports - use direct imports instead of re-exporting
 from .epub_utils import EPUBProcessor, EPUBTextExtraction
+from .postprocess import postprocess_transcription, postprocess_file, postprocess_text
 
 __all__ = [
     "PDFProcessor",
@@ -18,4 +19,8 @@ __all__ = [
     "is_tesseract_available",
     "ensure_tesseract_available",
     "perform_ocr",
+    # Post-processing
+    "postprocess_transcription",
+    "postprocess_file",
+    "postprocess_text",
 ]

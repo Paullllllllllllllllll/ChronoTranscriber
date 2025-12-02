@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from datetime import datetime, timezone
 
 from openai import OpenAI
@@ -27,6 +27,7 @@ from modules.processing.text_processing import (
     process_batch_output,
     format_page_line,
 )
+from modules.processing.postprocess import postprocess_transcription
 from modules.ui import print_info, print_success, print_warning, print_error
 from modules.ui.batch_display import (
     display_batch_summary,
@@ -41,8 +42,8 @@ from modules.ui.batch_display import (
 logger = setup_logger(__name__)
 
 
-def load_config() -> Tuple[List[Path], Dict[str, Any]]:
-    """Load YAML configuration and return (scan_dirs, processing_settings).
+def load_config() -> Tuple[List[Path], Dict[str, Any], Dict[str, Any]]:
+    """Load YAML configuration and return (scan_dirs, processing_settings, postprocessing_config).
 
     - Ensures file paths exist (creates input/output directories on demand)
     - Validates configured paths
@@ -54,15 +55,19 @@ def load_config() -> Tuple[List[Path], Dict[str, Any]]:
     validate_paths(paths_config)
 
     processing_settings = paths_config.get("general", {})
+    postprocessing_config = paths_config.get("postprocessing", {})
 
     # Use centralized directory collection utility
     scan_dirs = collect_scan_directories(paths_config)
     
-    return scan_dirs, processing_settings
+    return scan_dirs, processing_settings, postprocessing_config
 
 
 def process_all_batches(
-    root_folder: Path, processing_settings: Dict[str, Any], client: OpenAI
+    root_folder: Path,
+    processing_settings: Dict[str, Any],
+    client: OpenAI,
+    postprocessing_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Finalize all completed batch jobs for a given root folder.
 
@@ -650,12 +655,15 @@ def process_all_batches(
                 iname = info.get("image_name")
                 ordered_lines.append(format_page_line(tx, pn, iname))
 
+            # Combine lines and apply post-processing if enabled
+            combined_text = "\n".join(line for line in ordered_lines if line)
+            if postprocessing_config:
+                combined_text = postprocess_transcription(combined_text, postprocessing_config)
+
             processing_success = False
             try:
                 with final_txt_path.open("w", encoding="utf-8") as fout:
-                    for line in ordered_lines:
-                        if line:
-                            fout.write(line + "\n")
+                    fout.write(combined_text)
                 logger.info(
                     f"All batches for {temp_file.name} processed and saved to {final_txt_path}"
                 )
@@ -734,9 +742,10 @@ def run_batch_finalization(run_diagnostics: bool = True, custom_directory: Path 
         # Load minimal processing settings from config
         paths_config = get_config_service().get_paths_config()
         processing_settings = paths_config.get("general", {})
+        postprocessing_config = paths_config.get("postprocessing", {})
     else:
         # Load standard configuration
-        scan_dirs, processing_settings = load_config()
+        scan_dirs, processing_settings, postprocessing_config = load_config()
     
     client = OpenAI()
 
@@ -744,6 +753,6 @@ def run_batch_finalization(run_diagnostics: bool = True, custom_directory: Path 
         diagnose_api_issues()
 
     for directory in scan_dirs:
-        process_all_batches(directory, processing_settings, client)
+        process_all_batches(directory, processing_settings, client, postprocessing_config)
     print_info("Batch results processing complete across all directories.")
     logger.info("Batch results processing complete across all directories.")

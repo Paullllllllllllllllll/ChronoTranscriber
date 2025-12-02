@@ -243,6 +243,115 @@ Examples:
     return parser
 
 
+def create_postprocess_parser() -> argparse.ArgumentParser:
+    """Create argument parser for postprocess_transcriptions.py in CLI mode.
+    
+    Returns:
+        Configured ArgumentParser for post-processing operations
+    """
+    parser = argparse.ArgumentParser(
+        description="ChronoTranscriber Post-Processor - Clean and normalize transcription output (CLI Mode)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Post-process a single file in-place
+  python main/postprocess_transcriptions.py --input results/doc_transcription.txt --in-place
+
+  # Post-process with explicit output
+  python main/postprocess_transcriptions.py --input results/doc.txt --output results/doc_cleaned.txt
+
+  # Process all transcription files in a directory
+  python main/postprocess_transcriptions.py --input results/ --in-place --recursive
+
+  # Enable hyphenation merging
+  python main/postprocess_transcriptions.py --input doc.txt --in-place --merge-hyphenation
+
+  # Enable line wrapping with auto-detected width
+  python main/postprocess_transcriptions.py --input doc.txt --in-place --auto-wrap
+
+  # Enable line wrapping with explicit width
+  python main/postprocess_transcriptions.py --input doc.txt --in-place --wrap-width 100
+        """
+    )
+    
+    # Required arguments
+    parser.add_argument(
+        "--input", "-i",
+        type=str,
+        required=True,
+        help="Input path: file or directory containing *_transcription.txt files."
+    )
+    
+    parser.add_argument(
+        "--output", "-o",
+        type=str,
+        help="Output path for processed file(s). If not specified and not --in-place, prints to stdout."
+    )
+    
+    # Processing modes
+    parser.add_argument(
+        "--in-place",
+        action="store_true",
+        help="Modify input file(s) in-place instead of writing to output."
+    )
+    
+    parser.add_argument(
+        "--recursive", "-r",
+        action="store_true",
+        help="When input is a directory, process files recursively in subdirectories."
+    )
+    
+    # Post-processing options (override config)
+    parser.add_argument(
+        "--merge-hyphenation",
+        action="store_true",
+        default=None,
+        help="Merge words hyphenated across line breaks (e.g., 'politi-\\nche' -> 'politiche')."
+    )
+    
+    parser.add_argument(
+        "--no-collapse-spaces",
+        action="store_true",
+        help="Do not collapse long internal runs of spaces."
+    )
+    
+    parser.add_argument(
+        "--max-blank-lines",
+        type=int,
+        default=None,
+        help="Maximum number of consecutive blank lines to keep (default: 2)."
+    )
+    
+    parser.add_argument(
+        "--tab-size",
+        type=int,
+        default=None,
+        help="Number of spaces to expand each tab into (default: 4)."
+    )
+    
+    parser.add_argument(
+        "--wrap-width",
+        type=int,
+        default=None,
+        help="Wrap lines longer than this width (enables line wrapping)."
+    )
+    
+    parser.add_argument(
+        "--auto-wrap",
+        action="store_true",
+        default=None,
+        help="Automatically determine wrap width from text blocks (enables line wrapping)."
+    )
+    
+    parser.add_argument(
+        "--use-config",
+        action="store_true",
+        help="Use settings from paths_config.yaml postprocessing section as base."
+    )
+    
+    return parser
+
+
 def resolve_path(path_str: Optional[str], base_path: Optional[Path] = None) -> Path:
     """Resolve a path string to an absolute Path object.
     

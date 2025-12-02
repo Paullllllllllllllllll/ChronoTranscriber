@@ -25,6 +25,7 @@ from modules.llm.batch.batching import get_batch_chunk_size
 from modules.llm import transcribe_image_with_llm
 from modules.infra.concurrency import run_concurrent_transcription_tasks
 from modules.processing.text_processing import extract_transcribed_text, format_page_line
+from modules.processing.postprocess import postprocess_transcription
 from modules.core.utils import console_print
 from modules.core.token_guard import check_and_wait_for_token_limit
 
@@ -57,6 +58,9 @@ class WorkflowManager:
             .get('tesseract_image_processing', {})
             .get('ocr', {})
         )
+        
+        # Load post-processing configuration
+        self.postprocessing_config = paths_config.get("postprocessing", {})
 
         # Set up output directories
         pdf_output_dir = Path(
@@ -210,8 +214,10 @@ class WorkflowManager:
         output_txt_path.parent.mkdir(parents=True, exist_ok=True)
 
         rendered_text = extraction.to_plain_text()
+        # Apply post-processing if enabled
+        processed_text = postprocess_transcription(rendered_text, self.postprocessing_config)
         try:
-            output_txt_path.write_text(rendered_text, encoding="utf-8")
+            output_txt_path.write_text(processed_text, encoding="utf-8")
         except Exception as exc:
             logger.exception("Failed to write EPUB transcription for %s: %s", epub_path.name, exc)
             console_print(f"[ERROR] Failed to write output for {epub_path.name}.")
@@ -256,7 +262,9 @@ class WorkflowManager:
                         "pre_processed_image": None
                     }
                     await jfile.write(json.dumps(record) + '\n')
-                output_txt_path.write_text(text, encoding='utf-8')
+                # Apply post-processing if enabled
+                processed_text = postprocess_transcription(text, self.postprocessing_config)
+                output_txt_path.write_text(processed_text, encoding='utf-8')
                 console_print(
                     f"[SUCCESS] Extracted text from '{pdf_path.name}' using native method -> {output_txt_path.name}")
             except Exception as e:
@@ -842,7 +850,9 @@ class WorkflowManager:
                 page_number = int(order_index) + 1 if isinstance(order_index, int) else None
                 lines.append(format_page_line(text_chunk, page_number, image_name))
             combined_text = "\n".join(lines)
-            output_txt_path.write_text(combined_text, encoding='utf-8')
+            # Apply post-processing if enabled
+            processed_text = postprocess_transcription(combined_text, self.postprocessing_config)
+            output_txt_path.write_text(processed_text, encoding='utf-8')
         except Exception as e:
             logger.exception(
                 f"Error writing combined transcription output for {source_name}: {e}")

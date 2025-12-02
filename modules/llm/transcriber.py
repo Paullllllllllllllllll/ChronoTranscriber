@@ -136,16 +136,40 @@ class LangChainTranscriber:
         else:
             self.image_detail = "auto"
         
-        # Create provider instance
+        # Load max_output_tokens from model config (critical for reasoning models)
+        max_tokens = int(
+            tm.get("max_output_tokens")
+            or tm.get("max_tokens", 20480)
+        )
+        
+        # Load optional sampler parameters
+        temperature = float(tm.get("temperature", 0.0))
+        top_p = tm.get("top_p")
+        frequency_penalty = tm.get("frequency_penalty")
+        presence_penalty = tm.get("presence_penalty")
+        
+        # Build kwargs for optional parameters
+        provider_kwargs = {}
+        if top_p is not None:
+            provider_kwargs["top_p"] = float(top_p)
+        if frequency_penalty is not None:
+            provider_kwargs["frequency_penalty"] = float(frequency_penalty)
+        if presence_penalty is not None:
+            provider_kwargs["presence_penalty"] = float(presence_penalty)
+        
+        # Create provider instance with full config
         self._provider = get_provider(
             provider=self.provider_name,
             model=self.model,
             api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **provider_kwargs,
         )
         
         logger.info(
             f"LangChainTranscriber initialized: provider={self._provider.provider_name}, "
-            f"model={self.model}"
+            f"model={self.model}, max_tokens={max_tokens}"
         )
     
     @property

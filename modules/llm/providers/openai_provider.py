@@ -350,27 +350,33 @@ class OpenAIProvider(BaseProvider):
         # LangChain will automatically filter these out before sending to API
         disabled_params = self._build_disabled_params()
         
-        # Build model kwargs - include all params, LangChain will filter via disabled_params
-        model_kwargs: Dict[str, Any] = {
+        # Initialize LangChain ChatOpenAI
+        # LangChain handles:
+        # - Retry logic with exponential backoff (max_retries)
+        # - Parameter filtering for unsupported models (disabled_params)
+        # - Converting max_completion_tokens to correct API parameter for reasoning models
+        llm_kwargs = {
+            "api_key": api_key,
+            "model": model,
+            "timeout": timeout,
+            "max_retries": max_retries,
+            "disabled_params": disabled_params,
             "temperature": temperature,
             "top_p": top_p,
             "frequency_penalty": frequency_penalty,
             "presence_penalty": presence_penalty,
         }
         
-        # Initialize LangChain ChatOpenAI
-        # LangChain handles:
-        # - Retry logic with exponential backoff (max_retries)
-        # - Parameter filtering for unsupported models (disabled_params)
-        self._llm = ChatOpenAI(
-            api_key=api_key,
-            model=model,
-            max_tokens=max_tokens,
-            timeout=timeout,
-            max_retries=max_retries,
-            disabled_params=disabled_params,
-            **model_kwargs,
-        )
+        # For reasoning models (GPT-5, o-series), use max_completion_tokens instead of max_tokens
+        # LangChain v1.1.0+ accepts max_completion_tokens as a direct parameter and handles
+        # the conversion to the correct API parameter name for reasoning models
+        if self._capabilities.is_reasoning_model:
+            llm_kwargs["max_completion_tokens"] = max_tokens
+            logger.info(f"Using max_completion_tokens={max_tokens} for reasoning model {model}")
+        else:
+            llm_kwargs["max_tokens"] = max_tokens
+        
+        self._llm = ChatOpenAI(**llm_kwargs)
     
     def _build_disabled_params(self) -> Dict[str, Any]:
         """Build disabled_params dict based on model capabilities.

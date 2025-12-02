@@ -779,14 +779,19 @@ async def main_cli(args, paths_config: Dict[str, Any]) -> None:
     transcription_path = resolve_path(args.transcription, PROJECT_ROOT)
     validate_input_path(transcription_path)
     
-    if not transcription_path.name.endswith("_transcription.txt"):
-        print_error(f"Expected transcription file ending with '_transcription.txt', got: {transcription_path.name}")
+    if not transcription_path.suffix == ".txt":
+        print_error(f"Expected .txt transcription file, got: {transcription_path.name}")
         return
     
     # Find corresponding temp JSONL file
+    # Support both legacy (*_transcription.txt) and new (*.txt) naming
     identifier = transcription_path.stem.replace("_transcription", "")
     parent_folder = transcription_path.parent
-    temp_jsonl_path = parent_folder / f"{identifier}_transcription.jsonl"
+    
+    # Try new format first, then legacy
+    temp_jsonl_path = parent_folder / f"{identifier}.jsonl"
+    if not temp_jsonl_path.exists():
+        temp_jsonl_path = parent_folder / f"{identifier}_transcription.jsonl"
     
     # Create job object
     job = Job(

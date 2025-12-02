@@ -11,7 +11,7 @@ from PIL import Image
 
 from modules.config.service import get_config_service
 from modules.processing.image_utils import ImageProcessor
-from modules.core.safe_paths import create_safe_directory_name
+from modules.core.safe_paths import create_safe_directory_name, create_safe_filename
 
 logger = logging.getLogger(__name__)
 
@@ -288,10 +288,13 @@ class PDFProcessor:
         parent_folder = pdf_output_dir / safe_dir_name
         parent_folder.mkdir(parents=True, exist_ok=True)
         
-        # IMPORTANT: Use original PDF stem for output files (not the hashed directory name)
-        # This preserves proper file naming while handling path length limits via directory structure
-        output_txt_path = parent_folder / f"{self.pdf_path.stem}_transcription.txt"
-        temp_jsonl_path = parent_folder / f"{self.pdf_path.stem}_transcription.jsonl"
+        # Create safe filenames (truncated with hash if needed, considering full path length)
+        # No _transcription suffix to keep filenames shorter
+        output_txt_name = create_safe_filename(self.pdf_path.stem, ".txt", parent_folder)
+        temp_jsonl_name = create_safe_filename(self.pdf_path.stem, ".jsonl", parent_folder)
+        
+        output_txt_path = parent_folder / output_txt_name
+        temp_jsonl_path = parent_folder / temp_jsonl_name
         
         if not temp_jsonl_path.exists():
             temp_jsonl_path.touch()

@@ -18,12 +18,18 @@ import hashlib
 from pathlib import Path
 
 
+# Windows MAX_PATH limit
+WINDOWS_MAX_PATH = 260
+
 # Maximum safe length for directory/file names
 # Keep it well under 255 (NTFS limit) to leave room for subdirs and files
 MAX_SAFE_NAME_LENGTH = 80
 
 # Hash length for uniqueness (8 chars = 4 billion combinations)
 HASH_LENGTH = 8
+
+# Minimum name length to preserve readability (before hash)
+MIN_READABLE_LENGTH = 20
 
 
 def create_safe_directory_name(original_name: str, suffix: str = "") -> str:
@@ -60,6 +66,53 @@ def create_safe_directory_name(original_name: str, suffix: str = "") -> str:
 	
 	# Combine truncated name with hash and suffix
 	safe_name = f"{truncated}-{name_hash}{suffix}"
+	
+	return safe_name
+
+
+def create_safe_filename(original_name: str, extension: str, parent_path: Path = None) -> str:
+	"""
+	Create a safe filename that won't exceed Windows path limits.
+	
+	Args:
+		original_name: The original name (e.g., document stem)
+		extension: File extension including dot (e.g., ".txt", ".jsonl")
+		parent_path: Optional parent directory path to consider for MAX_PATH calculation
+	
+	Returns:
+		A shortened, safe filename with hash for uniqueness
+		
+	Example:
+		Input:  "Nippard_2025_Bodybuilding_Transformation_System_Intermediate_Advanced", ".txt"
+		Output: "Nippard_2025_Bodybuilding_Transformation_System_Inte-a3f8d9e2.txt"
+	"""
+	# Calculate hash of full original name for uniqueness
+	name_hash = hashlib.sha256(original_name.encode('utf-8')).hexdigest()[:HASH_LENGTH]
+	
+	# Calculate maximum filename length based on context
+	if parent_path is not None:
+		# Calculate remaining path budget from Windows MAX_PATH
+		parent_len = len(str(parent_path)) + 1  # +1 for path separator
+		max_filename_len = WINDOWS_MAX_PATH - parent_len - 10  # -10 for safety margin
+		# Ensure we stay within reasonable bounds
+		max_filename_len = max(MIN_READABLE_LENGTH + HASH_LENGTH + len(extension) + 1, 
+							   min(max_filename_len, MAX_SAFE_NAME_LENGTH))
+	else:
+		max_filename_len = MAX_SAFE_NAME_LENGTH
+	
+	# Calculate how much space we have for the actual name
+	# Format: [truncated_name]-[hash][extension]
+	reserved_length = len(extension) + HASH_LENGTH + 1  # +1 for the dash
+	available_length = max_filename_len - reserved_length
+	
+	# Truncate the name if necessary
+	if len(original_name) > available_length:
+		truncated = original_name[:max(MIN_READABLE_LENGTH, available_length)].rstrip('.-_ ')
+		# Combine truncated name with hash
+		safe_name = f"{truncated}-{name_hash}{extension}"
+	else:
+		# No truncation needed - use original name without hash
+		safe_name = f"{original_name}{extension}"
 	
 	return safe_name
 

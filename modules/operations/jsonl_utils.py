@@ -157,8 +157,10 @@ def backup_file(file_path: Path, suffix: str = "_backup") -> Path:
 def find_companion_files(base_path: Path) -> Dict[str, Optional[Path]]:
     """Find companion files for a transcription (JSONL, debug, etc.).
     
+    Supports both legacy (*_transcription.*) and new (*.*) naming conventions.
+    
     Args:
-        base_path: Base path (e.g., *_transcription.txt or *_transcription.jsonl).
+        base_path: Base path (e.g., *.txt, *.jsonl, *_transcription.txt).
         
     Returns:
         Dictionary with keys: 'jsonl', 'debug', 'txt' mapping to paths or None.
@@ -166,11 +168,21 @@ def find_companion_files(base_path: Path) -> Dict[str, Optional[Path]]:
     parent = base_path.parent
     stem = base_path.stem.replace("_transcription", "")
     
-    companions = {
-        "jsonl": parent / f"{stem}_transcription.jsonl",
-        "debug": parent / f"{stem}_batch_submission_debug.json",
-        "txt": parent / f"{stem}_transcription.txt",
-    }
+    def find_file(stem: str, extensions: list) -> Optional[Path]:
+        """Find file with any of the given extensions, trying new format first."""
+        for ext in extensions:
+            # Try new format first
+            new_path = parent / f"{stem}{ext}"
+            if new_path.exists():
+                return new_path
+            # Try legacy format
+            legacy_path = parent / f"{stem}_transcription{ext}"
+            if legacy_path.exists():
+                return legacy_path
+        return None
     
-    # Return only existing files
-    return {k: v if v.exists() else None for k, v in companions.items()}
+    return {
+        "jsonl": find_file(stem, [".jsonl"]),
+        "debug": parent / f"{stem}_batch_submission_debug.json" if (parent / f"{stem}_batch_submission_debug.json").exists() else None,
+        "txt": find_file(stem, [".txt"]),
+    }

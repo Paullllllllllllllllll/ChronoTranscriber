@@ -9,7 +9,7 @@ import numpy as np
 import cv2
 from deskew import determine_skew
 from skimage.filters import threshold_sauvola
-from modules.core.safe_paths import create_safe_directory_name
+from modules.core.safe_paths import create_safe_directory_name, create_safe_filename
 
 from modules.config.service import get_config_service
 from modules.config.constants import SUPPORTED_IMAGE_EXTENSIONS
@@ -156,12 +156,15 @@ class ImageProcessor:
         preprocessed_folder = parent_folder / "preprocessed_images"
         preprocessed_folder.mkdir(exist_ok=True)
         
-        # IMPORTANT: Use original folder name for output files (not the hashed directory name)
-        # This preserves proper file naming while handling path length limits via directory structure
-        temp_jsonl_path = parent_folder / f"{folder.name}_transcription.jsonl"
+        # Create safe filenames (truncated with hash if needed, considering full path length)
+        # No _transcription suffix to keep filenames shorter
+        temp_jsonl_name = create_safe_filename(folder.name, ".jsonl", parent_folder)
+        output_txt_name = create_safe_filename(folder.name, ".txt", parent_folder)
+        
+        temp_jsonl_path = parent_folder / temp_jsonl_name
         if not temp_jsonl_path.exists():
             temp_jsonl_path.touch()
-        output_txt_path = parent_folder / f"{folder.name}_transcription.txt"
+        output_txt_path = parent_folder / output_txt_name
         
         return parent_folder, preprocessed_folder, temp_jsonl_path, output_txt_path
 

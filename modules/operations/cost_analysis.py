@@ -367,8 +367,8 @@ def find_jsonl_files(paths_config: Dict, schemas_paths: Dict) -> List[Path]:
     jsonl_files = []
     input_is_output = paths_config.get("general", {}).get("input_paths_is_output_path", True)
     
-    # Patterns to search for (transcription files can have different naming)
-    patterns = ["*_transcription.jsonl", "*_temp.jsonl", "*.jsonl"]
+    # Patterns to search for (both legacy *_transcription.jsonl and new *.jsonl format)
+    patterns = ["*.jsonl"]
     
     # Scan schema-specific directories
     for schema_name, schema_config in schemas_paths.items():

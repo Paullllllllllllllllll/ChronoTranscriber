@@ -189,11 +189,26 @@ def write_repair_jsonl_line(path: Path, record: Dict[str, Any]) -> None:
 def discover_jobs(paths_config: Dict[str, Any]) -> List[Job]:
     """
     Discover repairable jobs by scanning the configured output folders for
-    *_transcription.txt files and locating their corresponding temporary JSONL.
+    transcription .txt files and locating their corresponding temporary JSONL.
+
+    Supports both legacy (*_transcription.txt) and new (*.txt) naming conventions.
 
     Returns a list of Job records sorted by parent folder path.
     """
     jobs: List[Job] = []
+
+    def find_companion_jsonl(txt_path: Path, identifier: str) -> Optional[Path]:
+        """Find the companion JSONL file for a transcription txt file."""
+        parent = txt_path.parent
+        # Try new format first (same base name)
+        new_format = parent / f"{identifier}.jsonl"
+        if new_format.exists():
+            return new_format
+        # Try legacy format
+        legacy_format = parent / f"{identifier}_transcription.jsonl"
+        if legacy_format.exists():
+            return legacy_format
+        return None
 
     def scan_root(root: Optional[str], kind: str) -> None:
         if not root:
@@ -201,16 +216,18 @@ def discover_jobs(paths_config: Dict[str, Any]) -> List[Job]:
         root_path = Path(root)
         if not root_path.exists():
             return
-        for p in root_path.rglob("*_transcription.txt"):
+        # Scan for all .txt files in output folders
+        for p in root_path.rglob("*.txt"):
             parent = p.parent
+            # Determine identifier (strip _transcription suffix if present)
             identifier = p.stem.replace("_transcription", "").strip()
-            temp = parent / f"{identifier}_transcription.jsonl"
+            temp = find_companion_jsonl(p, identifier)
             jobs.append(
                 Job(
                     parent_folder=parent,
                     identifier=identifier,
                     final_txt_path=p,
-                    temp_jsonl_path=temp if temp.exists() else None,
+                    temp_jsonl_path=temp,
                     kind=kind,
                 )
             )

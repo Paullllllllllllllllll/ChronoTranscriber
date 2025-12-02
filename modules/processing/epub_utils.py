@@ -10,7 +10,7 @@ import ebooklib
 from ebooklib import epub
 from lxml import html
 
-from modules.core.safe_paths import create_safe_directory_name
+from modules.core.safe_paths import create_safe_directory_name, create_safe_filename
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,9 @@ class EPUBProcessor:
         parent_folder = epub_output_dir / safe_dir_name
         parent_folder.mkdir(parents=True, exist_ok=True)
 
-        output_txt_path = parent_folder / f"{self.epub_path.stem}_transcription.txt"
+        # Create safe filename (truncated with hash if needed, considering full path length)
+        output_txt_name = create_safe_filename(self.epub_path.stem, ".txt", parent_folder)
+        output_txt_path = parent_folder / output_txt_name
         return parent_folder, output_txt_path
 
 

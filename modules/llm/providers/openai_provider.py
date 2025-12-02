@@ -361,20 +361,21 @@ class OpenAIProvider(BaseProvider):
             "timeout": timeout,
             "max_retries": max_retries,
             "disabled_params": disabled_params,
-            "temperature": temperature,
-            "top_p": top_p,
-            "frequency_penalty": frequency_penalty,
-            "presence_penalty": presence_penalty,
         }
         
         # For reasoning models (GPT-5, o-series), use max_completion_tokens instead of max_tokens
-        # LangChain v1.1.0+ accepts max_completion_tokens as a direct parameter and handles
-        # the conversion to the correct API parameter name for reasoning models
-        if self._capabilities.is_reasoning_model:
+        # and skip sampler parameters which are not supported
+        caps = self._capabilities
+        if caps.is_reasoning_model:
             llm_kwargs["max_completion_tokens"] = max_tokens
             logger.info(f"Using max_completion_tokens={max_tokens} for reasoning model {model}")
         else:
             llm_kwargs["max_tokens"] = max_tokens
+            # Only pass sampler parameters for non-reasoning models
+            llm_kwargs["temperature"] = temperature
+            llm_kwargs["top_p"] = top_p
+            llm_kwargs["frequency_penalty"] = frequency_penalty
+            llm_kwargs["presence_penalty"] = presence_penalty
         
         self._llm = ChatOpenAI(**llm_kwargs)
     

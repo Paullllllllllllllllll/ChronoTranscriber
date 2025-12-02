@@ -72,12 +72,13 @@ def process_all_batches(
 ) -> None:
     """Finalize all completed batch jobs for a given root folder.
 
-    Scans for ``*_transcription.jsonl`` files, retrieves batch summaries,
-    safeguards ordering using custom_id metadata, and writes a final
-    ``*_transcription.txt`` when all parts are available.
+    Scans for ``.jsonl`` files (both legacy ``*_transcription.jsonl`` and new format),
+    retrieves batch summaries, safeguards ordering using custom_id metadata, and writes
+    a final ``.txt`` output when all parts are available.
     """
     print_info(f"Scanning directory '{root_folder}' for temporary batch files...")
-    temp_files = list(root_folder.rglob("*_transcription.jsonl"))
+    # Search for both new format (*.jsonl) and legacy format (*_transcription.jsonl)
+    temp_files = list(root_folder.rglob("*.jsonl"))
     if not temp_files:
         print_info(f"No temporary batch files found in {root_folder}.")
         logger.info(f"No temporary batch files found in {root_folder}.")

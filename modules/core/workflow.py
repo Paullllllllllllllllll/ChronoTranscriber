@@ -62,38 +62,25 @@ class WorkflowManager:
         # Load post-processing configuration from image_processing_config
         self.postprocessing_config = image_processing_config.get("postprocessing", {})
 
-        # Set up output directories
-        pdf_output_dir = Path(
+        # Check if output should be colocated with input files
+        self.use_input_as_output = self.processing_settings.get("input_paths_is_output_path", False)
+
+        # Set up default output directories (used when use_input_as_output is False)
+        self.pdf_output_dir = Path(
             paths_config.get('file_paths', {}).get('PDFs', {}).get('output',
                                                                    'pdfs_out'))
-        image_output_dir = Path(
+        self.image_output_dir = Path(
             paths_config.get('file_paths', {}).get('Images', {}).get('output',
                                                                      'images_out'))
-        epub_output_dir = Path(
+        self.epub_output_dir = Path(
             paths_config.get('file_paths', {}).get('EPUBs', {}).get('output',
                                                                     'epubs_out'))
 
-        if self.processing_settings.get("input_paths_is_output_path", False):
-            pdf_input_dir = Path(
-                paths_config.get('file_paths', {}).get('PDFs', {}).get('input',
-                                                                       'pdfs_in'))
-            image_input_dir = Path(
-                paths_config.get('file_paths', {}).get('Images', {}).get(
-                    'input', 'images_in'))
-            self.pdf_output_dir = pdf_input_dir
-            self.image_output_dir = image_input_dir
-            self.epub_output_dir = Path(
-                paths_config.get('file_paths', {}).get('EPUBs', {}).get('input', 'epubs_in')
-            )
-        else:
-            self.pdf_output_dir = pdf_output_dir
-            self.image_output_dir = image_output_dir
-            self.epub_output_dir = epub_output_dir
-
-        # Ensure directories exist
-        self.pdf_output_dir.mkdir(parents=True, exist_ok=True)
-        self.image_output_dir.mkdir(parents=True, exist_ok=True)
-        self.epub_output_dir.mkdir(parents=True, exist_ok=True)
+        # Ensure default directories exist (only needed when not using input as output)
+        if not self.use_input_as_output:
+            self.pdf_output_dir.mkdir(parents=True, exist_ok=True)
+            self.image_output_dir.mkdir(parents=True, exist_ok=True)
+            self.epub_output_dir.mkdir(parents=True, exist_ok=True)
 
     def _ensure_tesseract_available(self) -> bool:
         """Verify that Tesseract is available.
@@ -210,7 +197,9 @@ class WorkflowManager:
             console_print(f"[ERROR] Failed to extract text from {epub_path.name}.")
             return
 
-        _parent_folder, output_txt_path = processor.prepare_output_folder(self.epub_output_dir)
+        # Determine output directory: use input file's parent when input_paths_is_output_path is True
+        output_dir = epub_path.parent if self.use_input_as_output else self.epub_output_dir
+        _parent_folder, output_txt_path = processor.prepare_output_folder(output_dir)
         output_txt_path.parent.mkdir(parents=True, exist_ok=True)
 
         rendered_text = extraction.to_plain_text()
@@ -232,8 +221,10 @@ class WorkflowManager:
         Processes a single PDF file for transcription based on the user configuration.
         """
         pdf_processor = PDFProcessor(pdf_path)
+        # Determine output directory: use input file's parent when input_paths_is_output_path is True
+        output_dir = pdf_path.parent if self.use_input_as_output else self.pdf_output_dir
         parent_folder, output_txt_path, temp_jsonl_path = pdf_processor.prepare_output_folder(
-            self.pdf_output_dir)
+            output_dir)
         method = self.user_config.transcription_method
 
         console_print(f"\n[INFO] Processing PDF: {pdf_path.name}")
@@ -478,8 +469,11 @@ class WorkflowManager:
         """
         Processes all images in a given folder based on the user configuration.
         """
+        # Determine output directory: use input folder itself when input_paths_is_output_path is True
+        # This places output files inside the source folder
+        output_dir = folder if self.use_input_as_output else self.image_output_dir
         parent_folder, preprocessed_folder, temp_jsonl_path, output_txt_path = ImageProcessor.prepare_image_folder(
-            folder, self.image_output_dir)
+            folder, output_dir)
         method = self.user_config.transcription_method
 
         console_print(f"\n[INFO] Processing folder: {folder.name}")

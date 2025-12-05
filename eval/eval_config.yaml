@@ -71,8 +71,16 @@ models:
 # Evaluation Settings
 # =============================================================================
 evaluation:
+  # Evaluation method: page_level uses JSONL files for accurate page-by-page comparison
+  # This avoids formatting penalties from post-processing in final TXT output
+  method: "page_level"
+  
   # Schema to use for transcription
   schema_path: "schemas/eval_transcription_schema.json"
+  
+  # Ground truth format: JSONL files with per-page transcriptions
+  # Create using: python main/prepare_ground_truth.py
+  ground_truth_format: "jsonl"
   
   # Normalization settings for metrics
   normalize_whitespace: true

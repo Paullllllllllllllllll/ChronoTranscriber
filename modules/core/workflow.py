@@ -15,6 +15,7 @@ from modules.infra.logger import setup_logger
 from modules.ui.core import UserConfiguration
 from modules.processing.pdf_utils import PDFProcessor, native_extract_pdf_text
 from modules.processing.epub_utils import EPUBProcessor, EPUBTextExtraction
+from modules.processing.mobi_utils import MOBIProcessor, MOBITextExtraction
 from modules.processing.image_utils import ImageProcessor
 from modules.processing.tesseract_utils import (
     configure_tesseract_executable,
@@ -75,12 +76,16 @@ class WorkflowManager:
         self.epub_output_dir = Path(
             paths_config.get('file_paths', {}).get('EPUBs', {}).get('output',
                                                                     'epubs_out'))
+        self.mobi_output_dir = Path(
+            paths_config.get('file_paths', {}).get('MOBIs', {}).get('output',
+                                                                    'mobis_out'))
 
         # Ensure default directories exist (only needed when not using input as output)
         if not self.use_input_as_output:
             self.pdf_output_dir.mkdir(parents=True, exist_ok=True)
             self.image_output_dir.mkdir(parents=True, exist_ok=True)
             self.epub_output_dir.mkdir(parents=True, exist_ok=True)
+            self.mobi_output_dir.mkdir(parents=True, exist_ok=True)
 
     def _ensure_tesseract_available(self) -> bool:
         """Verify that Tesseract is available.
@@ -153,8 +158,20 @@ class WorkflowManager:
                     item,
                     transcriber
                 )
-            else:
+            elif self.user_config.processing_type == "epubs":
                 await self.process_single_epub(item)
+            elif self.user_config.processing_type == "mobis":
+                await self.process_single_mobi(item)
+            else:
+                # Fallback - try to detect type from extension
+                suffix = item.suffix.lower()
+                if suffix == ".epub":
+                    await self.process_single_epub(item)
+                elif suffix == ".mobi" or suffix in {".azw", ".azw3", ".kfx"}:
+                    await self.process_single_mobi(item)
+                else:
+                    logger.warning(f"Unknown processing type for item: {item}")
+                    console_print(f"[WARN] Skipping unknown file type: {item.name}")
 
             processed_count += 1
             console_print(f"[INFO] Completed item {idx}/{total_items}")
@@ -214,6 +231,36 @@ class WorkflowManager:
 
         console_print(
             f"[SUCCESS] Extracted text from '{epub_path.name}' -> {output_txt_path.name}")
+
+    async def process_single_mobi(self, mobi_path: Path) -> None:
+        """Extract and save text from a single MOBI file."""
+        console_print(f"\n[INFO] Processing MOBI: {mobi_path.name}")
+
+        processor = MOBIProcessor(mobi_path)
+        try:
+            extraction: MOBITextExtraction = processor.extract_text()
+        except Exception as exc:
+            logger.exception("Failed to extract MOBI %s: %s", mobi_path.name, exc)
+            console_print(f"[ERROR] Failed to extract text from {mobi_path.name}.")
+            return
+
+        # Determine output directory: use input file's parent when input_paths_is_output_path is True
+        output_dir = mobi_path.parent if self.use_input_as_output else self.mobi_output_dir
+        _parent_folder, output_txt_path = processor.prepare_output_folder(output_dir)
+        output_txt_path.parent.mkdir(parents=True, exist_ok=True)
+
+        rendered_text = extraction.to_plain_text()
+        # Apply post-processing if enabled
+        processed_text = postprocess_transcription(rendered_text, self.postprocessing_config)
+        try:
+            output_txt_path.write_text(processed_text, encoding="utf-8")
+        except Exception as exc:
+            logger.exception("Failed to write MOBI transcription for %s: %s", mobi_path.name, exc)
+            console_print(f"[ERROR] Failed to write output for {mobi_path.name}.")
+            return
+
+        console_print(
+            f"[SUCCESS] Extracted text from '{mobi_path.name}' (via {extraction.source_format}) -> {output_txt_path.name}")
 
     async def process_single_pdf(self, pdf_path: Path,
                                  transcriber: Optional[Any]) -> None:

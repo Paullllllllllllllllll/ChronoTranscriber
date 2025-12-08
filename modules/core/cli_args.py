@@ -50,9 +50,9 @@ Examples:
     
     parser.add_argument(
         "--type", "-t",
-        choices=["images", "pdfs", "epubs"],
+        choices=["images", "pdfs", "epubs", "mobis"],
         required=False,
-        help="Type of documents to process: 'images', 'pdfs', or 'epubs'."
+        help="Type of documents to process: 'images', 'pdfs', 'epubs', or 'mobis'."
     )
     
     parser.add_argument(

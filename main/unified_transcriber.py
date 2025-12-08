@@ -99,9 +99,11 @@ def create_config_from_cli_args(args, base_input_dir: Path, base_output_dir: Pat
     config.processing_type = args.type
     config.transcription_method = args.method
 
-    # EPUBs currently support native extraction only
+    # EPUBs and MOBIs currently support native extraction only
     if config.processing_type == "epubs" and config.transcription_method != "native":
         raise ValueError("EPUB processing only supports the 'native' method.")
+    if config.processing_type == "mobis" and config.transcription_method != "native":
+        raise ValueError("MOBI processing only supports the 'native' method.")
 
     # Set batch processing (only for GPT)
     if args.method == "gpt":
@@ -171,7 +173,7 @@ def create_config_from_cli_args(args, base_input_dir: Path, base_output_dir: Pat
             config.selected_items = [input_path]
         else:
             raise ValueError(f"Input path does not exist: {input_path}")
-    else:
+    elif config.processing_type == "epubs":
         # For EPUBs, collect EPUB files
         if input_path.is_dir():
             if args.files:
@@ -180,6 +182,26 @@ def create_config_from_cli_args(args, base_input_dir: Path, base_output_dir: Pat
                 config.selected_items = list(input_path.rglob("*.epub"))
             else:
                 config.selected_items = list(input_path.glob("*.epub"))
+        elif input_path.is_file():
+            config.selected_items = [input_path]
+        else:
+            raise ValueError(f"Input path does not exist: {input_path}")
+    else:
+        # For MOBIs, collect MOBI files (.mobi, .azw, .azw3, .kfx)
+        mobi_extensions = [".mobi", ".azw", ".azw3", ".kfx"]
+        if input_path.is_dir():
+            if args.files:
+                config.selected_items = [input_path / f for f in args.files]
+            elif args.recursive:
+                config.selected_items = [
+                    f for ext in mobi_extensions 
+                    for f in input_path.rglob(f"*{ext}")
+                ]
+            else:
+                config.selected_items = [
+                    f for ext in mobi_extensions 
+                    for f in input_path.glob(f"*{ext}")
+                ]
         elif input_path.is_file():
             config.selected_items = [input_path]
         else:
@@ -536,6 +558,12 @@ async def transcribe_cli(args, paths_config: dict) -> None:
     epub_output_dir = Path(
         paths_config.get('file_paths', {}).get('EPUBs', {}).get('output', 'epubs_out')
     )
+    mobi_input_dir = Path(
+        paths_config.get('file_paths', {}).get('MOBIs', {}).get('input', 'mobis_in')
+    )
+    mobi_output_dir = Path(
+        paths_config.get('file_paths', {}).get('MOBIs', {}).get('output', 'mobis_out')
+    )
     
     # Determine base directories based on processing type
     if args.auto:
@@ -548,9 +576,12 @@ async def transcribe_cli(args, paths_config: dict) -> None:
     elif args.type == "pdfs":
         base_input_dir = pdf_input_dir
         base_output_dir = pdf_output_dir
-    else:
+    elif args.type == "epubs":
         base_input_dir = epub_input_dir
         base_output_dir = epub_output_dir
+    else:
+        base_input_dir = mobi_input_dir
+        base_output_dir = mobi_output_dir
     
     # Create configuration from CLI arguments
     user_config = create_config_from_cli_args(args, base_input_dir, base_output_dir, paths_config)

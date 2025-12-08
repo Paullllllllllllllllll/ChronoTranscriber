@@ -20,8 +20,11 @@ file_paths:
     input: ''  # Input directory for image folders
     output: ''  # Output directory for processed folders
   EPUBs:
-    input: ''  # Input directory for EPUB files (update as needed)
+    input: ''  # Input directory for EPUB files
     output: ''  # Output directory for extracted EPUB text files
+  MOBIs:
+    input: ''  # Input directory for MOBI/Kindle files (.mobi, .azw, .azw3, .kfx)
+    output: ''  # Output directory for extracted MOBI text files
   Auto:
     input: ''  # Input directory for auto mode (scans for mixed file types)
     output: ''  # Output directory for auto mode results

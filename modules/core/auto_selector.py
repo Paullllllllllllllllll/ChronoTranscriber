@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from modules.infra.logger import setup_logger
 from modules.processing.pdf_utils import PDFProcessor
 from modules.processing.image_utils import SUPPORTED_IMAGE_EXTENSIONS
+from modules.config.constants import SUPPORTED_MOBI_EXTENSIONS
 
 logger = setup_logger(__name__)
 
@@ -22,7 +23,7 @@ logger = setup_logger(__name__)
 class FileDecision:
     """Represents a decision for how to process a single file."""
     file_path: Path
-    file_type: str  # "pdf", "image", "epub"
+    file_type: str  # "pdf", "image", "epub", "mobi"
     method: str  # "native", "tesseract", "gpt"
     reason: str  # Explanation for the decision
 
@@ -55,22 +56,23 @@ class AutoSelector:
             f"gpt_available={self.gpt_available}"
         )
     
-    def scan_directory(self, input_dir: Path) -> Tuple[List[Path], List[Path], List[Path]]:
+    def scan_directory(self, input_dir: Path) -> Tuple[List[Path], List[Path], List[Path], List[Path]]:
         """Scan directory and categorize files.
         
         Args:
             input_dir: Directory to scan
             
         Returns:
-            Tuple of (pdf_files, image_files, epub_files)
+            Tuple of (pdf_files, image_files, epub_files, mobi_files)
         """
         pdfs = []
         images = []
         epubs = []
+        mobis = []
         
         if not input_dir.exists() or not input_dir.is_dir():
             logger.warning(f"Input directory does not exist or is not a directory: {input_dir}")
-            return pdfs, images, epubs
+            return pdfs, images, epubs, mobis
         
         # Scan all files (non-recursive for simplicity)
         for item in input_dir.iterdir():
@@ -80,6 +82,8 @@ class AutoSelector:
                     pdfs.append(item)
                 elif suffix == ".epub":
                     epubs.append(item)
+                elif suffix in SUPPORTED_MOBI_EXTENSIONS:
+                    mobis.append(item)
                 elif suffix in SUPPORTED_IMAGE_EXTENSIONS:
                     images.append(item)
             elif item.is_dir():
@@ -93,10 +97,10 @@ class AutoSelector:
         
         logger.info(
             f"Scanned {input_dir}: found {len(pdfs)} PDFs, "
-            f"{len(images)} image items, {len(epubs)} EPUBs"
+            f"{len(images)} image items, {len(epubs)} EPUBs, {len(mobis)} MOBIs"
         )
         
-        return pdfs, images, epubs
+        return pdfs, images, epubs, mobis
     
     def decide_pdf_method(self, pdf_path: Path) -> Tuple[str, str]:
         """Decide transcription method for a PDF.
@@ -168,6 +172,18 @@ class AutoSelector:
         # EPUBs currently only support native extraction
         return "native", "EPUB native text extraction"
     
+    def decide_mobi_method(self, mobi_path: Path) -> Tuple[str, str]:
+        """Decide transcription method for a MOBI/Kindle file.
+        
+        Args:
+            mobi_path: Path to MOBI file
+            
+        Returns:
+            Tuple of (method, reason)
+        """
+        # MOBIs are unpacked and extracted natively
+        return "native", "MOBI native text extraction (via unpack)"
+    
     def create_decisions(self, input_dir: Path) -> List[FileDecision]:
         """Create processing decisions for all files in directory.
         
@@ -179,7 +195,7 @@ class AutoSelector:
         """
         decisions = []
         
-        pdfs, images, epubs = self.scan_directory(input_dir)
+        pdfs, images, epubs, mobis = self.scan_directory(input_dir)
         
         # Process PDFs
         for pdf in pdfs:
@@ -208,6 +224,16 @@ class AutoSelector:
             decisions.append(FileDecision(
                 file_path=epub,
                 file_type="epub",
+                method=method,
+                reason=reason
+            ))
+        
+        # Process MOBIs
+        for mobi in mobis:
+            method, reason = self.decide_mobi_method(mobi)
+            decisions.append(FileDecision(
+                file_path=mobi,
+                file_type="mobi",
                 method=method,
                 reason=reason
             ))

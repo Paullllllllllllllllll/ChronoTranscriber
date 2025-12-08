@@ -21,5 +21,8 @@ SUPPORTED_IMAGE_FORMATS = {
 # Convenience set of supported extensions (derived from SUPPORTED_IMAGE_FORMATS)
 SUPPORTED_IMAGE_EXTENSIONS = set(SUPPORTED_IMAGE_FORMATS.keys())
 
+# Supported MOBI/Kindle ebook extensions
+SUPPORTED_MOBI_EXTENSIONS = {".mobi", ".azw", ".azw3", ".kfx"}
+
 # OpenAI Batch API terminal statuses (states that indicate batch completion)
 TERMINAL_BATCH_STATUSES = {"completed", "expired", "cancelled", "failed"}

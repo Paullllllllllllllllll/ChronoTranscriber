@@ -1,6 +1,6 @@
 # ChronoTranscriber
 
-A Python-based tool for researchers and archivists to transcribe historical documents from PDFs, EPUB ebooks, or image folders. ChronoTranscriber supports multiple AI providers (OpenAI, Anthropic, Google, OpenRouter) via LangChain, local OCR with Tesseract, and provides structured JSON outputs with scalable batch processing for large-scale document digitization projects.
+A Python-based tool for researchers and archivists to transcribe historical documents from PDFs, EPUB and MOBI/Kindle ebooks, or image folders. ChronoTranscriber supports multiple AI providers (OpenAI, Anthropic, Google, OpenRouter) via LangChain, local OCR with Tesseract, and provides structured JSON outputs with scalable batch processing for large-scale document digitization projects.
 
 ## Table of Contents
 
@@ -38,6 +38,7 @@ ChronoTranscriber supports two execution modes to accommodate different workflow
   - Supports EPUB 2.0 and EPUB 3.0
   - Automatically detects and extracts text from EPUB chapters
   - Preserves EPUB chapter structure and metadata
+- MOBI/Kindle Extraction: Natively extract text from unencrypted MOBI, AZW, AZW3, and KFX ebooks by unpacking to EPUB/HTML/PDF and normalizing the resulting text
 - Image Folder Transcription: Process directories containing scanned page images (PNG, JPEG)
 - Auto Mode Discovery: Scan a mixed directory and automatically choose native, Tesseract, or GPT transcription per file
 - Multi-Page Support: Preserve page ordering and handle documents with hundreds or thousands of pages
@@ -258,14 +259,16 @@ transcription_model:
 python main/unified_transcriber.py
 
 # CLI mode (automation)
-python main/unified_transcriber.py --type pdf --input document.pdf
+python main/unified_transcriber.py --type pdfs --method gpt --input ./input/pdfs --output ./output/pdfs
 ```
+
+For CLI mode, the `--type` flag accepts `images`, `pdfs`, `epubs`, or `mobis`, and `--method` accepts `native`, `tesseract`, or `gpt` (EPUBs and MOBIs currently support only `native`).
 
 ### Example Workflows
 
 **Transcribe a PDF with OpenAI:**
 ```bash
-python main/unified_transcriber.py --type pdf --method gpt --input ./documents/historical.pdf
+python main/unified_transcriber.py --type pdfs --method gpt --input ./documents/historical.pdf --output ./output/pdfs
 ```
 
 **Process images with Tesseract (offline):**
@@ -275,7 +278,7 @@ python main/unified_transcriber.py --type images --method tesseract --input ./sc
 
 **Submit a large job for batch processing:**
 ```bash
-python main/unified_transcriber.py --type pdf --method gpt --batch --input ./archive/
+python main/unified_transcriber.py --type pdfs --method gpt --batch --input ./archive/ --output ./output/pdfs
 ```
 
 **Check batch job status:**
@@ -357,6 +360,9 @@ file_paths:
   EPUBs:
     input: './input/epubs'
     output: './output/epubs'
+  MOBIs:
+    input: './input/mobis'   # MOBI/Kindle files (.mobi, .azw, .azw3, .kfx)
+    output: './output/mobis'
   Auto:
     input: './input/auto'
     output: './output/auto'
@@ -587,11 +593,17 @@ The interactive interface guides you through:
 Process documents with command-line arguments:
 
 ```bash
-# Process a single PDF with GPT in batch mode
-python main/unified_transcriber.py --type pdf --backend gpt --mode batch --schema markdown --input document.pdf
+# Process a directory of PDFs with GPT in batch mode
+python main/unified_transcriber.py --type pdfs --method gpt --batch --input ./input/pdfs --output ./output/pdfs
 
-# Process image folder with Tesseract
-python main/unified_transcriber.py --type images --backend tesseract --input ./scans/
+# Process an image folder with Tesseract (offline)
+python main/unified_transcriber.py --type images --method tesseract --input ./input/images --output ./output/images
+
+# Extract text from EPUB ebooks (native, no OCR)
+python main/unified_transcriber.py --type epubs --method native --input ./input/epubs --output ./output/epubs
+
+# Extract text from MOBI/Kindle ebooks (native unpack and text extraction)
+python main/unified_transcriber.py --type mobis --method native --input ./input/mobis --output ./output/mobis
 
 # View all options
 python main/unified_transcriber.py --help
@@ -618,6 +630,8 @@ Transcription outputs are saved to the configured output directories:
 
 - PDFs: `file_paths.PDFs.output` (or input directory if `input_paths_is_output_path: true`)
 - Images: `file_paths.Images.output` (or input directory if `input_paths_is_output_path: true`)
+- EPUBs: `file_paths.EPUBs.output` (or input directory if `input_paths_is_output_path: true`)
+- MOBIs: `file_paths.MOBIs.output` (or input directory if `input_paths_is_output_path: true`)
 
 Output Naming Convention:
 

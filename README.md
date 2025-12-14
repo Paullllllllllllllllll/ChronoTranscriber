@@ -13,6 +13,7 @@ A Python-based tool for researchers and archivists to transcribe historical docu
 - [Configuration](#configuration)
 - [Usage](#usage)
 - [Batch Processing](#batch-processing)
+- [Fine-Tuning Dataset Preparation](#fine-tuning-dataset-preparation)
 - [Utilities](#utilities)
 - [Architecture](#architecture)
 - [Troubleshooting](#troubleshooting)
@@ -693,6 +694,57 @@ What It Does:
 - Cancels all non-terminal batches
 - Shows detailed summary of cancellation results
 
+## Fine-Tuning Dataset Preparation
+
+ChronoTranscriber includes a workflow for preparing supervised fine-tuning datasets (one example per page) using corrected ground truth. The dataset builder outputs OpenAI-compatible JSONL for vision fine-tuning where the assistant response is a structured JSON string matching your transcription schema.
+
+### Overview
+
+1. Produce transcriptions (synchronous or batch) with `main/unified_transcriber.py`.
+2. Export an editable correction file with `main/prepare_ground_truth.py --extract`.
+3. Apply corrections into ground truth JSONL with `main/prepare_ground_truth.py --apply`.
+4. Build an OpenAI vision fine-tuning JSONL with `fine_tuning/build_openai_vision_sft_jsonl.py`.
+
+### Ground truth input
+
+The fine-tuning builder expects ground truth JSONL produced by `main/prepare_ground_truth.py --apply` (or equivalent). Each line represents one page and includes:
+
+- `page_index` (0-based)
+- `transcription` (string or null)
+- `no_transcribable_text` (boolean)
+- `transcription_not_possible` (boolean)
+
+### Manifest input (JSONL)
+
+The manifest is a JSONL file listing the pages you want included in training. To match existing repo conventions, the builder accepts the same page ordering fields used in ChronoTranscriber artifacts:
+
+- Use `page_index` or `order_index` (0-based)
+- Provide one of:
+  - `pre_processed_image` (path to an image file)
+  - `image_path` (path to an image file)
+  - `image_url` (URL to a hosted image)
+
+You can also pass a filtered transcription JSONL as the manifest. The builder supports nested `image_metadata` records as written by batch-mode JSONL files.
+
+### Build command
+
+```bash
+.venv\Scripts\python fine_tuning\build_openai_vision_sft_jsonl.py --ground-truth eval\test_data\ground_truth\address_books --manifest path\to\manifest.jsonl --output fine_tuning\training.jsonl
+```
+
+Optional flags:
+
+- `--schema <schema_name_or_path>`
+- `--system-prompt <path>`
+- `--additional-context <path>`
+- `--image-detail low|high|auto`
+- `--strict` (fail immediately on the first skipped manifest entry)
+
+Image constraints enforced by the builder:
+
+- Allowed extensions: `.jpg`, `.jpeg`, `.png`, `.webp`
+- Maximum file size: 10 MB
+
 ## Utilities
 
 ### Token Cost Analysis
@@ -838,6 +890,8 @@ ChronoTranscriber/
 │   ├── image_processing_config.yaml
 │   ├── model_config.yaml
 │   └── paths_config.yaml
+├── fine_tuning/                # Fine-tuning dataset preparation tools
+│   └── build_openai_vision_sft_jsonl.py
 ├── main/                      # CLI entry points
 │   ├── cancel_batches.py      # Cancel pending batch jobs
 │   ├── check_batches.py       # Monitor and download batch results

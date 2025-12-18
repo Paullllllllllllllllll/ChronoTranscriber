@@ -302,6 +302,7 @@ class GoogleProvider(BaseProvider):
         ]
         
         # Use structured output if schema provided
+        # Use include_raw=True to get token usage from the underlying AIMessage
         llm_to_use = self._llm
         if json_schema and caps.supports_structured_output:
             # Unwrap schema if wrapped
@@ -313,6 +314,7 @@ class GoogleProvider(BaseProvider):
             llm_to_use = self._llm.with_structured_output(
                 actual_schema,
                 method="json_schema",
+                include_raw=True,
             )
         
         # Invoke LLM - LangChain handles retries internally
@@ -326,13 +328,54 @@ class GoogleProvider(BaseProvider):
         """Invoke the LLM and process the response.
         
         LangChain handles retry logic internally.
+        
+        When using with_structured_output(include_raw=True), the response is a dict:
+        - "raw": The underlying AIMessage with response_metadata containing token usage
+        - "parsed": The parsed dict
+        - "parsing_error": Any parsing error that occurred
         """
         try:
             response = await llm.ainvoke(messages)
             
-            # Extract content - handle Gemini's different response formats
+            # Extract token usage and content
+            # Handle include_raw=True response format (dict with raw/parsed/parsing_error)
+            input_tokens = 0
+            output_tokens = 0
+            total_tokens = 0
+            raw_response = {}
+            raw_message = None
             parsed_output = None
-            if hasattr(response, 'content'):
+            
+            if isinstance(response, dict) and "raw" in response and "parsed" in response:
+                # with_structured_output(include_raw=True) returns {"raw": AIMessage, "parsed": dict}
+                raw_message = response.get("raw")
+                parsed_data = response.get("parsed")
+                
+                # Extract parsed content
+                if parsed_data is not None:
+                    if isinstance(parsed_data, dict):
+                        content = json.dumps(parsed_data)
+                        parsed_output = parsed_data
+                    else:
+                        content = str(parsed_data)
+                else:
+                    # Parsing failed, try to get content from raw message
+                    content = raw_message.content if raw_message and hasattr(raw_message, 'content') else ""
+                    if isinstance(content, dict):
+                        parsed_output = content
+                        content = json.dumps(content)
+                    elif isinstance(content, list):
+                        # Gemini can return content as list of parts
+                        text_parts = []
+                        for part in content:
+                            if isinstance(part, dict) and part.get("type") == "text":
+                                text_parts.append(part.get("text", ""))
+                            elif isinstance(part, str):
+                                text_parts.append(part)
+                        content = "".join(text_parts)
+            elif hasattr(response, 'content'):
+                # Standard AIMessage response (no structured output)
+                raw_message = response
                 content = response.content
                 if isinstance(content, dict):
                     parsed_output = content
@@ -349,19 +392,15 @@ class GoogleProvider(BaseProvider):
                 elif not isinstance(content, str):
                     content = str(content)
             elif isinstance(response, dict):
+                # Dict response without raw/parsed structure
                 content = json.dumps(response)
                 parsed_output = response
             else:
                 content = str(response)
             
-            # Extract token usage from response_metadata (LangChain standard)
-            input_tokens = 0
-            output_tokens = 0
-            total_tokens = 0
-            raw_response = {}
-            
-            if hasattr(response, 'response_metadata'):
-                metadata = response.response_metadata
+            # Extract token usage from the raw AIMessage's response_metadata
+            if raw_message and hasattr(raw_message, 'response_metadata'):
+                metadata = raw_message.response_metadata
                 if isinstance(metadata, dict):
                     raw_response = metadata
                     # Gemini uses 'usage_metadata' with different key names

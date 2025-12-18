@@ -481,9 +481,13 @@ class OpenAIProvider(BaseProvider):
         
         if json_schema and caps.supports_structured_output:
             # Try to use Pydantic model for better validation
+            # Use include_raw=True to get token usage from the underlying AIMessage
             try:
                 from modules.llm.schemas import TranscriptionOutput
-                llm_to_use = self._llm.with_structured_output(TranscriptionOutput)
+                llm_to_use = self._llm.with_structured_output(
+                    TranscriptionOutput,
+                    include_raw=True,
+                )
                 use_pydantic = True
             except ImportError:
                 # Fallback to JSON schema if Pydantic model not available
@@ -495,6 +499,7 @@ class OpenAIProvider(BaseProvider):
                     actual_schema,
                     method="json_schema",
                     strict=True,
+                    include_raw=True,
                 )
         
         # Invoke LLM - LangChain handles retries internally
@@ -512,41 +517,70 @@ class OpenAIProvider(BaseProvider):
         - Retry logic with exponential backoff
         - Token usage tracking in response_metadata
         - Structured output parsing
+        
+        When using with_structured_output(include_raw=True), the response is a dict:
+        - "raw": The underlying AIMessage with response_metadata containing token usage
+        - "parsed": The parsed Pydantic model or dict
+        - "parsing_error": Any parsing error that occurred
         """
         try:
             # LangChain handles retries for transient errors internally
             response = await llm.ainvoke(messages)
             
-            # Extract content - LangChain returns different types based on structured output
-            if use_pydantic and hasattr(response, 'model_dump'):
-                # Pydantic model response - LangChain parsed it for us
+            # Extract token usage and content
+            # Handle include_raw=True response format (dict with raw/parsed/parsing_error)
+            input_tokens = 0
+            output_tokens = 0
+            total_tokens = 0
+            raw_response = {}
+            raw_message = None
+            parsed_output = None
+            
+            if isinstance(response, dict) and "raw" in response and "parsed" in response:
+                # with_structured_output(include_raw=True) returns {"raw": AIMessage, "parsed": Pydantic/dict}
+                raw_message = response.get("raw")
+                parsed_data = response.get("parsed")
+                
+                # Extract parsed content
+                if parsed_data is not None:
+                    if hasattr(parsed_data, 'model_dump'):
+                        # Pydantic model
+                        content = parsed_data.model_dump_json()
+                        parsed_output = parsed_data.model_dump()
+                    elif isinstance(parsed_data, dict):
+                        content = json.dumps(parsed_data)
+                        parsed_output = parsed_data
+                    else:
+                        content = str(parsed_data)
+                else:
+                    # Parsing failed, try to get content from raw message
+                    content = raw_message.content if raw_message and hasattr(raw_message, 'content') else ""
+                    if isinstance(content, dict):
+                        parsed_output = content
+                        content = json.dumps(content)
+            elif use_pydantic and hasattr(response, 'model_dump'):
+                # Direct Pydantic model response (shouldn't happen with include_raw=True)
                 content = response.model_dump_json()
                 parsed_output = response.model_dump()
             elif hasattr(response, 'content'):
-                # Standard AIMessage response
+                # Standard AIMessage response (no structured output)
+                raw_message = response
                 content = response.content
-                parsed_output = None
                 if isinstance(content, dict):
                     parsed_output = content
                     content = json.dumps(content)
                 elif not isinstance(content, str):
                     content = str(content)
             elif isinstance(response, dict):
-                # Dict response (structured output)
+                # Dict response without raw/parsed structure
                 content = json.dumps(response)
                 parsed_output = response
             else:
                 content = str(response)
-                parsed_output = None
             
-            # Extract token usage from response_metadata (LangChain standard)
-            input_tokens = 0
-            output_tokens = 0
-            total_tokens = 0
-            raw_response = {}
-            
-            if hasattr(response, 'response_metadata'):
-                metadata = response.response_metadata
+            # Extract token usage from the raw AIMessage's response_metadata
+            if raw_message and hasattr(raw_message, 'response_metadata'):
+                metadata = raw_message.response_metadata
                 if isinstance(metadata, dict):
                     raw_response = metadata
                     # LangChain standardizes token usage in 'token_usage' key

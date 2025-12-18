@@ -17,10 +17,11 @@ Metrics are computed **page-by-page** using the temporary JSONL files produced b
 
 | Provider | Model | Reasoning Level |
 |----------|-------|-----------------|
-| OpenAI | GPT-5.1 | Medium |
+| Local | Tesseract OCR | None (baseline) |
+| OpenAI | GPT-5.2 | Medium |
 | OpenAI | GPT-5 Mini | Medium |
 | Google | Gemini 3.0 Pro | Medium |
-| Google | Gemini 2.5 Flash | None |
+| Google | Gemini 3.0 Flash | None |
 | Anthropic | Claude Sonnet 4.5 | Medium |
 | Anthropic | Claude Haiku 4.5 | Medium |
 
@@ -64,9 +65,14 @@ eval/
 For each model, run transcriptions and save to the appropriate output directory:
 
 ```bash
-# Example for GPT-5.1
+# Example for Tesseract (baseline)
 python main/unified_transcriber.py --input eval/test_data/input/address_books \
-    --output eval/test_data/output/address_books/gpt_5.1_medium \
+    --output eval/test_data/output/address_books/tesseract \
+    --type images --method tesseract
+
+# Example for GPT-5.2
+python main/unified_transcriber.py --input eval/test_data/input/address_books \
+    --output eval/test_data/output/address_books/gpt_5.2_medium \
     --type images --method gpt
 ```
 
@@ -79,7 +85,7 @@ Use the helper script to extract transcriptions for manual correction:
 
 1. **Extract** transcriptions to editable text format:
    ```bash
-   python main/prepare_ground_truth.py --extract --input eval/test_data/output/address_books/gpt_5.1_medium
+   python main/prepare_ground_truth.py --extract --input eval/test_data/output/address_books/gpt_5.2_medium
    ```
    This creates `*_editable.txt` files with page markers like `=== page 001 ===`.
 
@@ -91,7 +97,7 @@ Use the helper script to extract transcriptions for manual correction:
 
 3. **Apply** corrections to create ground truth JSONL:
    ```bash
-   python main/prepare_ground_truth.py --apply --input eval/test_data/output/address_books/gpt_5.1_medium
+   python main/prepare_ground_truth.py --apply --input eval/test_data/output/address_books/gpt_5.2_medium
    ```
    This creates JSONL files in `test_data/ground_truth/{category}/`.
 
@@ -136,6 +142,18 @@ WER = (Substitutions + Deletions + Insertions) / Reference_Word_Count
 ```
 
 Lower is better. WER is typically higher than CER since a single character error can affect an entire word.
+
+### Content vs Formatting Metrics
+
+The evaluation differentiates between:
+
+1. **Overall Metrics**: Full text including all formatting elements
+2. **Content-Only Metrics**: Text with formatting stripped (pure text extraction quality)
+3. **Formatting Metrics**: Separate metrics for:
+   - **Page Markers**: `<page_number>X</page_number>` tags
+   - **Markdown Elements**: Bold, italic, headings, footnotes, LaTeX equations
+
+This allows analyzing whether errors stem from text recognition vs. formatting interpretation.
 
 ## Output Files
 

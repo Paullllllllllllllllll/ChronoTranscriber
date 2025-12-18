@@ -28,12 +28,19 @@ dataset:
 # Models to Evaluate
 # =============================================================================
 models:
+  # Tesseract OCR (baseline)
+  - name: "tesseract"
+    provider: "local"
+    model_id: "tesseract"
+    reasoning_effort: null
+    description: "Tesseract OCR baseline (no LLM)"
+
   # OpenAI Models
-  - name: "gpt_5.1_medium"
+  - name: "gpt_5.2_medium"
     provider: "openai"
-    model_id: "gpt-5.1"
+    model_id: "gpt-5.2"
     reasoning_effort: "medium"
-    description: "GPT-5.1 with medium reasoning"
+    description: "GPT-5.2 with medium reasoning"
     
   - name: "gpt_5_mini_medium"
     provider: "openai"
@@ -48,11 +55,11 @@ models:
     reasoning_effort: "medium"
     description: "Gemini 3.0 Pro with medium reasoning"
     
-  - name: "gemini_2.5_flash"
+  - name: "gemini_3.0_flash"
     provider: "google"
-    model_id: "gemini-2.5-flash"
+    model_id: "gemini-3.0-flash"
     reasoning_effort: null  # No reasoning mode for flash
-    description: "Gemini 2.5 Flash (no reasoning)"
+    description: "Gemini 3.0 Flash (no reasoning)"
   
   # Anthropic Models
   - name: "claude_sonnet_4.5_medium"

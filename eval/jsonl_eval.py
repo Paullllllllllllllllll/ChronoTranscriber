@@ -148,9 +148,14 @@ def parse_transcription_jsonl(jsonl_path: Path) -> DocumentTranscriptions:
             image_name = meta.get("image_name", "")
             order_index = meta.get("order_index", page_index)
         else:
-            image_name = record.get("file_name", "") or record.get("pre_processed_image", "")
-            if isinstance(image_name, str) and "/" in image_name:
-                image_name = Path(image_name).name
+            # Prefer image_name field, then pre_processed_image path, then file_name
+            image_name = record.get("image_name", "")
+            if not image_name:
+                image_name = record.get("pre_processed_image", "")
+                if isinstance(image_name, str) and ("/" in image_name or "\\" in image_name):
+                    image_name = Path(image_name).name
+            if not image_name:
+                image_name = record.get("file_name", "")
             order_index = record.get("order_index", page_index)
 
         # Extract boolean flags
@@ -307,7 +312,7 @@ def align_pages(
 # Ground Truth Editing Utilities
 # =============================================================================
 
-PAGE_MARKER_PATTERN = re.compile(r"^=== page (\d+) ===\s*$", re.MULTILINE)
+PAGE_MARKER_PATTERN = re.compile(r"^=== (.+?) ===\s*$", re.MULTILINE)
 
 
 def export_pages_to_editable_txt(
@@ -318,10 +323,10 @@ def export_pages_to_editable_txt(
     Export page transcriptions to an editable text file with page markers.
 
     Format:
-    === page 001 ===
+    === page_0001_pre_processed.jpg ===
     {transcription text}
 
-    === page 002 ===
+    === page_0002_pre_processed.jpg ===
     {transcription text}
     ...
 
@@ -332,7 +337,11 @@ def export_pages_to_editable_txt(
     lines = []
 
     for page in sorted(doc.pages, key=lambda p: p.page_index):
-        marker = f"=== page {page.page_index + 1:03d} ==="
+        # Use image_name if available, otherwise fall back to page number
+        if page.image_name:
+            marker = f"=== {page.image_name} ==="
+        else:
+            marker = f"=== page_{page.page_index + 1:04d} ==="
         lines.append(marker)
 
         if page.has_text() and page.transcription:
@@ -356,7 +365,7 @@ def import_pages_from_editable_txt(
     """
     Import page transcriptions from an edited text file.
 
-    Parses the text file format with === page NNN === markers.
+    Parses the text file format with === image_name === markers.
 
     Args:
         txt_path: Path to edited text file
@@ -371,7 +380,7 @@ def import_pages_from_editable_txt(
     parts = PAGE_MARKER_PATTERN.split(content)
 
     # parts[0] is content before first marker (should be empty/whitespace)
-    # parts[1], parts[3], parts[5], ... are page numbers
+    # parts[1], parts[3], parts[5], ... are image names (or legacy page numbers)
     # parts[2], parts[4], parts[6], ... are page contents
 
     source_name = txt_path.stem.replace("_editable", "")
@@ -380,14 +389,17 @@ def import_pages_from_editable_txt(
     if original_doc:
         result.method = original_doc.method
 
+    # Build lookup from image_name to original page
+    image_name_to_page: Dict[str, PageTranscription] = {}
+    if original_doc:
+        for p in original_doc.pages:
+            if p.image_name:
+                image_name_to_page[p.image_name] = p
+
     i = 1
+    page_index_counter = 0
     while i < len(parts):
-        try:
-            page_num = int(parts[i])
-            page_index = page_num - 1  # Convert 1-indexed to 0-indexed
-        except (ValueError, IndexError):
-            i += 2
-            continue
+        marker_text = parts[i].strip()
 
         if i + 1 < len(parts):
             text = parts[i + 1].strip()
@@ -403,13 +415,28 @@ def import_pages_from_editable_txt(
         else:
             transcription = text if text else None
 
-        # Get image name from original if available
-        image_name = ""
+        # Try to find matching page from original doc by image name
+        image_name = marker_text
         custom_id = None
-        if original_doc:
+        page_index = page_index_counter
+
+        if marker_text in image_name_to_page:
+            orig_page = image_name_to_page[marker_text]
+            page_index = orig_page.page_index
+            custom_id = orig_page.custom_id
+        elif original_doc:
+            # Legacy format: try parsing as page number
+            if marker_text.startswith("page_"):
+                try:
+                    page_index = int(marker_text.replace("page_", "")) - 1
+                except ValueError:
+                    pass
+            elif marker_text.isdigit():
+                page_index = int(marker_text) - 1
+            # Try to get metadata from original by index
             orig_page = original_doc.get_page(page_index)
             if orig_page:
-                image_name = orig_page.image_name
+                image_name = orig_page.image_name or marker_text
                 custom_id = orig_page.custom_id
 
         page = PageTranscription(
@@ -422,6 +449,7 @@ def import_pages_from_editable_txt(
         )
         result.pages.append(page)
 
+        page_index_counter += 1
         i += 2
 
     result.pages.sort(key=lambda p: p.page_index)

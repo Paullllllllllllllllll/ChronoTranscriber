@@ -211,9 +211,13 @@ def apply_corrections(
         actual_category = category
         if actual_category is None:
             # Try to extract from path: .../output/{category}/{model}/...
+            # or from ground_truth path: .../ground_truth/{category}/...
             parts = txt_path.parts
             for i, part in enumerate(parts):
                 if part == "output" and i + 1 < len(parts):
+                    actual_category = parts[i + 1]
+                    break
+                if part == "ground_truth" and i + 1 < len(parts):
                     actual_category = parts[i + 1]
                     break
         

@@ -34,15 +34,23 @@ def setup_logger(name: str) -> logging.Logger:
         logs_dir_value = paths_config.get("general", {}).get("logs_dir")
         if not logs_dir_value:
             logs_dir = PROJECT_ROOT / "logs"
+            log_file = logs_dir / "application.log"
         else:
-            logs_dir = Path(logs_dir_value)
-            if not logs_dir.is_absolute():
-                logs_dir = (PROJECT_ROOT / logs_dir).resolve()
+            logs_path = Path(logs_dir_value)
+            if not logs_path.is_absolute():
+                logs_path = (PROJECT_ROOT / logs_path).resolve()
+            # Check if path points to a file (has .log extension) or directory
+            if logs_path.suffix == ".log":
+                log_file = logs_path
+                logs_dir = logs_path.parent
+            else:
+                logs_dir = logs_path
+                log_file = logs_dir / "application.log"
     except Exception:
         logs_dir = PROJECT_ROOT / "logs"
+        log_file = logs_dir / "application.log"
 
     logs_dir.mkdir(parents=True, exist_ok=True)
-    log_file = logs_dir / "application.log"
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
     if not logger.handlers:

@@ -1,0 +1,23 @@
+You are transcribing pages from a historical address book (Adressbuch) of the
+city of Basel, Switzerland, published in the late 19th or early 20th century.
+These pages contain alphabetical listings of residents and commercial firms
+with their occupations and street addresses.
+
+Transcribe only the main page content (the two-column directory entries).
+Do NOT transcribe marginal page reference numbers (e.g., "Seite 35—39") that
+appear in the left margin or gutter area—these are navigational aids, not
+part of the directory content.
+
+Special symbols and formatting:
+- Flash/lightning symbols (⸸) mark telephone subscribers. Transcribe these
+  symbols exactly as they appear, preserving their position before entries.
+- Em-dashes (—) are used in page headers between alphabetical range names
+  and page numbers. Preserve these as em-dashes.
+- Short dashes and hyphens appear in addresses and compound names. Preserve
+  the distinction between short dashes (-), en-dashes (–), and em-dashes (—).
+- Double dashes (--) should be transcribed as double dashes if they appear.
+
+Expect German text with historical spelling conventions, abbreviations such as
+Wwe. (Witwe/widow), Kfm. (Kaufmann/merchant), Part. (Parterre), Tagl. (Taglöhner),
+Hdl. (Händler), Ausl. (Ausländer), and similar period-specific short forms.
+Preserve original orthography, diacritics, and formatting exactly as they appear.

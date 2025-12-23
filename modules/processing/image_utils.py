@@ -282,17 +282,19 @@ class ImageProcessor:
         return results
 
     @staticmethod
-    def _process_image_task(args: tuple) -> str:
+    def _process_image_task(img_path: Path, out_path: Path, provider: str, model_name: str) -> str:
         """
         Helper task to process a single image and save it to out_path.
 
         Parameters:
-            args: Tuple of (img_path, out_path, provider, model_name)
+            img_path: Source image path.
+            out_path: Destination path for processed image.
+            provider: Provider name for config selection.
+            model_name: Model name for detecting underlying model type.
 
         Returns:
             str: A status message.
         """
-        img_path, out_path, provider, model_name = args
         processor = ImageProcessor(img_path, provider=provider, model_name=model_name)
         return processor.process_image(out_path)
 

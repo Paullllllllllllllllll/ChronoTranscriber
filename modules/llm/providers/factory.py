@@ -189,6 +189,10 @@ def get_provider(
             for key in ["top_p", "frequency_penalty", "presence_penalty", "top_k"]:
                 if key not in kwargs and tm.get(key) is not None:
                     kwargs[key] = tm.get(key)
+            
+            # Load reasoning config (cross-provider)
+            if "reasoning_config" not in kwargs and tm.get("reasoning") is not None:
+                kwargs["reasoning_config"] = tm.get("reasoning")
                     
         except Exception as e:
             logger.warning(f"Could not load config defaults: {e}")

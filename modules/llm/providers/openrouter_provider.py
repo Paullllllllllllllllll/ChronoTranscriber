@@ -113,6 +113,50 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
                 max_context_tokens=128000,
                 max_output_tokens=4096,
             )
+
+        # GPT-5 family
+        # GPT-5 uses reasoning_effort and does not support classic sampler controls.
+        if "gpt-5" in m:
+            return ProviderCapabilities(
+                provider_name="openrouter",
+                model_name=model_name,
+                supports_vision=True,
+                supports_image_detail=True,
+                default_image_detail="high",
+                supports_structured_output=True,
+                supports_json_mode=True,
+                is_reasoning_model=True,
+                supports_reasoning_effort=True,
+                supports_temperature=False,
+                supports_top_p=False,
+                supports_frequency_penalty=False,
+                supports_presence_penalty=False,
+                max_context_tokens=128000,
+                max_output_tokens=4096,
+            )
+
+        # o-series (o1/o3/o4) via OpenRouter
+        # Treat as reasoning models and disable classic sampler controls.
+        if any(x in m for x in ("/o1", "/o3", "/o4", " o1", " o3", " o4")) or any(
+            x in m for x in ("o1", "o3", "o4")
+        ):
+            return ProviderCapabilities(
+                provider_name="openrouter",
+                model_name=model_name,
+                supports_vision=True,
+                supports_image_detail=True,
+                default_image_detail="high",
+                supports_structured_output=True,
+                supports_json_mode=True,
+                is_reasoning_model=True,
+                supports_reasoning_effort=True,
+                supports_temperature=False,
+                supports_top_p=False,
+                supports_frequency_penalty=False,
+                supports_presence_penalty=False,
+                max_context_tokens=128000,
+                max_output_tokens=4096,
+            )
         
         # Other OpenAI models
         return ProviderCapabilities(
@@ -123,7 +167,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             default_image_detail="high",
             supports_structured_output=True,
             supports_json_mode=True,
-            is_reasoning_model="o1" in m or "o3" in m or "o4" in m,
+            is_reasoning_model=False,
             supports_reasoning_effort=False,
             supports_temperature=True,
             supports_top_p=True,
@@ -143,8 +187,8 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             default_image_detail="auto",
             supports_structured_output=True,
             supports_json_mode=True,
-            is_reasoning_model=False,
-            supports_reasoning_effort=False,
+            is_reasoning_model=True,
+            supports_reasoning_effort=True,
             supports_temperature=True,
             supports_top_p=True,
             supports_frequency_penalty=False,
@@ -166,7 +210,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_structured_output=True,
             supports_json_mode=True,
             is_reasoning_model="gemini-2.5" in m or "gemini-3" in m,
-            supports_reasoning_effort=False,
+            supports_reasoning_effort=True,
             supports_temperature=True,
             supports_top_p=True,
             supports_frequency_penalty=False,
@@ -174,7 +218,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             max_context_tokens=1000000,
             max_output_tokens=8192,
         )
-    
+
     # Meta Llama models via OpenRouter
     if "meta/" in m or "llama" in m:
         return ProviderCapabilities(
@@ -194,7 +238,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             max_context_tokens=128000,
             max_output_tokens=4096,
         )
-    
+
     # Mistral models via OpenRouter
     if "mistral/" in m or "mistral" in m or "mixtral" in m:
         return ProviderCapabilities(
@@ -214,7 +258,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             max_context_tokens=128000,
             max_output_tokens=4096,
         )
-    
+
     # Default/fallback - assume basic capabilities
     return ProviderCapabilities(
         provider_name="openrouter",
@@ -233,6 +277,33 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
         max_context_tokens=128000,
         max_output_tokens=4096,
     )
+
+
+def _effort_to_ratio(effort: str) -> float:
+    e = (effort or "").strip().lower()
+    return {
+        "xhigh": 0.95,
+        "high": 0.80,
+        "medium": 0.50,
+        "low": 0.20,
+        "minimal": 0.10,
+        "none": 0.0,
+    }.get(e, 0.50)
+
+
+def _compute_openrouter_reasoning_max_tokens(*, max_tokens: int, effort: str) -> int:
+    ratio = _effort_to_ratio(effort)
+    if ratio <= 0:
+        return 0
+    # Keep budget within OpenRouter docs guidance for Anthropic reasoning.
+    # Ensure some tokens remain for the final response.
+    reserve_for_answer = 256
+    upper = max(0, int(max_tokens) - reserve_for_answer)
+    budget = int(int(max_tokens) * ratio)
+    budget = min(budget, 32000, upper)
+    budget = max(budget, 1024)
+    return budget
+
 
 
 def _load_max_retries() -> int:
@@ -267,6 +338,7 @@ class OpenRouterProvider(BaseProvider):
         presence_penalty: float = 0.0,
         site_url: Optional[str] = None,
         app_name: Optional[str] = None,
+        reasoning_config: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         super().__init__(
@@ -283,6 +355,7 @@ class OpenRouterProvider(BaseProvider):
         self.presence_penalty = presence_penalty
         self.site_url = site_url
         self.app_name = app_name or "ChronoTranscriber"
+        self.reasoning_config = reasoning_config
         
         self._capabilities = _get_model_capabilities(model)
         max_retries = _load_max_retries()
@@ -297,6 +370,61 @@ class OpenRouterProvider(BaseProvider):
             "frequency_penalty": frequency_penalty,
             "presence_penalty": presence_penalty,
         }
+        
+        # Apply OpenRouter unified reasoning controls.
+        # OpenRouter accepts a top-level `reasoning` object and will route/translate
+        # it when supported by the selected model/provider.
+        if self._capabilities.supports_reasoning_effort and reasoning_config:
+            reasoning_payload: Dict[str, Any] = {}
+
+            effort = reasoning_config.get("effort")
+            if effort:
+                reasoning_payload["effort"] = str(effort)
+
+            max_reasoning_tokens = reasoning_config.get("max_tokens")
+            if max_reasoning_tokens is not None:
+                try:
+                    reasoning_payload["max_tokens"] = int(max_reasoning_tokens)
+                except Exception:
+                    pass
+
+            exclude = reasoning_config.get("exclude")
+            if exclude is not None:
+                reasoning_payload["exclude"] = bool(exclude)
+
+            enabled = reasoning_config.get("enabled")
+            if enabled is not None:
+                reasoning_payload["enabled"] = bool(enabled)
+
+            if reasoning_payload:
+                # Avoid sending both effort and max_tokens for models where OpenRouter expects
+                # one or the other.
+                m = (model or "").lower().strip()
+
+                # For Anthropic and Gemini thinking models, OpenRouter supports reasoning.max_tokens.
+                # Map effort -> max_tokens budget when max_tokens isn't explicitly provided.
+                if ("anthropic/" in m or "claude" in m or "gemini" in m) and "max_tokens" not in reasoning_payload:
+                    eff = (reasoning_payload.get("effort") or "medium")
+                    budget = _compute_openrouter_reasoning_max_tokens(max_tokens=max_tokens, effort=str(eff))
+                    if budget > 0:
+                        reasoning_payload.pop("effort", None)
+                        reasoning_payload["max_tokens"] = budget
+
+                # For DeepSeek models, OpenRouter docs emphasize enabling reasoning, rather than effort.
+                if "deepseek/" in m or "deepseek" in m:
+                    eff = str(reasoning_payload.get("effort") or "medium").lower().strip()
+                    reasoning_payload.pop("effort", None)
+                    if "enabled" not in reasoning_payload:
+                        reasoning_payload["enabled"] = eff != "none"
+
+                # OpenRouter's OpenAI-compatible endpoint expects this under extra_body.
+                extra_body = model_kwargs.get("extra_body")
+                if not isinstance(extra_body, dict):
+                    extra_body = {}
+                extra_body["reasoning"] = reasoning_payload
+                model_kwargs["extra_body"] = extra_body
+
+                logger.info(f"Using OpenRouter reasoning={reasoning_payload} for model {model}")
         
         # OpenRouter-specific headers
         default_headers = {

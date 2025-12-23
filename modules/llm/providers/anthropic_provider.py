@@ -369,6 +369,7 @@ class AnthropicProvider(BaseProvider):
         timeout: Optional[float] = None,
         top_p: float = 1.0,
         top_k: Optional[int] = None,
+        reasoning_config: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         super().__init__(
@@ -382,6 +383,7 @@ class AnthropicProvider(BaseProvider):
         
         self.top_p = top_p
         self.top_k = top_k
+        self.reasoning_config = reasoning_config
         
         self._capabilities = _get_model_capabilities(model)
         max_retries = _load_max_retries()
@@ -394,6 +396,24 @@ class AnthropicProvider(BaseProvider):
             model_kwargs["top_p"] = top_p
         if top_k is not None:
             model_kwargs["top_k"] = top_k
+        
+        # Apply extended thinking for Claude 4.5+ models that support it
+        # Maps reasoning_config.effort to Anthropic's thinking parameter
+        if self._capabilities.supports_reasoning_effort and reasoning_config:
+            effort = reasoning_config.get("effort", "medium")
+            # Map effort levels to thinking budget tokens
+            # Anthropic uses budget_tokens to control thinking depth
+            effort_to_budget = {
+                "low": 1024,
+                "medium": 4096,
+                "high": 16384,
+            }
+            budget = effort_to_budget.get(effort, 4096)
+            model_kwargs["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": budget,
+            }
+            logger.info(f"Using extended thinking (budget={budget}) for model {model}")
         
         # Initialize LangChain ChatAnthropic
         # LangChain handles retry logic with exponential backoff internally

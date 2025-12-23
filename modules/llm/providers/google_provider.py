@@ -268,6 +268,7 @@ class GoogleProvider(BaseProvider):
         timeout: Optional[float] = None,
         top_p: float = 1.0,
         top_k: Optional[int] = None,
+        reasoning_config: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         super().__init__(
@@ -281,22 +282,39 @@ class GoogleProvider(BaseProvider):
         
         self.top_p = top_p
         self.top_k = top_k
+        self.reasoning_config = reasoning_config
         
         self._capabilities = _get_model_capabilities(model)
         max_retries = _load_max_retries()
         
+        # Build LLM kwargs
+        llm_kwargs: Dict[str, Any] = {
+            "google_api_key": api_key,
+            "model": model,
+            "temperature": temperature if self._capabilities.supports_temperature else None,
+            "max_tokens": max_tokens,
+            "timeout": timeout,
+            "max_retries": max_retries,
+            "top_p": top_p if self._capabilities.supports_top_p else None,
+            "top_k": top_k,
+        }
+        
+        # Apply thinking mode for Gemini 2.5+ models that support it
+        # Maps reasoning_config.effort to Google's thinking_level parameter
+        if self._capabilities.supports_reasoning_effort and reasoning_config:
+            effort = reasoning_config.get("effort", "medium")
+            # Map effort levels to Gemini thinking_level
+            # Gemini uses "low" or "high" for thinking_level
+            if effort == "low":
+                llm_kwargs["thinking_level"] = "low"
+            else:
+                # medium and high both map to "high" thinking
+                llm_kwargs["thinking_level"] = "high"
+            logger.info(f"Using thinking_level={llm_kwargs['thinking_level']} for model {model}")
+        
         # Initialize LangChain ChatGoogleGenerativeAI
         # LangChain handles retry logic with exponential backoff internally
-        self._llm = ChatGoogleGenerativeAI(
-            google_api_key=api_key,
-            model=model,
-            temperature=temperature if self._capabilities.supports_temperature else None,
-            max_tokens=max_tokens,
-            timeout=timeout,
-            max_retries=max_retries,
-            top_p=top_p if self._capabilities.supports_top_p else None,
-            top_k=top_k,
-        )
+        self._llm = ChatGoogleGenerativeAI(**llm_kwargs)
     
     @property
     def provider_name(self) -> str:

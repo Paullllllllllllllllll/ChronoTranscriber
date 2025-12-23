@@ -160,6 +160,7 @@ class LangChainTranscriber:
         top_p = tm.get("top_p")
         frequency_penalty = tm.get("frequency_penalty")
         presence_penalty = tm.get("presence_penalty")
+        reasoning_cfg = tm.get("reasoning")
         
         # Build kwargs for optional parameters
         provider_kwargs = {}
@@ -169,6 +170,8 @@ class LangChainTranscriber:
             provider_kwargs["frequency_penalty"] = float(frequency_penalty)
         if presence_penalty is not None:
             provider_kwargs["presence_penalty"] = float(presence_penalty)
+        if reasoning_cfg is not None:
+            provider_kwargs["reasoning_config"] = reasoning_cfg
         
         # Create provider instance with full config
         self._provider = get_provider(

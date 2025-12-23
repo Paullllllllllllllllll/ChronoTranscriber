@@ -100,7 +100,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_structured_output=True,
             supports_json_mode=True,
             is_reasoning_model=True,
-            supports_reasoning_effort=False,
+            supports_reasoning_effort=True,
             supports_temperature=False,
             supports_top_p=False,
             supports_frequency_penalty=False,
@@ -120,7 +120,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_structured_output=True,
             supports_json_mode=True,
             is_reasoning_model=True,
-            supports_reasoning_effort=False,
+            supports_reasoning_effort=True,
             supports_temperature=False,
             supports_top_p=False,
             supports_frequency_penalty=False,
@@ -140,7 +140,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_structured_output=True,
             supports_json_mode=True,
             is_reasoning_model=True,
-            supports_reasoning_effort=False,
+            supports_reasoning_effort=True,
             supports_temperature=False,
             supports_top_p=False,
             supports_frequency_penalty=False,
@@ -160,7 +160,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_structured_output=True,
             supports_json_mode=True,
             is_reasoning_model=True,
-            supports_reasoning_effort=False,
+            supports_reasoning_effort=True,
             supports_temperature=False,
             supports_top_p=False,
             supports_frequency_penalty=False,
@@ -180,7 +180,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_structured_output=False,
             supports_json_mode=True,
             is_reasoning_model=True,
-            supports_reasoning_effort=False,
+            supports_reasoning_effort=True,
             supports_temperature=False,
             supports_top_p=False,
             supports_frequency_penalty=False,
@@ -200,7 +200,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_structured_output=False,  # Conservative for o-series
             supports_json_mode=True,
             is_reasoning_model=True,
-            supports_reasoning_effort=False,
+            supports_reasoning_effort=True,
             supports_temperature=False,
             supports_top_p=False,
             supports_frequency_penalty=False,
@@ -220,7 +220,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_structured_output=False,
             supports_json_mode=False,
             is_reasoning_model=True,
-            supports_reasoning_effort=False,
+            supports_reasoning_effort=True,
             supports_temperature=False,
             supports_top_p=False,
             supports_frequency_penalty=False,
@@ -327,6 +327,7 @@ class OpenAIProvider(BaseProvider):
         frequency_penalty: float = 0.0,
         presence_penalty: float = 0.0,
         service_tier: Optional[str] = None,
+        reasoning_config: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         super().__init__(
@@ -342,6 +343,7 @@ class OpenAIProvider(BaseProvider):
         self.frequency_penalty = frequency_penalty
         self.presence_penalty = presence_penalty
         self.service_tier = service_tier
+        self.reasoning_config = reasoning_config
         
         self._capabilities = _get_model_capabilities(model)
         max_retries = _load_max_retries()
@@ -369,6 +371,13 @@ class OpenAIProvider(BaseProvider):
         if caps.is_reasoning_model:
             llm_kwargs["max_completion_tokens"] = max_tokens
             logger.info(f"Using max_completion_tokens={max_tokens} for reasoning model {model}")
+            
+            # Apply reasoning controls for models that support them
+            if caps.supports_reasoning_effort and reasoning_config:
+                effort = reasoning_config.get("effort")
+                if effort:
+                    llm_kwargs["reasoning_effort"] = effort
+                    logger.info(f"Using reasoning_effort={effort} for model {model}")
         else:
             llm_kwargs["max_tokens"] = max_tokens
             # Only pass sampler parameters for non-reasoning models

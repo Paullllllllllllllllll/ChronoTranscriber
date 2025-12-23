@@ -1,10 +1,26 @@
 # model_config.yaml
 transcription_model:
-  # Provider selection: openai, anthropic, google, openrouter
-  # If not specified, auto-detected from model name
-  provider: google
+  # Configuration for the LLM used by the transcription pipeline.
+  #
+  # Used by:
+  # - Synchronous multi-provider transcription via LangChain (modules/llm/transcriber.py)
+  # - OpenAI Batch API transcription (OpenAI-specific; modules/llm/batch/batching.py)
+  #
+  # API keys (env vars):
+  # - openai: OPENAI_API_KEY
+  # - anthropic: ANTHROPIC_API_KEY
+  # - google: GOOGLE_API_KEY
+  # - openrouter: OPENROUTER_API_KEY
+  #
+  # Provider selection: openai, anthropic, google, openrouter.
+  # If omitted, the provider is auto-detected from `name` (see modules/llm/providers/factory.py).
+  provider: openai
   
-  # Model name - examples by provider (as of November 2025):
+  # Model identifier.
+  # - For openrouter, use the OpenRouter format: "provider/model" (e.g. "anthropic/claude-sonnet-4-5").
+  # - For other providers, use the provider-native model id.
+  #
+  # Examples by provider (as of late 2025):
   #
   # OpenAI:
   #   - GPT-5.1: gpt-5.1, gpt-5.1-mini, gpt-5.1-nano (newest, adaptive thinking)
@@ -35,18 +51,49 @@ transcription_model:
   #   Meta: meta/llama-3.2-90b-vision, meta/llama-3.3-70b-instruct
   #   Mistral: mistral/mistral-large, mistral/pixtral-large
 
-  name: gemini-3-flash-preview
-  max_output_tokens: 128000 # maximum number of tokens the model can generate
-  reasoning:                 # GPT-5-series and o3, o3-mini, o1, o1-mini, and o4-mini only.
-  # We recommend using gpt-5-mini with high reasoning effort and medium verbosity
-  # for a good balance of cost and quality.
+  name: gpt-5-mini
+
+  # Maximum output tokens.
+  # - In LangChain synchronous mode, this becomes the provider's output token limit.
+  # - For OpenAI reasoning families (GPT-5, o-series), OpenAI uses a different parameter name
+  #   under the hood (LangChain maps this appropriately).
+  # - This repo also accepts `max_tokens` as an alias in some call paths.
+  max_output_tokens: 128000
+
+  # Image inputs are required for the OCR/transcription flow. If you set a model that cannot
+  # accept images, the app will fail fast during config load (ensure_image_support()).
+  # Set to false only if you are wiring a text-only pipeline.
+  expects_image_inputs: true
+
+  # Reasoning controls.
+  # Applies to reasoning-capable models across all providers:
+  # - OpenAI GPT-5/o-series: Uses reasoning_effort parameter
+  # - Anthropic Claude 4.5/4.1: Uses extended thinking (budget_tokens mapped from effort)
+  # - Google Gemini 2.5/3: Uses thinking_level (low/high)
+  # - OpenRouter: Passes reasoning_effort to underlying models
+  #
+  # effort: low | medium | high
+  # - low: Minimal reasoning overhead, faster responses
+  # - medium: Balanced reasoning depth (recommended)
+  # - high: Maximum reasoning depth, slower but more thorough
+  reasoning:
     effort: medium
-  text:                      # GPT-5-series only
-    verbosity: medium
-  # classic sampler controls are used only for non-reasoning models like GPT-4o/4.1
-  temperature: 0.01 # model temperature - higher values make the model more random
-  top_p: 1.0 # nucleus sampling - controls the cumulative probability of tokens to consider
-  frequency_penalty: 0.01 # frequency_penalty - penalizes repeated tokens;
-  # flat reduction if a token has appeared more than once
-  presence_penalty: 0.01 # presence_penalty - penalizes repeated tokens;
-  # penalty increases with the number of times a token has appeared
+  text:
+    verbosity: medium  # OpenAI GPT-5 Batch API only: concise | medium | verbose
+
+  # Sampler controls.
+  # - Supported on most non-reasoning chat models.
+  # - For reasoning models (OpenAI GPT-5 + o-series, some Claude/Gemini variants), these may be
+  #   ignored or automatically filtered by the provider adapter.
+  temperature: 0.01
+  top_p: 1.0
+  frequency_penalty: 0.01
+  presence_penalty: 0.01
+
+  # Provider-specific sampler (used by Anthropic/Google; optional).
+  # top_k: null
+
+  # OpenAI service tier is configured primarily in config/concurrency_config.yaml:
+  # concurrency.transcription.service_tier: auto|default|priority|flex
+  # - flex is synchronous-only; batch processing will automatically fall back to auto.
+  # service_tier: auto

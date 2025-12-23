@@ -1,4 +1,7 @@
-# Image processing configuration (three pipelines)
+# Image processing configuration (LLM providers + Tesseract + output post-processing)
+#
+# Numbering in this file is documentation-only. Each numbered section corresponds to a
+# top-level YAML key below (all sections are peers).
 
 # 1) OpenAI API image processing (preparing images to send to the OpenAI API)
 api_image_processing:
@@ -6,17 +9,21 @@ api_image_processing:
   grayscale_conversion: true  # Convert color images to grayscale to reduce noise.
   handle_transparency: true  # Flatten images with alpha onto white background.
   # Controls the fidelity of images sent to the OpenAI Responses API.
-  # - high: better fidelity OCR, potentially higher token usage
-  # - low: faster/cheaper, lower fidelity
+  # Values:
+  # - high: uses tiling approach (170 tokens per 512×512 tile), better for fine details
+  # - low: 512×512 resize, 85 tokens per image, faster/cheaper
   # - auto: omit the parameter and let the model decide
+  # Token cost: low=85 tokens; high=85 + (170 × number of 512px tiles)
   llm_detail: high
 
   # JPEG compression quality (1-100) when saving processed images for API use.
   jpeg_quality: 100
 
-  # Resizing behavior prior to sending to the API
+  # Resizing behavior prior to sending to the API.
+  # Values:
   # - auto: choose a resizing strategy based on llm_detail
   # - none: do not resize (only transparency/grayscale steps applied)
+  # Note: any other value currently behaves like 'auto' (resizing enabled).
   resize_profile: high
 
   # Parameters for resizing profiles
@@ -25,7 +32,7 @@ api_image_processing:
   # For high detail, fit into this box (width, height) with padding as needed
   high_target_box: [768, 1536]
 
-# 1b) Google Gemini API image processing (preparing images to send to Google Gemini)
+# 2) Google Gemini API image processing (preparing images to send to Google Gemini)
 google_image_processing:
   target_dpi: 300  # DPI for rendering/extracting images before API processing.
   grayscale_conversion: true  # Convert color images to grayscale to reduce noise.
@@ -33,20 +40,24 @@ google_image_processing:
   
   # Controls the resolution of images sent to Google Gemini API.
   # Google uses media_resolution enum instead of OpenAI's detail parameter.
-  # - high: MEDIA_RESOLUTION_HIGH - Recommended for OCR/dense documents (more tokens)
-  # - medium: MEDIA_RESOLUTION_MEDIUM - Balanced quality/cost
-  # - low: MEDIA_RESOLUTION_LOW - Minimal tokens, fast/cheap
-  # - auto: MEDIA_RESOLUTION_UNSPECIFIED - Let model decide (default)
-  # - ultra_high: MEDIA_RESOLUTION_ULTRA_HIGH - Gemini 3 only, highest quality
+  # Values (Gemini 3 token counts per image):
+  # - ultra_high: 2240 tokens - Highest quality, for computer use / fine details (per-part only)
+  # - high: 1120 tokens - Recommended for OCR/dense documents, optimal for most use cases
+  # - medium: 560 tokens - Balanced quality/cost
+  # - low: 280 tokens - Minimal tokens, fast/cheap
+  # - auto: MEDIA_RESOLUTION_UNSPECIFIED - Default (1120 for images, 560 for PDFs)
+  # Note: Token counts differ for Gemini 2.5 and earlier models (258 tokens via Pan and Scan).
   media_resolution: high
 
   # JPEG compression quality (1-100) when saving processed images for API use.
   jpeg_quality: 100
 
-  # Resizing behavior prior to sending to the API
+  # Resizing behavior prior to sending to the API.
   # Google's token calculation uses 768x768 tiles, so we optimize for that.
+  # Values:
   # - auto: choose a resizing strategy based on media_resolution
   # - none: do not resize (only transparency/grayscale steps applied)
+  # Note: any other value currently behaves like 'auto' (resizing enabled).
   resize_profile: high
 
   # Parameters for resizing profiles
@@ -56,10 +67,12 @@ google_image_processing:
   # Google uses 768x768 tiles, so we use a box that's a multiple of 768
   high_target_box: [768, 1536]
 
-# 1c) Anthropic Claude API image processing (preparing images to send to Claude)
+# 3) Anthropic Claude API image processing (preparing images to send to Claude)
 # Anthropic recommends: long edge ≤ 1568px, ≤ 1.15 megapixels for optimal latency
-# Min 200px on any edge; max 8000x8000px (or 2000x2000 if >20 images)
-# Token calculation: tokens = (width * height) / 750
+# Min 200px on any edge; max 8000×8000px (or 2000×2000 if >20 images in one request)
+# Token calculation: tokens = (width × height) / 750
+# Example: 1568×1568 image ≈ 3,276 tokens; 1024×1024 ≈ 1,398 tokens
+# Anthropic auto-resizes images larger than 1568px (increases latency without benefit)
 anthropic_image_processing:
   target_dpi: 300  # DPI for rendering/extracting images before API processing.
   grayscale_conversion: true  # Convert color images to grayscale to reduce noise.
@@ -68,10 +81,14 @@ anthropic_image_processing:
   # JPEG compression quality (1-100) when saving processed images for API use.
   jpeg_quality: 100
 
-  # Resizing behavior prior to sending to the API
-  # Anthropic auto-resizes internally, but pre-resizing reduces latency.
-  # - auto: resize to optimal dimensions for Anthropic
+  # Resizing behavior prior to sending to the API.
+  # Anthropic auto-resizes internally, but pre-resizing to ≤1568px reduces latency.
+  # Values:
+  # - auto: apply provider-specific resizing (default, uses high_max_side_px)
+  # - high: cap the longest side to high_max_side_px (1568px, Anthropic's optimal)
+  # - low: cap the longest side to low_max_side_px (512px, minimal tokens)
   # - none: do not resize (only transparency/grayscale steps applied)
+  # Best practice: pre-resize to ≤1568px to avoid server-side resizing latency.
   resize_profile: auto
 
   # Parameters for resizing profiles
@@ -81,7 +98,7 @@ anthropic_image_processing:
   # No padding needed - Anthropic handles aspect ratios natively
   high_max_side_px: 1568
 
-# 2) Tesseract OCR image processing (preparing images for local Tesseract)
+# 4) Tesseract OCR image processing (preparing images for local Tesseract)
 tesseract_image_processing:
   # Resolution for page rendering and image saving; DPI metadata is embedded if enabled.
   target_dpi: 300
@@ -108,7 +125,7 @@ tesseract_image_processing:
     preserve_resolution: true      # do not resize/box-fit for Tesseract
     embed_dpi_metadata: true       # embed DPI metadata in output files
 
-# 3) Post-processing settings for transcription output cleanup
+# 5) Post-processing settings for transcription output cleanup
 # Applied to final transcription text before writing to file. Cleans up OCR
 # artifacts, normalizes whitespace, and optionally wraps long lines while
 # preserving Markdown formatting and semantic content.
@@ -138,8 +155,8 @@ postprocessing:
   
   # Auto-compute wrap width from average line length of text blocks.
   # Takes precedence over wrap_width when both wrap_lines and auto_wrap are true.
-  auto_wrap: true
+  auto_wrap: false
   
   # Explicit wrap width (characters). Only used when wrap_lines=true and auto_wrap=false.
   # Common values: 80 (terminal), 100 (wide editor), 120 (modern screens). null=80.
-  wrap_width: null
+  wrap_width: 120

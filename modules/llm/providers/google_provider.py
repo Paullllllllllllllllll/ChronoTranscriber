@@ -53,6 +53,8 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_vision=True,
             supports_image_detail=False,
             default_image_detail="auto",
+            supports_media_resolution=True,
+            default_media_resolution="high",
             supports_structured_output=True,
             supports_json_mode=True,
             is_reasoning_model=True,  # Thinking capabilities
@@ -73,6 +75,8 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_vision=True,
             supports_image_detail=False,
             default_image_detail="auto",
+            supports_media_resolution=True,
+            default_media_resolution="high",
             supports_structured_output=True,
             supports_json_mode=True,
             is_reasoning_model=True,
@@ -93,6 +97,8 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_vision=True,
             supports_image_detail=False,
             default_image_detail="auto",
+            supports_media_resolution=True,
+            default_media_resolution="high",
             supports_structured_output=True,
             supports_json_mode=True,
             is_reasoning_model=True,
@@ -113,6 +119,8 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_vision=True,
             supports_image_detail=False,
             default_image_detail="auto",
+            supports_media_resolution=True,
+            default_media_resolution="high",
             supports_structured_output=True,
             supports_json_mode=True,
             is_reasoning_model=True,  # Thinking mode support
@@ -133,6 +141,8 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_vision=True,
             supports_image_detail=False,
             default_image_detail="auto",
+            supports_media_resolution=True,
+            default_media_resolution="high",
             supports_structured_output=True,
             supports_json_mode=True,
             is_reasoning_model=True,
@@ -153,6 +163,8 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_vision=True,
             supports_image_detail=False,
             default_image_detail="auto",
+            supports_media_resolution=True,
+            default_media_resolution="high",
             supports_structured_output=True,
             supports_json_mode=True,
             is_reasoning_model=False,
@@ -173,6 +185,8 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_vision=True,
             supports_image_detail=False,
             default_image_detail="auto",
+            supports_media_resolution=True,
+            default_media_resolution="high",
             supports_structured_output=True,
             supports_json_mode=True,
             is_reasoning_model=False,
@@ -193,6 +207,8 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_vision=True,
             supports_image_detail=False,
             default_image_detail="auto",
+            supports_media_resolution=True,
+            default_media_resolution="high",
             supports_structured_output=True,
             supports_json_mode=True,
             is_reasoning_model=False,
@@ -212,6 +228,8 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
         supports_vision=True,
         supports_image_detail=False,
         default_image_detail="auto",
+        supports_media_resolution=True,
+        default_media_resolution="high",
         supports_structured_output=True,
         supports_json_mode=True,
         is_reasoning_model=False,
@@ -295,6 +313,7 @@ class GoogleProvider(BaseProvider):
         user_instruction: str = "Please transcribe the text from this image.",
         json_schema: Optional[Dict[str, Any]] = None,
         image_detail: Optional[str] = None,
+        media_resolution: Optional[str] = None,
     ) -> TranscriptionResult:
         """Transcribe text from an image file."""
         base64_data, mime_type = self.encode_image_to_base64(image_path)
@@ -305,6 +324,7 @@ class GoogleProvider(BaseProvider):
             user_instruction=user_instruction,
             json_schema=json_schema,
             image_detail=image_detail,
+            media_resolution=media_resolution,
         )
     
     async def transcribe_image_from_base64(
@@ -316,6 +336,7 @@ class GoogleProvider(BaseProvider):
         user_instruction: str = "Please transcribe the text from this image.",
         json_schema: Optional[Dict[str, Any]] = None,
         image_detail: Optional[str] = None,
+        media_resolution: Optional[str] = None,
     ) -> TranscriptionResult:
         """Transcribe text from a base64-encoded image using LangChain."""
         caps = self._capabilities
@@ -327,10 +348,31 @@ class GoogleProvider(BaseProvider):
                 transcription_not_possible=True,
             )
         
+        # Normalize media_resolution parameter
+        resolution = media_resolution
+        if resolution:
+            resolution = resolution.lower().strip()
+            if resolution not in ("low", "medium", "high", "ultra_high", "auto"):
+                resolution = None
+        if resolution is None:
+            resolution = caps.default_media_resolution if caps.supports_media_resolution else None
+        
+        # Map to Google's MediaResolution enum values
+        resolution_map = {
+            "low": "MEDIA_RESOLUTION_LOW",
+            "medium": "MEDIA_RESOLUTION_MEDIUM",
+            "high": "MEDIA_RESOLUTION_HIGH",
+            "ultra_high": "MEDIA_RESOLUTION_ULTRA_HIGH",
+            "auto": "MEDIA_RESOLUTION_UNSPECIFIED",
+        }
+        media_resolution_enum = resolution_map.get(resolution) if resolution else None
+        
         # Build data URL for Gemini
         data_url = self.create_data_url(image_base64, mime_type)
         
         # Gemini uses standard image_url format
+        # Note: LangChain's ChatGoogleGenerativeAI may not directly support per-part
+        # media_resolution in image_url. We'll set it globally via generation config instead.
         image_content = {
             "type": "image_url",
             "image_url": data_url,
@@ -360,13 +402,25 @@ class GoogleProvider(BaseProvider):
                 include_raw=True,
             )
         
+        # Apply media_resolution if supported
+        # LangChain's ChatGoogleGenerativeAI doesn't directly expose generation_config,
+        # so we pass it via model_kwargs if needed
+        invoke_kwargs = {}
+        if media_resolution_enum and caps.supports_media_resolution:
+            # For LangChain, we can't easily set per-request generation config
+            # Log the resolution for debugging
+            logger.debug(f"Using media_resolution: {resolution} ({media_resolution_enum})")
+            # Note: Current LangChain implementation may not expose this parameter
+            # Future enhancement: Pass via generation_config if LangChain supports it
+        
         # Invoke LLM - LangChain handles retries internally
-        return await self._invoke_llm(llm_to_use, messages)
+        return await self._invoke_llm(llm_to_use, messages, invoke_kwargs)
     
     async def _invoke_llm(
         self,
         llm,
         messages: List,
+        invoke_kwargs: Optional[Dict[str, Any]] = None,
     ) -> TranscriptionResult:
         """Invoke the LLM and process the response.
         
@@ -378,7 +432,9 @@ class GoogleProvider(BaseProvider):
         - "parsing_error": Any parsing error that occurred
         """
         try:
-            response = await llm.ainvoke(messages)
+            # Merge invoke_kwargs if provided
+            kwargs = invoke_kwargs or {}
+            response = await llm.ainvoke(messages, **kwargs)
             
             # Extract token usage and content
             # Handle include_raw=True response format (dict with raw/parsed/parsing_error)

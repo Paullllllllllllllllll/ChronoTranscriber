@@ -1,4 +1,4 @@
-# Image processing configuration (two pipelines)
+# Image processing configuration (three pipelines)
 
 # 1) OpenAI API image processing (preparing images to send to the OpenAI API)
 api_image_processing:
@@ -23,6 +23,37 @@ api_image_processing:
   # For low detail, cap the longest side to this many pixels (preserve aspect ratio)
   low_max_side_px: 512
   # For high detail, fit into this box (width, height) with padding as needed
+  high_target_box: [768, 1536]
+
+# 1b) Google Gemini API image processing (preparing images to send to Google Gemini)
+google_image_processing:
+  target_dpi: 300  # DPI for rendering/extracting images before API processing.
+  grayscale_conversion: true  # Convert color images to grayscale to reduce noise.
+  handle_transparency: true  # Flatten images with alpha onto white background.
+  
+  # Controls the resolution of images sent to Google Gemini API.
+  # Google uses media_resolution enum instead of OpenAI's detail parameter.
+  # - high: MEDIA_RESOLUTION_HIGH - Recommended for OCR/dense documents (more tokens)
+  # - medium: MEDIA_RESOLUTION_MEDIUM - Balanced quality/cost
+  # - low: MEDIA_RESOLUTION_LOW - Minimal tokens, fast/cheap
+  # - auto: MEDIA_RESOLUTION_UNSPECIFIED - Let model decide (default)
+  # - ultra_high: MEDIA_RESOLUTION_ULTRA_HIGH - Gemini 3 only, highest quality
+  media_resolution: high
+
+  # JPEG compression quality (1-100) when saving processed images for API use.
+  jpeg_quality: 100
+
+  # Resizing behavior prior to sending to the API
+  # Google's token calculation uses 768x768 tiles, so we optimize for that.
+  # - auto: choose a resizing strategy based on media_resolution
+  # - none: do not resize (only transparency/grayscale steps applied)
+  resize_profile: high
+
+  # Parameters for resizing profiles
+  # For low resolution, cap the longest side to this many pixels (preserve aspect ratio)
+  low_max_side_px: 512
+  # For high resolution, fit into this box (width, height) with padding as needed
+  # Google uses 768x768 tiles, so we use a box that's a multiple of 768
   high_target_box: [768, 1536]
 
 # 2) Tesseract OCR image processing (preparing images for local Tesseract)

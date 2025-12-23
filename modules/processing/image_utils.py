@@ -20,16 +20,30 @@ logger = setup_logger(__name__)
 
 
 class ImageProcessor:
-    def __init__(self, image_path: Path) -> None:
+    def __init__(self, image_path: Path, provider: str = "openai") -> None:
+        """Initialize ImageProcessor with provider-specific config.
+        
+        Args:
+            image_path: Path to the image file
+            provider: Provider name (openai, google, anthropic, openrouter) or 'tesseract'
+                     Determines which config section to use for preprocessing
+        """
         if image_path.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
             logger.error(f"Unsupported image format: {image_path.suffix}")
             raise ValueError(f"Unsupported image format: {image_path.suffix}")
         self.image_path = image_path
+        self.provider = provider.lower()
 
         # Full config dict (contains 'image_processing' and 'ocr' sections)
         self.image_config = get_config_service().get_image_processing_config()
-        # OpenAI API preprocessing settings
-        self.img_cfg = self.image_config.get('api_image_processing', {})
+        
+        # Map provider to config section
+        # Google uses google_image_processing, all others use api_image_processing (OpenAI format)
+        if self.provider == "google":
+            self.img_cfg = self.image_config.get('google_image_processing', {})
+        else:
+            # OpenAI, Anthropic, OpenRouter, and default all use OpenAI-style config
+            self.img_cfg = self.image_config.get('api_image_processing', {})
 
     def convert_to_grayscale(self, image: Image.Image) -> Image.Image:
         """
@@ -109,8 +123,13 @@ class ImageProcessor:
             with Image.open(self.image_path) as img:
                 img = self.handle_transparency(img)
                 img = self.convert_to_grayscale(img)
-                # Choose resizing based on llm_detail and resize_profile
-                detail = (self.img_cfg.get('llm_detail', 'high') or 'high')
+                # Choose resizing based on llm_detail (OpenAI) or media_resolution (Google)
+                # Both configs use same llm_detail/media_resolution key name in their respective sections
+                if self.provider == "google":
+                    # Google uses media_resolution but we map it to detail for resize logic
+                    detail = (self.img_cfg.get('media_resolution', 'high') or 'high')
+                else:
+                    detail = (self.img_cfg.get('llm_detail', 'high') or 'high')
                 img = ImageProcessor.resize_for_detail(img, detail, self.img_cfg)
 
                 # Force output to JPEG with configurable quality (regardless of extension)

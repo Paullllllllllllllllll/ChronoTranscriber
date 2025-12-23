@@ -342,10 +342,12 @@ class WorkflowManager:
             target_dpi = (self.image_processing_config
                           .get('api_image_processing', {})
                           .get('target_dpi', 300))
+            # Get provider from model config for provider-specific preprocessing
+            provider = self.model_config.get("transcription_model", {}).get("provider", "openai")
             console_print(
                 f"[INFO] Extracting and processing images from PDF with {target_dpi} DPI...")
             processed_image_files = await pdf_processor.process_images(
-                preprocessed_folder, target_dpi)
+                preprocessed_folder, target_dpi, provider=provider)
 
         # Rely on extraction order; order_index will follow the list order
         console_print(
@@ -536,8 +538,10 @@ class WorkflowManager:
             console_print(f"[INFO] Preprocessing images for Tesseract...")
             processed_files = ImageProcessor.process_and_save_images_for_tesseract(folder, preprocessed_folder)
         else:
-            console_print(f"[INFO] Processing images from folder for GPT...")
-            processed_files = ImageProcessor.process_and_save_images(folder, preprocessed_folder)
+            # Get provider from model config for provider-specific preprocessing
+            provider = self.model_config.get("transcription_model", {}).get("provider", "openai")
+            console_print(f"[INFO] Processing images from folder for {provider.upper()}...")
+            processed_files = ImageProcessor.process_and_save_images(folder, preprocessed_folder, provider=provider)
 
         if not processed_files:
             console_print(f"[WARN] No images found or processed in {folder}.")

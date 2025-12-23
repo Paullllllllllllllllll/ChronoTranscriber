@@ -27,8 +27,10 @@ class ProviderCapabilities:
     
     # Vision/multimodal
     supports_vision: bool = False
-    supports_image_detail: bool = True
+    supports_image_detail: bool = True  # OpenAI-style "detail" parameter
     default_image_detail: str = "high"  # "low", "high", "auto"
+    supports_media_resolution: bool = False  # Google-style media_resolution parameter
+    default_media_resolution: str = "high"  # "low", "medium", "high", "ultra_high", "auto"
     
     # Structured outputs
     supports_structured_output: bool = False
@@ -143,6 +145,7 @@ class BaseProvider(ABC):
         user_instruction: str = "Please transcribe the text from this image.",
         json_schema: Optional[Dict[str, Any]] = None,
         image_detail: Optional[str] = None,
+        media_resolution: Optional[str] = None,
     ) -> TranscriptionResult:
         """Transcribe text from an image.
         
@@ -151,7 +154,8 @@ class BaseProvider(ABC):
             system_prompt: System prompt for the model
             user_instruction: User instruction text
             json_schema: Optional JSON schema for structured output
-            image_detail: Image detail level ("low", "high", "auto")
+            image_detail: Image detail level for OpenAI ("low", "high", "auto")
+            media_resolution: Media resolution for Google ("low", "medium", "high", "ultra_high", "auto")
         
         Returns:
             TranscriptionResult with the transcription and metadata
@@ -168,6 +172,7 @@ class BaseProvider(ABC):
         user_instruction: str = "Please transcribe the text from this image.",
         json_schema: Optional[Dict[str, Any]] = None,
         image_detail: Optional[str] = None,
+        media_resolution: Optional[str] = None,
     ) -> TranscriptionResult:
         """Transcribe text from a base64-encoded image.
         
@@ -177,7 +182,8 @@ class BaseProvider(ABC):
             system_prompt: System prompt for the model
             user_instruction: User instruction text
             json_schema: Optional JSON schema for structured output
-            image_detail: Image detail level ("low", "high", "auto")
+            image_detail: Image detail level for OpenAI ("low", "high", "auto")
+            media_resolution: Media resolution for Google ("low", "medium", "high", "ultra_high", "auto")
         
         Returns:
             TranscriptionResult with the transcription and metadata

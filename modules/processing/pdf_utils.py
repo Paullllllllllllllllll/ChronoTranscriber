@@ -103,9 +103,14 @@ class PDFProcessor:
             logger.error(
                 f"Failed to extract images from PDF: {self.pdf_path}, {e}")
 
-    async def process_images(self, preprocessed_folder: Path, target_dpi: int) -> List[Path]:
+    async def process_images(self, preprocessed_folder: Path, target_dpi: int, provider: str = "openai") -> List[Path]:
         """
         Extracts images from PDF and directly pre-processes them without saving raw images.
+
+        Args:
+            preprocessed_folder: Path to save processed images
+            target_dpi: DPI for rendering PDF pages
+            provider: Provider name (openai, google, anthropic, openrouter) for config selection
 
         Returns:
             List[Path]: List of processed image paths.
@@ -138,8 +143,12 @@ class PDFProcessor:
                     img = Image.frombytes("RGB", [pix.width, pix.height], img_data)
 
                     # Apply processing directly to the image
-                    # Load processing config
-                    image_cfg = get_config_service().get_image_processing_config().get('api_image_processing', {})
+                    # Load provider-specific processing config
+                    img_processing_cfg = get_config_service().get_image_processing_config()
+                    if provider.lower() == "google":
+                        image_cfg = img_processing_cfg.get('google_image_processing', {})
+                    else:
+                        image_cfg = img_processing_cfg.get('api_image_processing', {})
 
                     # Handle transparency (if needed)
                     if image_cfg.get('handle_transparency', True):
@@ -153,8 +162,11 @@ class PDFProcessor:
                         from PIL import ImageOps
                         img = ImageOps.grayscale(img)
 
-                    # Resize based on llm_detail and resize_profile
-                    detail = (image_cfg.get('llm_detail', 'high') or 'high')
+                    # Resize based on llm_detail (OpenAI) or media_resolution (Google)
+                    if provider.lower() == "google":
+                        detail = (image_cfg.get('media_resolution', 'high') or 'high')
+                    else:
+                        detail = (image_cfg.get('llm_detail', 'high') or 'high')
                     final_img = ImageProcessor.resize_for_detail(img, detail, image_cfg)
 
                     # Save processed image with configurable JPEG quality

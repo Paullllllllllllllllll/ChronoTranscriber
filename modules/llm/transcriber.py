@@ -126,8 +126,10 @@ class LangChainTranscriber:
         
         # Load image processing config for detail level
         ipc = config_service.get_image_processing_config()
-        image_cfg = ipc.get("api_image_processing", {}) if isinstance(ipc, dict) else {}
-        raw_detail = str(image_cfg.get("llm_detail", "high")).lower().strip()
+        
+        # Load OpenAI-specific image_detail parameter
+        openai_cfg = ipc.get("api_image_processing", {}) if isinstance(ipc, dict) else {}
+        raw_detail = str(openai_cfg.get("llm_detail", "high")).lower().strip()
         
         if raw_detail in ("low", "high"):
             self.image_detail = raw_detail
@@ -135,6 +137,17 @@ class LangChainTranscriber:
             self.image_detail = "auto"
         else:
             self.image_detail = "auto"
+        
+        # Load Google-specific media_resolution parameter
+        google_cfg = ipc.get("google_image_processing", {}) if isinstance(ipc, dict) else {}
+        raw_resolution = str(google_cfg.get("media_resolution", "high")).lower().strip()
+        
+        if raw_resolution in ("low", "medium", "high", "ultra_high"):
+            self.media_resolution = raw_resolution
+        elif raw_resolution == "auto":
+            self.media_resolution = "auto"
+        else:
+            self.media_resolution = "high"
         
         # Load max_output_tokens from model config (critical for reasoning models)
         max_tokens = int(
@@ -193,6 +206,7 @@ class LangChainTranscriber:
             user_instruction="The image:",
             json_schema=self.full_schema_obj,
             image_detail=self.image_detail,
+            media_resolution=self.media_resolution,
         )
         
         # Convert TranscriptionResult to dict format expected by existing code
@@ -219,6 +233,7 @@ class LangChainTranscriber:
             user_instruction="The image:",
             json_schema=self.full_schema_obj,
             image_detail=self.image_detail,
+            media_resolution=self.media_resolution,
         )
         
         return self._result_to_dict(result)

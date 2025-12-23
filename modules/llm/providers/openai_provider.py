@@ -415,6 +415,7 @@ class OpenAIProvider(BaseProvider):
         user_instruction: str = "Please transcribe the text from this image.",
         json_schema: Optional[Dict[str, Any]] = None,
         image_detail: Optional[str] = None,
+        media_resolution: Optional[str] = None,
     ) -> TranscriptionResult:
         """Transcribe text from an image file."""
         base64_data, mime_type = self.encode_image_to_base64(image_path)
@@ -425,6 +426,7 @@ class OpenAIProvider(BaseProvider):
             user_instruction=user_instruction,
             json_schema=json_schema,
             image_detail=image_detail,
+            media_resolution=media_resolution,
         )
     
     async def transcribe_image_from_base64(
@@ -436,8 +438,13 @@ class OpenAIProvider(BaseProvider):
         user_instruction: str = "Please transcribe the text from this image.",
         json_schema: Optional[Dict[str, Any]] = None,
         image_detail: Optional[str] = None,
+        media_resolution: Optional[str] = None,
     ) -> TranscriptionResult:
-        """Transcribe text from a base64-encoded image using LangChain."""
+        """Transcribe text from a base64-encoded image using LangChain.
+        
+        Note: OpenAI uses image_detail parameter, not media_resolution.
+        The media_resolution parameter is accepted for API compatibility but ignored.
+        """
         caps = self._capabilities
         
         if not caps.supports_vision:

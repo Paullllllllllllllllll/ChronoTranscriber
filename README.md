@@ -584,10 +584,13 @@ ChronoTranscriber includes an optional domain context file at `additional_contex
 
 ChronoTranscriber supports custom JSON schemas for controlling transcription output format.
 
+ Some schemas include explicit page number markers in the transcription output. When enabled, page numbers appearing on headers and footers should be written like this: `<page_number>9</page_number>`.
+
 #### Included Schemas
 
 - `markdown_transcription_schema.json` (default): Produces markdown-formatted transcriptions with LaTeX equations, headings, and formatting
 - `plain_text_transcription_schema.json`: Produces plain text transcriptions without formatting
+- `plain_text_transcription_with_markers_schema.json`: Produces plain text transcriptions with explicit page number markers
 
 #### Schema Structure
 
@@ -615,6 +618,7 @@ Available Schemas:
 
 - `markdown_transcription_schema.json` (default): Produces markdown-formatted transcriptions with LaTeX equations, headings, and formatting
 - `plain_text_transcription_schema.json`: Produces plain text transcriptions without formatting
+- `plain_text_transcription_with_markers_schema.json`: Produces plain text transcriptions with explicit page number markers
 - `swiss_address_book_schema.json`: Specialized schema for extracting structured address book entries from historical Swiss documents
 
 Creating Custom Schemas:
@@ -972,6 +976,7 @@ ChronoTranscriber/
 ├── schemas/                   # JSON schemas for structured outputs
 │   ├── markdown_transcription_schema.json
 │   ├── plain_text_transcription_schema.json
+│   ├── plain_text_transcription_with_markers_schema.json
 │   └── swiss_address_book_schema.json
 ├── system_prompt/             # System prompt templates
 │   └── system_prompt.txt

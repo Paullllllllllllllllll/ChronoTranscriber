@@ -107,7 +107,7 @@ Environment variable: `OPENROUTER_API_KEY`
 ### Processing Modes
 
 - **Synchronous**: Real-time responses for interactive workflows
-- **Batch Processing**: Asynchronous processing via OpenAI Batch API for large jobs (OpenAI only)
+- **Batch Processing**: Asynchronous processing for large jobs via provider-native batch APIs (OpenAI, Anthropic, Google). OpenRouter does not support batch processing.
 
 ### Model-Specific Features
 
@@ -131,7 +131,7 @@ Environment variable: `OPENROUTER_API_KEY`
 
 ### Batch Processing
 
-- Scalable Submission: Submit large document sets as OpenAI Batch jobs
+- Scalable Submission: Submit large document sets as provider-native batch jobs (OpenAI Batch API, Anthropic Message Batches API, Google Gemini Batch API)
 - Smart Chunking: Automatic request splitting with 150 MB chunk size limit (below the 180 MB API limit)
 - Data URL Encoding: Images are base64-encoded and embedded directly in requests (no external hosting required)
 - Metadata Tracking: Each request includes image name, page number, and order index for reliable reconstruction
@@ -705,7 +705,15 @@ Output Naming Convention:
 
 ## Batch Processing
 
-Batch processing allows you to submit hundreds or thousands of pages for asynchronous transcription via OpenAI's Batch API.
+Batch processing allows you to submit hundreds or thousands of pages for asynchronous transcription via provider-native batch APIs.
+
+Supported batch providers:
+- OpenAI (Batch API)
+- Anthropic (Message Batches API)
+- Google (Gemini Batch API)
+
+Not supported:
+- OpenRouter (no native batch API)
 
 ### How Batch Processing Works
 

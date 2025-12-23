@@ -1,9 +1,14 @@
 """Batch finalization operations.
 
 This module encapsulates the logic to scan local JSONL artifacts, verify that
-all OpenAI Batch jobs are completed, download their results, merge outputs in
-page order, and write final transcription files. It keeps side-effectful UI
-printing and logging, but is importable by tests and thin CLIs.
+batch jobs are completed (supporting OpenAI, Anthropic, and Google), download
+their results, merge outputs in page order, and write final transcription files.
+It keeps side-effectful UI printing and logging, but is importable by tests and thin CLIs.
+
+Multi-provider support:
+- OpenAI: Uses legacy direct SDK calls for backward compatibility
+- Anthropic: Uses BatchBackend abstraction via Message Batches API
+- Google: Uses BatchBackend abstraction via Gemini Batch API
 """
 
 from __future__ import annotations
@@ -17,6 +22,8 @@ from datetime import datetime, timezone
 from openai import OpenAI
 
 from modules.llm.batch.batch_utils import diagnose_batch_failure, extract_custom_id_mapping
+from modules.llm.batch.backends import get_batch_backend, BatchHandle, BatchStatus
+from modules.llm.batch.backends.factory import supports_batch
 from modules.config.service import get_config_service
 from modules.infra.logger import setup_logger
 from modules.llm.openai_sdk_utils import coerce_file_id, list_all_batches, sdk_to_dict
@@ -62,6 +69,228 @@ def load_config() -> Tuple[List[Path], Dict[str, Any], Dict[str, Any]]:
     scan_dirs = collect_scan_directories(paths_config)
     
     return scan_dirs, processing_settings, postprocessing_config
+
+
+def _process_non_openai_batch(
+    temp_file: Path,
+    batch_ids: Set[str],
+    batch_provider: str,
+    batch_tracking_records: List[Dict[str, Any]],
+    processing_settings: Dict[str, Any],
+    postprocessing_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Process batch results for non-OpenAI providers (Anthropic, Google).
+    
+    Uses the BatchBackend abstraction to check status and download results.
+    """
+    from modules.llm.batch.batch_utils import extract_custom_id_mapping
+    
+    identifier = temp_file.stem.replace("_transcription", "")
+    
+    print_info(f"Processing {batch_provider.upper()} batch for {temp_file.name}...")
+    
+    try:
+        backend = get_batch_backend(batch_provider)
+    except Exception as e:
+        print_error(f"Failed to get batch backend for {batch_provider}: {e}")
+        return
+    
+    # Check status of all batches
+    all_completed = True
+    completed_count = 0
+    failed_count = 0
+    
+    for batch_id in batch_ids:
+        # Reconstruct handle from tracking record
+        tracking = next(
+            (t for t in batch_tracking_records if t.get("batch_id") == batch_id),
+            {}
+        )
+        handle = BatchHandle(
+            provider=batch_provider,
+            batch_id=batch_id,
+            metadata=tracking.get("metadata", {}),
+        )
+        
+        try:
+            status_info = backend.get_status(handle)
+        except Exception as e:
+            print_warning(f"Failed to get status for batch {batch_id}: {e}")
+            all_completed = False
+            continue
+        
+        if status_info.status == BatchStatus.COMPLETED:
+            completed_count += 1
+        elif status_info.status == BatchStatus.FAILED:
+            failed_count += 1
+            all_completed = False
+            print_warning(f"Batch {batch_id} failed: {status_info.error_message or 'Unknown error'}")
+        elif status_info.status in (BatchStatus.CANCELLED, BatchStatus.EXPIRED):
+            all_completed = False
+            print_warning(f"Batch {batch_id} was {status_info.status.value}")
+        else:
+            all_completed = False
+            print_info(f"Batch {batch_id} has status '{status_info.status.value}' - not yet completed.")
+    
+    # Display progress
+    display_batch_processing_progress(
+        temp_file=temp_file,
+        batch_ids=batch_ids,
+        completed_count=completed_count,
+        missing_count=0,
+    )
+    
+    if not all_completed:
+        if failed_count > 0:
+            print_warning(
+                f"{failed_count} batches have failed. Check the {batch_provider} dashboard for details."
+            )
+        return
+    
+    # All batches completed - download results
+    print_info(
+        f"All batches for {temp_file.name} report 'completed'. "
+        f"Attempting to download and process results..."
+    )
+    
+    # Extract custom_id mapping
+    custom_id_map, batch_order = extract_custom_id_mapping(temp_file)
+    
+    # Collect all transcriptions
+    all_transcriptions: List[Dict[str, Any]] = []
+    
+    for batch_id in batch_ids:
+        tracking = next(
+            (t for t in batch_tracking_records if t.get("batch_id") == batch_id),
+            {}
+        )
+        handle = BatchHandle(
+            provider=batch_provider,
+            batch_id=batch_id,
+            metadata=tracking.get("metadata", {}),
+        )
+        
+        try:
+            for result in backend.download_results(handle):
+                image_info = custom_id_map.get(result.custom_id, {})
+                image_name = image_info.get("image_name") or result.custom_id or "[unknown image]"
+                page_number = image_info.get("page_number")
+                
+                if not result.success:
+                    print_transcription_item_error(
+                        image_name=image_name,
+                        page_number=page_number,
+                        err_code=result.error_code,
+                        err_message=result.error,
+                    )
+                    all_transcriptions.append({
+                        "custom_id": result.custom_id,
+                        "transcription": f"[transcription error: {result.error}]",
+                        "order_info": batch_order.get(result.custom_id),
+                        "image_info": image_info,
+                        "error": True,
+                    })
+                    continue
+                
+                # Extract transcription text
+                transcription_text = result.content
+                if result.parsed_output and isinstance(result.parsed_output, dict):
+                    if "transcribed_text" in result.parsed_output:
+                        transcription_text = result.parsed_output["transcribed_text"]
+                
+                # Handle special cases
+                if result.no_transcribable_text:
+                    print_no_transcribable_text(image_name=image_name, page_number=page_number)
+                    transcription_text = "[No transcribable text]"
+                    all_transcriptions.append({
+                        "custom_id": result.custom_id,
+                        "transcription": transcription_text,
+                        "order_info": batch_order.get(result.custom_id),
+                        "image_info": image_info,
+                        "warning": True,
+                        "warning_type": "no_transcribable_text",
+                    })
+                elif result.transcription_not_possible:
+                    print_transcription_not_possible(image_name=image_name, page_number=page_number)
+                    transcription_text = "[Transcription not possible]"
+                    all_transcriptions.append({
+                        "custom_id": result.custom_id,
+                        "transcription": transcription_text,
+                        "order_info": batch_order.get(result.custom_id),
+                        "image_info": image_info,
+                        "warning": True,
+                        "warning_type": "transcription_not_possible",
+                    })
+                else:
+                    all_transcriptions.append({
+                        "custom_id": result.custom_id,
+                        "transcription": transcription_text,
+                        "order_info": batch_order.get(result.custom_id),
+                        "image_info": image_info,
+                    })
+                    
+        except Exception as e:
+            print_error(f"Failed to download results for batch {batch_id}: {e}")
+            logger.exception(f"Error downloading batch {batch_id}: {e}")
+            return
+    
+    if not all_transcriptions:
+        print_warning(f"No transcriptions extracted for {temp_file.name}. Skipping.")
+        return
+    
+    # Sort transcriptions by order
+    def get_sorting_key(entry):
+        order_info = entry.get("order_info")
+        if order_info is not None:
+            return (0, order_info)
+        custom_id = entry.get("custom_id")
+        if custom_id in batch_order:
+            return (1, batch_order[custom_id])
+        if isinstance(custom_id, str) and custom_id.startswith("req-"):
+            try:
+                req_idx = int(custom_id.split("-", 1)[1]) - 1
+                if req_idx >= 0:
+                    return (2, req_idx)
+            except Exception:
+                pass
+        return (3, 999999)
+    
+    all_transcriptions.sort(key=get_sorting_key)
+    
+    # Build final output
+    final_txt_path = temp_file.parent / f"{identifier}_transcription.txt"
+    
+    ordered_lines = []
+    for t in all_transcriptions:
+        tx = t.get("transcription", "")
+        info = t.get("image_info", {}) or {}
+        pn = info.get("page_number")
+        iname = info.get("image_name")
+        ordered_lines.append(format_page_line(tx, pn, iname))
+    
+    final_text = "\n\n".join(ordered_lines)
+    
+    # Apply post-processing if enabled
+    if postprocessing_config:
+        final_text = postprocess_transcription(final_text, postprocessing_config)
+    
+    # Write output
+    try:
+        final_txt_path.write_text(final_text, encoding="utf-8")
+        print_success(f"Saved transcription to {final_txt_path.name}")
+        logger.info(f"Wrote final transcription: {final_txt_path}")
+    except Exception as e:
+        print_error(f"Failed to write transcription file: {e}")
+        logger.exception(f"Error writing {final_txt_path}: {e}")
+        return
+    
+    # Optionally delete temp JSONL
+    if not processing_settings.get("retain_temporary_jsonl", True):
+        try:
+            temp_file.unlink()
+            print_info(f"Deleted temporary file: {temp_file.name}")
+        except Exception as e:
+            logger.warning(f"Could not delete temp file {temp_file.name}: {e}")
 
 
 def process_all_batches(
@@ -114,15 +343,36 @@ def process_all_batches(
 
         all_transcriptions: List[Dict[str, Any]] = []
 
+        # Track provider info for multi-provider support
+        batch_provider: Optional[str] = None
+        batch_tracking_records: List[Dict[str, Any]] = []
+
         with temp_file.open("r", encoding="utf-8") as f:
             for line in f:
                 try:
                     record = json.loads(line)
 
                     if "batch_tracking" in record:
-                        batch_id = record["batch_tracking"].get("batch_id")
+                        tracking = record["batch_tracking"]
+                        batch_id = tracking.get("batch_id")
                         if batch_id:
                             batch_ids.add(batch_id)
+                            batch_tracking_records.append(tracking)
+                            # Extract provider if present (new format)
+                            if tracking.get("provider"):
+                                batch_provider = tracking["provider"]
+
+                    elif "batch_session" in record and isinstance(
+                        record["batch_session"], dict
+                    ):
+                        has_batch_session = True
+                        session = record["batch_session"]
+                        status_val = session.get("status")
+                        if isinstance(status_val, str):
+                            batch_session_statuses.add(status_val.lower().strip())
+                        # Extract provider from session if present
+                        if session.get("provider"):
+                            batch_provider = session["provider"]
 
                     elif "image_metadata" in record and isinstance(
                         record["image_metadata"], dict
@@ -138,16 +388,12 @@ def process_all_batches(
                         has_batch_request = True
                         batch_request_count += 1
 
-                    elif "batch_session" in record and isinstance(
-                        record["batch_session"], dict
-                    ):
-                        has_batch_session = True
-                        status_val = record["batch_session"].get("status")
-                        if isinstance(status_val, str):
-                            batch_session_statuses.add(status_val.lower().strip())
-
                 except json.JSONDecodeError:
                     continue
+
+        # Default to OpenAI for backward compatibility with old batch files
+        if batch_provider is None:
+            batch_provider = "openai"
 
         # Attempt recovery of missing batch IDs from the debug artifact before classification
         if not batch_ids:
@@ -221,6 +467,20 @@ def process_all_batches(
             )
             continue
 
+        # Route to provider-specific processing
+        # For non-OpenAI providers, use the batch backend abstraction
+        if batch_provider != "openai" and supports_batch(batch_provider):
+            _process_non_openai_batch(
+                temp_file=temp_file,
+                batch_ids=batch_ids,
+                batch_provider=batch_provider,
+                batch_tracking_records=batch_tracking_records,
+                processing_settings=processing_settings,
+                postprocessing_config=postprocessing_config,
+            )
+            continue
+
+        # OpenAI batch processing (legacy path for backward compatibility)
         # Check if all batches are completed
         all_completed = True
         missing_batches: List[str] = []

@@ -23,6 +23,8 @@ from modules.processing.tesseract_utils import (
     perform_ocr,
 )
 from modules.llm.batch.batching import get_batch_chunk_size
+from modules.llm.batch.backends import get_batch_backend, BatchRequest, BatchHandle
+from modules.llm.batch.backends.factory import supports_batch
 from modules.llm import transcribe_image_with_llm
 from modules.infra.concurrency import run_concurrent_transcription_tasks
 from modules.processing.text_processing import extract_transcribed_text, format_page_line
@@ -94,6 +96,172 @@ class WorkflowManager:
             True if available, False otherwise.
         """
         return ensure_tesseract_available()
+
+    async def _submit_batch_with_backend(
+        self,
+        image_files: List[Path],
+        temp_jsonl_path: Path,
+        parent_folder: Path,
+        source_name: str,
+    ) -> Optional[BatchHandle]:
+        """Submit a batch using the provider-agnostic batch backend.
+        
+        Args:
+            image_files: List of image paths to process
+            temp_jsonl_path: Path to the temp JSONL file for tracking
+            parent_folder: Parent folder for debug artifacts
+            source_name: Name of the source (PDF or folder name)
+        
+        Returns:
+            BatchHandle if submission successful, None otherwise
+        """
+        tm = self.model_config.get("transcription_model", {})
+        provider = tm.get("provider", "openai")
+        
+        # Check if provider supports batch processing
+        if not supports_batch(provider):
+            console_print(
+                f"[WARN] Provider '{provider}' does not support batch processing. "
+                f"Falling back to synchronous mode."
+            )
+            return None
+        
+        total_images = len(image_files)
+        chunk_size = get_batch_chunk_size()
+        expected_batches = math.ceil(total_images / max(1, chunk_size))
+        
+        # Telemetry
+        logger.info(
+            "[Batch] Preparing submission: provider=%s, images=%d, chunk_size=%d",
+            provider, total_images, chunk_size,
+        )
+        console_print(
+            f"[INFO] Batch telemetry -> provider={provider}, images={total_images}, chunk_size={chunk_size}"
+        )
+        console_print(f"[INFO] Submitting batch job for {total_images} images...")
+        
+        # Early marker
+        try:
+            async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as f:
+                await f.write(json.dumps({"batch_session": {"status": "submitting", "provider": provider}}) + "\n")
+        except Exception:
+            logger.warning("Could not write early batch_session marker")
+        
+        # Record image metadata
+        try:
+            async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as f:
+                for idx, img_path in enumerate(image_files):
+                    image_record = {
+                        "image_metadata": {
+                            "pre_processed_image": str(img_path),
+                            "image_name": img_path.name,
+                            "order_index": idx,
+                            "custom_id": f"req-{idx + 1}"
+                        }
+                    }
+                    await f.write(json.dumps(image_record) + "\n")
+        except Exception as e:
+            logger.warning("Failed writing image_metadata before batch submit: %s", e)
+        
+        # Build batch requests
+        batch_requests = [
+            BatchRequest(
+                custom_id=f"req-{idx + 1}",
+                image_path=img_path,
+                order_index=idx,
+                image_info={
+                    "image_name": img_path.name,
+                    "order_index": idx,
+                    "page_number": idx + 1,
+                },
+            )
+            for idx, img_path in enumerate(image_files)
+        ]
+        
+        # Load system prompt
+        from modules.config.config_loader import PROJECT_ROOT
+        from modules.config.service import get_config_service
+        
+        pcfg = get_config_service().get_paths_config()
+        general = pcfg.get("general", {})
+        override_prompt = general.get("transcription_prompt_path")
+        system_prompt_path = (
+            Path(override_prompt)
+            if override_prompt
+            else (PROJECT_ROOT / "system_prompt" / "system_prompt.txt")
+        )
+        if not system_prompt_path.exists():
+            raise FileNotFoundError(f"System prompt missing: {system_prompt_path}")
+        system_prompt = system_prompt_path.read_text(encoding="utf-8").strip()
+        
+        # Load additional context if specified
+        additional_context = None
+        if self.user_config.additional_context_path:
+            ctx_path = Path(self.user_config.additional_context_path)
+            if ctx_path.exists():
+                additional_context = ctx_path.read_text(encoding="utf-8").strip()
+        
+        # Submit via backend
+        try:
+            backend = get_batch_backend(provider)
+            handle = await asyncio.to_thread(
+                backend.submit_batch,
+                batch_requests,
+                tm,
+                system_prompt=system_prompt,
+                schema_path=self.user_config.selected_schema_path,
+                additional_context=additional_context,
+            )
+        except Exception as e:
+            logger.exception(f"Batch submission failed for {source_name}: {e}")
+            console_print(
+                f"[ERROR] Batch submission failed for {source_name}. "
+                f"Falling back to synchronous processing."
+            )
+            return None
+        
+        # Write tracking record with provider info
+        try:
+            async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as f:
+                tracking_record = {
+                    "batch_tracking": {
+                        "batch_id": handle.batch_id,
+                        "provider": handle.provider,
+                        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        "metadata": handle.metadata,
+                    }
+                }
+                await f.write(json.dumps(tracking_record) + "\n")
+        except Exception as e:
+            logger.warning("Post-submission tracking write failed for %s: %s", source_name, e)
+        
+        # Write debug artifact
+        try:
+            debug_payload = {
+                "source": source_name,
+                "provider": provider,
+                "submitted_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "expected_batches": int(expected_batches),
+                "batch_ids": [handle.batch_id],
+                "total_images": int(total_images),
+                "chunk_size": int(chunk_size),
+            }
+            debug_path = parent_folder / f"{source_name}_batch_submission_debug.json"
+            debug_path.write_text(json.dumps(debug_payload, indent=2), encoding='utf-8')
+        except Exception as e:
+            logger.warning("Failed to write batch submission debug artifact for %s: %s", source_name, e)
+        
+        # Mark submitted
+        try:
+            async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as f:
+                await f.write(json.dumps({"batch_session": {"status": "submitted", "provider": provider}}) + "\n")
+        except Exception:
+            logger.warning("Could not write submitted batch_session marker")
+        
+        console_print(f"[SUCCESS] Batch submitted for '{source_name}'.")
+        console_print("[INFO] The batch will be processed asynchronously. Use 'check_batches.py' to monitor status.")
+        
+        return handle
 
     async def tesseract_ocr_image(self, img_path: Path,
                                   tesseract_config: str) -> Optional[str]:
@@ -355,113 +523,16 @@ class WorkflowManager:
         console_print(
             f"[INFO] Extracted {len(processed_image_files)} page images from PDF.")
 
-        # Handle GPT batch mode
+        # Handle GPT batch mode (multi-provider via batch backends)
         if method == "gpt" and self.user_config.use_batch_processing:
-            from modules.llm.batch import batching
-            total_images = len(processed_image_files)
-            chunk_size = get_batch_chunk_size()
-            expected_batches = math.ceil(total_images / max(1, chunk_size))
-
-            # Telemetry (console + log), do NOT write to JSONL
-            logger.info(
-                "[Batch] Preparing submission: images=%d, chunk_size=%d, expected_batch_files=%d",
-                total_images, chunk_size, expected_batches,
+            handle = await self._submit_batch_with_backend(
+                processed_image_files,
+                temp_jsonl_path,
+                parent_folder,
+                pdf_path.stem,
             )
-            console_print(
-                f"[INFO] Batch telemetry -> images={total_images}, chunk_size={chunk_size}, expected_batch_files={expected_batches}")
-
-            console_print(
-                f"[INFO] Submitting batch job for {total_images} images...")
-
-            # Early marker: indicate batch submission is starting (persisted)
-            try:
-                async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as f:
-                    await f.write(json.dumps({"batch_session": {"status": "submitting"}}) + "\n")
-            except Exception:
-                # Non-fatal; continue
-                logger.warning("Could not write early batch_session marker (PDF)")
-
-            # Record image metadata in the JSONL file before batch submission
-            try:
-                async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as f:
-                    for idx, img_path in enumerate(processed_image_files):
-                        image_record = {
-                            "image_metadata": {
-                                "pre_processed_image": str(img_path),
-                                "image_name": img_path.name,
-                                "order_index": idx,
-                                "custom_id": f"req-{idx + 1}"
-                            }
-                        }
-                        await f.write(json.dumps(image_record) + "\n")
-            except Exception as e:
-                # JSONL metadata write errors should not prevent submission; continue
-                logger.warning("Failed writing image_metadata before batch submit: %s", e)
-
-            # Submit the batch job (narrow except scope). Only fall back to sync
-            # if this call fails; never fall back due to later errors.
-            batch_responses = []
-            metadata_records = []
-            try:
-                batch_responses, metadata_records = await asyncio.to_thread(
-                    batching.process_batch_transcription,
-                    processed_image_files,
-                    "",
-                    self.model_config.get("transcription_model", {}),
-                    schema_path=self.user_config.selected_schema_path,
-                    additional_context_path=self.user_config.additional_context_path,
-                )
-            except Exception as e:
-                logger.exception(
-                    f"Batch submission failed for {pdf_path.name}: {e}")
-                console_print(
-                    f"[ERROR] Batch submission failed for {pdf_path.name}. Falling back to synchronous processing.")
-                # Fallback ONLY because submission itself failed
-                # Proceed to synchronous processing below
-            else:
-                # Post-submission logging (do not trigger sync fallback on errors)
-                try:
-                    async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as f:
-                        for record in metadata_records:
-                            await f.write(json.dumps(record) + "\n")
-                        for response in batch_responses:
-                            tracking_record = {
-                                "batch_tracking": {
-                                    "batch_id": response.id,
-                                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                                    "batch_file": str(response.id)
-                                }
-                            }
-                            await f.write(json.dumps(tracking_record) + "\n")
-                except Exception as e:
-                    logger.warning("Post-submission logging failed for %s: %s", pdf_path.name, e)
-
-                # Write batch submission debug artifact (best-effort)
-                try:
-                    debug_payload = {
-                        "source": pdf_path.name,
-                        "submitted_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                        "expected_batches": int(expected_batches),
-                        "batch_ids": [getattr(r, 'id', None) for r in batch_responses if getattr(r, 'id', None)],
-                        "total_images": int(total_images),
-                        "chunk_size": int(chunk_size),
-                    }
-                    debug_path = parent_folder / f"{pdf_path.stem}_batch_submission_debug.json"
-                    debug_path.write_text(json.dumps(debug_payload, indent=2), encoding='utf-8')
-                except Exception as e:
-                    logger.warning("Failed to write batch submission debug artifact for %s: %s", pdf_path.name, e)
-
-                # Mark submitted in session (best-effort)
-                try:
-                    async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as f:
-                        await f.write(json.dumps({"batch_session": {"status": "submitted"}}) + "\n")
-                except Exception:
-                    logger.warning("Could not write submitted batch_session marker (PDF)")
-
-                console_print(f"[SUCCESS] Batch submitted for PDF '{pdf_path.name}'.")
-                console_print("[INFO] The batch will be processed asynchronously. Use 'check_batches.py' to monitor status.")
-
-                # Cleanup may fail; never trigger sync fallback here
+            if handle is not None:
+                # Batch submitted successfully - cleanup and return
                 if not self.processing_settings.get("keep_preprocessed_images", True):
                     if preprocessed_folder.exists():
                         try:
@@ -469,8 +540,8 @@ class WorkflowManager:
                         except Exception as e:
                             logger.exception(
                                 f"Error cleaning up preprocessed images for {pdf_path.name}: {e}")
-
                 return
+            # If handle is None, fall through to synchronous processing
 
         # Synchronous processing for GPT or Tesseract
         console_print(
@@ -555,111 +626,16 @@ class WorkflowManager:
         # Deterministic ordering for folders: sort by filename
         processed_files.sort(key=lambda x: x.name.lower())
 
-        # Handle batch mode for GPT
+        # Handle batch mode for GPT (multi-provider via batch backends)
         if method == "gpt" and self.user_config.use_batch_processing:
-            from modules.llm.batch import batching
-            total_images = len(processed_files)
-            chunk_size = get_batch_chunk_size()
-            expected_batches = math.ceil(total_images / max(1, chunk_size))
-
-            # Telemetry (console + log), do NOT write to JSONL
-            logger.info(
-                "[Batch] Preparing submission (folder): images=%d, chunk_size=%d, expected_batch_files=%d",
-                total_images, chunk_size, expected_batches,
+            handle = await self._submit_batch_with_backend(
+                processed_files,
+                temp_jsonl_path,
+                parent_folder,
+                folder.name,
             )
-            console_print(
-                f"[INFO] Batch telemetry -> images={total_images}, chunk_size={chunk_size}, expected_batch_files={expected_batches}")
-            console_print(
-                f"[INFO] Submitting batch job for {total_images} images...")
-            # Early marker to standardize with PDF flow
-            try:
-                async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as f:
-                    await f.write(json.dumps({"batch_session": {"status": "submitting"}}) + "\n")
-            except Exception:
-                logger.warning("Could not write early batch_session marker (folder)")
-
-            # Record image metadata in the JSONL file before batch submission
-            try:
-                async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as f:
-                    for idx, img_path in enumerate(processed_files):
-                        image_record = {
-                            "image_metadata": {
-                                "pre_processed_image": str(img_path),
-                                "image_name": img_path.name,
-                                "folder_name": folder.name,
-                                "order_index": idx,
-                                "custom_id": f"req-{idx + 1}"
-                            }
-                        }
-                        await f.write(json.dumps(image_record) + "\n")
-            except Exception as e:
-                logger.warning("Failed writing image_metadata before batch submit (folder %s): %s", folder.name, e)
-
-            # Submit the batch job (narrow except scope). Only fall back to sync
-            # if this call fails; never fall back due to later errors.
-            batch_responses = []
-            metadata_records = []
-            try:
-                batch_responses, metadata_records = await asyncio.to_thread(
-                    batching.process_batch_transcription,
-                    processed_files,
-                    "",
-                    self.model_config.get("transcription_model", {}),
-                    schema_path=self.user_config.selected_schema_path,
-                    additional_context_path=self.user_config.additional_context_path,
-                )
-            except Exception as e:
-                logger.exception(
-                    f"Batch submission failed for folder '{folder.name}': {e}")
-                console_print(
-                    f"[ERROR] Batch submission failed for folder '{folder.name}'. Falling back to synchronous processing.")
-                # Fallback ONLY because submission itself failed
-                # Proceed to synchronous processing below
-            else:
-                # Post-submission logging (do not trigger sync fallback on errors)
-                try:
-                    async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as f:
-                        for record in metadata_records:
-                            await f.write(json.dumps(record) + "\n")
-                        for response in batch_responses:
-                            tracking_record = {
-                                "batch_tracking": {
-                                    "batch_id": response.id,
-                                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                                    "batch_file": str(response.id)
-                                }
-                            }
-                            await f.write(json.dumps(tracking_record) + "\n")
-                except Exception as e:
-                    logger.warning("Post-submission logging failed for folder %s: %s", folder.name, e)
-
-                # Write batch submission debug artifact (best-effort)
-                try:
-                    debug_payload = {
-                        "source": folder.name,
-                        "submitted_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                        "expected_batches": int(expected_batches),
-                        "batch_ids": [getattr(r, 'id', None) for r in batch_responses if getattr(r, 'id', None)],
-                        "total_images": int(total_images),
-                        "chunk_size": int(chunk_size),
-                    }
-                    debug_path = parent_folder / f"{folder.name}_batch_submission_debug.json"
-                    debug_path.write_text(json.dumps(debug_payload, indent=2), encoding='utf-8')
-                except Exception as e:
-                    logger.warning("Failed to write batch submission debug artifact for folder %s: %s", folder.name, e)
-
-                # Mark submitted in session (best-effort)
-                try:
-                    async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as f:
-                        await f.write(json.dumps({"batch_session": {"status": "submitted"}}) + "\n")
-                except Exception:
-                    logger.warning("Could not write submitted batch_session marker (folder)")
-
-                console_print(
-                    f"[SUCCESS] Batch submitted for folder '{folder.name}'.")
-                console_print(
-                    "[INFO] The batch will be processed asynchronously. Use 'check_batches.py' to monitor status.")
-
+            if handle is not None:
+                # Batch submitted successfully - cleanup and return
                 if not self.processing_settings.get("keep_preprocessed_images", True):
                     if preprocessed_folder.exists():
                         try:
@@ -667,8 +643,8 @@ class WorkflowManager:
                         except Exception as e:
                             logger.exception(
                                 f"Error cleaning up preprocessed images for folder '{folder.name}': {e}")
-
                 return
+            # If handle is None, fall through to synchronous processing
 
         # Synchronous processing (non-batch GPT or Tesseract)
         console_print(

@@ -1,9 +1,11 @@
 """Google Gemini provider implementation using LangChain.
 
 Supports Gemini models:
-- Gemini 2.0 Flash (fastest, latest)
-- Gemini 1.5 Pro (most capable)
-- Gemini 1.5 Flash (balanced)
+- Gemini 3 Flash (latest, Pro-level intelligence at Flash speed)
+- Gemini 3 Pro (most capable, state-of-the-art reasoning)
+- Gemini 2.5 Pro/Flash (adaptive thinking)
+- Gemini 2.0 Flash
+- Gemini 1.5 Pro/Flash
 
 LangChain handles:
 - Retry logic with exponential backoff (max_retries parameter)
@@ -34,15 +36,56 @@ logger = logging.getLogger(__name__)
 def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
     """Determine capabilities based on Google model name.
     
-    Supports (as of November 2025):
-    - Gemini 3: gemini-3-pro (latest, state-of-the-art reasoning)
+    Supports (as of December 2025):
+    - Gemini 3: gemini-3-pro, gemini-3-flash-preview (latest, state-of-the-art)
     - Gemini 2.5: gemini-2.5-pro, gemini-2.5-flash (with adaptive thinking)
     - Gemini 2.0: gemini-2.0-flash
     - Gemini 1.5: gemini-1.5-pro, gemini-1.5-flash
     """
     m = model_name.lower().strip()
     
-    # Gemini 3 Pro (latest, most capable)
+    # Gemini 3 Flash (Pro-level intelligence at Flash speed)
+    # Must check before general "gemini-3" pattern
+    if "gemini-3-flash" in m or "gemini-3.0-flash" in m:
+        return ProviderCapabilities(
+            provider_name="google",
+            model_name=model_name,
+            supports_vision=True,
+            supports_image_detail=False,
+            default_image_detail="auto",
+            supports_structured_output=True,
+            supports_json_mode=True,
+            is_reasoning_model=True,  # Thinking capabilities
+            supports_reasoning_effort=True,
+            supports_temperature=True,
+            supports_top_p=True,
+            supports_frequency_penalty=False,
+            supports_presence_penalty=False,
+            max_context_tokens=1048576,  # 1M token context
+            max_output_tokens=65536,
+        )
+    
+    # Gemini 3 Pro (state-of-the-art reasoning)
+    if "gemini-3-pro" in m or "gemini-3.0-pro" in m:
+        return ProviderCapabilities(
+            provider_name="google",
+            model_name=model_name,
+            supports_vision=True,
+            supports_image_detail=False,
+            default_image_detail="auto",
+            supports_structured_output=True,
+            supports_json_mode=True,
+            is_reasoning_model=True,
+            supports_reasoning_effort=True,
+            supports_temperature=True,
+            supports_top_p=True,
+            supports_frequency_penalty=False,
+            supports_presence_penalty=False,
+            max_context_tokens=2000000,  # 2M token context
+            max_output_tokens=65536,
+        )
+    
+    # Catch-all for other Gemini 3 variants
     if "gemini-3" in m or "gemini-3.0" in m:
         return ProviderCapabilities(
             provider_name="google",
@@ -52,13 +95,13 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             default_image_detail="auto",
             supports_structured_output=True,
             supports_json_mode=True,
-            is_reasoning_model=True,  # Advanced reasoning
+            is_reasoning_model=True,
             supports_reasoning_effort=True,
             supports_temperature=True,
             supports_top_p=True,
             supports_frequency_penalty=False,
             supports_presence_penalty=False,
-            max_context_tokens=2000000,  # 2M token context
+            max_context_tokens=1000000,
             max_output_tokens=65536,
         )
     

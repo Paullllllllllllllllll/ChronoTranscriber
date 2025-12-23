@@ -60,6 +60,42 @@ class PDFProcessor:
             self.doc.close()
             self.doc = None
 
+    @staticmethod
+    def _detect_model_type(provider: str, model_name: str) -> str:
+        """Detect the underlying model type from provider and model name.
+        
+        This allows correct preprocessing even when using models via OpenRouter.
+        For example, 'google/gemini-2.5-flash' via OpenRouter should use Google config.
+        
+        Returns:
+            Model type: 'google', 'anthropic', or 'openai'
+        """
+        provider = provider.lower()
+        model_name = model_name.lower() if model_name else ""
+        
+        # Direct providers take precedence
+        if provider == "google":
+            return "google"
+        if provider == "anthropic":
+            return "anthropic"
+        if provider == "openai":
+            return "openai"
+        
+        # For OpenRouter or unknown providers, detect from model name
+        if model_name:
+            # Google models
+            if "gemini" in model_name or "google/" in model_name:
+                return "google"
+            # Anthropic models
+            if "claude" in model_name or "anthropic/" in model_name:
+                return "anthropic"
+            # OpenAI models
+            if any(x in model_name for x in ["gpt-", "o1", "o3", "o4", "openai/"]):
+                return "openai"
+        
+        # Default to OpenAI-style config
+        return "openai"
+
     async def extract_images(self, output_dir: Path, dpi: int = 300) -> None:
         """
         Extract all pages of the PDF as images at the specified DPI.
@@ -103,7 +139,8 @@ class PDFProcessor:
             logger.error(
                 f"Failed to extract images from PDF: {self.pdf_path}, {e}")
 
-    async def process_images(self, preprocessed_folder: Path, target_dpi: int, provider: str = "openai") -> List[Path]:
+    async def process_images(self, preprocessed_folder: Path, target_dpi: int, 
+                             provider: str = "openai", model_name: str = "") -> List[Path]:
         """
         Extracts images from PDF and directly pre-processes them without saving raw images.
 
@@ -111,6 +148,7 @@ class PDFProcessor:
             preprocessed_folder: Path to save processed images
             target_dpi: DPI for rendering PDF pages
             provider: Provider name (openai, google, anthropic, openrouter) for config selection
+            model_name: Model name for detecting underlying model type (e.g., 'google/gemini-2.5-flash')
 
         Returns:
             List[Path]: List of processed image paths.
@@ -143,10 +181,15 @@ class PDFProcessor:
                     img = Image.frombytes("RGB", [pix.width, pix.height], img_data)
 
                     # Apply processing directly to the image
+                    # Detect model type from provider and model_name (for OpenRouter passthrough)
+                    model_type = self._detect_model_type(provider, model_name)
+                    
                     # Load provider-specific processing config
                     img_processing_cfg = get_config_service().get_image_processing_config()
-                    if provider.lower() == "google":
+                    if model_type == "google":
                         image_cfg = img_processing_cfg.get('google_image_processing', {})
+                    elif model_type == "anthropic":
+                        image_cfg = img_processing_cfg.get('anthropic_image_processing', {})
                     else:
                         image_cfg = img_processing_cfg.get('api_image_processing', {})
 
@@ -162,12 +205,14 @@ class PDFProcessor:
                         from PIL import ImageOps
                         img = ImageOps.grayscale(img)
 
-                    # Resize based on llm_detail (OpenAI) or media_resolution (Google)
-                    if provider.lower() == "google":
+                    # Resize based on model type
+                    if model_type == "google":
                         detail = (image_cfg.get('media_resolution', 'high') or 'high')
+                    elif model_type == "anthropic":
+                        detail = (image_cfg.get('resize_profile', 'auto') or 'auto')
                     else:
                         detail = (image_cfg.get('llm_detail', 'high') or 'high')
-                    final_img = ImageProcessor.resize_for_detail(img, detail, image_cfg)
+                    final_img = ImageProcessor.resize_for_detail(img, detail, image_cfg, model_type)
 
                     # Save processed image with configurable JPEG quality
                     jpeg_quality = int(image_cfg.get('jpeg_quality', 95))

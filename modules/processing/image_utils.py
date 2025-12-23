@@ -20,30 +20,68 @@ logger = setup_logger(__name__)
 
 
 class ImageProcessor:
-    def __init__(self, image_path: Path, provider: str = "openai") -> None:
+    def __init__(self, image_path: Path, provider: str = "openai", model_name: str = "") -> None:
         """Initialize ImageProcessor with provider-specific config.
         
         Args:
             image_path: Path to the image file
             provider: Provider name (openai, google, anthropic, openrouter) or 'tesseract'
-                     Determines which config section to use for preprocessing
+            model_name: Model name for detecting underlying model type when using OpenRouter
+                       (e.g., 'google/gemini-2.5-flash' uses Google config even via OpenRouter)
         """
         if image_path.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
             logger.error(f"Unsupported image format: {image_path.suffix}")
             raise ValueError(f"Unsupported image format: {image_path.suffix}")
         self.image_path = image_path
         self.provider = provider.lower()
+        self.model_name = model_name.lower() if model_name else ""
+        
+        # Detect underlying model type from model name (for OpenRouter passthrough)
+        self.model_type = self._detect_model_type()
 
         # Full config dict (contains 'image_processing' and 'ocr' sections)
         self.image_config = get_config_service().get_image_processing_config()
         
-        # Map provider to config section
-        # Google uses google_image_processing, all others use api_image_processing (OpenAI format)
-        if self.provider == "google":
+        # Map detected model type to config section
+        if self.model_type == "google":
             self.img_cfg = self.image_config.get('google_image_processing', {})
+        elif self.model_type == "anthropic":
+            self.img_cfg = self.image_config.get('anthropic_image_processing', {})
         else:
-            # OpenAI, Anthropic, OpenRouter, and default all use OpenAI-style config
+            # OpenAI and default use api_image_processing
             self.img_cfg = self.image_config.get('api_image_processing', {})
+    
+    def _detect_model_type(self) -> str:
+        """Detect the underlying model type from provider and model name.
+        
+        This allows correct preprocessing even when using models via OpenRouter.
+        For example, 'google/gemini-2.5-flash' via OpenRouter should use Google config.
+        
+        Returns:
+            Model type: 'google', 'anthropic', or 'openai'
+        """
+        # Direct providers take precedence
+        if self.provider == "google":
+            return "google"
+        if self.provider == "anthropic":
+            return "anthropic"
+        if self.provider == "openai":
+            return "openai"
+        
+        # For OpenRouter or unknown providers, detect from model name
+        if self.model_name:
+            # Google models
+            if "gemini" in self.model_name or "google/" in self.model_name:
+                return "google"
+            # Anthropic models
+            if "claude" in self.model_name or "anthropic/" in self.model_name:
+                return "anthropic"
+            # OpenAI models
+            if any(x in self.model_name for x in ["gpt-", "o1", "o3", "o4", "openai/"]):
+                return "openai"
+        
+        # Default to OpenAI-style config
+        return "openai"
 
     def convert_to_grayscale(self, image: Image.Image) -> Image.Image:
         """
@@ -56,20 +94,29 @@ class ImageProcessor:
         return image
 
     @staticmethod
-    def resize_for_detail(image: Image.Image, detail: str, img_cfg: dict) -> Image.Image:
+    def resize_for_detail(image: Image.Image, detail: str, img_cfg: dict, model_type: str = "openai") -> Image.Image:
         """
-        Resize strategy based on desired LLM detail.
+        Resize strategy based on desired LLM detail and model type.
         - low: downscale longest side to low_max_side_px.
-        - high: fit/pad into high_target_box [width, height].
+        - high: fit/pad into high_target_box [width, height] (OpenAI/Google) or
+                cap longest side to high_max_side_px (Anthropic).
         - auto: default to 'high' strategy.
+        
+        Args:
+            image: PIL Image to resize
+            detail: Detail level ('low', 'high', 'auto')
+            img_cfg: Config dict for the provider
+            model_type: 'openai', 'google', or 'anthropic' for provider-specific resizing
         """
         # Normalize flags and defaults
         resize_profile = (img_cfg.get('resize_profile', 'auto') or 'auto').lower()
         if resize_profile == 'none':
             return image
         detail_norm = (detail or 'high').lower()
-        if detail_norm not in ('low', 'high', 'auto'):
+        if detail_norm not in ('low', 'high', 'auto', 'medium', 'ultra_high'):
             detail_norm = 'high'
+        
+        # Low detail: cap longest side (same for all providers)
         if detail_norm == 'low':
             max_side = int(img_cfg.get('low_max_side_px', 512))
             w, h = image.size
@@ -79,25 +126,38 @@ class ImageProcessor:
             scale = max_side / float(longest)
             new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
             return image.resize(new_size, Image.Resampling.LANCZOS)
-        # high or auto -> box/pad
-        box = img_cfg.get('high_target_box', [768, 1536])
-        try:
-            target_width = int(box[0])
-            target_height = int(box[1])
-        except Exception:
-            target_width, target_height = 768, 1536
-        orig_width, orig_height = image.size
-        scale_w = target_width / orig_width
-        scale_h = target_height / orig_height
-        scale = min(scale_w, scale_h)
-        new_width = max(1, int(orig_width * scale))
-        new_height = max(1, int(orig_height * scale))
-        resized_img = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        final_img = Image.new("RGB", (target_width, target_height), (255, 255, 255))
-        paste_x = (target_width - new_width) // 2
-        paste_y = (target_height - new_height) // 2
-        final_img.paste(resized_img, (paste_x, paste_y))
-        return final_img
+        
+        # High/auto/medium/ultra_high: provider-specific strategy
+        if model_type == "anthropic":
+            # Anthropic: cap longest side to high_max_side_px (no padding)
+            max_side = int(img_cfg.get('high_max_side_px', 1568))
+            w, h = image.size
+            longest = max(w, h)
+            if longest <= max_side:
+                return image
+            scale = max_side / float(longest)
+            new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
+            return image.resize(new_size, Image.Resampling.LANCZOS)
+        else:
+            # OpenAI/Google: fit into box and pad with white
+            box = img_cfg.get('high_target_box', [768, 1536])
+            try:
+                target_width = int(box[0])
+                target_height = int(box[1])
+            except Exception:
+                target_width, target_height = 768, 1536
+            orig_width, orig_height = image.size
+            scale_w = target_width / orig_width
+            scale_h = target_height / orig_height
+            scale = min(scale_w, scale_h)
+            new_width = max(1, int(orig_width * scale))
+            new_height = max(1, int(orig_height * scale))
+            resized_img = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            final_img = Image.new("RGB", (target_width, target_height), (255, 255, 255))
+            paste_x = (target_width - new_width) // 2
+            paste_y = (target_height - new_height) // 2
+            final_img.paste(resized_img, (paste_x, paste_y))
+            return final_img
 
     def handle_transparency(self, image: Image.Image) -> Image.Image:
         """
@@ -123,14 +183,15 @@ class ImageProcessor:
             with Image.open(self.image_path) as img:
                 img = self.handle_transparency(img)
                 img = self.convert_to_grayscale(img)
-                # Choose resizing based on llm_detail (OpenAI) or media_resolution (Google)
-                # Both configs use same llm_detail/media_resolution key name in their respective sections
-                if self.provider == "google":
-                    # Google uses media_resolution but we map it to detail for resize logic
+                # Choose resizing based on model type
+                # Google uses media_resolution, Anthropic uses resize_profile, OpenAI uses llm_detail
+                if self.model_type == "google":
                     detail = (self.img_cfg.get('media_resolution', 'high') or 'high')
+                elif self.model_type == "anthropic":
+                    detail = (self.img_cfg.get('resize_profile', 'auto') or 'auto')
                 else:
                     detail = (self.img_cfg.get('llm_detail', 'high') or 'high')
-                img = ImageProcessor.resize_for_detail(img, detail, self.img_cfg)
+                img = ImageProcessor.resize_for_detail(img, detail, self.img_cfg, self.model_type)
 
                 # Force output to JPEG with configurable quality (regardless of extension)
                 # Create a new path with .jpg extension
@@ -189,14 +250,17 @@ class ImageProcessor:
 
     @staticmethod
     def process_images_multiprocessing(image_paths: List[Path],
-                                       output_paths: List[Path]) -> List[
-        Optional[str]]:
+                                       output_paths: List[Path],
+                                       provider: str = "openai",
+                                       model_name: str = "") -> List[Optional[str]]:
         """
         Process images using multiprocessing.
 
         Parameters:
             image_paths (List[Path]): List of source image paths.
             output_paths (List[Path]): List of destination paths for processed images.
+            provider (str): Provider name for config selection.
+            model_name (str): Model name for detecting underlying model type.
 
         Returns:
             List[Optional[str]]: Processing results for each image.
@@ -207,7 +271,9 @@ class ImageProcessor:
                          .get('image_processing', {}))
         processes = int(img_conc.get('concurrency_limit', 12))
 
-        args_list = list(zip(image_paths, output_paths))
+        # Create args list with provider and model_name for each image
+        args_list = [(img_path, out_path, provider, model_name) 
+                     for img_path, out_path in zip(image_paths, output_paths)]
         results = run_multiprocessing_tasks(
             ImageProcessor._process_image_task,
             args_list,
@@ -216,22 +282,23 @@ class ImageProcessor:
         return results
 
     @staticmethod
-    def _process_image_task(img_path: Path, out_path: Path) -> str:
+    def _process_image_task(args: tuple) -> str:
         """
         Helper task to process a single image and save it to out_path.
 
         Parameters:
-            img_path (Path): Path to the input image.
-            out_path (Path): Path to save the processed image.
+            args: Tuple of (img_path, out_path, provider, model_name)
 
         Returns:
             str: A status message.
         """
-        processor = ImageProcessor(img_path)
+        img_path, out_path, provider, model_name = args
+        processor = ImageProcessor(img_path, provider=provider, model_name=model_name)
         return processor.process_image(out_path)
 
     @staticmethod
-    def process_and_save_images(source_folder: Path, preprocessed_folder: Path) -> List[Path]:
+    def process_and_save_images(source_folder: Path, preprocessed_folder: Path,
+                                provider: str = "openai", model_name: str = "") -> List[Path]:
         """
         Reads images from source folder, processes them, and saves directly to preprocessed folder.
         Eliminates the need for intermediate raw image storage.
@@ -239,6 +306,8 @@ class ImageProcessor:
         Parameters:
             source_folder (Path): Path to the source folder containing original images.
             preprocessed_folder (Path): Path to save processed images.
+            provider (str): Provider name for config selection.
+            model_name (str): Model name for detecting underlying model type.
 
         Returns:
             List[Path]: List of processed image paths.
@@ -256,8 +325,8 @@ class ImageProcessor:
             preprocessed_folder / f"{img.stem}_pre_processed.jpg" for img in image_files
         ]
 
-        # Process all images at once using multiprocessing
-        ImageProcessor.process_images_multiprocessing(image_files, output_paths)
+        # Process all images at once using multiprocessing with provider info
+        ImageProcessor.process_images_multiprocessing(image_files, output_paths, provider, model_name)
 
         # Return all processed image paths that exist
         return [p for p in output_paths if p.exists()]

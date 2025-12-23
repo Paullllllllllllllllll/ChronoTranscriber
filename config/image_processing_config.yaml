@@ -56,6 +56,31 @@ google_image_processing:
   # Google uses 768x768 tiles, so we use a box that's a multiple of 768
   high_target_box: [768, 1536]
 
+# 1c) Anthropic Claude API image processing (preparing images to send to Claude)
+# Anthropic recommends: long edge ≤ 1568px, ≤ 1.15 megapixels for optimal latency
+# Min 200px on any edge; max 8000x8000px (or 2000x2000 if >20 images)
+# Token calculation: tokens = (width * height) / 750
+anthropic_image_processing:
+  target_dpi: 300  # DPI for rendering/extracting images before API processing.
+  grayscale_conversion: true  # Convert color images to grayscale to reduce noise.
+  handle_transparency: true  # Flatten images with alpha onto white background.
+  
+  # JPEG compression quality (1-100) when saving processed images for API use.
+  jpeg_quality: 100
+
+  # Resizing behavior prior to sending to the API
+  # Anthropic auto-resizes internally, but pre-resizing reduces latency.
+  # - auto: resize to optimal dimensions for Anthropic
+  # - none: do not resize (only transparency/grayscale steps applied)
+  resize_profile: auto
+
+  # Parameters for resizing profiles
+  # For low detail, cap the longest side to this many pixels (preserve aspect ratio)
+  low_max_side_px: 512
+  # For high detail, cap the longest side to Anthropic's optimal 1568 pixels
+  # No padding needed - Anthropic handles aspect ratios natively
+  high_max_side_px: 1568
+
 # 2) Tesseract OCR image processing (preparing images for local Tesseract)
 tesseract_image_processing:
   # Resolution for page rendering and image saving; DPI metadata is embedded if enabled.

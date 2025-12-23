@@ -385,9 +385,20 @@ Key Parameters:
 
 ### 3. Image Processing Configuration (`image_processing_config.yaml`)
 
-Controls image preprocessing for both API and Tesseract backends.
+Controls image preprocessing for API providers and Tesseract backends. ChronoTranscriber automatically selects the appropriate preprocessing configuration based on your chosen provider and model, ensuring optimal image preparation for each AI service.
 
-#### API Image Processing
+#### Provider-Aware Preprocessing
+
+The system automatically detects the underlying model type and applies provider-specific preprocessing, even when using models through OpenRouter. For example, using `google/gemini-2.5-flash` via OpenRouter will apply Google-specific preprocessing settings.
+
+| Provider | Model Detection | Config Section |
+|----------|-----------------|----------------|
+| OpenAI | Direct or `openai/`, `gpt-`, `o1`, `o3`, `o4` | `api_image_processing` |
+| Google | Direct or `google/`, `gemini` | `google_image_processing` |
+| Anthropic | Direct or `anthropic/`, `claude` | `anthropic_image_processing` |
+| OpenRouter | Auto-detected from model name | Varies by underlying model |
+
+#### OpenAI Image Processing
 
 ```yaml
 api_image_processing:
@@ -406,11 +417,59 @@ Key Parameters:
 - `target_dpi`: DPI for rendering PDF pages to images
 - `grayscale_conversion`: Convert images to grayscale to reduce noise
 - `handle_transparency`: Flatten transparent images onto white background
-- `llm_detail`: Controls image fidelity sent to API (high: better accuracy, higher token usage; low: faster and cheaper; auto: let model decide)
+- `llm_detail`: Controls the OpenAI `detail` parameter (high: better accuracy, higher token usage; low: faster and cheaper; auto: let model decide)
 - `jpeg_quality`: JPEG compression quality (1-100) for processed images
 - `resize_profile`: Image resizing strategy before API submission
 - `low_max_side_px`: Maximum side length in pixels for low-detail resizing
-- `high_target_box`: Target dimensions [width, height] for high-detail resizing
+- `high_target_box`: Target dimensions [width, height] for high-detail resizing with white padding
+
+#### Google Gemini Image Processing
+
+```yaml
+google_image_processing:
+  target_dpi: 300
+  grayscale_conversion: true
+  handle_transparency: true
+  media_resolution: high  # Options: low, medium, high, ultra_high, auto
+  jpeg_quality: 100
+  resize_profile: high
+  low_max_side_px: 512
+  high_target_box: [768, 1536]
+```
+
+Key Parameters:
+
+- `media_resolution`: Controls the Google `media_resolution` parameter
+  - `high`: MEDIA_RESOLUTION_HIGH (recommended for OCR and dense documents)
+  - `medium`: MEDIA_RESOLUTION_MEDIUM (balanced quality and cost)
+  - `low`: MEDIA_RESOLUTION_LOW (minimal tokens, fast and cheap)
+  - `ultra_high`: MEDIA_RESOLUTION_ULTRA_HIGH (Gemini 3 only, highest quality)
+  - `auto`: MEDIA_RESOLUTION_UNSPECIFIED (let model decide)
+- `high_target_box`: Google uses 768x768 tile-based token calculation; box dimensions are optimized for this
+
+#### Anthropic Claude Image Processing
+
+```yaml
+anthropic_image_processing:
+  target_dpi: 300
+  grayscale_conversion: true
+  handle_transparency: true
+  jpeg_quality: 100
+  resize_profile: auto
+  low_max_side_px: 512
+  high_max_side_px: 1568
+```
+
+Key Parameters:
+
+- `high_max_side_px`: Anthropic recommends images with longest edge up to 1568 pixels for optimal latency
+- `resize_profile`: Set to `auto` to apply Anthropic's recommended resizing (no padding, aspect ratio preserved)
+
+Anthropic-specific considerations:
+- Maximum image size: 8000x8000 pixels (2000x2000 if more than 20 images per request)
+- Minimum recommended size: 200 pixels on any edge
+- Token calculation: `tokens = (width * height) / 750`
+- Pre-resizing reduces time-to-first-token latency
 
 #### Tesseract Image Processing
 

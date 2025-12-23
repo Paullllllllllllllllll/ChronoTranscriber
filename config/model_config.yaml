@@ -26,9 +26,15 @@ transcription_model:
   #   - Gemini 1.5: gemini-1.5-pro, gemini-1.5-flash
   #
   # OpenRouter (200+ models via unified API):
-  #   - openai/gpt-5.1, anthropic/claude-sonnet-4-5, google/gemini-3-pro
-  #   - meta/llama-3.2-90b-vision, mistral/mistral-large
-  #
+  #   OpenAI: openai/gpt-5.1, openai/gpt-oss-120b, openai/gpt-oss-20b
+  #   Anthropic: anthropic/claude-sonnet-4-5, anthropic/claude-opus-4-1
+  #   Google: google/gemini-3-pro, google/gemini-2.5-flash
+  #   DeepSeek: deepseek/deepseek-r1, deepseek/deepseek-r1-0528-qwen3-8b,
+  #             deepseek/deepseek-v3.2-exp, deepseek/deepseek-chat-v3.1,
+  #             deepseek/deepseek-v3.1-terminus
+  #   Meta: meta/llama-3.2-90b-vision, meta/llama-3.3-70b-instruct
+  #   Mistral: mistral/mistral-large, mistral/pixtral-large
+
   name: gemini-3-flash-preview
   max_output_tokens: 128000 # maximum number of tokens the model can generate
   reasoning:                 # GPT-5-series and o3, o3-mini, o1, o1-mini, and o4-mini only.

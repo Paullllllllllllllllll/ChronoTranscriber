@@ -4,11 +4,12 @@ OpenRouter provides access to 200+ models from multiple providers
 through a unified OpenAI-compatible API.
 
 Supported model families include:
-- OpenAI models (GPT-4o, o1, etc.)
-- Anthropic models (Claude 3 family)
-- Google models (Gemini)
-- Meta models (Llama)
-- Mistral models
+- OpenAI models (GPT-5, GPT-4o, o1/o3, GPT-OSS-120B/20B)
+- Anthropic models (Claude 4.5, Claude 3.5)
+- Google models (Gemini 3, Gemini 2.5)
+- DeepSeek models (R1, V3.2, V3.1)
+- Meta models (Llama 3.2/3.3)
+- Mistral models (Mistral Large, Pixtral)
 - And many more
 
 LangChain handles:
@@ -44,12 +45,76 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
     """Determine capabilities based on OpenRouter model name.
     
     OpenRouter model names follow the format: provider/model-name
-    e.g., openai/gpt-4o, anthropic/claude-3-sonnet, google/gemini-pro
+    e.g., openai/gpt-4o, anthropic/claude-3-sonnet, google/gemini-pro,
+         deepseek/deepseek-r1, openai/gpt-oss-120b
     """
     m = model_name.lower().strip()
     
-    # OpenAI models via OpenRouter
-    if "openai/" in m or "gpt-4" in m or "gpt-5" in m:
+    # DeepSeek models via OpenRouter
+    # Check DeepSeek first since they have unique characteristics
+    if "deepseek/" in m or "deepseek" in m:
+        # DeepSeek R1 and R1-0528 variants (reasoning models)
+        if "deepseek-r1" in m:
+            return ProviderCapabilities(
+                provider_name="openrouter",
+                model_name=model_name,
+                supports_vision=True,
+                supports_image_detail=False,
+                default_image_detail="auto",
+                supports_structured_output=True,
+                supports_json_mode=True,
+                is_reasoning_model=True,  # R1 has reasoning capabilities
+                supports_reasoning_effort=True,
+                supports_temperature=True,
+                supports_top_p=True,
+                supports_frequency_penalty=False,
+                supports_presence_penalty=False,
+                max_context_tokens=128000,
+                max_output_tokens=8192,
+            )
+        
+        # DeepSeek V3.x models (V3.2-exp, V3.1-terminus, chat-v3.1)
+        return ProviderCapabilities(
+            provider_name="openrouter",
+            model_name=model_name,
+            supports_vision=True,
+            supports_image_detail=False,
+            default_image_detail="auto",
+            supports_structured_output=True,
+            supports_json_mode=True,
+            is_reasoning_model="terminus" in m,  # Terminus variants have hybrid reasoning
+            supports_reasoning_effort="terminus" in m,
+            supports_temperature=True,
+            supports_top_p=True,
+            supports_frequency_penalty=False,
+            supports_presence_penalty=False,
+            max_context_tokens=128000,
+            max_output_tokens=8192,
+        )
+    
+    # OpenAI models via OpenRouter (includes GPT-OSS-120B/20B)
+    if "openai/" in m or "gpt-4" in m or "gpt-5" in m or "gpt-oss" in m:
+        # GPT-OSS models have specific characteristics
+        if "gpt-oss" in m:
+            return ProviderCapabilities(
+                provider_name="openrouter",
+                model_name=model_name,
+                supports_vision=True,
+                supports_image_detail=True,
+                default_image_detail="high",
+                supports_structured_output=True,
+                supports_json_mode=True,
+                is_reasoning_model=True,  # GPT-OSS supports configurable reasoning
+                supports_reasoning_effort=True,
+                supports_temperature=True,
+                supports_top_p=True,
+                supports_frequency_penalty=True,
+                supports_presence_penalty=True,
+                max_context_tokens=128000,
+                max_output_tokens=4096,
+            )
+        
+        # Other OpenAI models
         return ProviderCapabilities(
             provider_name="openrouter",
             model_name=model_name,
@@ -58,7 +123,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             default_image_detail="high",
             supports_structured_output=True,
             supports_json_mode=True,
-            is_reasoning_model="o1" in m or "o3" in m,
+            is_reasoning_model="o1" in m or "o3" in m or "o4" in m,
             supports_reasoning_effort=False,
             supports_temperature=True,
             supports_top_p=True,

@@ -1,23 +1,47 @@
 # ChronoTranscriber
 
-A Python-based tool for researchers and archivists to transcribe historical documents from PDFs, EPUB and MOBI/Kindle ebooks, or image folders. ChronoTranscriber supports multiple AI providers (OpenAI, Anthropic, Google, OpenRouter) via LangChain, local OCR with Tesseract, and provides structured JSON outputs with scalable batch processing for large-scale document digitization projects.
+A comprehensive Python-based document transcription tool designed for researchers, archivists, and digital humanities projects. ChronoTranscriber transforms historical documents, academic papers, and ebooks into searchable, structured text using state-of-the-art AI models or local OCR.
+
+## What Makes ChronoTranscriber Different
+
+ChronoTranscriber is built specifically for large-scale document digitization with features that matter for serious research projects:
+
+**Multi-Provider AI Support**: Choose from OpenAI (GPT-5, o-series, GPT-4o), Anthropic (Claude 4.5, Claude 3.5), Google (Gemini 3, Gemini 2.5), or access 200+ models via OpenRouter. Switch providers without changing your workflow.
+
+**Cost-Effective Batch Processing**: Submit hundreds or thousands of pages for asynchronous processing at 50% lower cost. Batch support for OpenAI, Anthropic, and Google with automatic chunking and progress tracking.
+
+**Flexible Operation Modes**: Run interactively with guided prompts and navigation, or use CLI mode for automation, scripting, and CI/CD pipelines. The same tool adapts to your workflow.
+
+**Production-Ready Reliability**: Automatic retry logic with exponential backoff, daily token budget management, comprehensive error handling, and detailed logging for troubleshooting.
+
+**Multiple Input Formats**: Process PDFs (native text extraction or OCR), image folders (PNG, JPEG), EPUB ebooks, and MOBI/Kindle files. Auto mode intelligently selects the best method for each file.
+
+**Local OCR Option**: Use Tesseract OCR for completely offline processing without API costs or internet dependency.
+
+**Structured Outputs**: JSON schema enforcement ensures consistent, parseable results. Built-in schemas for markdown, plain text, and specialized formats like Swiss address books.
 
 ## Table of Contents
 
+- [What Makes ChronoTranscriber Different](#what-makes-chronotranscriber-different)
 - [Overview](#overview)
 - [Key Features](#key-features)
 - [Supported Providers and Models](#supported-providers-and-models)
 - [System Requirements](#system-requirements)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+  - [First-Time Setup](#first-time-setup)
+  - [Your First Transcription](#your-first-transcription)
+  - [Common Workflows](#common-workflows)
 - [Configuration](#configuration)
 - [Usage](#usage)
 - [Batch Processing](#batch-processing)
 - [Fine-Tuning Dataset Preparation](#fine-tuning-dataset-preparation)
 - [Utilities](#utilities)
 - [Architecture](#architecture)
+- [Frequently Asked Questions](#frequently-asked-questions)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
+- [Development](#development)
 - [License](#license)
 
 ## Overview
@@ -162,18 +186,22 @@ For OpenAI batch processing, ensure your account has access to the Batch API.
 
 ### Python Packages
 
-All Python dependencies are listed in `requirements.txt`. Key packages include:
+All Python dependencies are listed in `requirements.txt` (updated December 2025). Key packages include:
 
-- `langchain`, `langchain-openai`, `langchain-anthropic`, `langchain-google-genai`: Multi-provider LLM integration
-- `openai`: OpenAI SDK for batch processing
-- `PyMuPDF`: PDF processing
-- `pillow`: Image manipulation
-- `pytesseract`: Tesseract OCR wrapper
-- `opencv-python`: Advanced image processing
-- `scikit-image`: Scientific image processing
-- `pydantic`: Data validation and structured outputs
-- `pyyaml`: Configuration file parsing
-- `aiohttp`, `aiofiles`: Asynchronous I/O
+- `langchain==1.2.0`, `langchain-core==1.2.5`: Core LangChain framework
+- `langchain-openai==1.1.6`, `langchain-anthropic==1.3.0`, `langchain-google-genai==4.1.2`: Provider integrations
+- `openai==2.14.0`: OpenAI SDK for batch processing
+- `anthropic==0.75.0`: Anthropic SDK
+- `google-genai==1.56.0`: Google Gemini SDK
+- `PyMuPDF==1.26.7`: PDF processing
+- `pillow==12.0.0`: Image manipulation
+- `pytesseract==0.3.13`: Tesseract OCR wrapper
+- `opencv-python==4.12.0.88`: Advanced image processing
+- `scikit-image==0.26.0`: Scientific image processing
+- `numpy==2.2.6`: Numerical computing (constrained for opencv compatibility)
+- `pydantic==2.12.5`: Data validation and structured outputs
+- `pyyaml==6.0.3`: Configuration file parsing
+- `aiohttp==3.13.2`, `aiofiles==25.1.0`: Asynchronous I/O
 
 ## Installation
 
@@ -233,58 +261,189 @@ Edit `config/paths_config.yaml` to specify your input and output directories for
 
 ## Quick Start
 
-### Basic Usage
+This guide will get you transcribing documents in under 5 minutes.
 
-1. Set your API key for your preferred provider:
+### First-Time Setup
+
+**Step 1: Install Dependencies**
 
 ```bash
-# Choose one:
-export OPENAI_API_KEY="your_key"      # OpenAI
-export ANTHROPIC_API_KEY="your_key"   # Anthropic
-export GOOGLE_API_KEY="your_key"      # Google
-export OPENROUTER_API_KEY="your_key"  # OpenRouter
+# Clone the repository
+git clone https://github.com/Paullllllllllllllllll/ChronoTranscriber.git
+cd ChronoTranscriber
+
+# Create and activate virtual environment
+python -m venv .venv
+.venv\Scripts\activate  # Windows
+source .venv/bin/activate  # Linux/macOS
+
+# Install Python packages
+pip install -r requirements.txt
 ```
 
-2. Configure your model in `config/model_config.yaml`:
+**Step 2: Set Up API Key (for AI transcription)**
+
+Choose one provider and set its API key:
+
+```bash
+# Windows PowerShell
+$env:OPENAI_API_KEY="your_key_here"
+$env:ANTHROPIC_API_KEY="your_key_here"
+$env:GOOGLE_API_KEY="your_key_here"
+
+# Linux/macOS
+export OPENAI_API_KEY="your_key_here"
+export ANTHROPIC_API_KEY="your_key_here"
+export GOOGLE_API_KEY="your_key_here"
+```
+
+For persistent configuration, add to your system environment variables or shell profile.
+
+**Step 3: Configure Your Model (optional)**
+
+Edit `config/model_config.yaml` to select your preferred provider and model:
 
 ```yaml
 transcription_model:
-  provider: openai          # or: anthropic, google, openrouter
-  name: gpt-5-mini          # model name
+  provider: openai          # Options: openai, anthropic, google, openrouter
+  name: gpt-5-mini          # Model identifier
+  reasoning:
+    effort: low             # Options: low, medium, high (for reasoning models)
 ```
 
-3. Run the transcriber:
+The default configuration uses OpenAI's gpt-5-mini with medium reasoning effort, which provides a good balance of quality and cost.
+
+**Step 4: Configure Input/Output Paths (optional)**
+
+Edit `config/paths_config.yaml` to set your default directories:
+
+```yaml
+file_paths:
+  PDFs:
+    input: './input/pdfs'
+    output: './output/pdfs'
+  Images:
+    input: './input/images'
+    output: './output/images'
+```
+
+### Your First Transcription
+
+**Interactive Mode (Recommended for First-Time Users)**
+
+Run the transcriber without arguments for a guided experience:
 
 ```bash
-# Interactive mode (guided prompts)
 python main/unified_transcriber.py
-
-# CLI mode (automation)
-python main/unified_transcriber.py --type pdfs --method gpt --input ./input/pdfs --output ./output/pdfs
 ```
 
-For CLI mode, the `--type` flag accepts `images`, `pdfs`, `epubs`, or `mobis`, and `--method` accepts `native`, `tesseract`, or `gpt` (EPUBs and MOBIs currently support only `native`).
+The interactive interface will guide you through:
+1. Selecting document type (PDFs, images, EPUBs, or auto mode)
+2. Choosing transcription method (native extraction, Tesseract OCR, or AI)
+3. Configuring processing options (batch vs synchronous, schema selection)
+4. Selecting files to process
+5. Reviewing and confirming your choices
 
-### Example Workflows
+You can press 'b' to go back to previous steps or 'q' to quit at any time.
 
-**Transcribe a PDF with OpenAI:**
+**CLI Mode (For Automation)**
+
+For scripting and automation, use command-line arguments:
+
 ```bash
-python main/unified_transcriber.py --type pdfs --method gpt --input ./documents/historical.pdf --output ./output/pdfs
+# Transcribe a PDF with AI
+python main/unified_transcriber.py --type pdfs --method gpt --input ./documents/my_document.pdf --output ./results
+
+# Process a folder of images with Tesseract (offline)
+python main/unified_transcriber.py --type images --method tesseract --input ./scans --output ./results
+
+# Batch process multiple PDFs (cost-effective for large jobs)
+python main/unified_transcriber.py --type pdfs --method gpt --batch --input ./archive --output ./results
 ```
 
-**Process images with Tesseract (offline):**
+To enable CLI mode by default, set `interactive_mode: false` in `config/paths_config.yaml`.
+
+### Common Workflows
+
+**Workflow 1: Quick Test with a Single PDF**
+
+Best for: Testing the system or processing a single document
+
 ```bash
-python main/unified_transcriber.py --type images --method tesseract --input ./scans/
+# Using AI (requires API key)
+python main/unified_transcriber.py --type pdfs --method gpt --input ./test.pdf --output ./results
+
+# Using Tesseract (offline, no API key needed)
+python main/unified_transcriber.py --type pdfs --method tesseract --input ./test.pdf --output ./results
 ```
 
-**Submit a large job for batch processing:**
-```bash
-python main/unified_transcriber.py --type pdfs --method gpt --batch --input ./archive/ --output ./output/pdfs
-```
+**Workflow 2: Large-Scale Batch Processing**
 
-**Check batch job status:**
+Best for: Processing hundreds or thousands of pages cost-effectively
+
 ```bash
+# Step 1: Submit batch job (50% cost reduction)
+python main/unified_transcriber.py --type pdfs --method gpt --batch --input ./archive --output ./results
+
+# Step 2: Check status (run periodically or when you expect completion)
 python main/check_batches.py
+
+# Step 3: Results are automatically downloaded when batches complete
+```
+
+Batch processing typically completes within 24 hours. You can close the terminal after submission and check status later.
+
+**Workflow 3: Mixed Document Types (Auto Mode)**
+
+Best for: Folders containing PDFs, images, and ebooks
+
+```bash
+# Auto mode intelligently selects the best method for each file
+python main/unified_transcriber.py --auto --input ./mixed_documents --output ./results
+```
+
+Auto mode will:
+- Use native extraction for searchable PDFs and EPUBs
+- Apply OCR to scanned PDFs and images
+- Choose between Tesseract and AI based on your configuration
+
+**Workflow 4: Processing Image Collections**
+
+Best for: Scanned documents organized in folders
+
+```bash
+# Process all image folders
+python main/unified_transcriber.py --type images --method gpt --input ./scans --output ./results
+
+# Process with custom schema
+python main/unified_transcriber.py --type images --method gpt --schema plain_text_transcription_schema --input ./scans --output ./results
+```
+
+**Workflow 5: EPUB and MOBI Ebook Extraction**
+
+Best for: Extracting text from ebooks (no OCR needed)
+
+```bash
+# Extract from EPUB files
+python main/unified_transcriber.py --type epubs --method native --input ./ebooks --output ./results
+
+# Extract from MOBI/Kindle files
+python main/unified_transcriber.py --type mobis --method native --input ./kindle_books --output ./results
+```
+
+**Workflow 6: Repairing Failed Transcriptions**
+
+Best for: Fixing pages that failed during initial processing
+
+```bash
+# Repair all failures in a transcription
+python main/repair_transcriptions.py --transcription ./results/document_transcription.txt
+
+# Repair only API errors (skip "no text" and "not possible" pages)
+python main/repair_transcriptions.py --transcription ./results/document_transcription.txt --errors-only
+
+# Repair specific page indices
+python main/repair_transcriptions.py --transcription ./results/document_transcription.txt --indices 5,12,18
 ```
 
 ## Configuration
@@ -1055,6 +1214,206 @@ ChronoTranscriber separates orchestration logic from CLI entry points to improve
 - CLI entry points in `main/` are thin wrappers that delegate to operations modules
 - This design pattern allows operations to be reused, tested independently, and invoked programmatically
 
+## Frequently Asked Questions
+
+### General Questions
+
+**Q: Which AI provider should I choose?**
+
+A: It depends on your priorities:
+- **OpenAI (GPT-5-mini)**: Best balance of cost and quality. Excellent for general transcription. Supports batch processing for 50% cost reduction.
+- **Anthropic (Claude 3.5 Sonnet)**: Superior for complex layouts and academic papers. Better at preserving formatting and structure.
+- **Google (Gemini 2.0 Flash)**: Fastest processing and lowest cost. Good for straightforward documents.
+- **OpenRouter**: Access to 200+ models. Useful for trying different models without managing multiple API keys.
+
+Start with OpenAI's gpt-5-mini with low reasoning effort for cost-effective results.
+
+**Q: How much does it cost to transcribe documents?**
+
+A: Costs vary by provider and model. Examples with OpenAI gpt-5-mini:
+- Single page (300 DPI image): ~$0.01-0.02
+- 100-page PDF (synchronous): ~$1-2
+- 100-page PDF (batch mode): ~$0.50-1 (50% discount)
+- 1000-page archive (batch): ~$5-10
+
+Use the cost analysis tool to track actual spending: `python main/cost_analysis.py`
+
+**Q: Should I use batch processing or synchronous mode?**
+
+A: Use batch processing when:
+- Processing more than 50 pages
+- Cost is a priority (50% cheaper)
+- You can wait 24 hours for results
+- Processing large archives
+
+Use synchronous mode when:
+- You need results immediately
+- Processing fewer than 50 pages
+- Testing or debugging
+
+**Q: Can I process documents offline without an API key?**
+
+A: Yes. Use Tesseract OCR for completely offline processing:
+
+```bash
+python main/unified_transcriber.py --type pdfs --method tesseract --input ./docs --output ./results
+```
+
+Tesseract is free but generally produces lower quality results than AI models.
+
+### Configuration Questions
+
+**Q: How do I switch between providers?**
+
+A: Edit `config/model_config.yaml`:
+
+```yaml
+transcription_model:
+  provider: anthropic  # Change to: openai, anthropic, google, or openrouter
+  name: claude-3-5-sonnet  # Update model name for the provider
+```
+
+Then set the appropriate API key environment variable.
+
+**Q: How do I control costs with daily token limits?**
+
+A: Enable daily token budget in `config/concurrency_config.yaml`:
+
+```yaml
+daily_token_limit:
+  enabled: true
+  daily_tokens: 9000000  # Adjust to your budget
+```
+
+Processing automatically pauses when the limit is reached and resumes the next day.
+
+**Q: What's the difference between reasoning effort levels (low/medium/high)?**
+
+A: For reasoning models (GPT-5, o-series, Claude 4.5, Gemini 3):
+- **Low**: Fastest, cheapest, good for straightforward documents
+- **Medium**: Balanced quality and cost (recommended default)
+- **High**: Best quality for complex documents, slower and more expensive
+
+For most historical documents, low or medium effort is sufficient.
+
+**Q: How do I customize the output format?**
+
+A: Use different schemas in `schemas/` directory:
+- `markdown_transcription_schema.json`: Formatted text with headings, LaTeX equations
+- `plain_text_transcription_schema.json`: Simple plain text
+- `plain_text_transcription_with_markers_schema.json`: Plain text with page markers
+
+Specify with `--schema` flag or select in interactive mode.
+
+### Processing Questions
+
+**Q: What happens if some pages fail to transcribe?**
+
+A: Failed pages are marked in the output with:
+- `[transcription error: page_name]`: API or processing error
+- `[No transcribable text]`: Model determined page has no readable text
+- `[Transcription not possible]`: Model couldn't process the page
+
+Use the repair tool to retry failed pages:
+
+```bash
+python main/repair_transcriptions.py --transcription ./results/document_transcription.txt --errors-only
+```
+
+**Q: How do I process documents with mixed content (PDFs, images, ebooks)?**
+
+A: Use auto mode:
+
+```bash
+python main/unified_transcriber.py --auto --input ./mixed_folder --output ./results
+```
+
+Auto mode automatically detects file types and selects the best processing method for each.
+
+**Q: Can I process password-protected PDFs?**
+
+A: No, ChronoTranscriber does not support encrypted or password-protected PDFs. You must decrypt them first using external tools.
+
+**Q: How do I preserve page numbers in the output?**
+
+A: Use a schema with page markers:
+
+```bash
+python main/unified_transcriber.py --type pdfs --method gpt --schema plain_text_transcription_with_markers_schema --input ./docs --output ./results
+```
+
+Page numbers will appear as `<page_number>5</page_number>` in the output.
+
+### Batch Processing Questions
+
+**Q: How do I check if my batch jobs are complete?**
+
+A: Run the batch checker:
+
+```bash
+python main/check_batches.py
+```
+
+This shows status of all batches and automatically downloads completed results.
+
+**Q: Can I cancel a batch job?**
+
+A: Yes, use the cancel tool:
+
+```bash
+python main/cancel_batches.py
+```
+
+This lists all active batches and allows you to cancel them. Note that you're charged for any processing that occurred before cancellation.
+
+**Q: Where are batch results stored?**
+
+A: Results are saved to the output directory you specified when submitting the batch. Temporary tracking files (`*_temporary.jsonl`) are kept in the same location until results are downloaded.
+
+**Q: What if batch processing fails?**
+
+A: ChronoTranscriber automatically falls back to synchronous processing if batch submission fails. Check logs for details. Common causes:
+- Provider doesn't support batch processing (OpenRouter)
+- API key lacks batch access permissions
+- Network connectivity issues
+
+### Technical Questions
+
+**Q: What image formats are supported?**
+
+A: PNG, JPEG, JPG, WEBP, BMP, TIFF. Images are automatically preprocessed based on the selected provider.
+
+**Q: What's the maximum PDF size?**
+
+A: No hard limit, but very large PDFs (1000+ pages) should use batch processing. Individual page images are limited by provider constraints (typically 20MB per image after preprocessing).
+
+**Q: Can I run multiple transcription jobs simultaneously?**
+
+A: Yes, but be mindful of:
+- API rate limits (configure in `concurrency_config.yaml`)
+- Daily token budgets
+- System memory for image preprocessing
+
+Each job runs independently and can be monitored separately.
+
+**Q: How do I integrate ChronoTranscriber into my existing pipeline?**
+
+A: Use CLI mode with `interactive_mode: false`:
+
+```bash
+# In your script or CI/CD pipeline
+python main/unified_transcriber.py --type pdfs --method gpt --input "$INPUT_DIR" --output "$OUTPUT_DIR"
+
+# Check exit code
+if [ $? -eq 0 ]; then
+    echo "Transcription successful"
+else
+    echo "Transcription failed"
+fi
+```
+
+All scripts return proper exit codes (0 for success, 1 for errors).
+
 ## Troubleshooting
 
 ### Common Issues
@@ -1224,6 +1583,19 @@ Potential areas where contributions would be valuable:
 ## Development
 
 ### Recent Updates
+
+**December 2025: Dependency Updates and Maintenance**
+
+All dependencies updated to latest stable versions:
+
+- LangChain ecosystem: Updated to langchain 1.2.0, langchain-core 1.2.5, with enhanced provider integrations
+- OpenAI SDK: Updated to 2.14.0 with latest API features
+- LangChain providers: langchain-openai 1.1.6, langchain-anthropic 1.3.0, langchain-google-genai 4.1.2
+- Image processing: scikit-image 0.26.0, PyMuPDF 1.26.7 with improved performance
+- Scientific computing: numpy 2.2.6 (maintained for opencv compatibility), networkx 3.6.1
+- Infrastructure: Updated async libraries, improved websocket support, enhanced UUID utilities
+- All 24 outdated packages updated while maintaining full backward compatibility
+- Core functionality verified: All modules import successfully, CLI and interactive modes operational
 
 **November 2025: Version 3.0 - Multi-Provider LangChain Integration**
 

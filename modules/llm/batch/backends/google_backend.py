@@ -202,7 +202,7 @@ class GoogleBatchBackend(BatchBackend):
                     file=str(temp_path),
                     config=types.UploadFileConfig(
                         display_name=f"batch-requests-{int(time.time())}",
-                        mime_type="application/jsonl"
+                        mime_type="jsonl"
                     )
                 )
                 logger.info("Uploaded batch file: %s", uploaded_file.name)
@@ -210,7 +210,7 @@ class GoogleBatchBackend(BatchBackend):
                 # Create batch job from file
                 batch_job = client.batches.create(
                     model=api_model_name,
-                    src=uploaded_file,
+                    src=uploaded_file.name,
                     config={
                         "display_name": f"batch-transcription-{int(time.time())}",
                     },

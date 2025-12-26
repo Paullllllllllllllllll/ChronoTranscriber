@@ -10,7 +10,7 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
-from modules.core.utils import console_print
+from modules.ui import print_info
 
 
 def sdk_to_dict(obj: Any) -> Dict[str, Any]:
@@ -88,9 +88,7 @@ def list_all_batches(client: Any, limit: int = 100) -> List[Dict[str, Any]]:
             except Exception:
                 has_more = False
                 last_id = None
-        console_print(
-            f"[INFO] Batches page {page_index}: fetched {len(page_items)} item(s); has_more={has_more}"
-        )
+        print_info(f"Batches page {page_index}: fetched {len(page_items)} item(s); has_more={has_more}")
         if not has_more or not last_id:
             break
         after = last_id

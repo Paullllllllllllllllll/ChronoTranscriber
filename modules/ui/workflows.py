@@ -137,12 +137,29 @@ class WorkflowUI:
         if config.transcription_method != "gpt":
             return True
         
-        # Check API key first
+        # Check API key based on configured provider
         import os
-        api_key = os.getenv("OPENAI_API_KEY")
+        from modules.config.service import get_config_service
+        
+        config_service = get_config_service()
+        model_config = config_service.get_model_config()
+        provider = model_config.get("transcription_model", {}).get("provider", "openai")
+        
+        # Map provider to environment variable
+        provider_env_vars = {
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "google": "GOOGLE_API_KEY",
+            "openrouter": "OPENROUTER_API_KEY",
+        }
+        
+        env_var = provider_env_vars.get(provider, "OPENAI_API_KEY")
+        api_key = os.getenv(env_var)
+        
         if not api_key:
-            print_error("OPENAI_API_KEY environment variable is required for GPT transcription.")
-            print_info("Please set your API key and try again.")
+            print_error(f"{env_var} environment variable is required for {provider.upper()} transcription.")
+            print_info(f"Please set your API key and try again.")
+            print_info(f"  (Configured provider: {provider} in model_config.yaml)")
             sys.exit(1)
         
         # Ask about batch processing
@@ -571,27 +588,86 @@ class WorkflowUI:
         if config.processing_type == "auto":
             return True
         
-        print_header("PROCESSING SUMMARY", "Review your selections")
+        # Load model config for GPT details
+        from modules.config.service import get_config_service
+        config_service = get_config_service()
+        model_config = config_service.get_model_config()
+        paths_config = config_service.get_paths_config()
         
-        item_type = "image folder(s)" if config.processing_type == "images" else "PDF file(s)"
+        print_header("PROCESSING SUMMARY", "Review your selections before processing")
+        
+        # Determine item type description
+        if config.processing_type == "images":
+            item_type = "image folder(s)"
+        elif config.processing_type == "pdfs":
+            item_type = "PDF file(s)"
+        elif config.processing_type == "epubs":
+            item_type = "EPUB file(s)"
+        else:
+            item_type = "file(s)"
+        
         ui_print(f"  Ready to process ", PromptStyle.INFO, end="")
         ui_print(f"{len(config.selected_items)}", PromptStyle.HIGHLIGHT, end="")
         ui_print(f" {item_type}\n", PromptStyle.INFO)
         
-        ui_print("  Configuration:", PromptStyle.HIGHLIGHT)
+        # === Processing Configuration ===
+        ui_print("  Processing Configuration:", PromptStyle.HIGHLIGHT)
         print_separator(PromptStyle.LIGHT_LINE, 80)
         ui_print(f"    • Document type: {config.processing_type.capitalize()}", PromptStyle.INFO)
-        ui_print(f"    • Transcription method: {config.transcription_method.capitalize()}", PromptStyle.INFO)
+        ui_print(f"    • Transcription method: {config.transcription_method.upper()}", PromptStyle.INFO)
         
         if config.transcription_method == "gpt":
+            # Show batch/sync mode
             mode = "Batch (asynchronous)" if config.use_batch_processing else "Synchronous"
             ui_print(f"    • Processing mode: {mode}", PromptStyle.INFO)
+            
+            # Show model and provider
+            tm = model_config.get("transcription_model", {})
+            provider = tm.get("provider", "openai")
+            model_name = tm.get("name", "gpt-4o")
+            ui_print(f"    • Provider: {provider.upper()}", PromptStyle.INFO)
+            ui_print(f"    • Model: {model_name}", PromptStyle.INFO)
+            
+            # Show key model parameters
+            temperature = tm.get("temperature", 0.0)
+            max_tokens = tm.get("max_output_tokens") or tm.get("max_tokens", 20480)
+            ui_print(f"    • Temperature: {temperature}", PromptStyle.DIM)
+            ui_print(f"    • Max output tokens: {max_tokens:,}", PromptStyle.DIM)
+            
+            # Show schema
             if config.selected_schema_name:
                 ui_print(f"    • Schema: {config.selected_schema_name}", PromptStyle.INFO)
+            
+            # Show additional context status
+            if config.additional_context_path:
+                ui_print(f"    • Additional context: Yes ({config.additional_context_path.name})", PromptStyle.INFO)
+            else:
+                ui_print(f"    • Additional context: No", PromptStyle.DIM)
         
         print_separator(PromptStyle.LIGHT_LINE, 80)
         
-        ui_print("\n  Selected items (first 5 shown):", PromptStyle.INFO)
+        # === Output Location ===
+        ui_print("\n  Output Location:", PromptStyle.HIGHLIGHT)
+        print_separator(PromptStyle.LIGHT_LINE, 80)
+        use_input_as_output = paths_config.get('general', {}).get('input_paths_is_output_path', False)
+        if use_input_as_output:
+            ui_print("    • Output: Same directory as input files", PromptStyle.INFO)
+        else:
+            # Show configured output directory
+            file_paths = paths_config.get('file_paths', {})
+            if config.processing_type == "images":
+                output_dir = file_paths.get('Images', {}).get('output', 'images_out')
+            elif config.processing_type == "pdfs":
+                output_dir = file_paths.get('PDFs', {}).get('output', 'pdfs_out')
+            elif config.processing_type == "epubs":
+                output_dir = file_paths.get('EPUBs', {}).get('output', 'epubs_out')
+            else:
+                output_dir = "configured output directory"
+            ui_print(f"    • Output directory: {output_dir}", PromptStyle.INFO)
+        print_separator(PromptStyle.LIGHT_LINE, 80)
+        
+        # === Selected Items ===
+        ui_print("\n  Selected Items (first 5 shown):", PromptStyle.HIGHLIGHT)
         for i, item in enumerate(config.selected_items[:5], 1):
             ui_print(f"    {i}. {item.name}", PromptStyle.DIM)
         

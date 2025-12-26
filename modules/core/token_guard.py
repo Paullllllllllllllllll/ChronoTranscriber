@@ -10,7 +10,7 @@ import asyncio
 from typing import Any, Dict
 
 from modules.infra.logger import setup_logger
-from modules.core.utils import console_print
+from modules.ui import print_info, print_warning, print_success
 
 logger = setup_logger(__name__)
 
@@ -44,15 +44,15 @@ async def check_and_wait_for_token_limit(concurrency_config: Dict[str, Any]) -> 
     logger.warning(
         f"Daily token limit reached: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} tokens used"
     )
-    console_print(
-        f"\n[WARNING] Daily token limit reached: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} tokens used"
+    print_warning(
+        f"Daily token limit reached: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} tokens used"
     )
-    console_print(
-        f"[INFO] Waiting until {reset_time.strftime('%Y-%m-%d %H:%M:%S')} "
+    print_info(
+        f"Waiting until {reset_time.strftime('%Y-%m-%d %H:%M:%S')} "
         f"({seconds_until_reset // 3600}h {(seconds_until_reset % 3600) // 60}m) "
         "for token limit reset..."
     )
-    console_print("[INFO] Press Ctrl+C to cancel and exit.")
+    print_info("Press Ctrl+C to cancel and exit.")
     
     try:
         # Sleep in smaller intervals to allow for interruption
@@ -67,14 +67,14 @@ async def check_and_wait_for_token_limit(concurrency_config: Dict[str, Any]) -> 
             # Re-check if it's a new day
             if not token_tracker.is_limit_reached():
                 logger.info("Token limit has been reset. Resuming processing.")
-                console_print("[SUCCESS] Token limit has been reset. Resuming processing.")
+                print_success("Token limit has been reset. Resuming processing.")
                 return True
         
         logger.info("Token limit has been reset. Resuming processing.")
-        console_print("[SUCCESS] Token limit has been reset. Resuming processing.")
+        print_success("Token limit has been reset. Resuming processing.")
         return True
         
     except KeyboardInterrupt:
         logger.info("Wait cancelled by user (KeyboardInterrupt).")
-        console_print("\n[INFO] Wait cancelled by user.")
+        print_info("Wait cancelled by user.")
         return False

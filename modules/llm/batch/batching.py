@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from modules.llm.model_capabilities import detect_capabilities
-from modules.core.utils import console_print
+from modules.ui import print_info, print_warning, print_error, print_success
 from modules.config.config_loader import PROJECT_ROOT
 from modules.config.service import get_config_service
 from modules.llm.structured_outputs import build_structured_text_format
@@ -361,12 +361,12 @@ def submit_batch(batch_file_path: Path) -> Dict[str, Any]:
 
     client = OpenAI()
     try:
-        console_print(f"[INFO] Uploading batch file {batch_file_path.name} to OpenAI...")
+        print_info(f"Uploading batch file {batch_file_path.name} to OpenAI...")
         with batch_file_path.open("rb") as f:
             file_response = client.files.create(file=f, purpose="batch")
         file_id = file_response.id
         logger.info("Uploaded batch file; file id: %s", file_id)
-        console_print("[INFO] Batch file uploaded successfully, creating batch job...")
+        print_info("Batch file uploaded successfully, creating batch job...")
 
         batch_response = client.batches.create(
             input_file_id=file_id,
@@ -375,13 +375,11 @@ def submit_batch(batch_file_path: Path) -> Dict[str, Any]:
             metadata={"description": "Batch OCR transcription via Responses API"},
         )
         logger.info("Batch submitted; batch id: %s", batch_response.id)
-        console_print(
-            f"[INFO] Batch job created successfully with ID: {batch_response.id}"
-        )
+        print_info(f"Batch job created successfully with ID: {batch_response.id}")
         return batch_response
     except Exception as exc:  # propagate after logging
         logger.error("Error submitting batch file %s: %s", batch_file_path, exc)
-        console_print(f"[ERROR] Failed to submit batch file: {exc}")
+        print_error(f"Failed to submit batch file: {exc}")
         raise
 
 
@@ -410,9 +408,7 @@ def process_batch_transcription(
     max_batch_size = 150 * 1024 * 1024
     batch_index = 1
 
-    console_print(
-        f"[INFO] Processing {total_images} images in chunks of {chunk_size}..."
-    )
+    print_info(f"Processing {total_images} images in chunks of {chunk_size}...")
 
     submitted_parts = 0
     attempted_parts = 0
@@ -421,8 +417,8 @@ def process_batch_transcription(
         chunk_end = min(chunk_start + chunk_size, total_images)
         chunk_images = image_files[chunk_start:chunk_end]
 
-        console_print(
-            f"[INFO] Processing chunk {chunk_start // chunk_size + 1}/"
+        print_info(
+            f"Processing chunk {chunk_start // chunk_size + 1}/"
             f"{(total_images + chunk_size - 1) // chunk_size}: "
             f"images {chunk_start + 1}-{chunk_end} of {total_images}..."
         )
@@ -457,13 +453,9 @@ def process_batch_transcription(
                 all_metadata_records.append(metadata_record)
             except Exception as exc:
                 logger.error("Error processing image %s: %s", image_file, exc)
-                console_print(
-                    f"[ERROR] Failed to process image {image_file.name}: {exc}"
-                )
+                print_error(f"Failed to process image {image_file.name}: {exc}")
 
-        console_print(
-            f"[INFO] Creating batch files for chunk {chunk_start // chunk_size + 1}..."
-        )
+        print_info(f"Creating batch files for chunk {chunk_start // chunk_size + 1}...")
 
         current_lines: List[str] = []
         current_size = 0
@@ -479,18 +471,14 @@ def process_batch_transcription(
                 try:
                     response = submit_batch(batch_file)
                     batch_id = response.id
-                    console_print(
-                        f"[SUCCESS] Successfully submitted batch {batch_index} with ID: {batch_id}"
-                    )
+                    print_success(f"Successfully submitted batch {batch_index} with ID: {batch_id}")
                     batch_responses.append(response)
                     submitted_parts += 1
                 except Exception as exc:
                     logger.error(
                         "Error submitting batch file %s: %s", batch_file, exc
                     )
-                    console_print(
-                        f"[ERROR] Failed to submit batch file {batch_file}: {exc}"
-                    )
+                    print_error(f"Failed to submit batch file {batch_file}: {exc}")
                 try:
                     batch_file.unlink()
                 except Exception:
@@ -515,16 +503,12 @@ def process_batch_transcription(
             try:
                 response = submit_batch(batch_file)
                 batch_id = response.id
-                console_print(
-                    f"[SUCCESS] Successfully submitted batch {batch_index} with ID: {batch_id}"
-                )
+                print_success(f"Successfully submitted batch {batch_index} with ID: {batch_id}")
                 batch_responses.append(response)
                 submitted_parts += 1
             except Exception as exc:
                 logger.error("Error submitting batch file %s: %s", batch_file, exc)
-                console_print(
-                    f"[ERROR] Failed to submit batch file {batch_file}: {exc}"
-                )
+                print_error(f"Failed to submit batch file {batch_file}: {exc}")
             try:
                 batch_file.unlink()
             except Exception:
@@ -532,13 +516,9 @@ def process_batch_transcription(
             batch_index += 1
     total_parts = attempted_parts
     if submitted_parts == total_parts and total_parts > 0:
-        console_print(
-            f"[INFO] All {total_images} images processed and submitted in {total_parts} batch file(s)"
-        )
+        print_info(f"All {total_images} images processed and submitted in {total_parts} batch file(s)")
     else:
-        console_print(
-            f"[INFO] Submitted {submitted_parts}/{total_parts} batch file(s) for {total_images} images"
-        )
+        print_info(f"Submitted {submitted_parts}/{total_parts} batch file(s) for {total_images} images")
         if submitted_parts == 0:
             # Propagate failure to caller so workflow can decide on fallback
             raise RuntimeError(

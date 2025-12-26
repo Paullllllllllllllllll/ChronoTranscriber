@@ -13,6 +13,7 @@ from typing import Any, List, Optional, Dict, Tuple
 
 from modules.infra.logger import setup_logger
 from modules.ui.core import UserConfiguration
+from modules.ui import print_info, print_warning, print_error, print_success
 from modules.processing.pdf_utils import PDFProcessor, native_extract_pdf_text
 from modules.processing.epub_utils import EPUBProcessor, EPUBTextExtraction
 from modules.processing.mobi_utils import MOBIProcessor, MOBITextExtraction
@@ -29,7 +30,6 @@ from modules.llm import transcribe_image_with_llm
 from modules.infra.concurrency import run_concurrent_transcription_tasks
 from modules.processing.text_processing import extract_transcribed_text, format_page_line
 from modules.processing.postprocess import postprocess_transcription
-from modules.core.utils import console_print
 from modules.core.token_guard import check_and_wait_for_token_limit
 
 logger = setup_logger(__name__)
@@ -120,8 +120,8 @@ class WorkflowManager:
         
         # Check if provider supports batch processing
         if not supports_batch(provider):
-            console_print(
-                f"[WARN] Provider '{provider}' does not support batch processing. "
+            print_warning(
+                f"Provider '{provider}' does not support batch processing. "
                 f"Falling back to synchronous mode."
             )
             return None
@@ -135,10 +135,10 @@ class WorkflowManager:
             "[Batch] Preparing submission: provider=%s, images=%d, chunk_size=%d",
             provider, total_images, chunk_size,
         )
-        console_print(
-            f"[INFO] Batch telemetry -> provider={provider}, images={total_images}, chunk_size={chunk_size}"
+        print_info(
+            f"Batch telemetry -> provider={provider}, images={total_images}, chunk_size={chunk_size}"
         )
-        console_print(f"[INFO] Submitting batch job for {total_images} images...")
+        print_info(f"Submitting batch job for {total_images} images...")
         
         # Early marker
         try:
@@ -214,8 +214,8 @@ class WorkflowManager:
             )
         except Exception as e:
             logger.exception(f"Batch submission failed for {source_name}: {e}")
-            console_print(
-                f"[ERROR] Batch submission failed for {source_name}. "
+            print_error(
+                f"Batch submission failed for {source_name}. "
                 f"Falling back to synchronous processing."
             )
             return None
@@ -258,8 +258,8 @@ class WorkflowManager:
         except Exception:
             logger.warning("Could not write submitted batch_session marker")
         
-        console_print(f"[SUCCESS] Batch submitted for '{source_name}'.")
-        console_print("[INFO] The batch will be processed asynchronously. Use 'check_batches.py' to monitor status.")
+        print_success(f"Batch submitted for '{source_name}'.")
+        print_info("The batch will be processed asynchronously. Use 'check_batches.py' to monitor status.")
         
         return handle
 
@@ -282,8 +282,7 @@ class WorkflowManager:
         Process all selected items based on the user configuration.
         """
         total_items = len(self.user_config.selected_items)
-        console_print(
-            f"[INFO] Beginning processing of {total_items} item(s)...")
+        print_info(f"Beginning processing of {total_items} item(s)...")
         
         # Display initial token usage if enabled
         token_cfg = self.concurrency_config.get("daily_token_limit", {})
@@ -296,8 +295,8 @@ class WorkflowManager:
                 f"({stats['usage_percentage']:.1f}%) - "
                 f"{stats['tokens_remaining']:,} tokens remaining today"
             )
-            console_print(
-                f"[INFO] Daily token usage: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
+            print_info(
+                f"Daily token usage: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
                 f"({stats['usage_percentage']:.1f}%)"
             )
 
@@ -308,11 +307,10 @@ class WorkflowManager:
                 if not await check_and_wait_for_token_limit(self.concurrency_config):
                     # User cancelled wait - stop processing
                     logger.info(f"Processing stopped by user. Processed {processed_count}/{total_items} items.")
-                    console_print(f"\n[INFO] Processing stopped. Completed {processed_count}/{total_items} items.")
+                    print_info(f"Processing stopped. Completed {processed_count}/{total_items} items.")
                     break
             
-            console_print(
-                f"\n[INFO] Processing item {idx}/{total_items}: {item.name}")
+            print_info(f"Processing item {idx}/{total_items}: {item.name}")
 
             if self.user_config.processing_type == "images":
                 # Process image folder
@@ -339,10 +337,10 @@ class WorkflowManager:
                     await self.process_single_mobi(item)
                 else:
                     logger.warning(f"Unknown processing type for item: {item}")
-                    console_print(f"[WARN] Skipping unknown file type: {item.name}")
+                    print_warning(f"Skipping unknown file type: {item.name}")
 
             processed_count += 1
-            console_print(f"[INFO] Completed item {idx}/{total_items}")
+            print_info(f"Completed item {idx}/{total_items}")
             
             # Log token usage after each item if enabled
             if token_cfg.get("enabled", False) and self.user_config.transcription_method == "gpt":
@@ -354,8 +352,7 @@ class WorkflowManager:
                     f"({stats['usage_percentage']:.1f}%)"
                 )
 
-        console_print(
-            f"[INFO] All {processed_count}/{total_items} item(s) processed successfully.")
+        print_info(f"All {processed_count}/{total_items} item(s) processed successfully.")
         
         # Final token usage statistics
         if token_cfg.get("enabled", False) and self.user_config.transcription_method == "gpt":
@@ -365,21 +362,21 @@ class WorkflowManager:
                 f"Final token usage: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
                 f"({stats['usage_percentage']:.1f}%)"
             )
-            console_print(
-                f"[INFO] Final daily token usage: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
+            print_info(
+                f"Final daily token usage: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
                 f"({stats['usage_percentage']:.1f}%)"
             )
 
     async def process_single_epub(self, epub_path: Path) -> None:
         """Extract and save text from a single EPUB file."""
-        console_print(f"\n[INFO] Processing EPUB: {epub_path.name}")
+        print_info(f"Processing EPUB: {epub_path.name}")
 
         processor = EPUBProcessor(epub_path)
         try:
             extraction: EPUBTextExtraction = processor.extract_text()
         except Exception as exc:
             logger.exception("Failed to extract EPUB %s: %s", epub_path.name, exc)
-            console_print(f"[ERROR] Failed to extract text from {epub_path.name}.")
+            print_error(f"Failed to extract text from {epub_path.name}.")
             return
 
         # Determine output directory: use input file's parent when input_paths_is_output_path is True
@@ -394,22 +391,21 @@ class WorkflowManager:
             output_txt_path.write_text(processed_text, encoding="utf-8")
         except Exception as exc:
             logger.exception("Failed to write EPUB transcription for %s: %s", epub_path.name, exc)
-            console_print(f"[ERROR] Failed to write output for {epub_path.name}.")
+            print_error(f"Failed to write output for {epub_path.name}.")
             return
 
-        console_print(
-            f"[SUCCESS] Extracted text from '{epub_path.name}' -> {output_txt_path.name}")
+        print_success(f"Extracted text from '{epub_path.name}' -> {output_txt_path.name}")
 
     async def process_single_mobi(self, mobi_path: Path) -> None:
         """Extract and save text from a single MOBI file."""
-        console_print(f"\n[INFO] Processing MOBI: {mobi_path.name}")
+        print_info(f"Processing MOBI: {mobi_path.name}")
 
         processor = MOBIProcessor(mobi_path)
         try:
             extraction: MOBITextExtraction = processor.extract_text()
         except Exception as exc:
             logger.exception("Failed to extract MOBI %s: %s", mobi_path.name, exc)
-            console_print(f"[ERROR] Failed to extract text from {mobi_path.name}.")
+            print_error(f"Failed to extract text from {mobi_path.name}.")
             return
 
         # Determine output directory: use input file's parent when input_paths_is_output_path is True
@@ -424,11 +420,10 @@ class WorkflowManager:
             output_txt_path.write_text(processed_text, encoding="utf-8")
         except Exception as exc:
             logger.exception("Failed to write MOBI transcription for %s: %s", mobi_path.name, exc)
-            console_print(f"[ERROR] Failed to write output for {mobi_path.name}.")
+            print_error(f"Failed to write output for {mobi_path.name}.")
             return
 
-        console_print(
-            f"[SUCCESS] Extracted text from '{mobi_path.name}' (via {extraction.source_format}) -> {output_txt_path.name}")
+        print_success(f"Extracted text from '{mobi_path.name}' (via {extraction.source_format}) -> {output_txt_path.name}")
 
     async def process_single_pdf(self, pdf_path: Path,
                                  transcriber: Optional[Any]) -> None:
@@ -442,16 +437,15 @@ class WorkflowManager:
             output_dir)
         method = self.user_config.transcription_method
 
-        console_print(f"\n[INFO] Processing PDF: {pdf_path.name}")
-        console_print(f"[INFO] Using method: {method}")
+        print_info(f"Processing PDF: {pdf_path.name}")
+        print_info(f"Using method: {method}")
 
         if method == "tesseract" and not self._ensure_tesseract_available():
             return
 
         # Check if method is valid for this PDF
         if method == "native" and not pdf_processor.is_native_pdf():
-            console_print(
-                f"[WARN] PDF '{pdf_path.name}' is not searchable. Switching to tesseract method.")
+            print_warning(f"PDF '{pdf_path.name}' is not searchable. Switching to tesseract method.")
             method = "tesseract"  # Fall back to Tesseract if native extraction isn't possible
 
         # Native PDF extraction
@@ -471,24 +465,21 @@ class WorkflowManager:
                 # Apply post-processing if enabled
                 processed_text = postprocess_transcription(text, self.postprocessing_config)
                 output_txt_path.write_text(processed_text, encoding='utf-8')
-                console_print(
-                    f"[SUCCESS] Extracted text from '{pdf_path.name}' using native method -> {output_txt_path.name}")
+                print_success(f"Extracted text from '{pdf_path.name}' using native method -> {output_txt_path.name}")
             except Exception as e:
                 logger.exception(
                     f"Error writing native extraction output for {pdf_path.name}: {e}")
-                console_print(f"[ERROR] Failed to write output: {e}")
+                print_error(f"Failed to write output: {e}")
 
             # Cleanup if not retaining
             if not self.processing_settings.get("retain_temporary_jsonl", True):
                 try:
                     temp_jsonl_path.unlink()
-                    console_print(
-                        f"[CLEANUP] Deleted temporary file: {temp_jsonl_path.name}")
+                    print_info(f"Deleted temporary file: {temp_jsonl_path.name}")
                 except Exception as e:
                     logger.exception(
                         f"Error deleting temporary file {temp_jsonl_path}: {e}")
-                    console_print(
-                        f"[ERROR] Could not delete temporary file {temp_jsonl_path.name}: {e}")
+                    print_error(f"Could not delete temporary file {temp_jsonl_path.name}: {e}")
 
             return
 
@@ -500,8 +491,7 @@ class WorkflowManager:
             target_dpi = (self.image_processing_config
                           .get('tesseract_image_processing', {})
                           .get('target_dpi', 300))
-            console_print(
-                f"[INFO] Extracting and preprocessing images for Tesseract at {target_dpi} DPI...")
+            print_info(f"Extracting and preprocessing images for Tesseract at {target_dpi} DPI...")
             processed_image_files = await pdf_processor.process_images_for_tesseract(
                 preprocessed_folder, target_dpi)
         else:
@@ -514,14 +504,12 @@ class WorkflowManager:
             tm = self.model_config.get("transcription_model", {})
             provider = tm.get("provider", "openai")
             model_name = tm.get("name", "")
-            console_print(
-                f"[INFO] Extracting and processing images from PDF with {target_dpi} DPI...")
+            print_info(f"Extracting and processing images from PDF with {target_dpi} DPI...")
             processed_image_files = await pdf_processor.process_images(
                 preprocessed_folder, target_dpi, provider=provider, model_name=model_name)
 
         # Rely on extraction order; order_index will follow the list order
-        console_print(
-            f"[INFO] Extracted {len(processed_image_files)} page images from PDF.")
+        print_info(f"Extracted {len(processed_image_files)} page images from PDF.")
 
         # Handle GPT batch mode (multi-provider via batch backends)
         if method == "gpt" and self.user_config.use_batch_processing:
@@ -544,8 +532,7 @@ class WorkflowManager:
             # If handle is None, fall through to synchronous processing
 
         # Synchronous processing for GPT or Tesseract
-        console_print(
-            f"[INFO] Starting {method} transcription for {len(processed_image_files)} images...")
+        print_info(f"Starting {method} transcription for {len(processed_image_files)} images...")
 
         await self._process_images_with_method(
             processed_image_files,
@@ -565,8 +552,7 @@ class WorkflowManager:
                     logger.exception(
                         f"Error cleaning up preprocessed images for {pdf_path.name}: {e}")
 
-        console_print(
-            f"[SUCCESS] Saved transcription for PDF '{pdf_path.name}' -> {output_txt_path.name}")
+        print_success(f"Saved transcription for PDF '{pdf_path.name}' -> {output_txt_path.name}")
 
         # Remove temporary JSONL if not retaining AND not using batch processing
         # For batch processing, we must keep the JSONL files as they contain batch tracking info
@@ -575,16 +561,13 @@ class WorkflowManager:
                 method == "gpt" and self.user_config.use_batch_processing):
             try:
                 temp_jsonl_path.unlink()
-                console_print(
-                    f"[CLEANUP] Deleted temporary file: {temp_jsonl_path.name}")
+                print_info(f"Deleted temporary file: {temp_jsonl_path.name}")
             except Exception as e:
                 logger.exception(
                     f"Error deleting temporary file {temp_jsonl_path}: {e}")
-                console_print(
-                    f"[ERROR] Could not delete temporary file {temp_jsonl_path.name}: {e}")
+                print_error(f"Could not delete temporary file {temp_jsonl_path.name}: {e}")
         elif method == "gpt" and self.user_config.use_batch_processing:
-            console_print(
-                f"[INFO] Preserving {temp_jsonl_path.name} for batch tracking (required for retrieval)")
+            print_info(f"Preserving {temp_jsonl_path.name} for batch tracking (required for retrieval)")
 
     async def process_single_image_folder(self, folder: Path,
                                           transcriber: Optional[Any]) -> None:
@@ -598,8 +581,8 @@ class WorkflowManager:
             folder, output_dir)
         method = self.user_config.transcription_method
 
-        console_print(f"\n[INFO] Processing folder: {folder.name}")
-        console_print(f"[INFO] Using method: {method}")
+        print_info(f"Processing folder: {folder.name}")
+        print_info(f"Using method: {method}")
 
         if method == "tesseract" and not self._ensure_tesseract_available():
             return
@@ -608,19 +591,19 @@ class WorkflowManager:
         if method == "tesseract":
             preprocessed_folder = parent_folder / "preprocessed_images_tesseract"
             preprocessed_folder.mkdir(exist_ok=True)
-            console_print(f"[INFO] Preprocessing images for Tesseract...")
+            print_info(f"Preprocessing images for Tesseract...")
             processed_files = ImageProcessor.process_and_save_images_for_tesseract(folder, preprocessed_folder)
         else:
             # Get provider and model name from model config for provider-specific preprocessing
             tm = self.model_config.get("transcription_model", {})
             provider = tm.get("provider", "openai")
             model_name = tm.get("name", "")
-            console_print(f"[INFO] Processing images from folder for {provider.upper()}...")
+            print_info(f"Processing images from folder for {provider.upper()}...")
             processed_files = ImageProcessor.process_and_save_images(
                 folder, preprocessed_folder, provider=provider, model_name=model_name)
 
         if not processed_files:
-            console_print(f"[WARN] No images found or processed in {folder}.")
+            print_warning(f"No images found or processed in {folder}.")
             return
 
         # Deterministic ordering for folders: sort by filename
@@ -647,8 +630,7 @@ class WorkflowManager:
             # If handle is None, fall through to synchronous processing
 
         # Synchronous processing (non-batch GPT or Tesseract)
-        console_print(
-            f"[INFO] Starting {method} transcription for {len(processed_files)} images...")
+        print_info(f"Starting {method} transcription for {len(processed_files)} images...")
 
         await self._process_images_with_method(
             processed_files,
@@ -669,8 +651,7 @@ class WorkflowManager:
                     logger.exception(
                         f"Error cleaning up preprocessed images for folder '{folder.name}': {e}")
 
-        console_print(
-            f"[SUCCESS] Transcription completed for folder '{folder.name}' -> {output_txt_path.name}")
+        print_success(f"Transcription completed for folder '{folder.name}' -> {output_txt_path.name}")
 
         # Delete temporary JSONL if not retaining AND not using batch processing
         # For batch processing, we must keep the JSONL files as they contain batch tracking info
@@ -679,16 +660,13 @@ class WorkflowManager:
                 method == "gpt" and self.user_config.use_batch_processing):
             try:
                 temp_jsonl_path.unlink()
-                console_print(
-                    f"[CLEANUP] Deleted temporary file: {temp_jsonl_path.name}")
+                print_info(f"Deleted temporary file: {temp_jsonl_path.name}")
             except Exception as e:
                 logger.exception(
                     f"Error deleting temporary file {temp_jsonl_path}: {e}")
-                console_print(
-                    f"[ERROR] Could not delete temporary file {temp_jsonl_path.name}: {e}")
+                print_error(f"Could not delete temporary file {temp_jsonl_path.name}: {e}")
         elif method == "gpt" and self.user_config.use_batch_processing:
-            console_print(
-                f"[INFO] Preserving {temp_jsonl_path.name} for batch tracking (required for retrieval)")
+            print_info(f"Preserving {temp_jsonl_path.name} for batch tracking (required for retrieval)")
 
     async def _process_images_with_method(
             self,
@@ -851,7 +829,7 @@ class WorkflowManager:
                     await jfile.flush()
 
             try:
-                console_print(f"[INFO] Processing with concurrency limit of {concurrency_limit}...")
+                print_info(f"Processing with concurrency limit of {concurrency_limit}...")
                 results = await run_concurrent_transcription_tasks(
                     transcribe_single_image_task,
                     args_list,
@@ -862,7 +840,7 @@ class WorkflowManager:
             except Exception as e:
                 logger.exception(
                     f"Error running concurrent transcription tasks for {source_name}: {e}")
-                console_print(f"[ERROR] Concurrency error for {source_name}.")
+                print_error(f"Concurrency error for {source_name}.")
                 return
 
         # Combine the transcription text in page order with unified page headers
@@ -882,5 +860,5 @@ class WorkflowManager:
         except Exception as e:
             logger.exception(
                 f"Error writing combined transcription output for {source_name}: {e}")
-            console_print(f"[ERROR] Failed to write combined output for {source_name}.")
+            print_error(f"Failed to write combined output for {source_name}.")
             return

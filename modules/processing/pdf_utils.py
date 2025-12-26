@@ -120,7 +120,7 @@ class PDFProcessor:
         """
         preprocessed_folder.mkdir(parents=True, exist_ok=True)
 
-        from modules.core.utils import console_print
+        from modules.ui import print_error
 
         try:
             # Open PDF if not already open
@@ -194,7 +194,7 @@ class PDFProcessor:
 
         except Exception as e:
             logger.exception(f"Error extracting and processing images from PDF {self.pdf_path.name}: {e}")
-            console_print(f"[ERROR] Failed to process images from {self.pdf_path.name}.")
+            print_error(f"Failed to process images from {self.pdf_path.name}.")
             return []
 
     async def process_images_for_tesseract(self, preprocessed_folder: Path, target_dpi: int) -> List[Path]:
@@ -204,7 +204,7 @@ class PDFProcessor:
         """
         preprocessed_folder.mkdir(parents=True, exist_ok=True)
 
-        from modules.core.utils import console_print
+        from modules.ui import print_error
 
         try:
             # Ensure PDF is open
@@ -261,7 +261,7 @@ class PDFProcessor:
 
         except Exception as e:
             logger.exception(f"Error in Tesseract PDF image processing {self.pdf_path.name}: {e}")
-            console_print(f"[ERROR] Failed Tesseract preprocessing for {self.pdf_path.name}.")
+            print_error(f"Failed Tesseract preprocessing for {self.pdf_path.name}.")
             return []
 
     @staticmethod

@@ -13,7 +13,7 @@ import pytesseract
 from PIL import Image
 
 from modules.infra.logger import setup_logger
-from modules.core.utils import console_print
+from modules.ui import print_error
 
 logger = setup_logger(__name__)
 
@@ -68,8 +68,8 @@ def ensure_tesseract_available() -> bool:
     if is_tesseract_available():
         return True
     
-    console_print(
-        "[ERROR] Tesseract is not installed or not in PATH.\n"
+    print_error(
+        "Tesseract is not installed or not in PATH.\n"
         "- Install: https://github.com/tesseract-ocr/tesseract (Windows: official installer)\n"
         "- Or set 'tesseract_image_processing.ocr.tesseract_cmd' in config/image_processing_config.yaml to the full path, e.g.:\n"
         "  C:\\\\Program Files\\\\Tesseract-OCR\\\\tesseract.exe"

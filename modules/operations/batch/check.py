@@ -27,7 +27,6 @@ from modules.llm.batch.backends.factory import supports_batch
 from modules.config.service import get_config_service
 from modules.infra.logger import setup_logger
 from modules.llm.openai_sdk_utils import coerce_file_id, list_all_batches, sdk_to_dict
-from modules.io.path_utils import validate_paths
 from modules.io.directory_utils import collect_scan_directories
 from modules.processing.text_processing import (
     extract_transcribed_text,
@@ -52,15 +51,11 @@ logger = setup_logger(__name__)
 def load_config() -> Tuple[List[Path], Dict[str, Any], Dict[str, Any]]:
     """Load YAML configuration and return (scan_dirs, processing_settings, postprocessing_config).
 
-    - Ensures file paths exist (creates input/output directories on demand)
-    - Validates configured paths
+    Ensures file paths exist (creates input/output directories on demand).
     """
     config_service = get_config_service()
     paths_config = config_service.get_paths_config()
     image_processing_config = config_service.get_image_processing_config()
-
-    # Validate configured paths
-    validate_paths(paths_config)
 
     processing_settings = paths_config.get("general", {})
     postprocessing_config = image_processing_config.get("postprocessing", {})

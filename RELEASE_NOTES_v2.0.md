@@ -125,13 +125,13 @@ python main/cancel_batches.py [--batch-ids ID ...] [--force]
 - Absolute paths work as-is in both modes
 - Parent directories created automatically when needed
 
-### Deprecated Options
+### Removed Options
 
 The following configuration keys have been removed:
-- `allow_relative_paths`: Path resolution now automatic based on mode
+- `allow_relative_paths`: Path resolution is now automatic; relative paths resolve against PROJECT_ROOT
 - `base_directory`: Replaced by input and output directory configuration
 
-These keys are no longer needed and will be ignored if present in configuration files.
+These keys are no longer recognized. Remove them from configuration files if present.
 
 ## Technical Improvements
 
@@ -191,15 +191,15 @@ No breaking changes for users who continue using interactive mode. The applicati
 
 ### Configuration Updates
 
-**Optional: Remove deprecated keys**
+**Required: Remove deprecated keys**
 
 Edit `config/paths_config.yaml` and remove these lines if present:
 ```yaml
-allow_relative_paths: false  # No longer needed
-base_directory: "."          # No longer needed
+allow_relative_paths: false  # Removed
+base_directory: "."          # Removed
 ```
 
-These keys are ignored but can be removed for clarity.
+These keys are no longer recognized by the application.
 
 **Optional: Enable CLI mode**
 

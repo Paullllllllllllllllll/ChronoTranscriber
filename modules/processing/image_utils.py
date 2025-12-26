@@ -13,6 +13,7 @@ from modules.core.safe_paths import create_safe_directory_name, create_safe_file
 
 from modules.config.service import get_config_service
 from modules.config.constants import SUPPORTED_IMAGE_EXTENSIONS
+from modules.processing.model_utils import detect_model_type, get_image_config_section_name
 from modules.infra.logger import setup_logger
 from modules.infra.multiprocessing_utils import run_multiprocessing_tasks
 
@@ -37,52 +38,15 @@ class ImageProcessor:
         self.model_name = model_name.lower() if model_name else ""
         
         # Detect underlying model type from model name (for OpenRouter passthrough)
-        self.model_type = self._detect_model_type()
+        self.model_type = detect_model_type(self.provider, self.model_name)
 
         # Full config dict (contains 'image_processing' and 'ocr' sections)
         self.image_config = get_config_service().get_image_processing_config()
         
-        # Map detected model type to config section
-        if self.model_type == "google":
-            self.img_cfg = self.image_config.get('google_image_processing', {})
-        elif self.model_type == "anthropic":
-            self.img_cfg = self.image_config.get('anthropic_image_processing', {})
-        else:
-            # OpenAI and default use api_image_processing
-            self.img_cfg = self.image_config.get('api_image_processing', {})
+        # Get provider-specific config section
+        section_name = get_image_config_section_name(self.model_type)
+        self.img_cfg = self.image_config.get(section_name, {})
     
-    def _detect_model_type(self) -> str:
-        """Detect the underlying model type from provider and model name.
-        
-        This allows correct preprocessing even when using models via OpenRouter.
-        For example, 'google/gemini-2.5-flash' via OpenRouter should use Google config.
-        
-        Returns:
-            Model type: 'google', 'anthropic', or 'openai'
-        """
-        # Direct providers take precedence
-        if self.provider == "google":
-            return "google"
-        if self.provider == "anthropic":
-            return "anthropic"
-        if self.provider == "openai":
-            return "openai"
-        
-        # For OpenRouter or unknown providers, detect from model name
-        if self.model_name:
-            # Google models
-            if "gemini" in self.model_name or "google/" in self.model_name:
-                return "google"
-            # Anthropic models
-            if "claude" in self.model_name or "anthropic/" in self.model_name:
-                return "anthropic"
-            # OpenAI models
-            if any(x in self.model_name for x in ["gpt-", "o1", "o3", "o4", "openai/"]):
-                return "openai"
-        
-        # Default to OpenAI-style config
-        return "openai"
-
     def convert_to_grayscale(self, image: Image.Image) -> Image.Image:
         """
         Convert the image to grayscale if enabled.

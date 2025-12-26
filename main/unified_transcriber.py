@@ -31,7 +31,6 @@ from modules.ui import (
     ui_print,
     PromptStyle,
 )
-from modules.io.path_utils import validate_paths
 from modules.core.workflow import WorkflowManager
 from modules.core.auto_selector import AutoSelector
 from modules.core.cli_args import (
@@ -465,9 +464,6 @@ async def transcribe_interactive() -> None:
     config_service = get_config_service()
     paths_config = config_service.get_paths_config()
     
-    # Validate paths
-    validate_paths(paths_config)
-    
     # Get directory paths from config
     pdf_input_dir = Path(
         paths_config.get('file_paths', {}).get('PDFs', {}).get('input', 'pdfs_in')
@@ -535,9 +531,6 @@ async def transcribe_cli(args, paths_config: dict) -> None:
     """
     # Load additional configurations
     config_service = get_config_service()
-    
-    # Validate paths
-    validate_paths(paths_config)
     
     # Get directory paths from config
     pdf_input_dir = Path(

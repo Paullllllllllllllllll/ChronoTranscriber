@@ -10,6 +10,7 @@ import asyncio
 from PIL import Image
 
 from modules.config.service import get_config_service
+from modules.processing.model_utils import detect_model_type, get_image_config_section_name
 from modules.processing.image_utils import ImageProcessor
 from modules.core.safe_paths import create_safe_directory_name, create_safe_filename
 
@@ -59,42 +60,6 @@ class PDFProcessor:
         if self.doc:
             self.doc.close()
             self.doc = None
-
-    @staticmethod
-    def _detect_model_type(provider: str, model_name: str) -> str:
-        """Detect the underlying model type from provider and model name.
-        
-        This allows correct preprocessing even when using models via OpenRouter.
-        For example, 'google/gemini-2.5-flash' via OpenRouter should use Google config.
-        
-        Returns:
-            Model type: 'google', 'anthropic', or 'openai'
-        """
-        provider = provider.lower()
-        model_name = model_name.lower() if model_name else ""
-        
-        # Direct providers take precedence
-        if provider == "google":
-            return "google"
-        if provider == "anthropic":
-            return "anthropic"
-        if provider == "openai":
-            return "openai"
-        
-        # For OpenRouter or unknown providers, detect from model name
-        if model_name:
-            # Google models
-            if "gemini" in model_name or "google/" in model_name:
-                return "google"
-            # Anthropic models
-            if "claude" in model_name or "anthropic/" in model_name:
-                return "anthropic"
-            # OpenAI models
-            if any(x in model_name for x in ["gpt-", "o1", "o3", "o4", "openai/"]):
-                return "openai"
-        
-        # Default to OpenAI-style config
-        return "openai"
 
     async def extract_images(self, output_dir: Path, dpi: int = 300) -> None:
         """
@@ -182,16 +147,12 @@ class PDFProcessor:
 
                     # Apply processing directly to the image
                     # Detect model type from provider and model_name (for OpenRouter passthrough)
-                    model_type = self._detect_model_type(provider, model_name)
+                    model_type = detect_model_type(provider, model_name)
                     
                     # Load provider-specific processing config
                     img_processing_cfg = get_config_service().get_image_processing_config()
-                    if model_type == "google":
-                        image_cfg = img_processing_cfg.get('google_image_processing', {})
-                    elif model_type == "anthropic":
-                        image_cfg = img_processing_cfg.get('anthropic_image_processing', {})
-                    else:
-                        image_cfg = img_processing_cfg.get('api_image_processing', {})
+                    section_name = get_image_config_section_name(model_type)
+                    image_cfg = img_processing_cfg.get(section_name, {})
 
                     # Handle transparency (if needed)
                     if image_cfg.get('handle_transparency', True):

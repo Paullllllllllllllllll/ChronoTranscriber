@@ -121,8 +121,8 @@ def postprocess_cli(args) -> int:
     """
     # Load base config if requested
     config_service = get_config_service()
-    paths_config = config_service.get_paths_config()
-    base_config = paths_config.get("postprocessing", {})
+    image_processing_config = config_service.get_image_processing_config()
+    base_config = image_processing_config.get("postprocessing", {})
     
     # Resolve input path
     input_path = resolve_path(args.input)
@@ -218,8 +218,8 @@ def postprocess_interactive() -> int:
     
     # Load config
     config_service = get_config_service()
-    paths_config = config_service.get_paths_config()
-    base_config = paths_config.get("postprocessing", {})
+    image_processing_config = config_service.get_image_processing_config()
+    base_config = image_processing_config.get("postprocessing", {})
     
     # Step 1: Get input path
     while True:

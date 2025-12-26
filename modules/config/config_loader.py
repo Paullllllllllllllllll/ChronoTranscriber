@@ -182,11 +182,9 @@ class ConfigLoader:
     def get_paths_config(self) -> Dict[str, Any]:
         """
         Load, normalize, and return the paths configuration (cached).
-        - Expands ~ and envvars.
-        - If allow_relative_paths is true, resolve against general.base_directory
-          (itself resolved against PROJECT_ROOT when relative).
-        - If allow_relative_paths is false, enforce absolute paths, but still
-          expand envvars/home.
+        
+        Expands ~ and environment variables in all paths. Relative paths are
+        resolved against PROJECT_ROOT.
         """
         if self._paths is None:
             raw = self._load_yaml_file(DEFAULT_PATHS_CONFIG_PATH)
@@ -221,84 +219,26 @@ class ConfigLoader:
         return str((base / cand).resolve())
 
     def _normalize_paths_config(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
-        # Copy we can mutate safely
+        """Normalize paths config by expanding env vars and resolving relative paths."""
         out = dict(cfg or {})
         general = dict(out.get("general", {}))
-        allow_rel = bool(general.get("allow_relative_paths", False))
 
-        # Resolve base directory (used when allow_relative_paths is true)
-        base_dir_raw = general.get("base_directory")
-        if not base_dir_raw:
-            base_path = PROJECT_ROOT
-        else:
-            base_candidate = _expand_path_str(str(base_dir_raw))
-            base_path = (
-                base_candidate
-                if base_candidate.is_absolute()
-                else (PROJECT_ROOT / base_candidate)
-            )
-        base_path = base_path.resolve()
-
-        # logs_dir
-        logs_dir_raw = general.get("logs_dir")
-        if logs_dir_raw:
-            if allow_rel:
-                general["logs_dir"] = self._to_abs(logs_dir_raw, base_path)
-            else:
-                abs_p = _expand_path_str(str(logs_dir_raw))
-                general["logs_dir"] = str(
-                    abs_p.resolve()
-                    if abs_p.is_absolute()
-                    else (PROJECT_ROOT / abs_p).resolve()
-                )
-
-        # Optional overrides: transcription_prompt_path, transcription_schema_path
-        prompt_path_raw = general.get("transcription_prompt_path")
-        if prompt_path_raw:
-            if allow_rel:
-                general["transcription_prompt_path"] = self._to_abs(prompt_path_raw, base_path)
-            else:
-                abs_p = _expand_path_str(str(prompt_path_raw))
-                general["transcription_prompt_path"] = str(
-                    abs_p.resolve()
-                    if abs_p.is_absolute()
-                    else (PROJECT_ROOT / abs_p).resolve()
-                )
-
-        schema_path_raw = general.get("transcription_schema_path")
-        if schema_path_raw:
-            if allow_rel:
-                general["transcription_schema_path"] = self._to_abs(schema_path_raw, base_path)
-            else:
-                abs_p = _expand_path_str(str(schema_path_raw))
-                general["transcription_schema_path"] = str(
-                    abs_p.resolve()
-                    if abs_p.is_absolute()
-                    else (PROJECT_ROOT / abs_p).resolve()
-                )
-
-        # reflect resolved base_directory (as absolute)
-        general["base_directory"] = str(base_path)
+        # Normalize general paths
+        for key in ("logs_dir", "transcription_prompt_path", "transcription_schema_path"):
+            raw_path = general.get(key)
+            if raw_path:
+                general[key] = self._to_abs(raw_path, PROJECT_ROOT)
         out["general"] = general
 
-        # file_paths
+        # Normalize file_paths sections
         file_paths = dict(out.get("file_paths", {}))
         for section in ("PDFs", "Images", "EPUBs", "Auto"):
             if section in file_paths and isinstance(file_paths[section], dict):
                 sec = dict(file_paths[section])
                 for k in ("input", "output"):
                     rawp = sec.get(k)
-                    if not rawp:
-                        continue
-                    if allow_rel:
-                        sec[k] = self._to_abs(rawp, base_path)
-                    else:
-                        pth = _expand_path_str(str(rawp))
-                        sec[k] = str(
-                            pth.resolve()
-                            if pth.is_absolute()
-                            else (PROJECT_ROOT / pth).resolve()
-                        )
+                    if rawp:
+                        sec[k] = self._to_abs(rawp, PROJECT_ROOT)
                 file_paths[section] = sec
         out["file_paths"] = file_paths
 

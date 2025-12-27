@@ -1,9 +1,24 @@
-# Image processing configuration (LLM providers + Tesseract + output post-processing)
+# =============================================================================
+# Image Processing Configuration
+# =============================================================================
+# Controls image preprocessing for different LLM providers, Tesseract OCR,
+# and post-processing of transcription output.
 #
-# Numbering in this file is documentation-only. Each numbered section corresponds to a
-# top-level YAML key below (all sections are peers).
+# Used by:
+#   - modules/processing/image_utils.py (image preprocessing pipelines)
+#   - modules/processing/pdf_utils.py (PDF page image extraction)
+#   - modules/processing/tesseract_utils.py (Tesseract OCR settings)
+#   - modules/llm/batch/batching.py (llm_detail for batch requests)
+#   - modules/core/workflow.py (target_dpi, postprocessing)
+#   - modules/operations/batch/check.py (postprocessing on batch results)
+# =============================================================================
 
-# 1) OpenAI API image processing (preparing images to send to the OpenAI API)
+
+# =============================================================================
+# 1. OpenAI API Image Processing
+# =============================================================================
+# Settings for preprocessing images before sending to OpenAI's vision models.
+# Applies to synchronous transcription and Batch API.
 api_image_processing:
   target_dpi: 300  # DPI for rendering/extracting images before API processing.
   grayscale_conversion: true  # Convert color images to grayscale to reduce noise.
@@ -32,7 +47,11 @@ api_image_processing:
   # For high detail, fit into this box (width, height) with padding as needed
   high_target_box: [768, 1536]
 
-# 2) Google Gemini API image processing (preparing images to send to Google Gemini)
+# =============================================================================
+# 2. Google Gemini API Image Processing
+# =============================================================================
+# Settings for preprocessing images before sending to Google's Gemini models.
+# Google uses media_resolution instead of OpenAI's detail parameter.
 google_image_processing:
   target_dpi: 300  # DPI for rendering/extracting images before API processing.
   grayscale_conversion: true  # Convert color images to grayscale to reduce noise.
@@ -67,12 +86,18 @@ google_image_processing:
   # Google uses 768x768 tiles, so we use a box that's a multiple of 768
   high_target_box: [768, 1536]
 
-# 3) Anthropic Claude API image processing (preparing images to send to Claude)
-# Anthropic recommends: long edge ≤ 1568px, ≤ 1.15 megapixels for optimal latency
-# Min 200px on any edge; max 8000×8000px (or 2000×2000 if >20 images in one request)
-# Token calculation: tokens = (width × height) / 750
-# Example: 1568×1568 image ≈ 3,276 tokens; 1024×1024 ≈ 1,398 tokens
-# Anthropic auto-resizes images larger than 1568px (increases latency without benefit)
+# =============================================================================
+# 3. Anthropic Claude API Image Processing
+# =============================================================================
+# Settings for preprocessing images before sending to Anthropic's Claude models.
+#
+# Anthropic guidelines:
+#   - Recommended: long edge ≤ 1568px, ≤ 1.15 megapixels for optimal latency
+#   - Minimum: 200px on any edge
+#   - Maximum: 8000×8000px (or 2000×2000 if >20 images in one request)
+#   - Token calculation: tokens = (width × height) / 750
+#   - Example: 1568×1568 image ≈ 3,276 tokens; 1024×1024 ≈ 1,398 tokens
+#   - Note: Anthropic auto-resizes images >1568px (adds latency without benefit)
 anthropic_image_processing:
   target_dpi: 300  # DPI for rendering/extracting images before API processing.
   grayscale_conversion: true  # Convert color images to grayscale to reduce noise.
@@ -98,7 +123,11 @@ anthropic_image_processing:
   # No padding needed - Anthropic handles aspect ratios natively
   high_max_side_px: 1568
 
-# 4) Tesseract OCR image processing (preparing images for local Tesseract)
+# =============================================================================
+# 4. Tesseract OCR Image Processing
+# =============================================================================
+# Settings for preprocessing images before local Tesseract OCR.
+# Includes engine configuration, binary path, and preprocessing pipeline.
 tesseract_image_processing:
   # Resolution for page rendering and image saving; DPI metadata is embedded if enabled.
   target_dpi: 300
@@ -125,10 +154,19 @@ tesseract_image_processing:
     preserve_resolution: true      # do not resize/box-fit for Tesseract
     embed_dpi_metadata: true       # embed DPI metadata in output files
 
-# 5) Post-processing settings for transcription output cleanup
+# =============================================================================
+# 5. Post-Processing Settings
+# =============================================================================
 # Applied to final transcription text before writing to file. Cleans up OCR
 # artifacts, normalizes whitespace, and optionally wraps long lines while
 # preserving Markdown formatting and semantic content.
+#
+# Used by:
+#   - modules/processing/postprocess.py (postprocess_transcription function)
+#   - modules/core/workflow.py (after transcription completes)
+#   - modules/operations/batch/check.py (after batch results retrieved)
+# =============================================================================
+
 postprocessing:
   # Master toggle. When false, transcription output is written as-is.
   enabled: true

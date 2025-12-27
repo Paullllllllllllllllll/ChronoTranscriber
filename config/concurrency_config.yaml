@@ -1,43 +1,57 @@
-# Concurrency settings for transcription and image processing tasks
+# =============================================================================
+# Concurrency Configuration
+# =============================================================================
+# Controls parallel processing, API retry behavior, and token usage limits.
+#
+# Used by:
+#   - modules/core/workflow.py (concurrency_limit, delay_between_tasks)
+#   - modules/llm/batch/batching.py (service_tier, batch_chunk_size)
+#   - modules/llm/providers/*.py (retry.attempts)
+#   - modules/core/token_guard.py (daily_token_limit)
+# =============================================================================
+
 concurrency:
   transcription:
-    concurrency_limit: 1500  # Maximum number of concurrent transcription tasks
-    delay_between_tasks: 0.05  # Delay (in seconds) between starting transcription tasks
-    service_tier: default        # Controls OpenAI Responses service tier, allowed
-    # tiers: 'auto', 'default', 'flex', and 'priority'
-    batch_chunk_size: 50         # Number of requests per batch part file (used by Batch API)
-    retry:
-      # General API error retries (applies to Responses API calls)
-      # Maximum number of retry attempts for transient API errors (429, 5xx, timeouts)
-      attempts: 10
-      # Exponential backoff lower and upper bounds (seconds)
-      wait_min_seconds: 1
-      wait_max_seconds: 30
-      # Random jitter added to each backoff duration to reduce synchronized retries (seconds)
-      jitter_max_seconds: 0.5
-      
-      # Transcription-specific retries
-      # Additional retries when model returns specific failure indicators in the response
-      # These are separate from general API error retries and apply after a successful API call
-      # but when the model indicates it cannot transcribe the content
-      transcription_failures:
-        # Retry when model returns no_transcribable_text: true
-        # Set to 0 to accept the first response without retrying
-        no_transcribable_text_retries: 0
-        # Retry when model returns transcription_not_possible: true  
-        # Set to 0 to accept the first response without retrying
-        transcription_not_possible_retries: 3
-        # Wait time between transcription failure retries (seconds)
-        # Uses same exponential backoff strategy as general retries
-        wait_min_seconds: 1
-        wait_max_seconds: 30
-        jitter_max_seconds: 0.5
-  image_processing:
-    concurrency_limit: 24  # Maximum number of concurrent image processing tasks
-    delay_between_tasks: 0.0005  # No delay for image processing tasks
+    # Maximum concurrent LLM API calls during synchronous transcription.
+    # Higher values = faster processing but more API load.
+    # Recommended: 20-50 for most use cases; up to 1500 for high-throughput scenarios.
+    concurrency_limit: 1500
 
+    # Delay (seconds) between starting each transcription task.
+    # Helps avoid rate limiting; set to 0 for maximum throughput.
+    delay_between_tasks: 0.05
+
+    # OpenAI service tier for Responses API (synchronous mode only).
+    # Values: 'auto', 'default', 'flex', 'priority'
+    # Note: 'flex' is synchronous-only; batch processing auto-converts to 'auto'.
+    service_tier: default
+
+    # Number of images per batch file when using OpenAI Batch API.
+    # Larger chunks = fewer API calls but larger file uploads.
+    batch_chunk_size: 50
+
+    # Retry configuration for transient API errors (429, 5xx, timeouts).
+    # LangChain handles exponential backoff internally; only 'attempts' is used.
+    retry:
+      # Maximum retry attempts before failing. LangChain applies exponential backoff.
+      attempts: 10
+
+# =============================================================================
 # Daily Token Limit
-# Tracks OpenAI API token usage and enforces configurable daily limits with automatic midnight reset
+# =============================================================================
+# Tracks cumulative token usage across all LLM API calls and enforces a daily
+# cap. When the limit is reached, processing pauses until midnight reset.
+#
+# Used by:
+#   - modules/core/token_guard.py (limit enforcement)
+#   - modules/infra/token_tracker.py (usage tracking)
+#   - modules/core/workflow.py (check before each item)
+# =============================================================================
+
 daily_token_limit:
-  enabled: false  # Enable daily token limit enforcement (set to true to activate)
-  daily_tokens: 9000000  # Maximum tokens per day (9 million default)
+  # Master toggle. When false, no token tracking or limits are enforced.
+  enabled: false
+
+  # Maximum tokens allowed per day (input + output combined).
+  # Processing pauses when this limit is reached; resumes at midnight.
+  daily_tokens: 9000000

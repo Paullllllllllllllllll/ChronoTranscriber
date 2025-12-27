@@ -1,26 +1,36 @@
-# model_config.yaml
+# =============================================================================
+# Model Configuration
+# =============================================================================
+# Configuration for the LLM used by the transcription pipeline.
+#
+# Used by:
+#   - modules/llm/transcriber.py (LangChain-based multi-provider transcription)
+#   - modules/llm/providers/*.py (provider-specific implementations)
+#   - modules/llm/batch/batching.py (OpenAI Batch API transcription)
+#   - modules/config/config_loader.py (model validation at startup)
+#
+# API Keys (environment variables):
+#   - OpenAI: OPENAI_API_KEY
+#   - Anthropic: ANTHROPIC_API_KEY
+#   - Google: GOOGLE_API_KEY
+#   - OpenRouter: OPENROUTER_API_KEY
+# =============================================================================
+
 transcription_model:
-  # Configuration for the LLM used by the transcription pipeline.
+  # -------------------------------------------------------------------------
+  # Provider Selection
+  # -------------------------------------------------------------------------
+  # Supported: openai, anthropic, google, openrouter
+  # If omitted, auto-detected from model name (see modules/llm/providers/factory.py).
+  provider: google
+
+  # -------------------------------------------------------------------------
+  # Model Identifier
+  # -------------------------------------------------------------------------
+  # For OpenRouter: use "provider/model" format (e.g., "anthropic/claude-sonnet-4-5")
+  # For other providers: use the provider-native model ID
   #
-  # Used by:
-  # - Synchronous multi-provider transcription via LangChain (modules/llm/transcriber.py)
-  # - OpenAI Batch API transcription (OpenAI-specific; modules/llm/batch/batching.py)
-  #
-  # API keys (env vars):
-  # - openai: OPENAI_API_KEY
-  # - anthropic: ANTHROPIC_API_KEY
-  # - google: GOOGLE_API_KEY
-  # - openrouter: OPENROUTER_API_KEY
-  #
-  # Provider selection: openai, anthropic, google, openrouter.
-  # If omitted, the provider is auto-detected from `name` (see modules/llm/providers/factory.py).
-  provider: openai
-  
-  # Model identifier.
-  # - For openrouter, use the OpenRouter format: "provider/model" (e.g. "anthropic/claude-sonnet-4-5").
-  # - For other providers, use the provider-native model id.
-  #
-  # Examples by provider (as of late 2025):
+  # Examples by provider:
   #
   # OpenAI:
   #   - GPT-5.1: gpt-5.1, gpt-5.1-mini, gpt-5.1-nano (newest, adaptive thinking)
@@ -30,70 +40,72 @@ transcription_model:
   #   - GPT-4o: gpt-4o, gpt-4o-mini
   #
   # Anthropic:
-  #   - Claude 4.5: claude-sonnet-4-5-20250929, claude-opus-4-5-XXXXXXXX, claude-haiku-4-5-XXXXXXXX
+  #   - Claude 4.5: claude-sonnet-4-5-20250929, claude-opus-4-5-XXXXXXXX
   #   - Claude 4.1: claude-opus-4-1-20250805
-  #   - Claude 4: claude-sonnet-4-20250514, claude-opus-4-XXXXXXXX
+  #   - Claude 4: claude-sonnet-4-20250514
   #   - Claude 3.5: claude-3-5-sonnet-20241022, claude-3-5-haiku-20241022
   #
   # Google:
-  #   - Gemini 3: gemini-3-pro, gemini-3-flash-preview (state-of-the-art)
-  #   - Gemini 2.5: gemini-2.5-pro, gemini-2.5-flash (adaptive thinking)
-  #   - Gemini 2.0: gemini-2.0-flash
+  #   - Gemini 3: gemini-3-pro, gemini-3-flash-preview
+  #   - Gemini 2.5: gemini-2.5-pro, gemini-2.5-flash
+  #   - Gemini 2.0: gemini-2.0-flash, gemini-2.0-flash-exp
   #   - Gemini 1.5: gemini-1.5-pro, gemini-1.5-flash
   #
   # OpenRouter (200+ models via unified API):
-  #   OpenAI: openai/gpt-5.1, openai/gpt-oss-120b, openai/gpt-oss-20b
-  #   Anthropic: anthropic/claude-sonnet-4-5, anthropic/claude-opus-4-1
-  #   Google: google/gemini-3-pro, google/gemini-2.5-flash
-  #   DeepSeek: deepseek/deepseek-r1, deepseek/deepseek-r1-0528-qwen3-8b,
-  #             deepseek/deepseek-v3.2-exp, deepseek/deepseek-chat-v3.1,
-  #             deepseek/deepseek-v3.1-terminus
-  #   Meta: meta/llama-3.2-90b-vision, meta/llama-3.3-70b-instruct
-  #   Mistral: mistral/mistral-large, mistral/pixtral-large
+  #   - openai/gpt-5.1, anthropic/claude-sonnet-4-5, google/gemini-3-pro
+  #   - deepseek/deepseek-r1, meta/llama-3.2-90b-vision, mistral/pixtral-large
+  name: gemini-2.0-flash-exp
 
-  name: gpt-5-mini
-
-  # Maximum output tokens.
-  # - In LangChain synchronous mode, this becomes the provider's output token limit.
-  # - For OpenAI reasoning families (GPT-5, o-series), OpenAI uses a different parameter name
-  #   under the hood (LangChain maps this appropriately).
-  # - This repo also accepts `max_tokens` as an alias in some call paths.
+  # -------------------------------------------------------------------------
+  # Output Token Limit
+  # -------------------------------------------------------------------------
+  # Maximum tokens the model can generate per response.
+  # For reasoning models (GPT-5, o-series), LangChain maps this to the
+  # appropriate parameter name (max_completion_tokens).
   max_output_tokens: 128000
 
-  # Image inputs are required for the OCR/transcription flow. If you set a model that cannot
-  # accept images, the app will fail fast during config load (ensure_image_support()).
-  # Set to false only if you are wiring a text-only pipeline.
+  # -------------------------------------------------------------------------
+  # Image Input Validation
+  # -------------------------------------------------------------------------
+  # Set to true (default) to fail fast if the selected model lacks vision.
+  # Set to false only for text-only pipelines (not typical for OCR).
   expects_image_inputs: true
 
-  # Reasoning controls.
+  # -------------------------------------------------------------------------
+  # Reasoning Controls
+  # -------------------------------------------------------------------------
   # Applies to reasoning-capable models across all providers:
-  # - OpenAI GPT-5/o-series: Uses reasoning_effort parameter
-  # - Anthropic Claude 4.5/4.1: Uses extended thinking (budget_tokens mapped from effort)
-  # - Google Gemini 2.5/3: Uses thinking_level (low/high)
-  # - OpenRouter: Passes reasoning_effort to underlying models
+  #   - OpenAI GPT-5/o-series: Uses reasoning_effort parameter
+  #   - Anthropic Claude 4.5/4.1: Uses extended thinking (budget_tokens)
+  #   - Google Gemini 2.5/3: Uses thinking_level (low/high)
+  #   - OpenRouter: Passes reasoning_effort to underlying models
   #
-  # effort: low | medium | high
-  # - low: Minimal reasoning overhead, faster responses
-  # - medium: Balanced reasoning depth (recommended)
-  # - high: Maximum reasoning depth, slower but more thorough
+  # Values for effort: low | medium | high
+  #   - low: Minimal reasoning overhead, faster responses
+  #   - medium: Balanced reasoning depth (recommended)
+  #   - high: Maximum reasoning depth, slower but more thorough
   reasoning:
-    effort: medium
-  text:
-    verbosity: medium  # OpenAI GPT-5 Batch API only: concise | medium | verbose
+    effort: low
 
-  # Sampler controls.
-  # - Supported on most non-reasoning chat models.
-  # - For reasoning models (OpenAI GPT-5 + o-series, some Claude/Gemini variants), these may be
-  #   ignored or automatically filtered by the provider adapter.
-  temperature: 0.01
+  # Text output controls (OpenAI GPT-5 Batch API only).
+  # Verbosity: concise | medium | verbose
+  text:
+    verbosity: medium
+
+  # -------------------------------------------------------------------------
+  # Sampler Controls
+  # -------------------------------------------------------------------------
+  # Supported on most non-reasoning chat models. For reasoning models
+  # (GPT-5, o-series), these are automatically filtered by the provider.
+  # Note: Anthropic extended thinking requires temperature: 1
+  temperature: 1
   top_p: 1.0
   frequency_penalty: 0.01
   presence_penalty: 0.01
 
-  # Provider-specific sampler (used by Anthropic/Google; optional).
-  # top_k: null
-
-  # OpenAI service tier is configured primarily in config/concurrency_config.yaml:
-  # concurrency.transcription.service_tier: auto|default|priority|flex
-  # - flex is synchronous-only; batch processing will automatically fall back to auto.
-  # service_tier: auto
+  # -------------------------------------------------------------------------
+  # Service Tier (OpenAI only)
+  # -------------------------------------------------------------------------
+  # Configured in config/concurrency_config.yaml under:
+  #   concurrency.transcription.service_tier: auto|default|priority|flex
+  # Note: 'flex' is synchronous-only; batch processing auto-converts to 'auto'.

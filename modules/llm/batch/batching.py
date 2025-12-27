@@ -27,7 +27,7 @@ from modules.ui import print_info, print_warning, print_error, print_success
 from modules.config.config_loader import PROJECT_ROOT
 from modules.config.service import get_config_service
 from modules.llm.structured_outputs import build_structured_text_format
-from modules.llm.prompt_utils import render_prompt_with_schema, inject_additional_context
+from modules.llm.prompt_utils import render_prompt_with_schema, inject_additional_context, prepare_prompt_with_context
 from modules.config.constants import SUPPORTED_IMAGE_FORMATS
 
 logger = logging.getLogger(__name__)
@@ -279,22 +279,41 @@ def create_batch_request_line(
     if inject_schema_into_prompt:
         system_prompt = render_prompt_with_schema(system_prompt, loaded_schema)
 
-    # Inject additional context if provided (fail-safe: no context = empty replacement)
+    # Inject additional context - use hierarchical resolution if no explicit path
+    additional_context = None
     if additional_context_path is not None and additional_context_path.exists():
         try:
             additional_context = additional_context_path.read_text(encoding="utf-8").strip()
-            system_prompt = inject_additional_context(system_prompt, additional_context)
         except Exception as e:
             logger.warning(
                 "Failed to load additional context from %s: %s",
                 additional_context_path,
                 e,
             )
-            # Fail-safe: remove marker with empty string
-            system_prompt = inject_additional_context(system_prompt, "")
     else:
-        # No context provided: remove marker with empty string
-        system_prompt = inject_additional_context(system_prompt, "")
+        # Use hierarchical context resolution for file-specific context
+        from modules.llm.context_utils import resolve_context_for_file
+        # Extract image path from image_url if it's a file path
+        if image_url.startswith("file://"):
+            image_path = Path(image_url[7:])
+        elif image_url.startswith("data:"):
+            # Base64 data URL - no file path available for context resolution
+            image_path = None
+        else:
+            # Assume it might be a local path
+            image_path = Path(image_url) if not image_url.startswith("http") else None
+        
+        if image_path:
+            context_content, context_path = resolve_context_for_file(
+                image_path,
+                global_context_path=PROJECT_ROOT / "additional_context" / "additional_context.txt"
+            )
+            if context_content:
+                additional_context = context_content
+                logger.debug(f"Using resolved context from: {context_path}")
+    
+    # Inject context into prompt (or remove section if empty)
+    system_prompt = inject_additional_context(system_prompt, additional_context or "")
 
     # Load image processing config for llm_detail
     try:

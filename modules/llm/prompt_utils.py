@@ -7,7 +7,8 @@ for transcription tasks.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
+import re
+from typing import Any, Dict, Optional
 
 
 def render_prompt_with_schema(prompt_text: str, schema_obj: Dict[str, Any]) -> str:
@@ -53,9 +54,10 @@ def inject_additional_context(prompt_text: str, context: str) -> str:
     """
     Inject additional context into a prompt using the {{ADDITIONAL_CONTEXT}} marker.
     
-    If the marker exists, it is replaced with the provided context.
+    If the marker exists and context is provided, the marker is replaced with the context.
+    If the marker exists but context is empty/None, the entire "Additional context:" section
+    is removed to save tokens and avoid confusing the model.
     If the marker does not exist, the prompt is returned unchanged (fail-safe behavior).
-    If context is empty or None, the marker is replaced with "Empty".
     
     Parameters
     ----------
@@ -67,12 +69,71 @@ def inject_additional_context(prompt_text: str, context: str) -> str:
     Returns
     -------
     str
-        The prompt with context injected or marker removed
+        The prompt with context injected or section removed
     """
     marker = "{{ADDITIONAL_CONTEXT}}"
     if marker not in prompt_text:
         return prompt_text
     
-    # Replace marker with context (or "Empty" if no context provided)
-    context_text = context.strip() if context else "Empty"
-    return prompt_text.replace(marker, context_text)
+    context_text = context.strip() if context else ""
+    
+    if context_text:
+        # Replace marker with the actual context
+        return prompt_text.replace(marker, context_text)
+    else:
+        # Remove the entire "Additional context:" section to save tokens
+        # Look for patterns like "Additional context:\n{{ADDITIONAL_CONTEXT}}\n"
+        # Pattern to match "Additional context:" line followed by marker and trailing newlines
+        patterns = [
+            r"Additional context:\s*\n\s*\{\{ADDITIONAL_CONTEXT\}\}\s*\n?",
+            r"Additional context:\s*\{\{ADDITIONAL_CONTEXT\}\}\s*\n?",
+            r"- If additional context is provided below, use it to guide the transcription process\.\s*\n?",
+        ]
+        
+        result = prompt_text
+        for pattern in patterns:
+            result = re.sub(pattern, "", result)
+        
+        # If patterns didn't match, just remove the marker itself
+        if marker in result:
+            result = result.replace(marker, "")
+        
+        # Clean up any resulting double blank lines
+        result = re.sub(r"\n{3,}", "\n\n", result)
+        
+        return result
+
+
+def prepare_prompt_with_context(
+    prompt_text: str,
+    schema_obj: Optional[Dict[str, Any]] = None,
+    context: Optional[str] = None,
+) -> str:
+    """
+    Prepare a complete prompt by rendering schema and injecting context.
+    
+    This is a convenience function that combines render_prompt_with_schema
+    and inject_additional_context into a single call.
+    
+    Parameters
+    ----------
+    prompt_text : str
+        The raw prompt template text
+    schema_obj : Optional[Dict[str, Any]]
+        The JSON schema to inject. If None, schema injection is skipped.
+    context : Optional[str]
+        The additional context to inject. If None/empty, the context section is removed.
+        
+    Returns
+    -------
+    str
+        The fully prepared prompt with schema and context applied
+    """
+    result = prompt_text
+    
+    if schema_obj:
+        result = render_prompt_with_schema(result, schema_obj)
+    
+    result = inject_additional_context(result, context or "")
+    
+    return result

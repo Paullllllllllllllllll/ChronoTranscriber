@@ -10,6 +10,7 @@ import pytest
 from modules.llm.prompt_utils import (
     render_prompt_with_schema,
     inject_additional_context,
+    prepare_prompt_with_context,
 )
 
 
@@ -129,40 +130,34 @@ class TestInjectAdditionalContext:
         assert result == prompt
     
     @pytest.mark.unit
-    def test_empty_context_shows_empty(self):
-        """Test that empty context shows 'Empty'."""
-        prompt = "Context: {{ADDITIONAL_CONTEXT}}"
+    def test_empty_context_removes_section(self):
+        """Test that empty context removes the Additional context section."""
+        prompt = "Additional context:\n{{ADDITIONAL_CONTEXT}}\n\nOther content."
         
         result = inject_additional_context(prompt, "")
         
-        assert "Empty" in result
         assert "{{ADDITIONAL_CONTEXT}}" not in result
+        assert "Additional context:" not in result
+        assert "Other content." in result
     
     @pytest.mark.unit
-    def test_none_context_shows_empty(self):
-        """Test that None context shows 'Empty'."""
-        prompt = "Context: {{ADDITIONAL_CONTEXT}}"
+    def test_none_context_removes_section(self):
+        """Test that None context removes the section."""
+        prompt = "Additional context:\n{{ADDITIONAL_CONTEXT}}\n\nOther content."
         
         result = inject_additional_context(prompt, None)
         
-        assert "Empty" in result
+        assert "{{ADDITIONAL_CONTEXT}}" not in result
+        assert "Additional context:" not in result
     
     @pytest.mark.unit
-    def test_whitespace_context_shows_empty(self):
-        """Test that whitespace-only context is trimmed."""
+    def test_whitespace_context_removes_marker(self):
+        """Test that whitespace-only context removes the marker."""
         prompt = "Context: {{ADDITIONAL_CONTEXT}}"
         
         result = inject_additional_context(prompt, "   \n\t  ")
         
-        # After stripping, empty string is falsy, so "Empty" is used
-        # But if strip() returns empty string, context.strip() returns ''
-        # which is falsy, so we expect "Empty"
-        # Actually, the code does: context.strip() if context else "Empty"
-        # "   \n\t  ".strip() = "" which is falsy for the outer check
-        # Let me check: context = "   \n\t  ", context.strip() = ""
-        # context_text = context.strip() if context else "Empty"
-        # Since context is truthy (non-empty string), it evaluates context.strip() = ""
-        # So result is "Context: " - the marker is replaced with empty string
+        # After stripping, empty string triggers section removal
         assert "{{ADDITIONAL_CONTEXT}}" not in result
     
     @pytest.mark.unit
@@ -208,3 +203,51 @@ class TestInjectAdditionalContext:
         result = inject_additional_context(prompt, context)
         
         assert "Line 1\nLine 2\nLine 3" in result
+
+
+class TestPreparePromptWithContext:
+    """Tests for prepare_prompt_with_context function."""
+    
+    @pytest.mark.unit
+    def test_combines_schema_and_context(self):
+        """Test that schema and context are both applied."""
+        prompt = "{{TRANSCRIPTION_SCHEMA}}\n\nAdditional context:\n{{ADDITIONAL_CONTEXT}}"
+        schema = {"type": "object"}
+        context = "Historical document from 1850."
+        
+        result = prepare_prompt_with_context(prompt, schema, context)
+        
+        assert '"type": "object"' in result
+        assert "Historical document from 1850." in result
+    
+    @pytest.mark.unit
+    def test_schema_only(self):
+        """Test with schema but no context."""
+        prompt = "{{TRANSCRIPTION_SCHEMA}}\n\nAdditional context:\n{{ADDITIONAL_CONTEXT}}"
+        schema = {"type": "object"}
+        
+        result = prepare_prompt_with_context(prompt, schema, None)
+        
+        assert '"type": "object"' in result
+        assert "Additional context:" not in result
+    
+    @pytest.mark.unit
+    def test_context_only(self):
+        """Test with context but no schema."""
+        prompt = "Instructions. {{ADDITIONAL_CONTEXT}}"
+        context = "Some context"
+        
+        result = prepare_prompt_with_context(prompt, None, context)
+        
+        assert "Instructions." in result
+        assert "Some context" in result
+    
+    @pytest.mark.unit
+    def test_neither_schema_nor_context(self):
+        """Test with neither schema nor context."""
+        prompt = "Plain prompt with {{ADDITIONAL_CONTEXT}} marker."
+        
+        result = prepare_prompt_with_context(prompt, None, None)
+        
+        assert "Plain prompt with" in result
+        assert "{{ADDITIONAL_CONTEXT}}" not in result

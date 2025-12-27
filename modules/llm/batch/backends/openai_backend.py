@@ -21,7 +21,7 @@ from modules.llm.batch.backends.base import (
 )
 from modules.llm.model_capabilities import detect_capabilities
 from modules.llm.structured_outputs import build_structured_text_format
-from modules.llm.prompt_utils import render_prompt_with_schema, inject_additional_context
+from modules.llm.prompt_utils import prepare_prompt_with_context
 from modules.config.constants import SUPPORTED_IMAGE_FORMATS
 from modules.config.service import get_config_service
 
@@ -187,13 +187,9 @@ class OpenAIBatchBackend(BatchBackend):
                 transcription_schema = full_schema_obj
 
         # Prepare system prompt with schema and context
-        final_prompt = system_prompt
-        if full_schema_obj:
-            final_prompt = render_prompt_with_schema(final_prompt, full_schema_obj)
-        if additional_context:
-            final_prompt = inject_additional_context(final_prompt, additional_context)
-        else:
-            final_prompt = inject_additional_context(final_prompt, "")
+        final_prompt = prepare_prompt_with_context(
+            system_prompt, full_schema_obj, additional_context
+        )
 
         # Get image detail setting
         try:

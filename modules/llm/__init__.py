@@ -61,6 +61,21 @@ def __getattr__(name: str):
             "Capabilities": Capabilities,
         }[name]
     
+    if name in ("resolve_context_for_file", "resolve_context_for_folder", 
+                "resolve_context_for_image", "load_context_from_path"):
+        from modules.llm.context_utils import (
+            resolve_context_for_file,
+            resolve_context_for_folder,
+            resolve_context_for_image,
+            load_context_from_path,
+        )
+        return {
+            "resolve_context_for_file": resolve_context_for_file,
+            "resolve_context_for_folder": resolve_context_for_folder,
+            "resolve_context_for_image": resolve_context_for_image,
+            "load_context_from_path": load_context_from_path,
+        }[name]
+    
     raise AttributeError(f"module 'modules.llm' has no attribute '{name}'")
 
 __all__ = [
@@ -81,4 +96,9 @@ __all__ = [
     "detect_capabilities",
     "ensure_image_support",
     "Capabilities",
+    # Context utilities
+    "resolve_context_for_file",
+    "resolve_context_for_folder",
+    "resolve_context_for_image",
+    "load_context_from_path",
 ]

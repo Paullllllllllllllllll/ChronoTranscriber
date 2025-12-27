@@ -111,18 +111,25 @@ class LangChainTranscriber:
         # Render system prompt with schema
         self.system_prompt_text = render_prompt_with_schema(raw_prompt, self.full_schema_obj)
         
-        # Inject additional context
+        # Inject additional context - use explicit path or fall back to global default
+        additional_context = None
         if additional_context_path is not None and Path(additional_context_path).exists():
             try:
                 additional_context = Path(additional_context_path).read_text(encoding="utf-8").strip()
-                self.system_prompt_text = inject_additional_context(
-                    self.system_prompt_text, additional_context
-                )
             except Exception as e:
                 logger.warning(f"Failed to load additional context: {e}")
-                self.system_prompt_text = inject_additional_context(self.system_prompt_text, "")
         else:
-            self.system_prompt_text = inject_additional_context(self.system_prompt_text, "")
+            # Check for global default context file
+            from modules.llm.context_utils import load_context_from_path
+            global_context_path = PROJECT_ROOT / "additional_context" / "additional_context.txt"
+            additional_context = load_context_from_path(global_context_path)
+            if additional_context:
+                logger.debug(f"Using global context from: {global_context_path}")
+        
+        # Inject context into prompt (or remove section if empty)
+        self.system_prompt_text = inject_additional_context(
+            self.system_prompt_text, additional_context or ""
+        )
         
         # Load image processing config for detail level
         ipc = config_service.get_image_processing_config()

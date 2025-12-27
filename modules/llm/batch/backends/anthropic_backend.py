@@ -20,7 +20,7 @@ from modules.llm.batch.backends.base import (
     BatchStatus,
     BatchStatusInfo,
 )
-from modules.llm.prompt_utils import render_prompt_with_schema, inject_additional_context
+from modules.llm.prompt_utils import prepare_prompt_with_context
 from modules.config.constants import SUPPORTED_IMAGE_FORMATS
 
 logger = logging.getLogger(__name__)
@@ -85,14 +85,10 @@ class AnthropicBatchBackend(BatchBackend):
             with schema_path.open("r", encoding="utf-8") as f:
                 full_schema_obj = json.load(f)
 
-        # Prepare system prompt
-        final_prompt = system_prompt
-        if full_schema_obj:
-            final_prompt = render_prompt_with_schema(final_prompt, full_schema_obj)
-        if additional_context:
-            final_prompt = inject_additional_context(final_prompt, additional_context)
-        else:
-            final_prompt = inject_additional_context(final_prompt, "")
+        # Prepare system prompt with schema and context
+        final_prompt = prepare_prompt_with_context(
+            system_prompt, full_schema_obj, additional_context
+        )
 
         # Model configuration
         model_name = model_config.get("name", "claude-sonnet-4-20250514")

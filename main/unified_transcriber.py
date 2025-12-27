@@ -398,12 +398,20 @@ async def process_auto_mode(
             from modules.config.config_loader import PROJECT_ROOT
             default_schema = (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json").resolve()
             
+            # Support additional context in auto mode - use user config or global default
+            context_path = user_config.additional_context_path
+            if context_path is None:
+                # Check for global default context file
+                global_context = PROJECT_ROOT / "additional_context" / "additional_context.txt"
+                if global_context.exists():
+                    context_path = global_context
+            
             # Let open_transcriber get the correct API key based on provider config
             async with open_transcriber(
                 api_key=None,  # Factory will get correct key based on provider
                 model=model_config.get("transcription_model", {}).get("name", "gpt-4o"),
                 schema_path=default_schema,
-                additional_context_path=None,
+                additional_context_path=context_path,
             ) as t:
                 transcriber = t
                 await workflow_manager.process_selected_items(transcriber)

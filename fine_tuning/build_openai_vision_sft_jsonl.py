@@ -11,7 +11,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from modules.llm.prompt_utils import inject_additional_context, render_prompt_with_schema
+from modules.llm.prompt_utils import prepare_prompt_with_context
 from modules.llm.schema_utils import find_schema_path_by_name
 from modules.llm.providers.base import BaseProvider
 
@@ -72,13 +72,12 @@ def _load_schema_and_prompt(
     with resolved_schema_path.open("r", encoding="utf-8") as sf:
         schema_obj = json.load(sf)
 
-    system_prompt = render_prompt_with_schema(raw_prompt, schema_obj)
-
+    # Load additional context if provided
+    context = None
     if additional_context_path and additional_context_path.exists():
-        ctx = additional_context_path.read_text(encoding="utf-8").strip()
-        system_prompt = inject_additional_context(system_prompt, ctx)
-    else:
-        system_prompt = inject_additional_context(system_prompt, "")
+        context = additional_context_path.read_text(encoding="utf-8").strip()
+    
+    system_prompt = prepare_prompt_with_context(raw_prompt, schema_obj, context)
 
     return system_prompt, schema_obj
 

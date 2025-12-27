@@ -132,6 +132,8 @@ async def _repair_sync_mode(
     failure_indices: List[int],
     final_lines: List[str],
     repair_jsonl_path: Path,
+    schema_path: Optional[Path] = None,
+    additional_context_path: Optional[Path] = None,
 ) -> None:
     from modules.llm import transcribe_image_with_llm
 
@@ -236,7 +238,12 @@ async def _repair_sync_mode(
     repairs_dir.mkdir(parents=True, exist_ok=True)
     # Do not write a duplicate repair_session marker here; already recorded above.
 
-    async with open_transcriber(api_key=api_key, model=model_name) as trans:
+    async with open_transcriber(
+        api_key=api_key,
+        model=model_name,
+        schema_path=schema_path,
+        additional_context_path=additional_context_path,
+    ) as trans:
         write_lock = asyncio.Lock()
 
         async def on_result(res: Any) -> None:
@@ -381,6 +388,8 @@ async def _repair_batch_mode(
     failure_indices: List[int],
     final_lines: List[str],
     repair_jsonl_path: Path,
+    schema_path: Optional[Path] = None,
+    additional_context_path: Optional[Path] = None,
 ) -> None:
     targets: List[RepairTarget] = []
     images_for_batch: List[Path] = []
@@ -455,6 +464,8 @@ async def _repair_batch_mode(
             images_for_batch,
             "",  # prompt_text placeholder (unused)
             model_config.get("transcription_model", {}),
+            schema_path=schema_path,
+            additional_context_path=additional_context_path,
         )
     except Exception as e:
         logger.exception("Error submitting repair batch: %s", e)
@@ -730,6 +741,23 @@ async def main() -> None:
     if not repair_jsonl_path.exists():
         repair_jsonl_path.touch()
 
+    # Resolve schema and context for consistent repair with original transcription
+    from modules.config.config_loader import PROJECT_ROOT
+    from modules.llm.context_utils import resolve_context_for_folder
+    
+    # Use default schema
+    default_schema = (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json").resolve()
+    schema_path = default_schema if default_schema.exists() else None
+    
+    # Resolve context using folder-based hierarchy
+    context_content, context_path = resolve_context_for_folder(job_sel.parent_folder)
+    additional_context_path = context_path
+    
+    if additional_context_path:
+        print_info(f"Using context: {additional_context_path.name}")
+    if schema_path:
+        print_info(f"Using schema: {schema_path.name}")
+
     print_header("PROCESSING REPAIR", f"Repairing {len(failure_indices)} line(s)...")
 
     if mode == "sync":
@@ -740,6 +768,8 @@ async def main() -> None:
             failure_indices=failure_indices,
             final_lines=final_lines,
             repair_jsonl_path=repair_jsonl_path,
+            schema_path=schema_path,
+            additional_context_path=additional_context_path,
         )
     else:
         await _repair_batch_mode(
@@ -749,6 +779,8 @@ async def main() -> None:
             failure_indices=failure_indices,
             final_lines=final_lines,
             repair_jsonl_path=repair_jsonl_path,
+            schema_path=schema_path,
+            additional_context_path=additional_context_path,
         )
 
     print_header("REPAIR COMPLETE", "")
@@ -868,6 +900,31 @@ async def main_cli(args, paths_config: Dict[str, Any]) -> None:
     if not repair_jsonl_path.exists():
         repair_jsonl_path.touch()
     
+    # Resolve schema and context for consistent repair with original transcription
+    from modules.llm.context_utils import resolve_context_for_folder
+    
+    # Use default schema or CLI-specified schema
+    schema_path = None
+    if hasattr(args, 'schema') and args.schema:
+        schema_path = resolve_path(args.schema, PROJECT_ROOT)
+    else:
+        default_schema = (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json").resolve()
+        if default_schema.exists():
+            schema_path = default_schema
+    
+    # Resolve context using folder-based hierarchy or CLI-specified context
+    additional_context_path = None
+    if hasattr(args, 'context') and args.context:
+        additional_context_path = resolve_path(args.context, PROJECT_ROOT)
+    else:
+        context_content, context_path = resolve_context_for_folder(job.parent_folder)
+        additional_context_path = context_path
+    
+    if additional_context_path:
+        print_info(f"Using context: {additional_context_path.name}")
+    if schema_path:
+        print_info(f"Using schema: {schema_path.name}")
+    
     print_header("PROCESSING REPAIR", f"Repairing {len(failure_indices)} line(s)...")
     
     # Execute repair
@@ -879,6 +936,8 @@ async def main_cli(args, paths_config: Dict[str, Any]) -> None:
             failure_indices=failure_indices,
             final_lines=final_lines,
             repair_jsonl_path=repair_jsonl_path,
+            schema_path=schema_path,
+            additional_context_path=additional_context_path,
         )
     else:
         await _repair_batch_mode(
@@ -888,6 +947,8 @@ async def main_cli(args, paths_config: Dict[str, Any]) -> None:
             failure_indices=failure_indices,
             final_lines=final_lines,
             repair_jsonl_path=repair_jsonl_path,
+            schema_path=schema_path,
+            additional_context_path=additional_context_path,
         )
     
     print_header("REPAIR COMPLETE", "")

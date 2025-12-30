@@ -14,16 +14,15 @@ from __future__ import annotations
 
 import sys
 import os
+from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from modules.config.service import get_config_service
-from modules.infra.logger import setup_logger
-from modules.core.mode_selector import run_sync_with_mode_detection
 from modules.core.cli_args import create_postprocess_parser, resolve_path
+from modules.core.execution_framework import DualModeScript
 from modules.processing.postprocess import (
     postprocess_transcription,
     postprocess_file,
@@ -38,8 +37,6 @@ from modules.ui import (
     prompt_text,
     NavigationAction,
 )
-
-logger = setup_logger(__name__)
 
 
 def collect_transcription_files(
@@ -423,20 +420,32 @@ def postprocess_interactive() -> int:
     return 0 if error_count == 0 else 1
 
 
-def main() -> None:
-    """Main entry point with dual-mode support."""
-    # Detect mode and parse arguments
-    _config_service, interactive_mode, args, _paths_config = run_sync_with_mode_detection(
-        interactive_handler=postprocess_interactive,
-        cli_handler=lambda a, p: postprocess_cli(a),
-        parser_factory=create_postprocess_parser,
-        script_name="postprocess_transcriptions.py",
-    )
+class PostprocessScript(DualModeScript):
+    """Script for post-processing transcription output files."""
     
-    if interactive_mode:
-        sys.exit(postprocess_interactive())
-    else:
-        sys.exit(postprocess_cli(args))
+    def __init__(self):
+        super().__init__("postprocess_transcriptions")
+    
+    def create_argument_parser(self) -> ArgumentParser:
+        """Create argument parser for CLI mode."""
+        return create_postprocess_parser()
+    
+    def run_interactive(self) -> None:
+        """Run post-processing in interactive mode."""
+        result = postprocess_interactive()
+        if result != 0:
+            sys.exit(result)
+    
+    def run_cli(self, args: Namespace) -> None:
+        """Run post-processing in CLI mode."""
+        result = postprocess_cli(args)
+        if result != 0:
+            sys.exit(result)
+
+
+def main() -> None:
+    """Main entry point."""
+    PostprocessScript().execute()
 
 
 if __name__ == "__main__":

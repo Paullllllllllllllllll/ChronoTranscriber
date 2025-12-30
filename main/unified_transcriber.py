@@ -39,7 +39,7 @@ from modules.core.cli_args import (
     validate_input_path,
     validate_output_path,
 )
-from modules.core.mode_selector import run_with_mode_detection
+from modules.core.execution_framework import AsyncDualModeScript
 from modules.llm.schema_utils import list_schema_options
 
 logger = setup_logger(__name__)
@@ -608,36 +608,33 @@ async def transcribe_cli(args, paths_config: dict) -> None:
     print_success("Processing complete!")
 
 
-async def main() -> None:
-    """Main entry point supporting both interactive and CLI modes."""
-    try:
-        # Use centralized mode detection
-        config_service, interactive_mode, args, paths_config = run_with_mode_detection(
-            interactive_handler=transcribe_interactive,
-            cli_handler=transcribe_cli,
-            parser_factory=create_transcriber_parser,
-            script_name="unified_transcriber"
-        )
-        
-        # Route to appropriate handler
-        if interactive_mode:
-            await transcribe_interactive()
-        else:
-            await transcribe_cli(args, paths_config)
-            
-    except KeyboardInterrupt:
-        print_info("\nProcessing interrupted by user.")
-        sys.exit(0)
-    except ValueError as e:
-        print_error(f"Invalid arguments: {e}")
-        sys.exit(1)
-    except Exception as e:
-        logger.exception(f"Unexpected error: {e}")
-        print_error(f"An unexpected error occurred: {e}")
-        print_info("Check the logs for more details.")
-        if logger.isEnabledFor(logging.DEBUG):
-            ui_print(f"\nTraceback:\n{traceback.format_exc()}", PromptStyle.DIM)
-        sys.exit(1)
+class UnifiedTranscriberScript(AsyncDualModeScript):
+    """Main script for the ChronoTranscriber application."""
+    
+    def __init__(self):
+        super().__init__("unified_transcriber")
+    
+    def create_argument_parser(self):
+        """Create argument parser for CLI mode."""
+        from argparse import ArgumentParser
+        return create_transcriber_parser()
+    
+    async def run_interactive(self) -> None:
+        """Run transcription in interactive mode."""
+        await transcribe_interactive()
+    
+    async def run_cli(self, args) -> None:
+        """Run transcription in CLI mode."""
+        try:
+            await transcribe_cli(args, self.paths_config)
+        except ValueError as e:
+            print_error(f"Invalid arguments: {e}")
+            sys.exit(1)
+
+
+def main() -> None:
+    """Main entry point."""
+    UnifiedTranscriberScript().execute()
 
 
 # --------------------------------------------------
@@ -645,4 +642,4 @@ async def main() -> None:
 # --------------------------------------------------
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

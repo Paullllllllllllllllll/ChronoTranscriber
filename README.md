@@ -207,6 +207,12 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+For development and running tests:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
 ### Install Tesseract (Optional)
 
 For local OCR:
@@ -254,6 +260,9 @@ python -m venv .venv
 source .venv/bin/activate  # Linux/macOS
 
 pip install -r requirements.txt
+
+# For development and running tests
+pip install -r requirements-dev.txt
 ```
 
 **Step 2: Set Up API Key**
@@ -1170,6 +1179,20 @@ Provide:
 - Error recovery mechanisms
 
 ## Development
+
+### Development Dependencies
+
+For development and running tests, install the dev requirements file:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+### Running Tests
+
+```bash
+.venv\Scripts\python.exe -m pytest -v
+```
 
 ### Recent Updates
 

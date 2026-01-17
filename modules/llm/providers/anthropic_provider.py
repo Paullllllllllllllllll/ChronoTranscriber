@@ -372,11 +372,14 @@ class AnthropicProvider(BaseProvider):
         reasoning_config: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
+        caps = _get_model_capabilities(model)
+        effective_max_tokens = int(min(max_tokens, caps.max_output_tokens))
+
         super().__init__(
             api_key=api_key,
             model=model,
             temperature=temperature,
-            max_tokens=max_tokens,
+            max_tokens=effective_max_tokens,
             timeout=timeout,
             **kwargs,
         )
@@ -385,7 +388,7 @@ class AnthropicProvider(BaseProvider):
         self.top_k = top_k
         self.reasoning_config = reasoning_config
         
-        self._capabilities = _get_model_capabilities(model)
+        self._capabilities = caps
         max_retries = _load_max_retries()
         
         # Build LangChain model kwargs
@@ -420,7 +423,7 @@ class AnthropicProvider(BaseProvider):
         self._llm = ChatAnthropic(
             api_key=api_key,
             model=model,
-            max_tokens=max_tokens,
+            max_tokens=effective_max_tokens,
             timeout=timeout,
             max_retries=max_retries,
             **model_kwargs,
@@ -499,22 +502,29 @@ class AnthropicProvider(BaseProvider):
             ]),
         ]
         
-        # Use structured output if schema provided
+        # Native structured outputs (no function calling)
+        # We require json_schema mode so the model returns a validated JSON object.
+        if json_schema and not caps.supports_structured_output:
+            raise ValueError(
+                f"Selected Anthropic model '{self.model}' does not support native structured outputs. "
+                f"Choose a Claude model that supports structured outputs (e.g. claude-sonnet-4-5-* or claude-opus-4-1-*)."
+            )
+
         # Use include_raw=True to get token usage from the underlying AIMessage
         llm_to_use = self._llm
-        if json_schema and caps.supports_structured_output:
+        if json_schema:
             # Unwrap schema if wrapped
             if isinstance(json_schema, dict) and "schema" in json_schema:
                 actual_schema = json_schema["schema"]
             else:
                 actual_schema = json_schema
-            
+
             # Transform schema for Anthropic compatibility (handle nullable types)
             actual_schema = _transform_schema_for_anthropic(actual_schema)
-            
+
             llm_to_use = self._llm.with_structured_output(
                 actual_schema,
-                method="json_mode",
+                method="json_schema",
                 include_raw=True,
             )
         
@@ -569,7 +579,20 @@ class AnthropicProvider(BaseProvider):
                 # Standard AIMessage response (no structured output)
                 raw_message = response
                 content = response.content
-                if isinstance(content, dict):
+                if isinstance(content, list):
+                    text_parts: List[str] = []
+                    for item in content:
+                        if isinstance(item, dict):
+                            t = item.get("text")
+                            if isinstance(t, str) and t.strip():
+                                text_parts.append(t)
+                        elif isinstance(item, str) and item.strip():
+                            text_parts.append(item)
+                    if text_parts:
+                        content = "\n".join(text_parts)
+                    else:
+                        content = str(content)
+                elif isinstance(content, dict):
                     parsed_output = content
                     content = json.dumps(content)
                 elif not isinstance(content, str):

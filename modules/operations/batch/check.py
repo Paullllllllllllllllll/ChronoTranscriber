@@ -964,8 +964,7 @@ def diagnose_api_issues() -> None:
     if not api_key:
         print_error("No OpenAI API key found in environment variables")
     else:
-        key_summary = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 10 else "[hidden]"
-        print_info(f"OpenAI API key present: {key_summary}")
+        print_info("OpenAI API key present: True")
 
     # Check for common model issues using SDK
     try:

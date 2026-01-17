@@ -17,6 +17,10 @@ import traceback
 from pathlib import Path
 from copy import deepcopy
 
+_project_root = Path(__file__).resolve().parents[1]
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
 from modules.config.config_loader import PROJECT_ROOT
 from modules.config.service import get_config_service
 from modules.infra.logger import setup_logger
@@ -601,12 +605,29 @@ async def transcribe_cli(args, paths_config: dict) -> None:
     
     # Create configuration from CLI arguments
     user_config = create_config_from_cli_args(args, base_input_dir, base_output_dir, paths_config)
+
+    effective_paths_config = paths_config
+    if not args.auto:
+        output_path = resolve_path(args.output, base_output_dir)
+        validate_output_path(output_path)
+
+        effective_paths_config = deepcopy(paths_config)
+        file_paths_cfg = effective_paths_config.setdefault("file_paths", {})
+
+        if args.type == "images":
+            file_paths_cfg.setdefault("Images", {})["output"] = str(output_path)
+        elif args.type == "pdfs":
+            file_paths_cfg.setdefault("PDFs", {})["output"] = str(output_path)
+        elif args.type == "epubs":
+            file_paths_cfg.setdefault("EPUBs", {})["output"] = str(output_path)
+        else:
+            file_paths_cfg.setdefault("MOBIs", {})["output"] = str(output_path)
     
     # Process documents
     if user_config.processing_type == "auto":
         await process_auto_mode(
             user_config,
-            paths_config,
+            effective_paths_config,
             config_service.get_model_config(),
             config_service.get_concurrency_config(),
             config_service.get_image_processing_config()
@@ -614,7 +635,7 @@ async def transcribe_cli(args, paths_config: dict) -> None:
     else:
         await process_documents(
             user_config,
-            paths_config,
+            effective_paths_config,
             config_service.get_model_config(),
             config_service.get_concurrency_config(),
             config_service.get_image_processing_config()

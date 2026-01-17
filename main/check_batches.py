@@ -10,8 +10,13 @@ Supports two modes:
 
 from __future__ import annotations
 
+import sys
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
+
+_project_root = Path(__file__).resolve().parents[1]
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
 
 from modules.core.cli_args import create_check_batches_parser, resolve_path, validate_input_path
 from modules.core.execution_framework import DualModeScript

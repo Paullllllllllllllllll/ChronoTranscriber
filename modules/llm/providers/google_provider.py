@@ -271,11 +271,14 @@ class GoogleProvider(BaseProvider):
         reasoning_config: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
+        caps = _get_model_capabilities(model)
+        effective_max_tokens = int(min(max_tokens, caps.max_output_tokens))
+
         super().__init__(
             api_key=api_key,
             model=model,
             temperature=temperature,
-            max_tokens=max_tokens,
+            max_tokens=effective_max_tokens,
             timeout=timeout,
             **kwargs,
         )
@@ -284,7 +287,7 @@ class GoogleProvider(BaseProvider):
         self.top_k = top_k
         self.reasoning_config = reasoning_config
         
-        self._capabilities = _get_model_capabilities(model)
+        self._capabilities = caps
         max_retries = _load_max_retries()
         
         # Build LLM kwargs
@@ -292,7 +295,7 @@ class GoogleProvider(BaseProvider):
             "google_api_key": api_key,
             "model": model,
             "temperature": temperature if self._capabilities.supports_temperature else None,
-            "max_tokens": max_tokens,
+            "max_tokens": effective_max_tokens,
             "timeout": timeout,
             "max_retries": max_retries,
             "top_p": top_p if self._capabilities.supports_top_p else None,

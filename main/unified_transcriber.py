@@ -468,6 +468,8 @@ async def process_documents(
 
 async def transcribe_interactive() -> None:
     """Handle interactive mode transcription workflow."""
+    import time
+    
     # Load configurations
     config_service = get_config_service()
     paths_config = config_service.get_paths_config()
@@ -505,6 +507,11 @@ async def transcribe_interactive() -> None:
         paths_config,
     )
     
+    # Track processing time
+    start_time = time.time()
+    processed_count = len(user_config.selected_items)
+    failed_count = 0
+    
     # Process documents
     if user_config.processing_type == "auto":
         # Override output directory with Auto output
@@ -525,9 +532,17 @@ async def transcribe_interactive() -> None:
             config_service.get_image_processing_config()
         )
     
+    # Calculate duration
+    duration_seconds = time.time() - start_time
+    
     # Display completion summary
     if user_config.processing_type != "auto":  # Auto mode prints its own summary
-        WorkflowUI.display_completion_summary(user_config)
+        WorkflowUI.display_completion_summary(
+            user_config,
+            processed_count=processed_count,
+            failed_count=failed_count,
+            duration_seconds=duration_seconds,
+        )
 
 
 async def transcribe_cli(args, paths_config: dict) -> None:

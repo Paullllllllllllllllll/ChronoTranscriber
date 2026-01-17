@@ -588,11 +588,12 @@ class WorkflowUI:
         if config.processing_type == "auto":
             return True
         
-        # Load model config for GPT details
+        # Load configs for display
         from modules.config.service import get_config_service
         config_service = get_config_service()
         model_config = config_service.get_model_config()
         paths_config = config_service.get_paths_config()
+        concurrency_config = config_service.get_concurrency_config()
         
         print_header("PROCESSING SUMMARY", "Review your selections before processing")
         
@@ -621,19 +622,6 @@ class WorkflowUI:
             mode = "Batch (asynchronous)" if config.use_batch_processing else "Synchronous"
             ui_print(f"    • Processing mode: {mode}", PromptStyle.INFO)
             
-            # Show model and provider
-            tm = model_config.get("transcription_model", {})
-            provider = tm.get("provider", "openai")
-            model_name = tm.get("name", "gpt-4o")
-            ui_print(f"    • Provider: {provider.upper()}", PromptStyle.INFO)
-            ui_print(f"    • Model: {model_name}", PromptStyle.INFO)
-            
-            # Show key model parameters
-            temperature = tm.get("temperature", 0.0)
-            max_tokens = tm.get("max_output_tokens") or tm.get("max_tokens", 20480)
-            ui_print(f"    • Temperature: {temperature}", PromptStyle.DIM)
-            ui_print(f"    • Max output tokens: {max_tokens:,}", PromptStyle.DIM)
-            
             # Show schema
             if config.selected_schema_name:
                 ui_print(f"    • Schema: {config.selected_schema_name}", PromptStyle.INFO)
@@ -645,6 +633,62 @@ class WorkflowUI:
                 ui_print(f"    • Additional context: No", PromptStyle.DIM)
         
         print_separator(PromptStyle.LIGHT_LINE, 80)
+        
+        # === Model Configuration (for GPT method) ===
+        if config.transcription_method == "gpt":
+            ui_print("\n  Model Configuration:", PromptStyle.HIGHLIGHT)
+            print_separator(PromptStyle.LIGHT_LINE, 80)
+            
+            tm = model_config.get("transcription_model", {})
+            provider = tm.get("provider", "openai")
+            model_name = tm.get("name", "gpt-4o")
+            ui_print(f"    • Provider: {provider.upper()}", PromptStyle.INFO)
+            ui_print(f"    • Model: {model_name}", PromptStyle.INFO)
+            
+            # Show key model parameters
+            temperature = tm.get("temperature")
+            max_tokens = tm.get("max_output_tokens") or tm.get("max_tokens", 20480)
+            if temperature is not None:
+                ui_print(f"      - Temperature: {temperature}", PromptStyle.DIM)
+            ui_print(f"      - Max output tokens: {max_tokens:,}", PromptStyle.DIM)
+            
+            # Show reasoning configuration if present
+            reasoning = tm.get("reasoning", {})
+            if reasoning:
+                effort = reasoning.get("effort", "medium")
+                ui_print(f"      - Reasoning effort: {effort}", PromptStyle.DIM)
+            
+            # Show text verbosity if present (GPT-5 specific)
+            text_config = tm.get("text", {})
+            if text_config:
+                verbosity = text_config.get("verbosity", "medium")
+                ui_print(f"      - Text verbosity: {verbosity}", PromptStyle.DIM)
+            
+            print_separator(PromptStyle.LIGHT_LINE, 80)
+            
+            # === Concurrency Configuration ===
+            ui_print("\n  Concurrency Configuration:", PromptStyle.HIGHLIGHT)
+            print_separator(PromptStyle.LIGHT_LINE, 80)
+            
+            # Image processing concurrency
+            img_proc = concurrency_config.get("image_processing", {})
+            img_concurrency = img_proc.get("concurrency_limit", 24)
+            ui_print(f"    • Image extraction: {img_concurrency} concurrent tasks", PromptStyle.INFO)
+            
+            # API request concurrency
+            api_requests = concurrency_config.get("api_requests", {})
+            trans_api = api_requests.get("transcription", {})
+            trans_concurrency = trans_api.get("concurrency_limit", 5)
+            trans_service_tier = trans_api.get("service_tier", "default")
+            ui_print(f"    • Transcription API: {trans_concurrency} concurrent requests", PromptStyle.INFO)
+            ui_print(f"      - Service tier: {trans_service_tier}", PromptStyle.DIM)
+            
+            # Retry configuration
+            retry_config = concurrency_config.get("retry", {})
+            max_attempts = retry_config.get("max_attempts", 5)
+            ui_print(f"      - Max retry attempts: {max_attempts}", PromptStyle.DIM)
+            
+            print_separator(PromptStyle.LIGHT_LINE, 80)
         
         # === Output Location ===
         ui_print("\n  Output Location:", PromptStyle.HIGHLIGHT)
@@ -688,19 +732,86 @@ class WorkflowUI:
         return False
     
     @staticmethod
-    def display_completion_summary(config: UserConfiguration) -> None:
-        """Display completion summary."""
+    def display_completion_summary(
+        config: UserConfiguration,
+        processed_count: int = 0,
+        failed_count: int = 0,
+        duration_seconds: float = 0.0,
+    ) -> None:
+        """Display detailed completion summary.
+        
+        Args:
+            config: User configuration object
+            processed_count: Number of successfully processed items
+            failed_count: Number of failed items
+            duration_seconds: Total processing duration in seconds
+        """
+        from modules.config.service import get_config_service
+        config_service = get_config_service()
+        paths_config = config_service.get_paths_config()
+        
         print_header("PROCESSING COMPLETE", "")
+        
+        total_count = processed_count + failed_count
+        
+        # === Results Section ===
+        ui_print("  Results:", PromptStyle.HIGHLIGHT)
+        print_separator(PromptStyle.LIGHT_LINE, 80)
         
         if config.use_batch_processing and config.transcription_method == "gpt":
             print_success("Batch processing jobs have been submitted!")
-            ui_print("")
-            ui_print("  Next steps:", PromptStyle.HIGHLIGHT)
+            ui_print(f"    • Jobs submitted: {total_count}", PromptStyle.INFO)
+        else:
+            if failed_count == 0 and processed_count > 0:
+                print_success(f"All {processed_count} item(s) processed successfully!")
+            elif processed_count > 0:
+                ui_print(f"    • Processed: {processed_count}/{total_count} item(s)", PromptStyle.INFO)
+                if failed_count > 0:
+                    ui_print(f"    • Failed: {failed_count} item(s)", PromptStyle.WARNING)
+            else:
+                ui_print("    • No items were processed.", PromptStyle.WARNING)
+        
+        # Duration
+        if duration_seconds > 0:
+            if duration_seconds >= 3600:
+                hours = duration_seconds / 3600
+                ui_print(f"    • Duration: {hours:.1f} hours", PromptStyle.INFO)
+            elif duration_seconds >= 60:
+                minutes = duration_seconds / 60
+                ui_print(f"    • Duration: {minutes:.1f} minutes", PromptStyle.INFO)
+            else:
+                ui_print(f"    • Duration: {duration_seconds:.1f} seconds", PromptStyle.INFO)
+        
+        print_separator(PromptStyle.LIGHT_LINE, 80)
+        
+        # === Output Location ===
+        ui_print("\n  Output:", PromptStyle.HIGHLIGHT)
+        print_separator(PromptStyle.LIGHT_LINE, 80)
+        use_input_as_output = paths_config.get('general', {}).get('input_paths_is_output_path', False)
+        if use_input_as_output:
+            ui_print("    • Location: Same directory as input files", PromptStyle.INFO)
+        else:
+            file_paths = paths_config.get('file_paths', {})
+            if config.processing_type == "images":
+                output_dir = file_paths.get('Images', {}).get('output', 'images_out')
+            elif config.processing_type == "pdfs":
+                output_dir = file_paths.get('PDFs', {}).get('output', 'pdfs_out')
+            elif config.processing_type == "epubs":
+                output_dir = file_paths.get('EPUBs', {}).get('output', 'epubs_out')
+            else:
+                output_dir = "configured output directory"
+            ui_print(f"    • Location: {output_dir}", PromptStyle.INFO)
+        ui_print("    • Transcriptions: .txt files", PromptStyle.INFO)
+        print_separator(PromptStyle.LIGHT_LINE, 80)
+        
+        # === Next Steps (for batch mode) ===
+        if config.use_batch_processing and config.transcription_method == "gpt":
+            ui_print("\n  Next steps:", PromptStyle.HIGHLIGHT)
+            print_separator(PromptStyle.LIGHT_LINE, 80)
             ui_print("    • Check batch status: ", PromptStyle.DIM, end="")
             ui_print("python main/check_batches.py", PromptStyle.INFO)
             ui_print("    • Cancel pending batches: ", PromptStyle.DIM, end="")
             ui_print("python main/cancel_batches.py", PromptStyle.INFO)
-        else:
-            print_success("All selected items have been processed.")
+            print_separator(PromptStyle.LIGHT_LINE, 80)
         
         ui_print("\n  Thank you for using ChronoTranscriber!\n", PromptStyle.HIGHLIGHT)

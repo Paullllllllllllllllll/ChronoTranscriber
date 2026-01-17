@@ -88,11 +88,11 @@ class AutoSelector:
                     images.append(item)
             elif item.is_dir():
                 # Check if it's an image folder (contains images)
-                folder_images = [
-                    f for f in item.iterdir()
-                    if f.is_file() and f.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
-                ]
-                if folder_images:
+                has_images = any(
+                    f.is_file() and f.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
+                    for f in item.iterdir()
+                )
+                if has_images:
                     images.append(item)  # Treat folder as a single image collection
         
         logger.info(

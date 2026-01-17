@@ -54,6 +54,8 @@ class ImageProcessor:
             Image.Image: The grayscale image.
         """
         if self.img_cfg.get('grayscale_conversion', True):
+            if image.mode == 'L':
+                return image
             return ImageOps.grayscale(image)
         return image
 
@@ -117,7 +119,12 @@ class ImageProcessor:
             new_width = max(1, int(orig_width * scale))
             new_height = max(1, int(orig_height * scale))
             resized_img = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            final_img = Image.new("RGB", (target_width, target_height), (255, 255, 255))
+            if resized_img.mode not in ('RGB', 'L'):
+                resized_img = resized_img.convert('RGB')
+            if resized_img.mode == 'L':
+                final_img = Image.new("L", (target_width, target_height), 255)
+            else:
+                final_img = Image.new("RGB", (target_width, target_height), (255, 255, 255))
             paste_x = (target_width - new_width) // 2
             paste_y = (target_height - new_height) // 2
             final_img.paste(resized_img, (paste_x, paste_y))
@@ -145,17 +152,45 @@ class ImageProcessor:
         """
         try:
             with Image.open(self.image_path) as img:
-                img = self.handle_transparency(img)
-                img = self.convert_to_grayscale(img)
-                # Choose resizing based on model type
-                # Google uses media_resolution, Anthropic uses resize_profile, OpenAI uses llm_detail
                 if self.model_type == "google":
                     detail = (self.img_cfg.get('media_resolution', 'high') or 'high')
                 elif self.model_type == "anthropic":
                     detail = (self.img_cfg.get('resize_profile', 'auto') or 'auto')
                 else:
                     detail = (self.img_cfg.get('llm_detail', 'high') or 'high')
+
+                if getattr(img, "format", None) == "JPEG":
+                    try:
+                        desired_mode = "L" if self.img_cfg.get('grayscale_conversion', True) else "RGB"
+                        w, h = img.size
+                        detail_norm = (detail or 'high').lower()
+                        if detail_norm == 'low':
+                            max_side = int(self.img_cfg.get('low_max_side_px', 512))
+                            if max(w, h) > max_side:
+                                img.draft(desired_mode, (max_side, max_side))
+                        elif self.model_type == "anthropic":
+                            max_side = int(self.img_cfg.get('high_max_side_px', 1568))
+                            if max(w, h) > max_side:
+                                img.draft(desired_mode, (max_side, max_side))
+                        else:
+                            box = self.img_cfg.get('high_target_box', [768, 1536])
+                            try:
+                                target_width = int(box[0])
+                                target_height = int(box[1])
+                            except Exception:
+                                target_width, target_height = 768, 1536
+                            scale = min(target_width / float(w), target_height / float(h))
+                            if scale < 1.0:
+                                img.draft(desired_mode, (target_width, target_height))
+                    except Exception:
+                        pass
+
+                img = self.handle_transparency(img)
+                img = self.convert_to_grayscale(img)
                 img = ImageProcessor.resize_for_detail(img, detail, self.img_cfg, self.model_type)
+
+                if img.mode not in ('RGB', 'L'):
+                    img = img.convert('RGB')
 
                 # Force output to JPEG with configurable quality (regardless of extension)
                 # Create a new path with .jpg extension
@@ -278,13 +313,15 @@ class ImageProcessor:
         Returns:
             List[Path]: List of processed image paths.
         """
-        # Find all image files in source folder
-        image_files: List[Path] = []
-        for ext in SUPPORTED_IMAGE_EXTENSIONS:
-            image_files.extend(list(source_folder.glob(f'*{ext}')))
+        image_files: List[Path] = [
+            p for p in source_folder.iterdir()
+            if p.is_file() and p.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
+        ]
 
         if not image_files:
             return []
+
+        image_files.sort(key=lambda p: p.name.lower())
 
         # Create list of output paths
         output_paths = [
@@ -473,10 +510,10 @@ class ImageProcessor:
                          .get('image_processing', {}))
         processes = int(img_conc.get('concurrency_limit', 4))
 
-        # Find all images
-        image_files: List[Path] = []
-        for ext in SUPPORTED_IMAGE_EXTENSIONS:
-            image_files.extend(list(source_folder.glob(f'*{ext}')))
+        image_files: List[Path] = [
+            p for p in source_folder.iterdir()
+            if p.is_file() and p.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
+        ]
         if not image_files:
             return []
 

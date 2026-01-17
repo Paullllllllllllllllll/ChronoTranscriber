@@ -35,10 +35,10 @@ class PDFProcessor:
         """
         try:
             with fitz.open(self.pdf_path) as doc:
-                text = ""
+                parts: list[str] = []
                 for page in doc:
-                    text += page.get_text()
-                return bool(text.strip())
+                    parts.append(page.get_text())
+                return bool("".join(parts).strip())
         except Exception as e:
             logger.error(f"Error checking if PDF is native: {self.pdf_path}, {e}")
             return False
@@ -326,13 +326,13 @@ def native_extract_pdf_text(pdf_path: Path) -> str:
     Returns the extracted text.
     """
     pdf_processor = PDFProcessor(pdf_path)
-    text = ""
+    parts: list[str] = []
     try:
         pdf_processor.open_pdf()
         if pdf_processor.doc:
             for page in pdf_processor.doc:
-                text += page.get_text()
+                parts.append(page.get_text())
         pdf_processor.close_pdf()
     except Exception as e:
         logger.exception(f"Failed native PDF extraction on {pdf_path.name}: {e}")
-    return text
+    return "".join(parts)

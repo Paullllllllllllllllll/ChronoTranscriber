@@ -44,10 +44,10 @@ def _encode_image_to_base64(image_path: Path) -> tuple[str, str]:
 class AnthropicBatchBackend(BatchBackend):
     """Anthropic Message Batches API backend."""
 
-    def __init__(self):
-        self._client = None
+    def __init__(self) -> None:
+        self._client: Any = None
 
-    def _get_client(self):
+    def _get_client(self) -> Any:
         """Lazy initialization of Anthropic client."""
         if self._client is None:
             import anthropic

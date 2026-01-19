@@ -26,7 +26,7 @@ from modules.operations.batch.check import run_batch_finalization
 class CheckBatchesScript(DualModeScript):
     """Script to check batch job status and download completed results."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("check_batches")
     
     def create_argument_parser(self) -> ArgumentParser:

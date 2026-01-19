@@ -111,5 +111,6 @@ def json_schema_to_pydantic_compatible(schema: Dict[str, Any]) -> Dict[str, Any]
         Unwrapped JSON schema dict
     """
     if isinstance(schema, dict) and "schema" in schema:
-        return schema["schema"]
+        inner = schema["schema"]
+        return inner if isinstance(inner, dict) else schema
     return schema

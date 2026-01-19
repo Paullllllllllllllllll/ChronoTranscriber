@@ -35,7 +35,7 @@ def read_jsonl_records(jsonl_path: Path) -> List[Dict[str, Any]]:
     Returns:
         List of parsed JSON records.
     """
-    records = []
+    records: list[dict[str, Any]] = []
     if not jsonl_path.exists():
         return records
     

@@ -19,7 +19,7 @@ from modules.operations.repair.run import main as repair_main_interactive, main_
 class RepairTranscriptionsScript(AsyncDualModeScript):
     """Script for repairing transcription batches."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("repair_transcriptions")
     
     def create_argument_parser(self) -> ArgumentParser:

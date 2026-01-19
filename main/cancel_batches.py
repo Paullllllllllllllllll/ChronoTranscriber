@@ -33,7 +33,7 @@ from modules.ui.batch_display import (
 class CancelBatchesScript(DualModeScript):
     """Script to cancel all non-terminal batch jobs."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("cancel_batches")
     
     def create_argument_parser(self) -> ArgumentParser:
@@ -43,7 +43,7 @@ class CancelBatchesScript(DualModeScript):
     def run_interactive(self) -> None:
         """Cancel batches in interactive mode with prompts."""
         try:
-            from openai import OpenAI  # type: ignore
+            from openai import OpenAI
         except Exception as e:
             print_error("Could not import OpenAI SDK. This is often caused by a pydantic/pydantic-core version mismatch.")
             print_info("Try upgrading your environment inside the venv, e.g.:")
@@ -101,7 +101,7 @@ class CancelBatchesScript(DualModeScript):
     def run_cli(self, args: Namespace) -> None:
         """Cancel batches in CLI mode with arguments."""
         try:
-            from openai import OpenAI  # type: ignore
+            from openai import OpenAI
         except Exception as e:
             print_error(f"Could not import OpenAI SDK: {e}")
             sys.exit(1)

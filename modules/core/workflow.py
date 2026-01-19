@@ -291,7 +291,8 @@ class WorkflowManager:
         """
         Process all selected items based on the user configuration.
         """
-        total_items = len(self.user_config.selected_items)
+        selected = self.user_config.selected_items or []
+        total_items = len(selected)
         print_info(f"Beginning processing of {total_items} item(s)...")
         
         # Display initial token usage if enabled
@@ -311,7 +312,7 @@ class WorkflowManager:
             )
 
         processed_count = 0
-        for idx, item in enumerate(self.user_config.selected_items, 1):
+        for idx, item in enumerate(selected, 1):
             # Check token limit before starting each new item (only for GPT method)
             if self.user_config.transcription_method == "gpt":
                 if not await check_and_wait_for_token_limit(self.concurrency_config):

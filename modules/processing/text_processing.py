@@ -65,7 +65,7 @@ def _extract_from_responses_object(data: Dict[str, Any]) -> str:
     Tries `output_text`; if missing, reconstructs from `output[*].content[].text`.
     """
     if isinstance(data, dict) and isinstance(data.get("output_text"), str):
-        return data["output_text"].strip()
+        return str(data["output_text"]).strip()
 
     parts: List[str] = []
     output = data.get("output")
@@ -81,7 +81,8 @@ def _extract_from_responses_object(data: Dict[str, Any]) -> str:
 
 def _try_parse_json(text: str) -> Optional[Dict[str, Any]]:
     try:
-        return json.loads(text)
+        result = json.loads(text)
+        return result if isinstance(result, dict) else None
     except Exception:
         return None
 

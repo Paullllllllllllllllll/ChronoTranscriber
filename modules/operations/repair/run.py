@@ -788,7 +788,7 @@ async def main() -> None:
     print_info(f"Repair log: {repair_jsonl_path.relative_to(job_sel.parent_folder)}")
 
 
-async def main_cli(args, paths_config: Dict[str, Any]) -> None:
+async def main_cli(args: Any, paths_config: Dict[str, Any]) -> None:
     """CLI mode repair workflow entrypoint.
     
     Args:

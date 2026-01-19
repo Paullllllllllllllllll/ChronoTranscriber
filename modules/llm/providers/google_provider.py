@@ -269,7 +269,7 @@ class GoogleProvider(BaseProvider):
         top_p: float = 1.0,
         top_k: Optional[int] = None,
         reasoning_config: Optional[Dict[str, Any]] = None,
-        **kwargs,
+        **kwargs: Any,
     ):
         caps = _get_model_capabilities(model)
         effective_max_tokens = int(min(max_tokens, caps.max_output_tokens))
@@ -439,8 +439,8 @@ class GoogleProvider(BaseProvider):
     
     async def _invoke_llm(
         self,
-        llm,
-        messages: List,
+        llm: Any,
+        messages: List[Any],
         invoke_kwargs: Optional[Dict[str, Any]] = None,
     ) -> TranscriptionResult:
         """Invoke the LLM and process the response.

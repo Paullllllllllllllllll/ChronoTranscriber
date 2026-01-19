@@ -24,7 +24,7 @@ class ProgressState:
     failed: int = 0
     start_time: Optional[datetime] = None
     
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.start_time is None:
             self.start_time = datetime.now()
     

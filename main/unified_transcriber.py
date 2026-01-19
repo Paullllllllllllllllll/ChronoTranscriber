@@ -50,7 +50,7 @@ from modules.llm.schema_utils import list_schema_options
 logger = setup_logger(__name__)
 
 
-def create_config_from_cli_args(args, base_input_dir: Path, base_output_dir: Path, paths_config: dict) -> UserConfiguration:
+def create_config_from_cli_args(args: Any, base_input_dir: Path, base_output_dir: Path, paths_config: dict[str, Any]) -> UserConfiguration:
     """Create UserConfiguration from CLI arguments.
     
     Args:
@@ -551,7 +551,7 @@ async def transcribe_interactive() -> None:
         )
 
 
-async def transcribe_cli(args, paths_config: dict) -> None:
+async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> None:
     """Handle CLI mode transcription workflow.
     
     Args:
@@ -649,10 +649,10 @@ async def transcribe_cli(args, paths_config: dict) -> None:
 class UnifiedTranscriberScript(AsyncDualModeScript):
     """Main script for the ChronoTranscriber application."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("unified_transcriber")
     
-    def create_argument_parser(self):
+    def create_argument_parser(self) -> Any:
         """Create argument parser for CLI mode."""
         from argparse import ArgumentParser
         return create_transcriber_parser()
@@ -661,7 +661,7 @@ class UnifiedTranscriberScript(AsyncDualModeScript):
         """Run transcription in interactive mode."""
         await transcribe_interactive()
     
-    async def run_cli(self, args) -> None:
+    async def run_cli(self, args: Any) -> None:
         """Run transcription in CLI mode."""
         try:
             await transcribe_cli(args, self.paths_config)

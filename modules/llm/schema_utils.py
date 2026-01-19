@@ -30,7 +30,8 @@ def _schemas_dir() -> Path:
 def _load_json(path: Path) -> Optional[Dict[str, Any]]:
     try:
         with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
+            result = json.load(f)
+            return result if isinstance(result, dict) else None
     except Exception as e:
         logger.warning("Failed to load schema JSON %s: %s", path, e)
         return None

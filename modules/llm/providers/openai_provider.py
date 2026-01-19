@@ -328,7 +328,7 @@ class OpenAIProvider(BaseProvider):
         presence_penalty: float = 0.0,
         service_tier: Optional[str] = None,
         reasoning_config: Optional[Dict[str, Any]] = None,
-        **kwargs,
+        **kwargs: Any,
     ):
         super().__init__(
             api_key=api_key,
@@ -523,8 +523,8 @@ class OpenAIProvider(BaseProvider):
     
     async def _invoke_llm(
         self,
-        llm,
-        messages: List,
+        llm: Any,
+        messages: List[Any],
         use_pydantic: bool = False,
     ) -> TranscriptionResult:
         """Invoke the LLM and process the response.

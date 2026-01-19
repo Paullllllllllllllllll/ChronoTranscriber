@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 from modules.infra.logger import setup_logger
 from modules.processing.tesseract_utils import is_tesseract_available

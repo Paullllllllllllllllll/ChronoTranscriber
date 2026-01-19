@@ -370,7 +370,7 @@ class AnthropicProvider(BaseProvider):
         top_p: float = 1.0,
         top_k: Optional[int] = None,
         reasoning_config: Optional[Dict[str, Any]] = None,
-        **kwargs,
+        **kwargs: Any,
     ):
         caps = _get_model_capabilities(model)
         effective_max_tokens = int(min(max_tokens, caps.max_output_tokens))
@@ -420,8 +420,8 @@ class AnthropicProvider(BaseProvider):
         
         # Initialize LangChain ChatAnthropic
         # LangChain handles retry logic with exponential backoff internally
-        self._llm = ChatAnthropic(
-            api_key=api_key,
+        self._llm = ChatAnthropic(  # type: ignore[call-arg]
+            api_key=api_key,  # type: ignore[arg-type]
             model=model,
             max_tokens=effective_max_tokens,
             timeout=timeout,
@@ -522,7 +522,7 @@ class AnthropicProvider(BaseProvider):
             # Transform schema for Anthropic compatibility (handle nullable types)
             actual_schema = _transform_schema_for_anthropic(actual_schema)
 
-            llm_to_use = self._llm.with_structured_output(
+            llm_to_use = self._llm.with_structured_output(  # type: ignore[assignment]
                 actual_schema,
                 method="json_schema",
                 include_raw=True,
@@ -533,8 +533,8 @@ class AnthropicProvider(BaseProvider):
     
     async def _invoke_llm(
         self,
-        llm,
-        messages: List,
+        llm: Any,
+        messages: List[Any],
     ) -> TranscriptionResult:
         """Invoke the LLM and process the response.
         

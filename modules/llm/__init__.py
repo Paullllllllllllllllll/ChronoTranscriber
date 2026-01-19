@@ -12,7 +12,10 @@ Note: Imports are lazy to avoid circular import issues with config_loader.
 """
 
 
-def __getattr__(name: str):
+from typing import Any
+
+
+def __getattr__(name: str) -> Any:
     """Lazy import to avoid circular dependencies."""
     if name in ("LangChainTranscriber", "open_transcriber", "transcribe_image_with_llm"):
         from modules.llm.transcriber import (

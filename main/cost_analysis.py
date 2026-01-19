@@ -36,6 +36,7 @@ from modules.ui import (
     print_error,
     prompt_yes_no,
     PromptResult,
+    NavigationAction,
 )
 from modules.ui.workflows import WorkflowUI
 from modules.ui.cost_display import display_analysis
@@ -44,7 +45,7 @@ from modules.ui.cost_display import display_analysis
 class CostAnalysisScript(DualModeScript):
     """Script for analyzing token costs from temporary .jsonl files."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("cost_analysis")
     
     def create_argument_parser(self) -> ArgumentParser:
@@ -101,7 +102,7 @@ class CostAnalysisScript(DualModeScript):
         if analysis.file_stats:
             result = prompt_yes_no("Save results as CSV?", default=True)
             
-            if result == PromptResult.YES:
+            if result.action == NavigationAction.CONTINUE and result.value:
                 # Determine output directory (use first file's directory)
                 output_dir = analysis.file_stats[0].file_path.parent
                 output_path = output_dir / "cost_analysis.csv"

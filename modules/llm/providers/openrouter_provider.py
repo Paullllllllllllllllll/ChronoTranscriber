@@ -339,7 +339,7 @@ class OpenRouterProvider(BaseProvider):
         site_url: Optional[str] = None,
         app_name: Optional[str] = None,
         reasoning_config: Optional[Dict[str, Any]] = None,
-        **kwargs,
+        **kwargs: Any,
     ):
         super().__init__(
             api_key=api_key,
@@ -436,8 +436,8 @@ class OpenRouterProvider(BaseProvider):
         # LangChain handles:
         # - Retry logic with exponential backoff (max_retries)
         # - Parameter filtering for unsupported models (disabled_params)
-        self._llm = ChatOpenAI(  # type: ignore[call-arg,arg-type]
-            api_key=api_key,
+        self._llm = ChatOpenAI(  # type: ignore[call-arg]
+            api_key=api_key,  # type: ignore[arg-type]
             model=model,
             base_url=OPENROUTER_BASE_URL,
             max_tokens=max_tokens,
@@ -575,8 +575,8 @@ class OpenRouterProvider(BaseProvider):
     
     async def _invoke_llm(
         self,
-        llm,
-        messages: List,
+        llm: Any,
+        messages: List[Any],
     ) -> TranscriptionResult:
         """Invoke the LLM and process the response.
         

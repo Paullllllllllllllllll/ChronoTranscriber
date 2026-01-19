@@ -364,7 +364,7 @@ def find_jsonl_files(paths_config: Dict, schemas_paths: Dict) -> List[Path]:
     Returns:
         List of Path objects for .jsonl files
     """
-    jsonl_files = []
+    jsonl_files: list[Path] = []
     input_is_output = paths_config.get("general", {}).get("input_paths_is_output_path", True)
     
     # Patterns to search for (both legacy *_transcription.jsonl and new *.jsonl format)

@@ -114,7 +114,7 @@ class WorkflowUI:
         """
         result = prompt_select(
             f"Which transcription method would you like to use for {config.processing_type}?",
-            WorkflowUI.get_method_options(config.processing_type),
+            WorkflowUI.get_method_options(config.processing_type or "pdfs"),
             allow_back=True
         )
         
@@ -288,15 +288,15 @@ class WorkflowUI:
             return WorkflowUI._configure_auto_mode(config, base_dir, paths_config)
         
         print_header(
-            f"DOCUMENT SELECTION — {config.processing_type.upper()}",
+            f"DOCUMENT SELECTION — {(config.processing_type or 'UNKNOWN').upper()}",
             "Choose which items to process"
         )
         
         # Display current configuration
         ui_print("  Current Settings:", PromptStyle.HIGHLIGHT)
         print_separator(PromptStyle.LIGHT_LINE, 80)
-        ui_print(f"    • Document type: {config.processing_type.capitalize()}", PromptStyle.INFO)
-        ui_print(f"    • Transcription method: {config.transcription_method.capitalize()}", PromptStyle.INFO)
+        ui_print(f"    • Document type: {(config.processing_type or 'unknown').capitalize()}", PromptStyle.INFO)
+        ui_print(f"    • Transcription method: {(config.transcription_method or 'unknown').capitalize()}", PromptStyle.INFO)
         if config.transcription_method == "gpt":
             mode = "Batch (asynchronous)" if config.use_batch_processing else "Synchronous"
             ui_print(f"    • Processing mode: {mode}", PromptStyle.INFO)
@@ -608,14 +608,14 @@ class WorkflowUI:
             item_type = "file(s)"
         
         ui_print(f"  Ready to process ", PromptStyle.INFO, end="")
-        ui_print(f"{len(config.selected_items)}", PromptStyle.HIGHLIGHT, end="")
+        ui_print(f"{len(config.selected_items or [])}", PromptStyle.HIGHLIGHT, end="")
         ui_print(f" {item_type}\n", PromptStyle.INFO)
         
         # === Processing Configuration ===
         ui_print("  Processing Configuration:", PromptStyle.HIGHLIGHT)
         print_separator(PromptStyle.LIGHT_LINE, 80)
-        ui_print(f"    • Document type: {config.processing_type.capitalize()}", PromptStyle.INFO)
-        ui_print(f"    • Transcription method: {config.transcription_method.upper()}", PromptStyle.INFO)
+        ui_print(f"    • Document type: {(config.processing_type or 'unknown').capitalize()}", PromptStyle.INFO)
+        ui_print(f"    • Transcription method: {(config.transcription_method or 'unknown').upper()}", PromptStyle.INFO)
         
         if config.transcription_method == "gpt":
             # Show batch/sync mode
@@ -712,11 +712,12 @@ class WorkflowUI:
         
         # === Selected Items ===
         ui_print("\n  Selected Items (first 5 shown):", PromptStyle.HIGHLIGHT)
-        for i, item in enumerate(config.selected_items[:5], 1):
+        selected = config.selected_items or []
+        for i, item in enumerate(selected[:5], 1):
             ui_print(f"    {i}. {item.name}", PromptStyle.DIM)
         
-        if len(config.selected_items) > 5:
-            ui_print(f"    ... and {len(config.selected_items) - 5} more", PromptStyle.DIM)
+        if len(selected) > 5:
+            ui_print(f"    ... and {len(selected) - 5} more", PromptStyle.DIM)
         
         ui_print("")
         
@@ -727,7 +728,7 @@ class WorkflowUI:
         )
         
         if result.action == NavigationAction.CONTINUE:
-            return result.value
+            return bool(result.value)
         
         return False
     

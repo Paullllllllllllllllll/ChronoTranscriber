@@ -19,6 +19,7 @@ class ConfigService:
     
     _instance: Optional[ConfigService] = None
     _lock = threading.Lock()
+    _initialized: bool = False
     
     def __new__(cls) -> ConfigService:
         if cls._instance is None:
@@ -69,9 +70,9 @@ class ConfigService:
         self._ensure_loaded()
         if self._model_config is None:
             with self._lock:
-                if self._model_config is None:
+                if self._model_config is None and self._loader is not None:
                     self._model_config = self._loader.get_model_config()
-        return self._model_config.copy()
+        return self._model_config.copy() if self._model_config else {}
     
     def get_paths_config(self) -> Dict[str, Any]:
         """Get paths configuration (cached).
@@ -82,9 +83,9 @@ class ConfigService:
         self._ensure_loaded()
         if self._paths_config is None:
             with self._lock:
-                if self._paths_config is None:
+                if self._paths_config is None and self._loader is not None:
                     self._paths_config = self._loader.get_paths_config()
-        return self._paths_config.copy()
+        return self._paths_config.copy() if self._paths_config else {}
     
     def get_concurrency_config(self) -> Dict[str, Any]:
         """Get concurrency configuration (cached).
@@ -95,9 +96,9 @@ class ConfigService:
         self._ensure_loaded()
         if self._concurrency_config is None:
             with self._lock:
-                if self._concurrency_config is None:
+                if self._concurrency_config is None and self._loader is not None:
                     self._concurrency_config = self._loader.get_concurrency_config()
-        return self._concurrency_config.copy()
+        return self._concurrency_config.copy() if self._concurrency_config else {}
     
     def get_image_processing_config(self) -> Dict[str, Any]:
         """Get image processing configuration (cached).
@@ -108,9 +109,9 @@ class ConfigService:
         self._ensure_loaded()
         if self._image_processing_config is None:
             with self._lock:
-                if self._image_processing_config is None:
+                if self._image_processing_config is None and self._loader is not None:
                     self._image_processing_config = self._loader.get_image_processing_config()
-        return self._image_processing_config.copy()
+        return self._image_processing_config.copy() if self._image_processing_config else {}
     
     def reload(self, config_path: Optional[Path] = None) -> None:
         """Force reload of all configurations.

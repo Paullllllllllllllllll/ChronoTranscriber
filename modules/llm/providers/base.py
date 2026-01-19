@@ -77,7 +77,7 @@ class TranscriptionResult:
     # Error information
     error: Optional[str] = None
     
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Parse transcription status flags from content if available."""
         if self.content and not self.parsed_output:
             try:
@@ -106,7 +106,7 @@ class BaseProvider(ABC):
         temperature: float = 0.0,
         max_tokens: int = 4096,
         timeout: Optional[float] = None,
-        **kwargs,
+        **kwargs: Any,
     ):
         """Initialize the provider.
         
@@ -195,11 +195,16 @@ class BaseProvider(ABC):
         """Clean up resources (e.g., HTTP sessions)."""
         pass
     
-    async def __aenter__(self):
+    async def __aenter__(self) -> "BaseProvider":
         """Async context manager entry."""
         return self
     
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[Any],
+    ) -> bool:
         """Async context manager exit."""
         await self.close()
         return False

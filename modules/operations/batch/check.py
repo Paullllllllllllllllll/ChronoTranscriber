@@ -130,7 +130,7 @@ def _process_non_openai_batch(
     # Display progress
     display_batch_processing_progress(
         temp_file=temp_file,
-        batch_ids=batch_ids,
+        batch_ids=list(batch_ids),
         completed_count=completed_count,
         missing_count=0,
     )
@@ -313,7 +313,7 @@ def process_all_batches(
     try:
         batches = list_all_batches(client)
         batch_dict: Dict[str, Dict[str, Any]] = {
-            b.get("id"): b for b in batches if isinstance(b, dict) and b.get("id")
+            str(b.get("id")): b for b in batches if isinstance(b, dict) and b.get("id")
         }
     except Exception as e:
         print_error(f"Failed to retrieve batches from OpenAI: {e}")
@@ -523,7 +523,7 @@ def process_all_batches(
         # Display progress information for this temp file (standardized UI helper)
         display_batch_processing_progress(
             temp_file=temp_file,
-            batch_ids=batch_ids,
+            batch_ids=list(batch_ids),
             completed_count=completed_count,
             missing_count=len(missing_batches),
         )

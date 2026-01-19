@@ -417,7 +417,7 @@ class GoogleProvider(BaseProvider):
             else:
                 actual_schema = json_schema
             
-            llm_to_use = self._llm.with_structured_output(
+            llm_to_use = self._llm.with_structured_output(  # type: ignore[assignment]
                 actual_schema,
                 method="json_schema",
                 include_raw=True,
@@ -426,7 +426,7 @@ class GoogleProvider(BaseProvider):
         # Apply media_resolution if supported
         # LangChain's ChatGoogleGenerativeAI doesn't directly expose generation_config,
         # so we pass it via model_kwargs if needed
-        invoke_kwargs = {}
+        invoke_kwargs: Dict[str, Any] = {}
         if media_resolution_enum and caps.supports_media_resolution:
             # For LangChain, we can't easily set per-request generation config
             # Log the resolution for debugging

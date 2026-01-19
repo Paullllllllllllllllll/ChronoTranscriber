@@ -93,7 +93,7 @@ def check_system_requirements() -> Dict[str, Tuple[bool, str]]:
     return checks
 
 
-def diagnose_api_connectivity() -> Dict[str, any]:
+def diagnose_api_connectivity() -> Dict[str, Any]:
     """Diagnose OpenAI API connectivity.
     
     Returns:

@@ -436,7 +436,7 @@ class OpenRouterProvider(BaseProvider):
         # LangChain handles:
         # - Retry logic with exponential backoff (max_retries)
         # - Parameter filtering for unsupported models (disabled_params)
-        self._llm = ChatOpenAI(
+        self._llm = ChatOpenAI(  # type: ignore[call-arg,arg-type]
             api_key=api_key,
             model=model,
             base_url=OPENROUTER_BASE_URL,
@@ -448,10 +448,10 @@ class OpenRouterProvider(BaseProvider):
             **model_kwargs,
         )
     
-    def _build_disabled_params(self) -> Dict[str, Any]:
+    def _build_disabled_params(self) -> Dict[str, Any] | None:
         """Build disabled_params dict based on model capabilities."""
         caps = self._capabilities
-        disabled = {}
+        disabled: Dict[str, Any] = {}
         
         if not caps.supports_temperature:
             disabled["temperature"] = None
@@ -559,7 +559,7 @@ class OpenRouterProvider(BaseProvider):
             # Note: Not all OpenRouter models support structured output
             # For those that do, use json_mode method as it's more widely supported
             try:
-                llm_to_use = self._llm.with_structured_output(
+                llm_to_use = self._llm.with_structured_output(  # type: ignore[assignment]
                     actual_schema,
                     method="json_mode",
                     include_raw=True,

@@ -445,7 +445,7 @@ class WorkflowManager:
         output_dir = pdf_path.parent if self.use_input_as_output else self.pdf_output_dir
         parent_folder, output_txt_path, temp_jsonl_path = pdf_processor.prepare_output_folder(
             output_dir)
-        method = self.user_config.transcription_method
+        method: str = self.user_config.transcription_method or "gpt"
 
         print_info(f"Processing PDF: {pdf_path.name}")
         print_info(f"Using method: {method}")
@@ -589,7 +589,7 @@ class WorkflowManager:
         output_dir = folder if self.use_input_as_output else self.image_output_dir
         parent_folder, preprocessed_folder, temp_jsonl_path, output_txt_path = ImageProcessor.prepare_image_folder(
             folder, output_dir)
-        method = self.user_config.transcription_method
+        method: str = self.user_config.transcription_method or "gpt"
 
         print_info(f"Processing folder: {folder.name}")
         print_info(f"Using method: {method}")
@@ -704,6 +704,7 @@ class WorkflowManager:
             Returns a tuple containing the image path, image name, and the transcription result.
             """
             image_name = img_path.name
+            final_text: Optional[str] = None
             try:
                 if method == "gpt":
                     if not trans:

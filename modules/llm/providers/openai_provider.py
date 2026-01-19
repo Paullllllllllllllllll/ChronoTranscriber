@@ -386,16 +386,16 @@ class OpenAIProvider(BaseProvider):
             llm_kwargs["frequency_penalty"] = frequency_penalty
             llm_kwargs["presence_penalty"] = presence_penalty
         
-        self._llm = ChatOpenAI(**llm_kwargs)
+        self._llm = ChatOpenAI(**llm_kwargs)  # type: ignore[arg-type]
     
-    def _build_disabled_params(self) -> Dict[str, Any]:
+    def _build_disabled_params(self) -> Dict[str, Any] | None:
         """Build disabled_params dict based on model capabilities.
         
         LangChain's disabled_params feature automatically filters out
         unsupported parameters before sending to the API.
         """
         caps = self._capabilities
-        disabled = {}
+        disabled: Dict[str, Any] = {}
         
         # Disable sampler controls for reasoning models
         if not caps.supports_temperature:
@@ -500,7 +500,7 @@ class OpenAIProvider(BaseProvider):
             # Use include_raw=True to get token usage from the underlying AIMessage
             try:
                 from modules.llm.schemas import TranscriptionOutput
-                llm_to_use = self._llm.with_structured_output(
+                llm_to_use = self._llm.with_structured_output(  # type: ignore[assignment]
                     TranscriptionOutput,
                     include_raw=True,
                 )
@@ -511,7 +511,7 @@ class OpenAIProvider(BaseProvider):
                     actual_schema = json_schema["schema"]
                 else:
                     actual_schema = json_schema
-                llm_to_use = self._llm.with_structured_output(
+                llm_to_use = self._llm.with_structured_output(  # type: ignore[assignment]
                     actual_schema,
                     method="json_schema",
                     strict=True,

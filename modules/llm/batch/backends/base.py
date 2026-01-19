@@ -103,14 +103,14 @@ class BatchResultItem:
     def no_transcribable_text(self) -> bool:
         """Check if result indicates no transcribable text."""
         if self.parsed_output and isinstance(self.parsed_output, dict):
-            return self.parsed_output.get("no_transcribable_text", False)
+            return bool(self.parsed_output.get("no_transcribable_text", False))
         return False
     
     @property
     def transcription_not_possible(self) -> bool:
         """Check if result indicates transcription not possible."""
         if self.parsed_output and isinstance(self.parsed_output, dict):
-            return self.parsed_output.get("transcription_not_possible", False)
+            return bool(self.parsed_output.get("transcription_not_possible", False))
         return False
 
 

@@ -65,10 +65,10 @@ class AutoSelector:
         Returns:
             Tuple of (pdf_files, image_files, epub_files, mobi_files)
         """
-        pdfs = []
-        images = []
-        epubs = []
-        mobis = []
+        pdfs: list[Path] = []
+        images: list[Path] = []
+        epubs: list[Path] = []
+        mobis: list[Path] = []
         
         if not input_dir.exists() or not input_dir.is_dir():
             logger.warning(f"Input directory does not exist or is not a directory: {input_dir}")

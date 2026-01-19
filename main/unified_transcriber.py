@@ -16,6 +16,7 @@ import logging
 import traceback
 from pathlib import Path
 from copy import deepcopy
+from typing import Any
 
 _project_root = Path(__file__).resolve().parents[1]
 if str(_project_root) not in sys.path:
@@ -315,7 +316,8 @@ async def process_auto_mode(
         print_warning("No auto mode decisions available. Nothing to process.")
         return
 
-    output_dir = user_config.selected_items[0]  # Default output directory
+    selected = user_config.selected_items or []
+    output_dir = selected[0] if selected else Path.cwd()  # Default output directory
 
     selector = user_config.auto_selector or AutoSelector(paths_config)
     user_config.auto_selector = selector
@@ -325,7 +327,7 @@ async def process_auto_mode(
     use_input_as_output = paths_config.get('general', {}).get('input_paths_is_output_path', False)
     
     # Group decisions by method for efficient processing
-    by_method = {}
+    by_method: dict[str, list[Any]] = {}
     for decision in decisions:
         if decision.method not in by_method:
             by_method[decision.method] = []
@@ -513,7 +515,7 @@ async def transcribe_interactive() -> None:
     
     # Track processing time
     start_time = time.time()
-    processed_count = len(user_config.selected_items)
+    processed_count = len(user_config.selected_items or [])
     failed_count = 0
     
     # Process documents

@@ -41,7 +41,7 @@ class UserConfiguration:
     processing_type: Optional[str] = None
     transcription_method: Optional[str] = None
     use_batch_processing: bool = False
-    selected_items: List[Path] = None
+    selected_items: List[Path] | None = None
     process_all: bool = False
     selected_schema_name: Optional[str] = None
     selected_schema_path: Optional[Path] = None
@@ -73,5 +73,5 @@ class UserConfiguration:
             f"Processing type: {self.processing_type}, "
             f"Method: {method_name}{batch_text}{schema_text}, "
             f"Process all: {self.process_all}, "
-            f"Selected items: {len(self.selected_items)}"
+            f"Selected items: {len(self.selected_items or [])}"
         )

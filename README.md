@@ -63,7 +63,7 @@ Fully offline processing with configurable engine modes, page segmentation, and 
 
 ### Intelligent Capability Management
 
-Automatic model capability detection. Reasoning models (GPT-5, o-series, Claude 4.5) have temperature/top_p automatically disabled. LangChain handles retry logic, token tracking, and structured output parsing.
+Automatic model capability detection. OpenAI reasoning models (GPT-5 and o-series) do not support sampler controls like `temperature`/`top_p`, and ChronoTranscriber filters unsupported parameters automatically. LangChain handles retry logic, token tracking, and structured output parsing.
 
 ### Hierarchical Context Resolution
 
@@ -143,8 +143,8 @@ Environment variable: `OPENROUTER_API_KEY`
 
 ### Model-Specific Features
 
-- **Reasoning Models** (GPT-5, o-series, Claude 4.5, Gemini 3): Support reasoning effort controls; temperature/sampling automatically disabled
-- **Classic Models** (GPT-4o, GPT-4.1, Claude 3.5, Gemini 2.0): Support temperature, top_p, frequency_penalty, presence_penalty
+- **Reasoning / thinking controls**: Provider-specific controls for internal reasoning (OpenAI `reasoning.effort`, Anthropic extended thinking via `thinking.budget_tokens`, Google `thinkingConfig` / thinking level). Availability and valid values differ by model.
+- **Sampler controls**: `temperature`/`top_p` are supported on most non-reasoning models. OpenAI reasoning models don’t support these controls. For Anthropic, extended thinking isn’t compatible with changing `temperature` or `top_k`.
 - **Automatic Capability Detection**: Unsupported parameters filtered before API calls
 
 ## System Requirements
@@ -410,17 +410,24 @@ transcription_model:
   name: gpt-5-mini
   max_output_tokens: 128000
   
-  # Reasoning models only (GPT-5, o-series, Claude 4.5, Gemini 3)
+  # Reasoning / thinking controls.
+  # OpenAI: sent as `reasoning: { effort: ... }` in the Responses API (and as `reasoning_effort` in Chat Completions); supported values are model-dependent.
+  # Anthropic: mapped to `thinking: { type: "enabled", budget_tokens: ... }`.
+  # Google: mapped to the Gemini thinking configuration (thinking level/budget).
   reasoning:
-    effort: medium  # Options: low, medium, high
+    effort: medium  # Default cross-provider preset. For OpenAI, valid values also include `none`, `minimal`, and `xhigh` (model-dependent).
   
-  # GPT-5 only
+  # OpenAI GPT-5 family only (Responses API): controls verbosity of the model's response.
   text:
     verbosity: medium  # Options: low, medium, high
   
-  # Classic models only (automatically disabled for reasoning models)
+  # Sampler controls (only applied when supported by the selected provider/model).
+  # OpenAI: temperature range 0.0–2.0.
+  # Anthropic: temperature range 0.0–1.0.
+  # Google: temperature range 0.0–2.0.
   temperature: 0.01
   top_p: 1.0
+  # OpenAI only (Chat Completions): frequency/presence penalties range -2.0–2.0.
   frequency_penalty: 0.01
   presence_penalty: 0.01
 ```
@@ -428,9 +435,18 @@ transcription_model:
 **Key Parameters**:
 - `provider`: AI provider (auto-detected if not specified)
 - `name`: Model identifier
-- `max_output_tokens`: Maximum tokens per request
-- `reasoning.effort`: Reasoning depth (low/medium/high)
-- `temperature`, `top_p`: Automatically disabled for reasoning models
+- `max_output_tokens`: Maximum tokens per request. For OpenAI reasoning models, this budget must cover both visible output and internal reasoning tokens (insufficient budget can yield an `incomplete` response).
+- `reasoning.effort`: Cross-provider reasoning preset used by ChronoTranscriber.
+  - OpenAI supports additional values such as `none`, `minimal`, and `xhigh` depending on the model.
+- `text.verbosity`: OpenAI GPT-5 family output verbosity (`low` | `medium` | `high`).
+- `temperature`, `top_p`: Sampling controls (only used when supported by the selected provider/model).
+- `frequency_penalty`, `presence_penalty`: OpenAI Chat Completions sampling penalties (range -2.0–2.0).
+
+References:
+- OpenAI reasoning: https://platform.openai.com/docs/guides/reasoning
+- OpenAI Chat Completions parameters (incl. `verbosity` / `reasoning_effort` / penalties): https://platform.openai.com/docs/api-reference/chat/create
+- Anthropic Messages + extended thinking: https://platform.claude.com/docs/en/api/messages/create and https://platform.claude.com/docs/en/build-with-claude/extended-thinking
+- Google GenerationConfig (temperature 0.0–2.0, etc.): https://ai.google.dev/api/rest/v1/GenerationConfig
 
 ### 2. Paths Configuration (`paths_config.yaml`)
 

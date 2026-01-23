@@ -691,7 +691,46 @@ class WorkflowManager:
     ) -> None:
         """
         Helper method to process images using the specified method.
+        Skips images that have already been successfully processed (exist in JSONL).
         """
+        # Load already-processed image names from existing JSONL to avoid duplicates
+        already_processed: set[str] = set()
+        if temp_jsonl_path.exists():
+            try:
+                with temp_jsonl_path.open("r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            record = json.loads(line)
+                            # Skip metadata records (batch_session, image_metadata, batch_tracking)
+                            if any(k in record for k in ("batch_session", "image_metadata", "batch_tracking")):
+                                continue
+                            # Only count as processed if it has a valid transcription
+                            img_name = record.get("image_name")
+                            text_chunk = record.get("text_chunk")
+                            if img_name and text_chunk is not None:
+                                already_processed.add(img_name)
+                        except json.JSONDecodeError:
+                            continue
+            except Exception as e:
+                logger.warning(f"Could not read existing JSONL for skip detection: {e}")
+        
+        # Filter out already-processed images
+        if already_processed:
+            original_count = len(image_files)
+            image_files = [img for img in image_files if img.name not in already_processed]
+            skipped_count = original_count - len(image_files)
+            if skipped_count > 0:
+                print_info(f"Skipping {skipped_count} already-processed images (found in JSONL)")
+                logger.info(f"Skipped {skipped_count} images already in {temp_jsonl_path.name}")
+        
+        if not image_files:
+            print_info("All images already processed. Regenerating output file from JSONL...")
+            # Still need to regenerate the output text file from existing JSONL
+            await self._regenerate_output_from_jsonl(temp_jsonl_path, output_txt_path, source_name, is_folder)
+            return
 
         async def transcribe_single_image_task(
                 img_path: Path,
@@ -740,6 +779,10 @@ class WorkflowManager:
                     order_index
                 )
 
+        # Build a mapping from image name to original order index for correct ordering
+        # We need to preserve the original page order even when resuming
+        all_image_names = {img.name: idx for idx, img in enumerate(image_files)}
+        
         # Set up args for processing
         if method == "gpt":
             args_list = [
@@ -751,9 +794,9 @@ class WorkflowManager:
                      .get('tesseract_image_processing', {})
                      .get('ocr', {})
                      .get('tesseract_config', "--oem 3 --psm 6")),
-                    idx,
+                    all_image_names[img.name],  # Use original index for correct ordering
                 )
-                for idx, img in enumerate(image_files)
+                for img in image_files
             ]
         else:
             args_list = [
@@ -765,9 +808,9 @@ class WorkflowManager:
                      .get('tesseract_image_processing', {})
                      .get('ocr', {})
                      .get('tesseract_config', "--oem 3 --psm 6")),
-                    idx,
+                    all_image_names[img.name],  # Use original index for correct ordering
                 )
-                for idx, img in enumerate(image_files)
+                for img in image_files
             ]
 
         transcription_conf = self.concurrency_config.get("concurrency", {}).get(
@@ -874,3 +917,56 @@ class WorkflowManager:
                 f"Error writing combined transcription output for {source_name}: {e}")
             print_error(f"Failed to write combined output for {source_name}.")
             return
+
+    async def _regenerate_output_from_jsonl(
+            self,
+            temp_jsonl_path: Path,
+            output_txt_path: Path,
+            source_name: str,
+            is_folder: bool = False
+    ) -> None:
+        """
+        Regenerate the output text file from existing JSONL records.
+        Used when all images are already processed and we just need to rebuild the output.
+        """
+        try:
+            records = []
+            with temp_jsonl_path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                        # Skip metadata records
+                        if any(k in record for k in ("batch_session", "image_metadata", "batch_tracking")):
+                            continue
+                        # Only include records with valid transcription
+                        if record.get("image_name") and record.get("text_chunk") is not None:
+                            records.append(record)
+                    except json.JSONDecodeError:
+                        continue
+            
+            if not records:
+                print_warning(f"No valid transcription records found in {temp_jsonl_path.name}")
+                return
+            
+            # Sort by order_index for correct page order
+            ordered = sorted(records, key=lambda r: r.get("order_index", 0))
+            
+            lines: List[str] = []
+            for record in ordered:
+                image_name = record.get("image_name", "")
+                text_chunk = record.get("text_chunk", "")
+                order_index = record.get("order_index", 0)
+                page_number = int(order_index) + 1 if isinstance(order_index, int) else None
+                lines.append(format_page_line(text_chunk, page_number, image_name))
+            
+            combined_text = "\n".join(lines)
+            # Apply post-processing if enabled
+            processed_text = postprocess_transcription(combined_text, self.postprocessing_config)
+            output_txt_path.write_text(processed_text, encoding='utf-8')
+            print_success(f"Regenerated output file: {output_txt_path.name}")
+        except Exception as e:
+            logger.exception(f"Error regenerating output from JSONL for {source_name}: {e}")
+            print_error(f"Failed to regenerate output for {source_name}.")

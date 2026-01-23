@@ -365,6 +365,11 @@ class OpenAIProvider(BaseProvider):
             "disabled_params": disabled_params,
         }
         
+        # Pass service_tier to LangChain (OpenAI API supports auto/default/flex/priority)
+        if service_tier:
+            llm_kwargs["service_tier"] = service_tier
+            logger.info(f"Using service_tier={service_tier} for model {model}")
+        
         # For reasoning models (GPT-5, o-series), use max_completion_tokens instead of max_tokens
         # and skip sampler parameters which are not supported
         caps = self._capabilities

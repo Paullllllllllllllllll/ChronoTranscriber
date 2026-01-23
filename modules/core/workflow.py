@@ -31,6 +31,11 @@ from modules.infra.concurrency import run_concurrent_transcription_tasks
 from modules.processing.text_processing import extract_transcribed_text, format_page_line
 from modules.processing.postprocess import postprocess_transcription
 from modules.core.token_guard import check_and_wait_for_token_limit
+from modules.operations.jsonl_utils import (
+    get_processed_image_names,
+    read_jsonl_records,
+    extract_transcription_records,
+)
 
 logger = setup_logger(__name__)
 
@@ -694,28 +699,7 @@ class WorkflowManager:
         Skips images that have already been successfully processed (exist in JSONL).
         """
         # Load already-processed image names from existing JSONL to avoid duplicates
-        already_processed: set[str] = set()
-        if temp_jsonl_path.exists():
-            try:
-                with temp_jsonl_path.open("r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            record = json.loads(line)
-                            # Skip metadata records (batch_session, image_metadata, batch_tracking)
-                            if any(k in record for k in ("batch_session", "image_metadata", "batch_tracking")):
-                                continue
-                            # Only count as processed if it has a valid transcription
-                            img_name = record.get("image_name")
-                            text_chunk = record.get("text_chunk")
-                            if img_name and text_chunk is not None:
-                                already_processed.add(img_name)
-                        except json.JSONDecodeError:
-                            continue
-            except Exception as e:
-                logger.warning(f"Could not read existing JSONL for skip detection: {e}")
+        already_processed = get_processed_image_names(temp_jsonl_path)
         
         # Filter out already-processed images
         if already_processed:
@@ -728,8 +712,7 @@ class WorkflowManager:
         
         if not image_files:
             print_info("All images already processed. Regenerating output file from JSONL...")
-            # Still need to regenerate the output text file from existing JSONL
-            await self._regenerate_output_from_jsonl(temp_jsonl_path, output_txt_path, source_name, is_folder)
+            self._write_output_from_jsonl(temp_jsonl_path, output_txt_path)
             return
 
         async def transcribe_single_image_task(
@@ -918,41 +901,26 @@ class WorkflowManager:
             print_error(f"Failed to write combined output for {source_name}.")
             return
 
-    async def _regenerate_output_from_jsonl(
-            self,
-            temp_jsonl_path: Path,
-            output_txt_path: Path,
-            source_name: str,
-            is_folder: bool = False
-    ) -> None:
-        """
-        Regenerate the output text file from existing JSONL records.
-        Used when all images are already processed and we just need to rebuild the output.
+    def _write_output_from_jsonl(self, jsonl_path: Path, output_path: Path) -> bool:
+        """Write combined output text from JSONL transcription records.
+        
+        Args:
+            jsonl_path: Path to JSONL file with transcription records.
+            output_path: Path to write combined text output.
+            
+        Returns:
+            True if successful, False otherwise.
         """
         try:
-            records = []
-            with temp_jsonl_path.open("r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        record = json.loads(line)
-                        # Skip metadata records
-                        if any(k in record for k in ("batch_session", "image_metadata", "batch_tracking")):
-                            continue
-                        # Only include records with valid transcription
-                        if record.get("image_name") and record.get("text_chunk") is not None:
-                            records.append(record)
-                    except json.JSONDecodeError:
-                        continue
+            records = read_jsonl_records(jsonl_path)
+            transcriptions = extract_transcription_records(records, deduplicate=True)
             
-            if not records:
-                print_warning(f"No valid transcription records found in {temp_jsonl_path.name}")
-                return
+            if not transcriptions:
+                print_warning(f"No valid transcription records found in {jsonl_path.name}")
+                return False
             
             # Sort by order_index for correct page order
-            ordered = sorted(records, key=lambda r: r.get("order_index", 0))
+            ordered = sorted(transcriptions, key=lambda r: r.get("order_index", 0))
             
             lines: List[str] = []
             for record in ordered:
@@ -963,10 +931,11 @@ class WorkflowManager:
                 lines.append(format_page_line(text_chunk, page_number, image_name))
             
             combined_text = "\n".join(lines)
-            # Apply post-processing if enabled
             processed_text = postprocess_transcription(combined_text, self.postprocessing_config)
-            output_txt_path.write_text(processed_text, encoding='utf-8')
-            print_success(f"Regenerated output file: {output_txt_path.name}")
+            output_path.write_text(processed_text, encoding='utf-8')
+            print_success(f"Output written: {output_path.name}")
+            return True
         except Exception as e:
-            logger.exception(f"Error regenerating output from JSONL for {source_name}: {e}")
-            print_error(f"Failed to regenerate output for {source_name}.")
+            logger.exception(f"Error writing output from JSONL {jsonl_path.name}: {e}")
+            print_error(f"Failed to write output from {jsonl_path.name}.")
+            return False

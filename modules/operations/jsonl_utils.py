@@ -108,6 +108,58 @@ def extract_batch_ids(records: List[Dict[str, Any]]) -> List[str]:
     return batch_ids
 
 
+def extract_transcription_records(
+    records: List[Dict[str, Any]],
+    deduplicate: bool = True,
+) -> List[Dict[str, Any]]:
+    """Extract transcription records from JSONL, filtering out metadata.
+    
+    Args:
+        records: List of JSONL records.
+        deduplicate: If True, keep only the latest record per image_name.
+        
+    Returns:
+        List of transcription records with image_name and text_chunk.
+    """
+    # Filter out metadata records
+    METADATA_KEYS = ("batch_session", "image_metadata", "batch_tracking")
+    transcription_records = []
+    
+    for record in records:
+        # Skip metadata records
+        if any(k in record for k in METADATA_KEYS):
+            continue
+        # Only include records with valid transcription
+        if record.get("image_name") and record.get("text_chunk") is not None:
+            transcription_records.append(record)
+    
+    if deduplicate and transcription_records:
+        # Keep latest record per image_name (last occurrence wins)
+        by_image: Dict[str, Dict[str, Any]] = {}
+        for record in transcription_records:
+            by_image[record["image_name"]] = record
+        transcription_records = list(by_image.values())
+    
+    return transcription_records
+
+
+def get_processed_image_names(jsonl_path: Path) -> set[str]:
+    """Get set of image names that have been successfully processed.
+    
+    Args:
+        jsonl_path: Path to JSONL file.
+        
+    Returns:
+        Set of image names with valid transcriptions.
+    """
+    if not jsonl_path.exists():
+        return set()
+    
+    records = read_jsonl_records(jsonl_path)
+    transcriptions = extract_transcription_records(records, deduplicate=False)
+    return {r["image_name"] for r in transcriptions}
+
+
 def is_batch_jsonl(jsonl_path: Path) -> bool:
     """Check if a JSONL file contains batch processing markers.
     

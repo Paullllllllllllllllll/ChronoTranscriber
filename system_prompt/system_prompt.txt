@@ -6,7 +6,7 @@ Analyze the provided image and output a transcription that conforms to the JSON 
 Guidelines:
 - Always attempt transcription, even if imperfect.
 - If the page is completely empty or truly impossible to transcribe, set the appropriate boolean flag (transcription_not_possible or no_transcribable_text) to true.
-- If additional context is provided below, use it to guide the transcription process.
+- Use any additional context provided below to guide transcription.
 - Output only valid JSON—no additional text, explanations, or code comments.
 
 Additional context:

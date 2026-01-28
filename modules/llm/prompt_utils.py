@@ -87,7 +87,7 @@ def inject_additional_context(prompt_text: str, context: str) -> str:
         patterns = [
             r"Additional context:\s*\n\s*\{\{ADDITIONAL_CONTEXT\}\}\s*\n?",
             r"Additional context:\s*\{\{ADDITIONAL_CONTEXT\}\}\s*\n?",
-            r"- If additional context is provided below, use it to guide the transcription process\.\s*\n?",
+            r"- Use any additional context provided below to guide transcription\.\s*\n?",
         ]
         
         result = prompt_text

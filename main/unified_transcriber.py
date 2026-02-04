@@ -93,6 +93,29 @@ def create_config_from_cli_args(args: Any, base_input_dir: Path, base_output_dir
         # Set output directory for auto mode
         config.selected_items = [auto_output]  # Store output path
         
+        # Handle schema selection for auto mode (applies to GPT files)
+        if args.schema:
+            options = list_schema_options()
+            schema_dict = {name: path for name, path in options}
+            if args.schema in schema_dict:
+                config.selected_schema_name = args.schema
+                config.selected_schema_path = schema_dict[args.schema]
+            else:
+                raise ValueError(f"Schema '{args.schema}' not found. Available: {list(schema_dict.keys())}")
+        else:
+            # Use default schema for auto mode GPT files
+            default_schema = (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json").resolve()
+            config.selected_schema_name = "markdown_transcription_schema"
+            config.selected_schema_path = default_schema
+        
+        # Handle additional context for auto mode
+        if args.context:
+            context_path = resolve_path(args.context, PROJECT_ROOT)
+            validate_input_path(context_path)
+            config.additional_context_path = context_path
+        else:
+            config.additional_context_path = None
+        
         return config
     
     # Validate non-auto mode has required arguments
@@ -278,17 +301,29 @@ async def configure_user_workflow_interactive(
                 base_dir = epub_input_dir
 
             if WorkflowUI.select_items_for_processing(config, base_dir, paths_config):
-                current_step = "summary"
+                # Auto mode needs schema selection if GPT files detected
+                if config.processing_type == "auto":
+                    current_step = "auto_schema_selection"
+                else:
+                    current_step = "summary"
             else:
                 # Auto mode goes back to processing_type, others to batch_processing
                 current_step = "processing_type" if config.processing_type == "auto" else "batch_processing"
+        
+        elif current_step == "auto_schema_selection":
+            # Schema selection for auto mode (when GPT files are detected)
+            if WorkflowUI.configure_auto_mode_schema(config):
+                current_step = "summary"
+            else:
+                current_step = "item_selection"
         
         elif current_step == "summary":
             confirmed = WorkflowUI.display_processing_summary(config)
             if confirmed:
                 return config
             else:
-                current_step = "item_selection"
+                # Go back to schema selection for auto mode, item_selection for others
+                current_step = "auto_schema_selection" if config.processing_type == "auto" else "item_selection"
 
 
 async def process_auto_mode(
@@ -400,9 +435,11 @@ async def process_auto_mode(
             workflow_manager.epub_output_dir = output_dir
         transcriber = None
         if method == "gpt":
-            # Use default schema for auto mode
+            # Use schema from user config (set in interactive or CLI mode)
             from modules.config.config_loader import PROJECT_ROOT
-            default_schema = (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json").resolve()
+            schema_path = user_config.selected_schema_path
+            if schema_path is None:
+                schema_path = (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json").resolve()
             
             # Support additional context in auto mode - use user config or global default
             context_path = user_config.additional_context_path
@@ -416,7 +453,7 @@ async def process_auto_mode(
             async with open_transcriber(
                 api_key=None,  # Factory will get correct key based on provider
                 model=model_config.get("transcription_model", {}).get("name", "gpt-4o"),
-                schema_path=default_schema,
+                schema_path=schema_path,
                 additional_context_path=context_path,
             ) as t:
                 transcriber = t

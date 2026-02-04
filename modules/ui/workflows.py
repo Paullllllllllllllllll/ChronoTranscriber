@@ -273,6 +273,39 @@ class WorkflowUI:
         return True
     
     @staticmethod
+    def configure_auto_mode_schema(config: UserConfiguration) -> bool:
+        """Configure schema and context for auto mode when GPT files are detected.
+        
+        This method checks if any GPT transcription will occur in auto mode
+        and prompts for schema selection if so.
+        
+        Args:
+            config: UserConfiguration object with auto_decisions populated
+        
+        Returns:
+            True if configured successfully, False if user wants to go back
+        """
+        # Check if any decisions will use GPT
+        decisions = config.auto_decisions or []
+        gpt_decisions = [d for d in decisions if d.method == "gpt"]
+        
+        if not gpt_decisions:
+            # No GPT processing, skip schema selection
+            return True
+        
+        print_header("GPT TRANSCRIPTION SETTINGS", f"{len(gpt_decisions)} file(s) will use GPT transcription")
+        
+        # Configure schema
+        if not WorkflowUI.configure_schema_selection(config):
+            return False
+        
+        # Configure additional context
+        if not WorkflowUI.configure_additional_context(config):
+            return False
+        
+        return True
+    
+    @staticmethod
     def select_items_for_processing(
         config: UserConfiguration,
         base_dir: Path,

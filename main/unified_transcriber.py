@@ -65,14 +65,9 @@ def create_config_from_cli_args(args: Any, base_input_dir: Path, base_output_dir
     config = UserConfiguration()
     config.auto_selector = AutoSelector(paths_config)
 
-    # Resolve resume mode: CLI flags override config setting
-    config_resume = paths_config.get("general", {}).get("resume_mode", "skip")
+    # Resume mode: default is 'skip'; --force/--overwrite switches to 'overwrite'
     if getattr(args, "force", None):
         config.resume_mode = "overwrite"
-    elif getattr(args, "resume", None):
-        config.resume_mode = "skip"
-    else:
-        config.resume_mode = config_resume
 
     # Handle auto mode
     if args.auto:
@@ -269,7 +264,6 @@ async def configure_user_workflow_interactive(
         UserConfiguration object with all settings
     """
     config = UserConfiguration()
-    config.resume_mode = paths_config.get("general", {}).get("resume_mode", "skip")
     
     # Display welcome banner
     WorkflowUI.display_welcome()

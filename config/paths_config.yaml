@@ -31,15 +31,6 @@ general:
   keep_preprocessed_images: false
 
   # -------------------------------------------------------------------------
-  # Resume Behavior
-  # -------------------------------------------------------------------------
-  # Controls what happens when output files already exist for an input file.
-  #   skip:      Skip files whose output .txt already exists and is non-empty.
-  #   overwrite: Always reprocess, overwriting any existing output.
-  # CLI flags --resume / --force (--overwrite) override this setting.
-  resume_mode: skip
-
-  # -------------------------------------------------------------------------
   # Output Path Behavior
   # -------------------------------------------------------------------------
   # When true: output files are written next to input files.

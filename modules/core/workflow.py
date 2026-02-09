@@ -349,6 +349,7 @@ class WorkflowManager:
             )
 
         processed_count = 0
+        failed_count = 0
         for idx, item in enumerate(selected, 1):
             # Check token limit before starting each new item (only for GPT method)
             if self.user_config.transcription_method == "gpt":
@@ -360,32 +361,37 @@ class WorkflowManager:
             
             print_info(f"Processing item {idx}/{total_items}: {item.name}")
 
-            if self.user_config.processing_type == "images":
-                # Process image folder
-                await self.process_single_image_folder(
-                    item,
-                    transcriber
-                )
-            elif self.user_config.processing_type == "pdfs":
-                # Process PDF file
-                await self.process_single_pdf(
-                    item,
-                    transcriber
-                )
-            elif self.user_config.processing_type == "epubs":
-                await self.process_single_epub(item)
-            elif self.user_config.processing_type == "mobis":
-                await self.process_single_mobi(item)
-            else:
-                # Fallback - try to detect type from extension
-                suffix = item.suffix.lower()
-                if suffix == ".epub":
+            try:
+                if self.user_config.processing_type == "images":
+                    # Process image folder
+                    await self.process_single_image_folder(
+                        item,
+                        transcriber
+                    )
+                elif self.user_config.processing_type == "pdfs":
+                    # Process PDF file
+                    await self.process_single_pdf(
+                        item,
+                        transcriber
+                    )
+                elif self.user_config.processing_type == "epubs":
                     await self.process_single_epub(item)
-                elif suffix == ".mobi" or suffix in {".azw", ".azw3", ".kfx"}:
+                elif self.user_config.processing_type == "mobis":
                     await self.process_single_mobi(item)
                 else:
-                    logger.warning(f"Unknown processing type for item: {item}")
-                    print_warning(f"Skipping unknown file type: {item.name}")
+                    # Fallback - try to detect type from extension
+                    suffix = item.suffix.lower()
+                    if suffix == ".epub":
+                        await self.process_single_epub(item)
+                    elif suffix == ".mobi" or suffix in {".azw", ".azw3", ".kfx"}:
+                        await self.process_single_mobi(item)
+                    else:
+                        logger.warning(f"Unknown processing type for item: {item}")
+                        print_warning(f"Skipping unknown file type: {item.name}")
+            except Exception as e:
+                failed_count += 1
+                logger.exception(f"Failed to process item {idx}/{total_items} ({item.name}): {e}")
+                print_error(f"Failed to process '{item.name}': {e}")
 
             processed_count += 1
             print_info(f"Completed item {idx}/{total_items}")
@@ -400,7 +406,12 @@ class WorkflowManager:
                     f"({stats['usage_percentage']:.1f}%)"
                 )
 
-        print_info(f"All {processed_count}/{total_items} item(s) processed successfully.")
+        if failed_count > 0:
+            print_warning(
+                f"Processed {processed_count}/{total_items} item(s) with {failed_count} failure(s)."
+            )
+        else:
+            print_info(f"All {processed_count}/{total_items} item(s) processed successfully.")
         
         # Final token usage statistics
         if token_cfg.get("enabled", False) and self.user_config.transcription_method == "gpt":

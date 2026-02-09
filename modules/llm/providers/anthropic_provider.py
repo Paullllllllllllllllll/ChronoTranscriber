@@ -141,7 +141,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
         )
     
     # Claude 4.5 Haiku (fastest, cost-efficient)
-    # Note: Claude Haiku 4.5 does NOT support output_format/structured output
+    # Structured outputs GA: supported on Haiku 4.5
     if "claude-haiku-4-5" in m or "claude-haiku-4.5" in m:
         return ProviderCapabilities(
             provider_name="anthropic",
@@ -149,8 +149,8 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_vision=True,
             supports_image_detail=False,
             default_image_detail="auto",
-            supports_structured_output=False,  # Haiku 4.5 doesn't support output_format
-            supports_json_mode=False,
+            supports_structured_output=True,
+            supports_json_mode=True,
             is_reasoning_model=True,  # Extended thinking support
             supports_reasoning_effort=True,
             supports_temperature=True,
@@ -241,7 +241,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             max_output_tokens=8192,
         )
     
-    # Claude 3.5 Haiku
+    # Claude 3.5 Haiku (does NOT support structured outputs)
     if "claude-3-5-haiku" in m or "claude-3.5-haiku" in m:
         return ProviderCapabilities(
             provider_name="anthropic",
@@ -249,8 +249,8 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_vision=True,
             supports_image_detail=False,
             default_image_detail="auto",
-            supports_structured_output=True,
-            supports_json_mode=True,
+            supports_structured_output=False,
+            supports_json_mode=False,
             is_reasoning_model=False,
             supports_reasoning_effort=False,
             supports_temperature=True,
@@ -261,7 +261,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             max_output_tokens=8192,
         )
     
-    # Claude 3 Opus
+    # Claude 3 Opus (does NOT support structured outputs)
     if "claude-3-opus" in m:
         return ProviderCapabilities(
             provider_name="anthropic",
@@ -269,8 +269,8 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_vision=True,
             supports_image_detail=False,
             default_image_detail="auto",
-            supports_structured_output=True,
-            supports_json_mode=True,
+            supports_structured_output=False,
+            supports_json_mode=False,
             is_reasoning_model=False,
             supports_reasoning_effort=False,
             supports_temperature=True,
@@ -281,7 +281,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             max_output_tokens=4096,
         )
     
-    # Claude 3 Sonnet
+    # Claude 3 Sonnet (does NOT support structured outputs)
     if "claude-3-sonnet" in m:
         return ProviderCapabilities(
             provider_name="anthropic",
@@ -289,8 +289,8 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_vision=True,
             supports_image_detail=False,
             default_image_detail="auto",
-            supports_structured_output=True,
-            supports_json_mode=True,
+            supports_structured_output=False,
+            supports_json_mode=False,
             is_reasoning_model=False,
             supports_reasoning_effort=False,
             supports_temperature=True,
@@ -301,7 +301,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             max_output_tokens=4096,
         )
     
-    # Claude 3 Haiku
+    # Claude 3 Haiku (does NOT support structured outputs)
     if "claude-3-haiku" in m:
         return ProviderCapabilities(
             provider_name="anthropic",
@@ -309,8 +309,8 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_vision=True,
             supports_image_detail=False,
             default_image_detail="auto",
-            supports_structured_output=True,
-            supports_json_mode=True,
+            supports_structured_output=False,
+            supports_json_mode=False,
             is_reasoning_model=False,
             supports_reasoning_effort=False,
             supports_temperature=True,

@@ -365,15 +365,29 @@ async def process_auto_mode(
     # Check if we should use input paths as output paths
     use_input_as_output = paths_config.get('general', {}).get('input_paths_is_output_path', False)
     
-    # Group decisions by method for efficient processing
-    by_method: dict[str, list[Any]] = {}
+    # Group decisions by (method, processing_type) to avoid routing
+    # different file types through the wrong processor (e.g. image folders
+    # being sent to process_single_pdf just because they share the "gpt" method).
+    def _file_type_to_processing_type(ft: str) -> str:
+        if ft == "pdf":
+            return "pdfs"
+        elif ft in ("image", "image_folder"):
+            return "images"
+        elif ft == "epub":
+            return "epubs"
+        elif ft == "mobi":
+            return "mobis"
+        return "pdfs"  # fallback
+
+    by_method_and_type: dict[tuple[str, str], list[Any]] = {}
     for decision in decisions:
-        if decision.method not in by_method:
-            by_method[decision.method] = []
-        by_method[decision.method].append(decision)
+        key = (decision.method, _file_type_to_processing_type(decision.file_type))
+        if key not in by_method_and_type:
+            by_method_and_type[key] = []
+        by_method_and_type[key].append(decision)
     
-    # Process each method group
-    for method, items in by_method.items():
+    # Process each (method, processing_type) group
+    for (method, processing_type), items in by_method_and_type.items():
         print_info(f"Processing {len(items)} file(s) with {method.upper()} method...")
 
         # Create a temporary UserConfiguration for this method
@@ -382,14 +396,7 @@ async def process_auto_mode(
         temp_config.use_batch_processing = False  # Auto mode uses synchronous
         temp_config.selected_items = [d.file_path for d in items]
         temp_config.resume_mode = user_config.resume_mode
-
-        first_item = items[0]
-        if first_item.file_type == "pdf":
-            temp_config.processing_type = "pdfs"
-        elif first_item.file_type in ("image", "image_folder"):
-            temp_config.processing_type = "images"
-        else:
-            temp_config.processing_type = "epubs"
+        temp_config.processing_type = processing_type
 
         # Determine per-group paths configuration
         group_paths_config = paths_config

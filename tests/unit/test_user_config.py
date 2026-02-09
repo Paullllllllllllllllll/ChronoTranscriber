@@ -29,6 +29,7 @@ class TestUserConfiguration:
         assert config.additional_context_path is None
         assert config.auto_decisions is None
         assert config.auto_selector is None
+        assert config.resume_mode == "skip"
     
     @pytest.mark.unit
     def test_custom_initialization(self, temp_dir):

@@ -87,6 +87,22 @@ Examples:
         help="Path to additional context file (for GPT method). If not specified, no additional context is used."
     )
     
+    # Resume / overwrite behavior
+    resume_group = parser.add_mutually_exclusive_group()
+    resume_group.add_argument(
+        "--resume",
+        action="store_true",
+        default=None,
+        help="Skip files whose output already exists (default behavior). Overrides resume_mode in config."
+    )
+    resume_group.add_argument(
+        "--force", "--overwrite",
+        action="store_true",
+        dest="force",
+        default=None,
+        help="Force reprocessing of all files, overwriting existing output."
+    )
+
     # File selection options
     parser.add_argument(
         "--files",

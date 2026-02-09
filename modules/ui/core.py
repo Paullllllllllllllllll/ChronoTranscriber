@@ -48,6 +48,7 @@ class UserConfiguration:
     additional_context_path: Optional[Path] = None
     auto_decisions: Optional[List[Any]] = None
     auto_selector: Optional["AutoSelector"] = None
+    resume_mode: str = "skip"
 
     def __post_init__(self) -> None:
         if self.selected_items is None:

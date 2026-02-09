@@ -31,6 +31,7 @@ from modules.infra.concurrency import run_concurrent_transcription_tasks
 from modules.processing.text_processing import extract_transcribed_text, format_page_line
 from modules.processing.postprocess import postprocess_transcription
 from modules.core.token_guard import check_and_wait_for_token_limit
+from modules.core.resume import ResumeChecker, ProcessingState
 from modules.operations.jsonl_utils import (
     get_processed_image_names,
     read_jsonl_records,
@@ -93,6 +94,24 @@ class WorkflowManager:
             self.image_output_dir.mkdir(parents=True, exist_ok=True)
             self.epub_output_dir.mkdir(parents=True, exist_ok=True)
             self.mobi_output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Resume checker
+        self.resume_mode = user_config.resume_mode
+        self.resume_checker = ResumeChecker(
+            resume_mode=self.resume_mode,
+            paths_config=paths_config,
+            use_input_as_output=self.use_input_as_output,
+            pdf_output_dir=self.pdf_output_dir,
+            image_output_dir=self.image_output_dir,
+            epub_output_dir=self.epub_output_dir,
+            mobi_output_dir=self.mobi_output_dir,
+        )
+
+        # When resume mode is active, preserve JSONL files so page-level
+        # resume works across runs.
+        if self.resume_mode == "skip":
+            self.processing_settings = dict(self.processing_settings)
+            self.processing_settings["retain_temporary_jsonl"] = True
 
     def _ensure_tesseract_available(self) -> bool:
         """Verify that Tesseract is available.
@@ -296,7 +315,20 @@ class WorkflowManager:
         """
         Process all selected items based on the user configuration.
         """
-        selected = self.user_config.selected_items or []
+        selected = list(self.user_config.selected_items or [])
+
+        # --- Resume filtering ---
+        processing_type = self.user_config.processing_type or ""
+        if self.resume_mode != "overwrite" and processing_type:
+            selected, skipped = self.resume_checker.filter_items(selected, processing_type)
+            if skipped:
+                print_info(
+                    f"Resume: skipping {len(skipped)} already-processed item(s)"
+                )
+                for sr in skipped:
+                    logger.info("Skipped (already processed): %s — %s", sr.item.name, sr.reason)
+        # --- End resume filtering ---
+
         total_items = len(selected)
         print_info(f"Beginning processing of {total_items} item(s)...")
         

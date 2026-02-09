@@ -17,18 +17,27 @@ general:
   # -------------------------------------------------------------------------
   # When true: scripts run interactively with user prompts and navigation.
   # When false: scripts run as CLI tools accepting command-line arguments.
-  interactive_mode: true
+  interactive_mode: false
 
   # -------------------------------------------------------------------------
   # Temporary File Retention
   # -------------------------------------------------------------------------
   # Retain .jsonl tracking files after processing (useful for debugging).
   # Note: Batch processing always retains JSONL for result retrieval.
-  retain_temporary_jsonl: true
+  retain_temporary_jsonl: false
 
   # Retain preprocessed images after transcription completes.
   # Set to false to save disk space; true helps with debugging.
-  keep_preprocessed_images: true
+  keep_preprocessed_images: false
+
+  # -------------------------------------------------------------------------
+  # Resume Behavior
+  # -------------------------------------------------------------------------
+  # Controls what happens when output files already exist for an input file.
+  #   skip:      Skip files whose output .txt already exists and is non-empty.
+  #   overwrite: Always reprocess, overwriting any existing output.
+  # CLI flags --resume / --force (--overwrite) override this setting.
+  resume_mode: skip
 
   # -------------------------------------------------------------------------
   # Output Path Behavior

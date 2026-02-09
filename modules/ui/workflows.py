@@ -752,6 +752,41 @@ class WorkflowUI:
         if len(selected) > 5:
             ui_print(f"    ... and {len(selected) - 5} more", PromptStyle.DIM)
         
+        # === Resume Information ===
+        from modules.core.resume import ResumeChecker, ProcessingState
+        resume_checker = ResumeChecker(
+            resume_mode=config.resume_mode,
+            paths_config=paths_config,
+            use_input_as_output=use_input_as_output,
+        )
+        _, skipped = resume_checker.filter_items(
+            list(selected), config.processing_type or ""
+        )
+        if skipped:
+            ui_print("")
+            ui_print("  Resume Information:", PromptStyle.WARNING)
+            print_separator(PromptStyle.LIGHT_LINE, 80)
+            ui_print(
+                f"    • {len(skipped)} of {len(selected)} item(s) already have output and will be skipped",
+                PromptStyle.WARNING,
+            )
+            new_count = len(selected) - len(skipped)
+            ui_print(f"    • {new_count} item(s) will be processed", PromptStyle.INFO)
+            ui_print(f"    • Resume mode: {config.resume_mode}", PromptStyle.DIM)
+            ui_print("    • Use --force / --overwrite to reprocess all items", PromptStyle.DIM)
+            print_separator(PromptStyle.LIGHT_LINE, 80)
+            if new_count == 0:
+                print_warning("All items already processed. Nothing to do.")
+                result = prompt_yes_no(
+                    "Force reprocess all items?",
+                    default=False,
+                    allow_back=True,
+                )
+                if result.action == NavigationAction.CONTINUE and result.value:
+                    config.resume_mode = "overwrite"
+                    return True
+                return False
+        
         ui_print("")
         
         result = prompt_yes_no(

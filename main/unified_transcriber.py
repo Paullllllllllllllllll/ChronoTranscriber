@@ -65,6 +65,15 @@ def create_config_from_cli_args(args: Any, base_input_dir: Path, base_output_dir
     config = UserConfiguration()
     config.auto_selector = AutoSelector(paths_config)
 
+    # Resolve resume mode: CLI flags override config setting
+    config_resume = paths_config.get("general", {}).get("resume_mode", "skip")
+    if getattr(args, "force", None):
+        config.resume_mode = "overwrite"
+    elif getattr(args, "resume", None):
+        config.resume_mode = "skip"
+    else:
+        config.resume_mode = config_resume
+
     # Handle auto mode
     if args.auto:
         # Use Auto input/output paths from config
@@ -260,6 +269,7 @@ async def configure_user_workflow_interactive(
         UserConfiguration object with all settings
     """
     config = UserConfiguration()
+    config.resume_mode = paths_config.get("general", {}).get("resume_mode", "skip")
     
     # Display welcome banner
     WorkflowUI.display_welcome()
@@ -377,6 +387,7 @@ async def process_auto_mode(
         temp_config.transcription_method = method
         temp_config.use_batch_processing = False  # Auto mode uses synchronous
         temp_config.selected_items = [d.file_path for d in items]
+        temp_config.resume_mode = user_config.resume_mode
 
         first_item = items[0]
         if first_item.file_type == "pdf":
@@ -662,6 +673,12 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> None:
         else:
             file_paths_cfg.setdefault("MOBIs", {})["output"] = str(output_path)
     
+    # Log resume mode for CLI awareness
+    if user_config.resume_mode == "skip":
+        print_info(f"Resume mode: skip (use --force to reprocess all)")
+    else:
+        print_info(f"Resume mode: overwrite (all files will be reprocessed)")
+
     # Process documents
     if user_config.processing_type == "auto":
         await process_auto_mode(

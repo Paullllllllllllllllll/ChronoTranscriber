@@ -16,6 +16,11 @@ SUPPORTED_IMAGE_FORMATS = {
     ".bmp": "image/bmp",
     ".gif": "image/gif",
     ".webp": "image/webp",
+    ".jp2": "image/jp2",
+    ".j2k": "image/jp2",
+    ".pbm": "image/x-portable-bitmap",
+    ".pgm": "image/x-portable-graymap",
+    ".ppm": "image/x-portable-pixmap",
 }
 
 # Convenience set of supported extensions (derived from SUPPORTED_IMAGE_FORMATS)

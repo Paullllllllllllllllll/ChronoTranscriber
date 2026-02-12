@@ -15,6 +15,7 @@ from modules.ui.prompts import (
     PromptResult,
     prompt_select,
     prompt_yes_no,
+    prompt_text,
     prompt_multiselect,
     print_header,
     print_separator,
@@ -304,7 +305,61 @@ class WorkflowUI:
             return False
         
         return True
-    
+
+    @staticmethod
+    def configure_page_range(config: UserConfiguration) -> bool:
+        """Optionally configure page-range filtering.
+
+        Args:
+            config: UserConfiguration object
+
+        Returns:
+            True if configured (or skipped), False if user wants to go back
+        """
+        result = prompt_select(
+            "Would you like to limit which pages/sections are processed?",
+            [
+                ("no", "No — Process all pages (default)"),
+                ("yes", "Yes — Specify a page range"),
+            ],
+            allow_back=True,
+        )
+
+        if result.action == NavigationAction.BACK:
+            return False
+
+        if result.value == "no":
+            config.page_range = None
+            return True
+
+        # Prompt for the page-range string
+        from modules.core.page_range import parse_page_range
+
+        def _validate_range(value: str) -> bool:
+            try:
+                parse_page_range(value)
+                return True
+            except ValueError:
+                return False
+
+        text_result = prompt_text(
+            "Enter page range (e.g. '5', 'first:5', 'last:5', '3-7', '1,3,5-8'):",
+            allow_back=True,
+            validator=_validate_range,
+            error_message=(
+                "Invalid page range. Use formats like '5', 'first:5', 'last:5', "
+                "'3-7', '3-', '-7', or '1,3,5-8'."
+            ),
+        )
+
+        if text_result.action == NavigationAction.BACK:
+            return False
+
+        config.page_range = parse_page_range(text_result.value)
+        print_info(f"Page range set: {config.page_range.describe()}")
+        logger.info(f"User configured page range: {config.page_range.describe()}")
+        return True
+
     @staticmethod
     def select_items_for_processing(
         config: UserConfiguration,
@@ -664,6 +719,10 @@ class WorkflowUI:
                 ui_print(f"    • Additional context: Yes ({config.additional_context_path.name})", PromptStyle.INFO)
             else:
                 ui_print(f"    • Additional context: No", PromptStyle.DIM)
+
+        # Show page range if configured
+        if config.page_range is not None:
+            ui_print(f"    • Page range: {config.page_range.describe()}", PromptStyle.INFO)
         
         print_separator(PromptStyle.LIGHT_LINE, 80)
         

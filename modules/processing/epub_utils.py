@@ -58,8 +58,13 @@ class EPUBProcessor:
     def __init__(self, epub_path: Path) -> None:
         self.epub_path = epub_path
 
-    def extract_text(self) -> EPUBTextExtraction:
-        """Extract the EPUB text content and metadata using EbookLib."""
+    def extract_text(self, section_indices: Optional[List[int]] = None) -> EPUBTextExtraction:
+        """Extract the EPUB text content and metadata using EbookLib.
+
+        Args:
+            section_indices: Optional list of 0-based section indices to extract.
+                If None, all sections are extracted.
+        """
         try:
             book = epub.read_epub(str(self.epub_path))
         except Exception as exc:  # pragma: no cover - surface errors upstream
@@ -70,8 +75,14 @@ class EPUBProcessor:
         author_entries = book.get_metadata("DC", "creator")
         authors = [entry[0].strip() for entry in author_entries if entry and entry[0].strip()]
 
+        all_items = list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
+
+        # Apply section filter
+        if section_indices is not None:
+            all_items = [all_items[i] for i in section_indices if 0 <= i < len(all_items)]
+
         sections: List[str] = []
-        for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
+        for item in all_items:
             try:
                 content_bytes = item.get_content()
                 text = _html_bytes_to_text(content_bytes)

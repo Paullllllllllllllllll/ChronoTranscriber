@@ -299,7 +299,8 @@ class ImageProcessor:
 
     @staticmethod
     def process_and_save_images(source_folder: Path, preprocessed_folder: Path,
-                                provider: str = "openai", model_name: str = "") -> List[Path]:
+                                provider: str = "openai", model_name: str = "",
+                                page_indices: Optional[List[int]] = None) -> List[Path]:
         """
         Reads images from source folder, processes them, and saves directly to preprocessed folder.
         Eliminates the need for intermediate raw image storage.
@@ -309,6 +310,8 @@ class ImageProcessor:
             preprocessed_folder (Path): Path to save processed images.
             provider (str): Provider name for config selection.
             model_name (str): Model name for detecting underlying model type.
+            page_indices (Optional[List[int]]): Optional 0-based indices into the sorted
+                image list.  If None, all images are processed.
 
         Returns:
             List[Path]: List of processed image paths.
@@ -322,6 +325,10 @@ class ImageProcessor:
             return []
 
         image_files.sort(key=lambda p: p.name.lower())
+
+        # Apply page-range filter
+        if page_indices is not None:
+            image_files = [image_files[i] for i in page_indices if 0 <= i < len(image_files)]
 
         # Create list of output paths
         output_paths = [
@@ -494,9 +501,16 @@ class ImageProcessor:
         return pil_bin, diag
 
     @staticmethod
-    def process_and_save_images_for_tesseract(source_folder: Path, preprocessed_folder: Path) -> List[Path]:
+    def process_and_save_images_for_tesseract(source_folder: Path, preprocessed_folder: Path,
+                                              page_indices: Optional[List[int]] = None) -> List[Path]:
         """
         Process images for Tesseract (lossless, full resolution) and save as PNG/TIFF.
+
+        Args:
+            source_folder: Path to the source folder containing original images.
+            preprocessed_folder: Path to save processed images.
+            page_indices: Optional 0-based indices into the sorted image list.
+                If None, all images are processed.
         """
         config_service = get_config_service()
         tip_cfg = config_service.get_image_processing_config().get('tesseract_image_processing', {})
@@ -519,6 +533,10 @@ class ImageProcessor:
 
         # Deterministic ordering by filename
         image_files.sort(key=lambda p: p.name)
+
+        # Apply page-range filter
+        if page_indices is not None:
+            image_files = [image_files[i] for i in page_indices if 0 <= i < len(image_files)]
 
         preprocessed_folder.mkdir(parents=True, exist_ok=True)
         suffix = '.png' if output_format == 'png' else '.tif'

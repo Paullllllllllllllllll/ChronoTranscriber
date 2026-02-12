@@ -66,11 +66,15 @@ class MOBIProcessor:
         self.mobi_path = mobi_path
         self._tempdir: Optional[Path] = None
 
-    def extract_text(self) -> MOBITextExtraction:
+    def extract_text(self, section_indices: Optional[List[int]] = None) -> MOBITextExtraction:
         """Extract the MOBI text content by unpacking to intermediate format.
         
         The mobi library extracts to EPUB, HTML, or PDF depending on the MOBI type.
         We handle each case appropriately.
+
+        Args:
+            section_indices: Optional list of 0-based section/page indices.
+                If None, all sections are extracted.
         """
         try:
             tempdir, filepath = mobi.extract(str(self.mobi_path))
@@ -87,11 +91,11 @@ class MOBIProcessor:
             suffix = extracted_path.suffix.lower()
             
             if suffix == ".epub":
-                return self._extract_from_epub(extracted_path)
+                return self._extract_from_epub(extracted_path, section_indices)
             elif suffix in (".html", ".htm", ".xhtml"):
-                return self._extract_from_html(extracted_path)
+                return self._extract_from_html(extracted_path, section_indices)
             elif suffix == ".pdf":
-                return self._extract_from_pdf(extracted_path)
+                return self._extract_from_pdf(extracted_path, section_indices)
             else:
                 # Fallback: try to read as text
                 logger.warning(
@@ -107,10 +111,11 @@ class MOBIProcessor:
         finally:
             self._cleanup()
 
-    def _extract_from_epub(self, epub_path: Path) -> MOBITextExtraction:
+    def _extract_from_epub(self, epub_path: Path,
+                            section_indices: Optional[List[int]] = None) -> MOBITextExtraction:
         """Extract text from the unpacked EPUB."""
         processor = EPUBProcessor(epub_path)
-        extraction: EPUBTextExtraction = processor.extract_text()
+        extraction: EPUBTextExtraction = processor.extract_text(section_indices=section_indices)
         
         return MOBITextExtraction(
             title=extraction.title,
@@ -119,7 +124,8 @@ class MOBIProcessor:
             source_format="epub"
         )
 
-    def _extract_from_html(self, html_path: Path) -> MOBITextExtraction:
+    def _extract_from_html(self, html_path: Path,
+                            section_indices: Optional[List[int]] = None) -> MOBITextExtraction:
         """Extract text from the unpacked HTML."""
         try:
             content = html_path.read_bytes()
@@ -137,6 +143,10 @@ class MOBIProcessor:
             # Extract text content
             text_content = document.text_content()
             sections = [text_content] if text_content else []
+
+            # Apply section filter (HTML is typically a single section)
+            if section_indices is not None:
+                sections = [sections[i] for i in section_indices if 0 <= i < len(sections)]
             
             return MOBITextExtraction(
                 title=title,
@@ -149,7 +159,8 @@ class MOBIProcessor:
             # Fallback to raw text
             return self._extract_as_text(html_path)
 
-    def _extract_from_pdf(self, pdf_path: Path) -> MOBITextExtraction:
+    def _extract_from_pdf(self, pdf_path: Path,
+                           section_indices: Optional[List[int]] = None) -> MOBITextExtraction:
         """Extract text from the unpacked PDF using PyMuPDF."""
         try:
             import fitz  # PyMuPDF
@@ -167,12 +178,14 @@ class MOBIProcessor:
                     if author:
                         authors = [author]
                 
-                # Extract text from each page
-                for page_num in range(len(doc)):
-                    page = doc[page_num]
-                    text = page.get_text()
-                    if text.strip():
-                        sections.append(text)
+                # Determine which pages to extract
+                pages = section_indices if section_indices is not None else list(range(len(doc)))
+                for page_num in pages:
+                    if 0 <= page_num < len(doc):
+                        page = doc[page_num]
+                        text = page.get_text()
+                        if text.strip():
+                            sections.append(text)
             
             return MOBITextExtraction(
                 title=title,

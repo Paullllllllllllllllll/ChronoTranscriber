@@ -30,6 +30,7 @@ class TestUserConfiguration:
         assert config.auto_decisions is None
         assert config.auto_selector is None
         assert config.resume_mode == "skip"
+        assert config.page_range is None
     
     @pytest.mark.unit
     def test_custom_initialization(self, temp_dir):
@@ -137,3 +138,45 @@ class TestUserConfiguration:
         
         config.process_all = False
         assert config.process_all is False
+
+    @pytest.mark.unit
+    def test_page_range_field(self):
+        """Test page_range field on UserConfiguration."""
+        from modules.core.page_range import parse_page_range
+
+        config = UserConfiguration()
+        assert config.page_range is None
+
+        pr = parse_page_range("first:5")
+        config.page_range = pr
+        assert config.page_range is pr
+        assert config.page_range.first_n == 5
+
+    @pytest.mark.unit
+    def test_str_representation_with_page_range(self):
+        """Test string representation includes page range when set."""
+        from modules.core.page_range import parse_page_range
+
+        config = UserConfiguration(
+            processing_type="pdfs",
+            transcription_method="native",
+            selected_items=[Path("doc.pdf")],
+        )
+        config.page_range = parse_page_range("first:5")
+
+        str_repr = str(config)
+        assert "first 5" in str_repr
+
+    @pytest.mark.unit
+    def test_str_representation_auto_with_page_range(self):
+        """Test string representation for auto mode with page range."""
+        from modules.core.page_range import parse_page_range
+
+        config = UserConfiguration(
+            processing_type="auto",
+            auto_decisions=[1, 2],
+        )
+        config.page_range = parse_page_range("last:3")
+
+        str_repr = str(config)
+        assert "last 3" in str_repr

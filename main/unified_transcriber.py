@@ -141,12 +141,18 @@ def create_config_from_cli_args(args: Any, base_input_dir: Path, base_output_dir
     Returns:
         UserConfiguration object
     """
+    from modules.core.page_range import parse_page_range
+
     config = UserConfiguration()
     config.auto_selector = AutoSelector(paths_config)
 
     # Resume mode: default is 'skip'; --force/--overwrite switches to 'overwrite'
     if getattr(args, "force", None):
         config.resume_mode = "overwrite"
+
+    # Parse page range if provided
+    if getattr(args, "pages", None):
+        config.page_range = parse_page_range(args.pages)
 
     # Handle auto mode
     if args.auto:
@@ -284,7 +290,7 @@ async def configure_user_workflow_interactive(
                 if config.processing_type == "auto":
                     current_step = "auto_schema_selection"
                 else:
-                    current_step = "summary"
+                    current_step = "page_range"
             else:
                 # Auto mode goes back to processing_type, others to batch_processing
                 current_step = "processing_type" if config.processing_type == "auto" else "batch_processing"
@@ -292,17 +298,26 @@ async def configure_user_workflow_interactive(
         elif current_step == "auto_schema_selection":
             # Schema selection for auto mode (when GPT files are detected)
             if WorkflowUI.configure_auto_mode_schema(config):
-                current_step = "summary"
+                current_step = "page_range"
             else:
                 current_step = "item_selection"
-        
+
+        elif current_step == "page_range":
+            if WorkflowUI.configure_page_range(config):
+                current_step = "summary"
+            else:
+                # Go back to the previous step
+                if config.processing_type == "auto":
+                    current_step = "auto_schema_selection"
+                else:
+                    current_step = "item_selection"
+
         elif current_step == "summary":
             confirmed = WorkflowUI.display_processing_summary(config)
             if confirmed:
                 return config
             else:
-                # Go back to schema selection for auto mode, item_selection for others
-                current_step = "auto_schema_selection" if config.processing_type == "auto" else "item_selection"
+                current_step = "page_range"
 
 
 async def process_auto_mode(
@@ -372,6 +387,7 @@ async def process_auto_mode(
         temp_config.selected_items = [d.file_path for d in items]
         temp_config.resume_mode = user_config.resume_mode
         temp_config.processing_type = processing_type
+        temp_config.page_range = user_config.page_range
 
         # Determine per-group paths configuration
         group_paths_config = paths_config

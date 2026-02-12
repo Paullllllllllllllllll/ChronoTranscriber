@@ -115,7 +115,20 @@ Examples:
         action="store_true",
         help="Process files recursively in subdirectories."
     )
-    
+
+    # Page range filtering
+    parser.add_argument(
+        "--pages",
+        type=str,
+        default=None,
+        help=(
+            "Page range to process. Examples: '5' (first 5), 'first:5', "
+            "'last:5', '3-7', '3-' (page 3 to end), '-7' (start to page 7), "
+            "'1,3,5-8' (compound). For image folders, indices refer to "
+            "sorted image files."
+        ),
+    )
+
     return parser
 
 

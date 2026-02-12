@@ -461,9 +461,24 @@ class WorkflowManager:
         """
         print_info(f"Processing {format_label}: {file_path.name}")
 
+        # Resolve page/section range if configured
+        section_indices = None
+        if self.user_config.page_range is not None:
+            # We need a preliminary extraction to count sections, but that's
+            # expensive.  Instead, pass section_indices through and let the
+            # processor clamp internally.  For the log message we do a quick
+            # count by reading the spine / item list without full extraction.
+            section_indices_raw = self.user_config.page_range.resolve(2**31)
+            if section_indices_raw:
+                section_indices = section_indices_raw
+                print_info(
+                    f"Page range: {self.user_config.page_range.describe()} "
+                    f"(applied to {format_label} sections)"
+                )
+
         processor = processor_cls(file_path)
         try:
-            extraction = processor.extract_text()
+            extraction = processor.extract_text(section_indices=section_indices)
         except Exception as exc:
             logger.exception("Failed to extract %s %s: %s", format_label, file_path.name, exc)
             print_error(f"Failed to extract text from {file_path.name}.")
@@ -528,6 +543,24 @@ class WorkflowManager:
         print_info(f"Processing PDF: {pdf_path.name}")
         print_info(f"Using method: {method}")
 
+        # Resolve page range if configured
+        page_indices = None
+        if self.user_config.page_range is not None:
+            pdf_processor.open_pdf()
+            total_pages = pdf_processor.doc.page_count
+            page_indices = self.user_config.page_range.resolve(total_pages)
+            if not page_indices:
+                print_warning(
+                    f"Page range '{self.user_config.page_range.describe()}' "
+                    f"yielded no pages for '{pdf_path.name}' ({total_pages} pages). Skipping."
+                )
+                pdf_processor.close_pdf()
+                return
+            print_info(
+                f"Page range: processing {len(page_indices)} of {total_pages} pages "
+                f"({self.user_config.page_range.describe()})"
+            )
+
         if method == "tesseract" and not self._ensure_tesseract_available():
             return
 
@@ -538,7 +571,7 @@ class WorkflowManager:
 
         # Native PDF extraction
         if method == "native":
-            text = native_extract_pdf_text(pdf_path)
+            text = native_extract_pdf_text(pdf_path, page_indices=page_indices)
             try:
                 async with aiofiles.open(temp_jsonl_path, 'a',
                                          encoding='utf-8') as jfile:
@@ -572,7 +605,7 @@ class WorkflowManager:
                           .get('target_dpi', 300))
             print_info(f"Extracting and preprocessing images for Tesseract at {target_dpi} DPI...")
             processed_image_files = await pdf_processor.process_images_for_tesseract(
-                preprocessed_folder, target_dpi)
+                preprocessed_folder, target_dpi, page_indices=page_indices)
         else:
             preprocessed_folder = parent_folder / "preprocessed_images"
             preprocessed_folder.mkdir(exist_ok=True)
@@ -585,7 +618,8 @@ class WorkflowManager:
             model_name = tm.get("name", "")
             print_info(f"Extracting and processing images from PDF with {target_dpi} DPI...")
             processed_image_files = await pdf_processor.process_images(
-                preprocessed_folder, target_dpi, provider=provider, model_name=model_name)
+                preprocessed_folder, target_dpi, provider=provider, model_name=model_name,
+                page_indices=page_indices)
 
         # Rely on extraction order; order_index will follow the list order
         print_info(f"Extracted {len(processed_image_files)} page images from PDF.")
@@ -635,6 +669,26 @@ class WorkflowManager:
         print_info(f"Processing folder: {folder.name}")
         print_info(f"Using method: {method}")
 
+        # Resolve page range for image folders (indices into sorted file list)
+        page_indices = None
+        if self.user_config.page_range is not None:
+            from modules.config.constants import SUPPORTED_IMAGE_EXTENSIONS
+            total_images = len([
+                p for p in folder.iterdir()
+                if p.is_file() and p.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
+            ])
+            page_indices = self.user_config.page_range.resolve(total_images)
+            if not page_indices:
+                print_warning(
+                    f"Page range '{self.user_config.page_range.describe()}' "
+                    f"yielded no images for '{folder.name}' ({total_images} images). Skipping."
+                )
+                return
+            print_info(
+                f"Page range: processing {len(page_indices)} of {total_images} images "
+                f"({self.user_config.page_range.describe()})"
+            )
+
         if method == "tesseract" and not self._ensure_tesseract_available():
             return
 
@@ -643,7 +697,8 @@ class WorkflowManager:
             preprocessed_folder = parent_folder / "preprocessed_images_tesseract"
             preprocessed_folder.mkdir(exist_ok=True)
             print_info(f"Preprocessing images for Tesseract...")
-            processed_files = ImageProcessor.process_and_save_images_for_tesseract(folder, preprocessed_folder)
+            processed_files = ImageProcessor.process_and_save_images_for_tesseract(
+                folder, preprocessed_folder, page_indices=page_indices)
         else:
             # Get provider and model name from model config for provider-specific preprocessing
             tm = self.model_config.get("transcription_model", {})
@@ -651,7 +706,8 @@ class WorkflowManager:
             model_name = tm.get("name", "")
             print_info(f"Processing images from folder for {provider.upper()}...")
             processed_files = ImageProcessor.process_and_save_images(
-                folder, preprocessed_folder, provider=provider, model_name=model_name)
+                folder, preprocessed_folder, provider=provider, model_name=model_name,
+                page_indices=page_indices)
 
         if not processed_files:
             print_warning(f"No images found or processed in {folder}.")

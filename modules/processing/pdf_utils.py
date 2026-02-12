@@ -105,7 +105,8 @@ class PDFProcessor:
                 f"Failed to extract images from PDF: {self.pdf_path}, {e}")
 
     async def process_images(self, preprocessed_folder: Path, target_dpi: int, 
-                             provider: str = "openai", model_name: str = "") -> List[Path]:
+                             provider: str = "openai", model_name: str = "",
+                             page_indices: Optional[List[int]] = None) -> List[Path]:
         """
         Extracts images from PDF and directly pre-processes them without saving raw images.
 
@@ -114,6 +115,7 @@ class PDFProcessor:
             target_dpi: DPI for rendering PDF pages
             provider: Provider name (openai, google, anthropic, openrouter) for config selection
             model_name: Model name for detecting underlying model type (e.g., 'google/gemini-2.5-flash')
+            page_indices: Optional list of 0-based page indices to process. If None, all pages.
 
         Returns:
             List[Path]: List of processed image paths.
@@ -129,8 +131,11 @@ class PDFProcessor:
 
             processed_image_paths = []
 
+            # Determine which pages to process
+            pages_to_process = page_indices if page_indices is not None else list(range(self.doc.page_count))
+
             # Process each page directly
-            for page_num in range(self.doc.page_count):
+            for page_num in pages_to_process:
                 try:
                     # Get the page
                     page = self.doc[page_num]
@@ -197,10 +202,16 @@ class PDFProcessor:
             print_error(f"Failed to process images from {self.pdf_path.name}.")
             return []
 
-    async def process_images_for_tesseract(self, preprocessed_folder: Path, target_dpi: int) -> List[Path]:
+    async def process_images_for_tesseract(self, preprocessed_folder: Path, target_dpi: int,
+                                             page_indices: Optional[List[int]] = None) -> List[Path]:
         """
         Render PDF pages at target_dpi and preprocess for Tesseract OCR.
         Saves lossless PNG/TIFF, preserves resolution, embeds DPI metadata if enabled.
+
+        Args:
+            preprocessed_folder: Path to save processed images.
+            target_dpi: DPI for rendering PDF pages.
+            page_indices: Optional list of 0-based page indices to process. If None, all pages.
         """
         preprocessed_folder.mkdir(parents=True, exist_ok=True)
 
@@ -224,12 +235,13 @@ class PDFProcessor:
                                  .get('image_processing', {}))
             concurrency_limit = int(img_conc.get('concurrency_limit', 4))
 
-            # Deterministic output paths
+            # Determine which pages to process
             suffix = '.png' if output_format == 'png' else '.tif'
             total_pages = int(self.doc.page_count)
+            pages = page_indices if page_indices is not None else list(range(total_pages))
             out_paths: List[Path] = [
                 preprocessed_folder / f"page_{i + 1:04d}_tess_preprocessed{suffix}"
-                for i in range(total_pages)
+                for i in pages
             ]
 
             sem = asyncio.Semaphore(max(1, concurrency_limit))
@@ -246,16 +258,17 @@ class PDFProcessor:
                         embed_dpi,
                     )
 
-            tasks = [bound_worker(i, out_paths[i]) for i in range(total_pages)]
+            tasks = [bound_worker(pg, op) for pg, op in zip(pages, out_paths)]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            for i, res in enumerate(results):
+            for idx, res in enumerate(results):
+                pg = pages[idx]
                 if isinstance(res, Exception):
-                    logger.error(f"Error Tesseract-preprocessing page {i + 1} from {self.pdf_path}: {res}")
+                    logger.error(f"Error Tesseract-preprocessing page {pg + 1} from {self.pdf_path}: {res}")
                 elif not res:
-                    logger.error(f"Tesseract-preprocessing page {i + 1} did not complete successfully.")
+                    logger.error(f"Tesseract-preprocessing page {pg + 1} did not complete successfully.")
                 else:
-                    logger.info(f"[Tesseract] Processed page {i + 1} -> {out_paths[i].name} dpi={target_dpi}")
+                    logger.info(f"[Tesseract] Processed page {pg + 1} -> {out_paths[idx].name} dpi={target_dpi}")
 
             return [p for p in out_paths if p.exists()]
 
@@ -320,9 +333,15 @@ class PDFProcessor:
         return parent_folder, output_txt_path, temp_jsonl_path
 
 
-def native_extract_pdf_text(pdf_path: Path) -> str:
+def native_extract_pdf_text(pdf_path: Path,
+                            page_indices: Optional[List[int]] = None) -> str:
     """
     Extract text from a native (searchable) PDF using PyMuPDF.
+
+    Args:
+        pdf_path: Path to the PDF file.
+        page_indices: Optional list of 0-based page indices. If None, all pages.
+
     Returns the extracted text.
     """
     pdf_processor = PDFProcessor(pdf_path)
@@ -330,8 +349,13 @@ def native_extract_pdf_text(pdf_path: Path) -> str:
     try:
         pdf_processor.open_pdf()
         if pdf_processor.doc:
-            for page in pdf_processor.doc:
-                parts.append(page.get_text())
+            if page_indices is not None:
+                for idx in page_indices:
+                    if 0 <= idx < pdf_processor.doc.page_count:
+                        parts.append(pdf_processor.doc[idx].get_text())
+            else:
+                for page in pdf_processor.doc:
+                    parts.append(page.get_text())
         pdf_processor.close_pdf()
     except Exception as e:
         logger.exception(f"Failed native PDF extraction on {pdf_path.name}: {e}")

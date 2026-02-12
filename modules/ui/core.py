@@ -19,6 +19,7 @@ from typing import Any, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from modules.core.auto_selector import AutoSelector
+    from modules.core.page_range import PageRange
 
 
 @dataclass
@@ -36,6 +37,7 @@ class UserConfiguration:
         additional_context_path: Path to additional context file (GPT only)
         auto_decisions: List of FileDecision objects for auto mode
         auto_selector: Cached AutoSelector instance for auto mode
+        page_range: Optional page-range filter (first N, last N, or explicit spans)
     """
 
     processing_type: Optional[str] = None
@@ -49,6 +51,7 @@ class UserConfiguration:
     auto_decisions: Optional[List[Any]] = None
     auto_selector: Optional["AutoSelector"] = None
     resume_mode: str = "skip"
+    page_range: Optional["PageRange"] = None
 
     def __post_init__(self) -> None:
         if self.selected_items is None:
@@ -57,7 +60,8 @@ class UserConfiguration:
     def __str__(self) -> str:
         if self.processing_type == "auto":
             decision_count = len(self.auto_decisions) if self.auto_decisions else 0
-            return f"Processing type: auto, Decisions: {decision_count} files"
+            page_text = f", Pages: {self.page_range.describe()}" if self.page_range else ""
+            return f"Processing type: auto, Decisions: {decision_count} files{page_text}"
         
         method_name = {
             "native": "Native PDF extraction",
@@ -70,9 +74,14 @@ class UserConfiguration:
             if self.transcription_method == "gpt" and self.selected_schema_name
             else ""
         )
+        page_text = (
+            f", Pages: {self.page_range.describe()}"
+            if self.page_range
+            else ""
+        )
         return (
             f"Processing type: {self.processing_type}, "
             f"Method: {method_name}{batch_text}{schema_text}, "
             f"Process all: {self.process_all}, "
-            f"Selected items: {len(self.selected_items or [])}"
+            f"Selected items: {len(self.selected_items or [])}{page_text}"
         )

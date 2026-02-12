@@ -14,8 +14,55 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from modules.config.constants import SUPPORTED_IMAGE_FORMATS
+from modules.config.service import get_config_service
 
 logger = logging.getLogger(__name__)
+
+
+def load_max_retries() -> int:
+    """Load max retries from concurrency_config.yaml.
+    
+    Used by all LangChain-based providers to configure retry attempts.
+    LangChain handles retry logic internally with exponential backoff.
+    """
+    try:
+        conc_cfg = get_config_service().get_concurrency_config() or {}
+        trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get("transcription", {}) or {}
+        retry_cfg = trans_cfg.get("retry", {}) or {}
+        attempts = int(retry_cfg.get("attempts", 5))
+        return max(1, attempts)
+    except Exception:
+        return 5
+
+
+@dataclass(frozen=True)
+class TokenUsageMapping:
+    """Maps provider-specific token usage keys in LangChain response_metadata.
+    
+    Each provider stores token counts under different key paths. This mapping
+    allows _process_llm_response() to extract them generically.
+    """
+    usage_key: str = "token_usage"
+    input_key: str = "prompt_tokens"
+    output_key: str = "completion_tokens"
+    total_key: str = "total_tokens"
+
+
+# Pre-built mappings for each supported provider
+OPENAI_TOKEN_MAPPING = TokenUsageMapping()  # defaults match OpenAI
+ANTHROPIC_TOKEN_MAPPING = TokenUsageMapping(
+    usage_key="usage",
+    input_key="input_tokens",
+    output_key="output_tokens",
+    total_key="",  # Anthropic doesn't provide total; compute from in+out
+)
+GOOGLE_TOKEN_MAPPING = TokenUsageMapping(
+    usage_key="usage_metadata",
+    input_key="prompt_token_count",
+    output_key="candidates_token_count",
+    total_key="total_token_count",
+)
+OPENROUTER_TOKEN_MAPPING = TokenUsageMapping()  # same as OpenAI
 
 
 @dataclass(frozen=True)
@@ -136,7 +183,6 @@ class BaseProvider(ABC):
         """Return the capabilities of this provider/model combination."""
         pass
     
-    @abstractmethod
     async def transcribe_image(
         self,
         image_path: Path,
@@ -147,7 +193,10 @@ class BaseProvider(ABC):
         image_detail: Optional[str] = None,
         media_resolution: Optional[str] = None,
     ) -> TranscriptionResult:
-        """Transcribe text from an image.
+        """Transcribe text from an image file.
+        
+        Encodes the image to base64 and delegates to transcribe_image_from_base64.
+        Subclasses typically only need to override transcribe_image_from_base64.
         
         Args:
             image_path: Path to the image file
@@ -160,7 +209,16 @@ class BaseProvider(ABC):
         Returns:
             TranscriptionResult with the transcription and metadata
         """
-        pass
+        base64_data, mime_type = self.encode_image_to_base64(image_path)
+        return await self.transcribe_image_from_base64(
+            image_base64=base64_data,
+            mime_type=mime_type,
+            system_prompt=system_prompt,
+            user_instruction=user_instruction,
+            json_schema=json_schema,
+            image_detail=image_detail,
+            media_resolution=media_resolution,
+        )
     
     @abstractmethod
     async def transcribe_image_from_base64(
@@ -195,6 +253,155 @@ class BaseProvider(ABC):
         """Clean up resources (e.g., HTTP sessions)."""
         pass
     
+    def _normalize_list_content(self, content_list: list) -> str:
+        """Normalize list-type content from LLM response to a string.
+        
+        Override in subclasses for provider-specific list content handling.
+        Default behavior: convert to string representation.
+        
+        Args:
+            content_list: List content from the LLM response.
+            
+        Returns:
+            Normalized string content.
+        """
+        return str(content_list)
+
+    async def _process_llm_response(
+        self,
+        response: Any,
+        token_mapping: TokenUsageMapping,
+    ) -> TranscriptionResult:
+        """Process a LangChain LLM response into a TranscriptionResult.
+        
+        Shared logic for all providers: extracts content, parses structured output,
+        extracts token usage, and tracks daily token consumption.
+        
+        Args:
+            response: Raw response from llm.ainvoke() — either an AIMessage,
+                      a dict (from with_structured_output(include_raw=True)),
+                      or another type.
+            token_mapping: Provider-specific mapping for token usage keys.
+        
+        Returns:
+            TranscriptionResult with content, tokens, and parsed output.
+        """
+        input_tokens = 0
+        output_tokens = 0
+        total_tokens = 0
+        raw_response: Dict[str, Any] = {}
+        raw_message = None
+        parsed_output: Optional[Dict[str, Any]] = None
+
+        if isinstance(response, dict) and "raw" in response and "parsed" in response:
+            # with_structured_output(include_raw=True) → {"raw": AIMessage, "parsed": ...}
+            raw_message = response.get("raw")
+            parsed_data = response.get("parsed")
+
+            if parsed_data is not None:
+                if hasattr(parsed_data, "model_dump"):
+                    # Pydantic model
+                    content = parsed_data.model_dump_json()
+                    parsed_output = parsed_data.model_dump()
+                elif isinstance(parsed_data, dict):
+                    content = json.dumps(parsed_data)
+                    parsed_output = parsed_data
+                else:
+                    content = str(parsed_data)
+            else:
+                # Parsing failed — fall back to raw message content
+                content = (
+                    raw_message.content
+                    if raw_message and hasattr(raw_message, "content")
+                    else ""
+                )
+                if isinstance(content, dict):
+                    parsed_output = content
+                    content = json.dumps(content)
+                elif isinstance(content, list):
+                    content = self._normalize_list_content(content)
+        elif hasattr(response, "content"):
+            # Standard AIMessage response (no structured output)
+            raw_message = response
+            content = response.content
+            if isinstance(content, dict):
+                parsed_output = content
+                content = json.dumps(content)
+            elif isinstance(content, list):
+                content = self._normalize_list_content(content)
+            elif not isinstance(content, str):
+                content = str(content)
+        elif isinstance(response, dict):
+            content = json.dumps(response)
+            parsed_output = response
+        else:
+            content = str(response)
+
+        # Extract token usage from response_metadata
+        if raw_message and hasattr(raw_message, "response_metadata"):
+            metadata = raw_message.response_metadata
+            if isinstance(metadata, dict):
+                raw_response = metadata
+                usage = metadata.get(token_mapping.usage_key, {})
+                if isinstance(usage, dict):
+                    input_tokens = usage.get(token_mapping.input_key, 0)
+                    output_tokens = usage.get(token_mapping.output_key, 0)
+                    if token_mapping.total_key:
+                        total_tokens = usage.get(token_mapping.total_key, 0)
+                    if total_tokens == 0:
+                        total_tokens = input_tokens + output_tokens
+
+        # Track tokens using daily tracker
+        if total_tokens > 0:
+            try:
+                from modules.infra.token_tracker import get_token_tracker
+                token_tracker = get_token_tracker()
+                token_tracker.add_tokens(total_tokens)
+                logger.debug(
+                    f"[TOKEN] API call consumed {total_tokens:,} tokens "
+                    f"(daily total: {token_tracker.get_tokens_used_today():,})"
+                )
+            except Exception as e:
+                logger.warning(f"Error tracking tokens: {e}")
+
+        result = TranscriptionResult(
+            content=content,
+            raw_response=raw_response,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+        )
+
+        if parsed_output and isinstance(parsed_output, dict):
+            result.parsed_output = parsed_output
+            result.no_transcribable_text = parsed_output.get("no_transcribable_text", False)
+            result.transcription_not_possible = parsed_output.get("transcription_not_possible", False)
+
+        return result
+
+    def _build_disabled_params(self) -> Dict[str, Any] | None:
+        """Build disabled_params dict based on model capabilities.
+        
+        LangChain's disabled_params feature automatically filters out
+        unsupported parameters before sending to the API.
+        
+        Subclasses that set self._capabilities can use this directly.
+        Returns None if no params need disabling.
+        """
+        caps = getattr(self, "_capabilities", None)
+        if caps is None:
+            return None
+        disabled: Dict[str, Any] = {}
+        if not caps.supports_temperature:
+            disabled["temperature"] = None
+        if not caps.supports_top_p:
+            disabled["top_p"] = None
+        if not caps.supports_frequency_penalty:
+            disabled["frequency_penalty"] = None
+        if not caps.supports_presence_penalty:
+            disabled["presence_penalty"] = None
+        return disabled if disabled else None
+
     async def __aenter__(self) -> "BaseProvider":
         """Async context manager entry."""
         return self

@@ -50,6 +50,85 @@ from modules.llm.schema_utils import list_schema_options
 logger = setup_logger(__name__)
 
 
+def _resolve_schema(args_schema: str | None, config: UserConfiguration) -> None:
+    """Resolve and set schema on config from CLI --schema argument.
+    
+    If args_schema is provided, looks it up in available schemas.
+    Otherwise, sets the default markdown_transcription_schema.
+    """
+    if args_schema:
+        options = list_schema_options()
+        schema_dict = {name: path for name, path in options}
+        if args_schema in schema_dict:
+            config.selected_schema_name = args_schema
+            config.selected_schema_path = schema_dict[args_schema]
+        else:
+            raise ValueError(f"Schema '{args_schema}' not found. Available: {list(schema_dict.keys())}")
+    else:
+        default_schema = (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json").resolve()
+        config.selected_schema_name = "markdown_transcription_schema"
+        config.selected_schema_path = default_schema
+
+
+def _resolve_context(args_context: str | None, config: UserConfiguration) -> None:
+    """Resolve and set additional context path on config from CLI --context argument."""
+    if args_context:
+        context_path = resolve_path(args_context, PROJECT_ROOT)
+        validate_input_path(context_path)
+        config.additional_context_path = context_path
+    else:
+        config.additional_context_path = None
+
+
+def _collect_files_for_type(
+    input_path: Path,
+    processing_type: str,
+    args: Any,
+) -> list[Path]:
+    """Collect files/folders to process based on processing type and CLI args.
+    
+    Args:
+        input_path: Validated input path (directory or single file).
+        processing_type: One of 'images', 'pdfs', 'epubs', 'mobis'.
+        args: Parsed CLI args (uses .files, .recursive).
+    
+    Returns:
+        List of paths to process.
+    
+    Raises:
+        ValueError: If input path is invalid for the processing type.
+    """
+    if processing_type == "images":
+        if not input_path.is_dir():
+            raise ValueError(f"For image processing, input must be a directory: {input_path}")
+        if args.files:
+            return [input_path / f for f in args.files]
+        elif args.recursive:
+            return [d for d in input_path.iterdir() if d.is_dir()]
+        else:
+            return [input_path]
+
+    # File-based types: pdfs, epubs, mobis
+    ext_map: dict[str, list[str]] = {
+        "pdfs": [".pdf"],
+        "epubs": [".epub"],
+        "mobis": [".mobi", ".azw", ".azw3", ".kfx"],
+    }
+    extensions = ext_map.get(processing_type, [])
+
+    if input_path.is_file():
+        return [input_path]
+    if not input_path.exists():
+        raise ValueError(f"Input path does not exist: {input_path}")
+    # Directory
+    if args.files:
+        return [input_path / f for f in args.files]
+    elif args.recursive:
+        return [f for ext in extensions for f in input_path.rglob(f"*{ext}")]
+    else:
+        return [f for ext in extensions for f in input_path.glob(f"*{ext}")]
+
+
 def create_config_from_cli_args(args: Any, base_input_dir: Path, base_output_dir: Path, paths_config: dict[str, Any]) -> UserConfiguration:
     """Create UserConfiguration from CLI arguments.
     
@@ -97,28 +176,8 @@ def create_config_from_cli_args(args: Any, base_input_dir: Path, base_output_dir
         # Set output directory for auto mode
         config.selected_items = [auto_output]  # Store output path
         
-        # Handle schema selection for auto mode (applies to GPT files)
-        if args.schema:
-            options = list_schema_options()
-            schema_dict = {name: path for name, path in options}
-            if args.schema in schema_dict:
-                config.selected_schema_name = args.schema
-                config.selected_schema_path = schema_dict[args.schema]
-            else:
-                raise ValueError(f"Schema '{args.schema}' not found. Available: {list(schema_dict.keys())}")
-        else:
-            # Use default schema for auto mode GPT files
-            default_schema = (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json").resolve()
-            config.selected_schema_name = "markdown_transcription_schema"
-            config.selected_schema_path = default_schema
-        
-        # Handle additional context for auto mode
-        if args.context:
-            context_path = resolve_path(args.context, PROJECT_ROOT)
-            validate_input_path(context_path)
-            config.additional_context_path = context_path
-        else:
-            config.additional_context_path = None
+        _resolve_schema(args.schema, config)
+        _resolve_context(args.context, config)
         
         return config
     
@@ -140,29 +199,8 @@ def create_config_from_cli_args(args: Any, base_input_dir: Path, base_output_dir
     if args.method == "gpt":
         config.use_batch_processing = args.batch
         
-        # Handle schema selection
-        if args.schema:
-            # Find schema by name
-            options = list_schema_options()
-            schema_dict = {name: path for name, path in options}
-            if args.schema in schema_dict:
-                config.selected_schema_name = args.schema
-                config.selected_schema_path = schema_dict[args.schema]
-            else:
-                raise ValueError(f"Schema '{args.schema}' not found. Available: {list(schema_dict.keys())}")
-        else:
-            # Use default schema
-            default_schema = (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json").resolve()
-            config.selected_schema_name = "markdown_transcription_schema"
-            config.selected_schema_path = default_schema
-        
-        # Handle additional context
-        if args.context:
-            context_path = resolve_path(args.context, PROJECT_ROOT)
-            validate_input_path(context_path)
-            config.additional_context_path = context_path
-        else:
-            config.additional_context_path = None
+        _resolve_schema(args.schema, config)
+        _resolve_context(args.context, config)
     
     # Resolve input path
     input_path = resolve_path(args.input, base_input_dir)
@@ -173,70 +211,7 @@ def create_config_from_cli_args(args: Any, base_input_dir: Path, base_output_dir
     validate_output_path(output_path)
     
     # Determine selected items based on input type
-    if config.processing_type == "images":
-        # For images, expect input to be a folder containing subfolders
-        if input_path.is_dir():
-            if args.files:
-                # Specific subfolders
-                config.selected_items = [input_path / f for f in args.files]
-            elif args.recursive:
-                # All subfolders
-                config.selected_items = [d for d in input_path.iterdir() if d.is_dir()]
-            else:
-                # Direct processing of the folder
-                config.selected_items = [input_path]
-        else:
-            raise ValueError(f"For image processing, input must be a directory: {input_path}")
-    elif config.processing_type == "pdfs":
-        # For PDFs, collect PDF files
-        if input_path.is_dir():
-            if args.files:
-                # Specific files
-                config.selected_items = [input_path / f for f in args.files]
-            elif args.recursive:
-                # All PDFs recursively
-                config.selected_items = list(input_path.rglob("*.pdf"))
-            else:
-                # PDFs in the directory
-                config.selected_items = list(input_path.glob("*.pdf"))
-        elif input_path.is_file():
-            # Single PDF file
-            config.selected_items = [input_path]
-        else:
-            raise ValueError(f"Input path does not exist: {input_path}")
-    elif config.processing_type == "epubs":
-        # For EPUBs, collect EPUB files
-        if input_path.is_dir():
-            if args.files:
-                config.selected_items = [input_path / f for f in args.files]
-            elif args.recursive:
-                config.selected_items = list(input_path.rglob("*.epub"))
-            else:
-                config.selected_items = list(input_path.glob("*.epub"))
-        elif input_path.is_file():
-            config.selected_items = [input_path]
-        else:
-            raise ValueError(f"Input path does not exist: {input_path}")
-    else:
-        # For MOBIs, collect MOBI files (.mobi, .azw, .azw3, .kfx)
-        mobi_extensions = [".mobi", ".azw", ".azw3", ".kfx"]
-        if input_path.is_dir():
-            if args.files:
-                config.selected_items = [input_path / f for f in args.files]
-            elif args.recursive:
-                config.selected_items = [
-                    f for ext in mobi_extensions 
-                    for f in input_path.rglob(f"*{ext}")
-                ]
-            else:
-                config.selected_items = [
-                    f for ext in mobi_extensions 
-                    for f in input_path.glob(f"*{ext}")
-                ]
-        elif input_path.is_file():
-            config.selected_items = [input_path]
-        else:
-            raise ValueError(f"Input path does not exist: {input_path}")
+    config.selected_items = _collect_files_for_type(input_path, config.processing_type, args)
     
     if not config.selected_items:
         raise ValueError(f"No items found to process in: {input_path}")

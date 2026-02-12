@@ -428,47 +428,49 @@ class WorkflowManager:
 
     async def process_single_epub(self, epub_path: Path) -> None:
         """Extract and save text from a single EPUB file."""
-        print_info(f"Processing EPUB: {epub_path.name}")
-
-        processor = EPUBProcessor(epub_path)
-        try:
-            extraction: EPUBTextExtraction = processor.extract_text()
-        except Exception as exc:
-            logger.exception("Failed to extract EPUB %s: %s", epub_path.name, exc)
-            print_error(f"Failed to extract text from {epub_path.name}.")
-            return
-
-        # Determine output directory: use input file's parent when input_paths_is_output_path is True
-        output_dir = epub_path.parent if self.use_input_as_output else self.epub_output_dir
-        _parent_folder, output_txt_path = processor.prepare_output_folder(output_dir)
-        output_txt_path.parent.mkdir(parents=True, exist_ok=True)
-
-        rendered_text = extraction.to_plain_text()
-        # Apply post-processing if enabled
-        processed_text = postprocess_transcription(rendered_text, self.postprocessing_config)
-        try:
-            output_txt_path.write_text(processed_text, encoding="utf-8")
-        except Exception as exc:
-            logger.exception("Failed to write EPUB transcription for %s: %s", epub_path.name, exc)
-            print_error(f"Failed to write output for {epub_path.name}.")
-            return
-
-        print_success(f"Extracted text from '{epub_path.name}' -> {output_txt_path.name}")
+        await self._process_native_ebook(
+            file_path=epub_path,
+            processor_cls=EPUBProcessor,
+            format_label="EPUB",
+            default_output_dir=self.epub_output_dir,
+        )
 
     async def process_single_mobi(self, mobi_path: Path) -> None:
         """Extract and save text from a single MOBI file."""
-        print_info(f"Processing MOBI: {mobi_path.name}")
+        await self._process_native_ebook(
+            file_path=mobi_path,
+            processor_cls=MOBIProcessor,
+            format_label="MOBI",
+            default_output_dir=self.mobi_output_dir,
+        )
 
-        processor = MOBIProcessor(mobi_path)
+    async def _process_native_ebook(
+        self,
+        file_path: Path,
+        processor_cls: type,
+        format_label: str,
+        default_output_dir: Path,
+    ) -> None:
+        """Shared logic for extracting text from EPUB/MOBI files.
+        
+        Args:
+            file_path: Path to the ebook file.
+            processor_cls: EPUBProcessor or MOBIProcessor class.
+            format_label: Human-readable format name for log messages.
+            default_output_dir: Default output directory for this format.
+        """
+        print_info(f"Processing {format_label}: {file_path.name}")
+
+        processor = processor_cls(file_path)
         try:
-            extraction: MOBITextExtraction = processor.extract_text()
+            extraction = processor.extract_text()
         except Exception as exc:
-            logger.exception("Failed to extract MOBI %s: %s", mobi_path.name, exc)
-            print_error(f"Failed to extract text from {mobi_path.name}.")
+            logger.exception("Failed to extract %s %s: %s", format_label, file_path.name, exc)
+            print_error(f"Failed to extract text from {file_path.name}.")
             return
 
         # Determine output directory: use input file's parent when input_paths_is_output_path is True
-        output_dir = mobi_path.parent if self.use_input_as_output else self.mobi_output_dir
+        output_dir = file_path.parent if self.use_input_as_output else default_output_dir
         _parent_folder, output_txt_path = processor.prepare_output_folder(output_dir)
         output_txt_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -478,11 +480,38 @@ class WorkflowManager:
         try:
             output_txt_path.write_text(processed_text, encoding="utf-8")
         except Exception as exc:
-            logger.exception("Failed to write MOBI transcription for %s: %s", mobi_path.name, exc)
-            print_error(f"Failed to write output for {mobi_path.name}.")
+            logger.exception("Failed to write %s transcription for %s: %s", format_label, file_path.name, exc)
+            print_error(f"Failed to write output for {file_path.name}.")
             return
 
-        print_success(f"Extracted text from '{mobi_path.name}' (via {extraction.source_format}) -> {output_txt_path.name}")
+        # Include source_format in success message when available (e.g. MOBI)
+        source_fmt = getattr(extraction, "source_format", None)
+        suffix = f" (via {source_fmt})" if source_fmt else ""
+        print_success(f"Extracted text from '{file_path.name}'{suffix} -> {output_txt_path.name}")
+
+    def _cleanup_preprocessed(self, preprocessed_folder: Path, source_name: str) -> None:
+        """Remove preprocessed images folder if the setting says to discard them."""
+        if not self.processing_settings.get("keep_preprocessed_images", True):
+            if preprocessed_folder.exists():
+                try:
+                    shutil.rmtree(preprocessed_folder, ignore_errors=True)
+                except Exception as e:
+                    logger.exception(
+                        f"Error cleaning up preprocessed images for {source_name}: {e}")
+
+    def _cleanup_temp_jsonl(self, temp_jsonl_path: Path, method: str) -> None:
+        """Remove temporary JSONL unless retained or needed for batch tracking."""
+        is_batch = method == "gpt" and self.user_config.use_batch_processing
+        if not self.processing_settings.get("retain_temporary_jsonl", True) and not is_batch:
+            try:
+                temp_jsonl_path.unlink()
+                print_info(f"Deleted temporary file: {temp_jsonl_path.name}")
+            except Exception as e:
+                logger.exception(
+                    f"Error deleting temporary file {temp_jsonl_path}: {e}")
+                print_error(f"Could not delete temporary file {temp_jsonl_path.name}: {e}")
+        elif is_batch:
+            print_info(f"Preserving {temp_jsonl_path.name} for batch tracking (required for retrieval)")
 
     async def process_single_pdf(self, pdf_path: Path,
                                  transcriber: Optional[Any]) -> None:
@@ -530,16 +559,7 @@ class WorkflowManager:
                     f"Error writing native extraction output for {pdf_path.name}: {e}")
                 print_error(f"Failed to write output: {e}")
 
-            # Cleanup if not retaining
-            if not self.processing_settings.get("retain_temporary_jsonl", True):
-                try:
-                    temp_jsonl_path.unlink()
-                    print_info(f"Deleted temporary file: {temp_jsonl_path.name}")
-                except Exception as e:
-                    logger.exception(
-                        f"Error deleting temporary file {temp_jsonl_path}: {e}")
-                    print_error(f"Could not delete temporary file {temp_jsonl_path.name}: {e}")
-
+            self._cleanup_temp_jsonl(temp_jsonl_path, method)
             return
 
         # Non-native PDF: Extract images
@@ -580,13 +600,7 @@ class WorkflowManager:
             )
             if handle is not None:
                 # Batch submitted successfully - cleanup and return
-                if not self.processing_settings.get("keep_preprocessed_images", True):
-                    if preprocessed_folder.exists():
-                        try:
-                            shutil.rmtree(preprocessed_folder, ignore_errors=True)
-                        except Exception as e:
-                            logger.exception(
-                                f"Error cleaning up preprocessed images for {pdf_path.name}: {e}")
+                self._cleanup_preprocessed(preprocessed_folder, pdf_path.name)
                 return
             # If handle is None, fall through to synchronous processing
 
@@ -602,31 +616,9 @@ class WorkflowManager:
             pdf_path.name
         )
 
-        # If keep_preprocessed_images is false, delete preprocessed folder
-        if not self.processing_settings.get("keep_preprocessed_images", True):
-            if preprocessed_folder.exists():
-                try:
-                    shutil.rmtree(preprocessed_folder, ignore_errors=True)
-                except Exception as e:
-                    logger.exception(
-                        f"Error cleaning up preprocessed images for {pdf_path.name}: {e}")
-
+        self._cleanup_preprocessed(preprocessed_folder, pdf_path.name)
         print_success(f"Saved transcription for PDF '{pdf_path.name}' -> {output_txt_path.name}")
-
-        # Remove temporary JSONL if not retaining AND not using batch processing
-        # For batch processing, we must keep the JSONL files as they contain batch tracking info
-        if not self.processing_settings.get("retain_temporary_jsonl",
-                                            True) and not (
-                method == "gpt" and self.user_config.use_batch_processing):
-            try:
-                temp_jsonl_path.unlink()
-                print_info(f"Deleted temporary file: {temp_jsonl_path.name}")
-            except Exception as e:
-                logger.exception(
-                    f"Error deleting temporary file {temp_jsonl_path}: {e}")
-                print_error(f"Could not delete temporary file {temp_jsonl_path.name}: {e}")
-        elif method == "gpt" and self.user_config.use_batch_processing:
-            print_info(f"Preserving {temp_jsonl_path.name} for batch tracking (required for retrieval)")
+        self._cleanup_temp_jsonl(temp_jsonl_path, method)
 
     async def process_single_image_folder(self, folder: Path,
                                           transcriber: Optional[Any]) -> None:
@@ -678,13 +670,7 @@ class WorkflowManager:
             )
             if handle is not None:
                 # Batch submitted successfully - cleanup and return
-                if not self.processing_settings.get("keep_preprocessed_images", True):
-                    if preprocessed_folder.exists():
-                        try:
-                            shutil.rmtree(preprocessed_folder, ignore_errors=True)
-                        except Exception as e:
-                            logger.exception(
-                                f"Error cleaning up preprocessed images for folder '{folder.name}': {e}")
+                self._cleanup_preprocessed(preprocessed_folder, f"folder '{folder.name}'")
                 return
             # If handle is None, fall through to synchronous processing
 
@@ -701,31 +687,9 @@ class WorkflowManager:
             is_folder=True
         )
 
-        # Delete preprocessed folder if not retaining
-        if not self.processing_settings.get("keep_preprocessed_images", True):
-            if preprocessed_folder.exists():
-                try:
-                    shutil.rmtree(preprocessed_folder, ignore_errors=True)
-                except Exception as e:
-                    logger.exception(
-                        f"Error cleaning up preprocessed images for folder '{folder.name}': {e}")
-
+        self._cleanup_preprocessed(preprocessed_folder, f"folder '{folder.name}'")
         print_success(f"Transcription completed for folder '{folder.name}' -> {output_txt_path.name}")
-
-        # Delete temporary JSONL if not retaining AND not using batch processing
-        # For batch processing, we must keep the JSONL files as they contain batch tracking info
-        if not self.processing_settings.get("retain_temporary_jsonl",
-                                            True) and not (
-                method == "gpt" and self.user_config.use_batch_processing):
-            try:
-                temp_jsonl_path.unlink()
-                print_info(f"Deleted temporary file: {temp_jsonl_path.name}")
-            except Exception as e:
-                logger.exception(
-                    f"Error deleting temporary file {temp_jsonl_path}: {e}")
-                print_error(f"Could not delete temporary file {temp_jsonl_path.name}: {e}")
-        elif method == "gpt" and self.user_config.use_batch_processing:
-            print_info(f"Preserving {temp_jsonl_path.name} for batch tracking (required for retrieval)")
+        self._cleanup_temp_jsonl(temp_jsonl_path, method)
 
     async def _process_images_with_method(
             self,

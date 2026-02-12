@@ -23,11 +23,12 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from modules.llm.providers.base import (
+    ANTHROPIC_TOKEN_MAPPING,
     BaseProvider,
     ProviderCapabilities,
     TranscriptionResult,
+    load_max_retries,
 )
-from modules.config.service import get_config_service
 
 logger = logging.getLogger(__name__)
 
@@ -341,21 +342,6 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
     )
 
 
-def _load_max_retries() -> int:
-    """Load max retries from concurrency_config.yaml.
-    
-    LangChain's ChatAnthropic handles retry logic internally.
-    """
-    try:
-        conc_cfg = get_config_service().get_concurrency_config() or {}
-        trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get("transcription", {}) or {}
-        retry_cfg = trans_cfg.get("retry", {}) or {}
-        attempts = int(retry_cfg.get("attempts", 5))
-        return max(1, attempts)
-    except Exception:
-        return 5
-
-
 class AnthropicProvider(BaseProvider):
     """Anthropic (Claude) LLM provider using LangChain."""
     
@@ -389,7 +375,7 @@ class AnthropicProvider(BaseProvider):
         self.reasoning_config = reasoning_config
         
         self._capabilities = caps
-        max_retries = _load_max_retries()
+        max_retries = load_max_retries()
         
         # Build LangChain model kwargs
         model_kwargs: Dict[str, Any] = {}
@@ -435,29 +421,19 @@ class AnthropicProvider(BaseProvider):
     
     def get_capabilities(self) -> ProviderCapabilities:
         return self._capabilities
-    
-    async def transcribe_image(
-        self,
-        image_path: Path,
-        *,
-        system_prompt: str,
-        user_instruction: str = "Please transcribe the text from this image.",
-        json_schema: Optional[Dict[str, Any]] = None,
-        image_detail: Optional[str] = None,
-        media_resolution: Optional[str] = None,
-    ) -> TranscriptionResult:
-        """Transcribe text from an image file."""
-        base64_data, mime_type = self.encode_image_to_base64(image_path)
-        return await self.transcribe_image_from_base64(
-            image_base64=base64_data,
-            mime_type=mime_type,
-            system_prompt=system_prompt,
-            user_instruction=user_instruction,
-            json_schema=json_schema,
-            image_detail=image_detail,
-            media_resolution=media_resolution,
-        )
-    
+
+    def _normalize_list_content(self, content_list: list) -> str:
+        """Anthropic can return content as a list of text blocks."""
+        text_parts: List[str] = []
+        for item in content_list:
+            if isinstance(item, dict):
+                t = item.get("text")
+                if isinstance(t, str) and t.strip():
+                    text_parts.append(t)
+            elif isinstance(item, str) and item.strip():
+                text_parts.append(item)
+        return "\n".join(text_parts) if text_parts else str(content_list)
+
     async def transcribe_image_from_base64(
         self,
         image_base64: str,
@@ -539,113 +515,12 @@ class AnthropicProvider(BaseProvider):
         """Invoke the LLM and process the response.
         
         LangChain handles retry logic internally.
-        
-        When using with_structured_output(include_raw=True), the response is a dict:
-        - "raw": The underlying AIMessage with response_metadata containing token usage
-        - "parsed": The parsed dict
-        - "parsing_error": Any parsing error that occurred
+        Response parsing and token tracking are handled by the shared
+        BaseProvider._process_llm_response() method.
         """
         try:
             response = await llm.ainvoke(messages)
-            
-            # Extract token usage and content
-            # Handle include_raw=True response format (dict with raw/parsed/parsing_error)
-            input_tokens = 0
-            output_tokens = 0
-            total_tokens = 0
-            raw_response = {}
-            raw_message = None
-            parsed_output = None
-            
-            if isinstance(response, dict) and "raw" in response and "parsed" in response:
-                # with_structured_output(include_raw=True) returns {"raw": AIMessage, "parsed": dict}
-                raw_message = response.get("raw")
-                parsed_data = response.get("parsed")
-                
-                # Extract parsed content
-                if parsed_data is not None:
-                    if isinstance(parsed_data, dict):
-                        content = json.dumps(parsed_data)
-                        parsed_output = parsed_data
-                    else:
-                        content = str(parsed_data)
-                else:
-                    # Parsing failed, try to get content from raw message
-                    content = raw_message.content if raw_message and hasattr(raw_message, 'content') else ""
-                    if isinstance(content, dict):
-                        parsed_output = content
-                        content = json.dumps(content)
-            elif hasattr(response, 'content'):
-                # Standard AIMessage response (no structured output)
-                raw_message = response
-                content = response.content
-                if isinstance(content, list):
-                    text_parts: List[str] = []
-                    for item in content:
-                        if isinstance(item, dict):
-                            t = item.get("text")
-                            if isinstance(t, str) and t.strip():
-                                text_parts.append(t)
-                        elif isinstance(item, str) and item.strip():
-                            text_parts.append(item)
-                    if text_parts:
-                        content = "\n".join(text_parts)
-                    else:
-                        content = str(content)
-                elif isinstance(content, dict):
-                    parsed_output = content
-                    content = json.dumps(content)
-                elif not isinstance(content, str):
-                    content = str(content)
-            elif isinstance(response, dict):
-                # Dict response without raw/parsed structure
-                content = json.dumps(response)
-                parsed_output = response
-            else:
-                content = str(response)
-            
-            # Extract token usage from the raw AIMessage's response_metadata
-            if raw_message and hasattr(raw_message, 'response_metadata'):
-                metadata = raw_message.response_metadata
-                if isinstance(metadata, dict):
-                    raw_response = metadata
-                    # Anthropic uses 'usage' with input_tokens/output_tokens
-                    usage = metadata.get('usage', {})
-                    if isinstance(usage, dict):
-                        input_tokens = usage.get('input_tokens', 0)
-                        output_tokens = usage.get('output_tokens', 0)
-                        total_tokens = input_tokens + output_tokens
-            
-            # Track tokens
-            if total_tokens > 0:
-                try:
-                    from modules.infra.token_tracker import get_token_tracker
-                    token_tracker = get_token_tracker()
-                    token_tracker.add_tokens(total_tokens)
-                    logger.debug(
-                        f"[TOKEN] API call consumed {total_tokens:,} tokens "
-                        f"(daily total: {token_tracker.get_tokens_used_today():,})"
-                    )
-                except Exception as e:
-                    logger.warning(f"Error tracking tokens: {e}")
-            
-            # Create result
-            result = TranscriptionResult(
-                content=content,
-                raw_response=raw_response,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                total_tokens=total_tokens,
-            )
-            
-            # Set parsed output flags if available
-            if parsed_output and isinstance(parsed_output, dict):
-                result.parsed_output = parsed_output
-                result.no_transcribable_text = parsed_output.get('no_transcribable_text', False)
-                result.transcription_not_possible = parsed_output.get('transcription_not_possible', False)
-            
-            return result
-            
+            return await self._process_llm_response(response, ANTHROPIC_TOKEN_MAPPING)
         except Exception as e:
             logger.error(f"Error invoking Anthropic: {e}")
             return TranscriptionResult(

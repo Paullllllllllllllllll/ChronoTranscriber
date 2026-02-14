@@ -296,14 +296,23 @@ class WorkflowUI:
         
         print_header("GPT TRANSCRIPTION SETTINGS", f"{len(gpt_decisions)} file(s) will use GPT transcription")
         
+        # configure_schema_selection and configure_additional_context gate on
+        # config.transcription_method == "gpt".  In auto mode the field is
+        # None, so temporarily set it so the prompts actually appear.
+        prev_method = config.transcription_method
+        config.transcription_method = "gpt"
+        
         # Configure schema
         if not WorkflowUI.configure_schema_selection(config):
+            config.transcription_method = prev_method
             return False
         
         # Configure additional context
         if not WorkflowUI.configure_additional_context(config):
+            config.transcription_method = prev_method
             return False
         
+        config.transcription_method = prev_method
         return True
 
     @staticmethod

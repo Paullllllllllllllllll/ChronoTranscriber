@@ -393,15 +393,17 @@ class WorkflowManager:
             processed_count += 1
             print_info(f"Completed item {idx}/{total_items}")
             
-            # Log token usage after each item if enabled
+            # Log and print token usage after each item if enabled
             if token_cfg.get("enabled", False) and self.user_config.transcription_method == "gpt":
                 token_tracker = get_token_tracker()
                 stats = token_tracker.get_stats()
-                logger.info(
+                usage_msg = (
                     f"Token usage after item {idx}/{total_items}: "
                     f"{stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
                     f"({stats['usage_percentage']:.1f}%)"
                 )
+                logger.info(usage_msg)
+                print_info(usage_msg)
 
         if failed_count > 0:
             print_warning(
@@ -530,6 +532,12 @@ class WorkflowManager:
         """
         Processes a single PDF file for transcription based on the user configuration.
         """
+        # Resolve per-file context and update transcriber before processing
+        if transcriber is not None and not self.user_config.additional_context_path:
+            from modules.llm.context_utils import resolve_context_for_file
+            ctx_content, ctx_path = resolve_context_for_file(pdf_path)
+            transcriber.update_context(ctx_content)
+
         pdf_processor = PDFProcessor(pdf_path)
         # Determine output directory: use input file's parent when input_paths_is_output_path is True
         output_dir = pdf_path.parent if self.use_input_as_output else self.pdf_output_dir
@@ -656,6 +664,12 @@ class WorkflowManager:
         """
         Processes all images in a given folder based on the user configuration.
         """
+        # Resolve per-folder context and update transcriber before processing
+        if transcriber is not None and not self.user_config.additional_context_path:
+            from modules.llm.context_utils import resolve_context_for_folder
+            ctx_content, ctx_path = resolve_context_for_folder(folder)
+            transcriber.update_context(ctx_content)
+
         # Determine output directory: use input folder itself when input_paths_is_output_path is True
         # This places output files inside the source folder
         output_dir = folder if self.use_input_as_output else self.image_output_dir

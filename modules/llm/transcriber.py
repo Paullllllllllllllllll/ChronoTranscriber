@@ -108,8 +108,8 @@ class LangChainTranscriber:
             else:
                 self.transcription_schema = loaded_schema
         
-        # Render system prompt with schema
-        self.system_prompt_text = render_prompt_with_schema(raw_prompt, self.full_schema_obj)
+        # Render system prompt with schema (but NOT yet with context)
+        self._base_prompt = render_prompt_with_schema(raw_prompt, self.full_schema_obj)
         
         # Inject additional context - use explicit path or hierarchical resolution
         additional_context = None
@@ -128,7 +128,7 @@ class LangChainTranscriber:
         
         # Inject context into prompt (or remove section if empty)
         self.system_prompt_text = inject_additional_context(
-            self.system_prompt_text, additional_context or ""
+            self._base_prompt, additional_context or ""
         )
         
         # Load image processing config for detail level
@@ -195,6 +195,22 @@ class LangChainTranscriber:
             f"model={self.model}, max_tokens={max_tokens}"
         )
     
+    def update_context(self, context_content: Optional[str]) -> None:
+        """Re-inject context into the system prompt.
+
+        Call this before processing each item when per-file context
+        resolution is needed.  The base prompt (schema-rendered, pre-context)
+        is preserved from __init__ so only the context section changes.
+
+        Parameters
+        ----------
+        context_content : Optional[str]
+            New context text, or None/empty to remove the context section.
+        """
+        self.system_prompt_text = inject_additional_context(
+            self._base_prompt, context_content or ""
+        )
+
     @property
     def provider(self) -> BaseProvider:
         """Get the underlying provider instance."""

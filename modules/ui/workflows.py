@@ -681,10 +681,6 @@ class WorkflowUI:
         Returns:
             True if user confirms, False if they want to go back
         """
-        # Skip summary for auto mode (already shown in _configure_auto_mode)
-        if config.processing_type == "auto":
-            return True
-        
         # Load configs for display
         from modules.config.service import get_config_service
         config_service = get_config_service()
@@ -692,38 +688,58 @@ class WorkflowUI:
         paths_config = config_service.get_paths_config()
         concurrency_config = config_service.get_concurrency_config()
         
+        is_auto = config.processing_type == "auto"
+        decisions = config.auto_decisions or []
+        
+        # Determine whether any GPT processing will occur
+        if is_auto:
+            has_gpt = any(d.method == "gpt" for d in decisions)
+        else:
+            has_gpt = config.transcription_method == "gpt"
+        
         print_header("PROCESSING SUMMARY", "Review your selections before processing")
         
-        # Determine item type description
-        if config.processing_type == "images":
-            item_type = "image folder(s)"
-        elif config.processing_type == "pdfs":
-            item_type = "PDF file(s)"
-        elif config.processing_type == "epubs":
-            item_type = "EPUB file(s)"
+        # === Item count ===
+        if is_auto:
+            ui_print(f"  Ready to process ", PromptStyle.INFO, end="")
+            ui_print(f"{len(decisions)}", PromptStyle.HIGHLIGHT, end="")
+            ui_print(f" file(s) in auto mode\n", PromptStyle.INFO)
         else:
-            item_type = "file(s)"
-        
-        ui_print(f"  Ready to process ", PromptStyle.INFO, end="")
-        ui_print(f"{len(config.selected_items or [])}", PromptStyle.HIGHLIGHT, end="")
-        ui_print(f" {item_type}\n", PromptStyle.INFO)
+            if config.processing_type == "images":
+                item_type = "image folder(s)"
+            elif config.processing_type == "pdfs":
+                item_type = "PDF file(s)"
+            elif config.processing_type == "epubs":
+                item_type = "EPUB file(s)"
+            else:
+                item_type = "file(s)"
+            ui_print(f"  Ready to process ", PromptStyle.INFO, end="")
+            ui_print(f"{len(config.selected_items or [])}", PromptStyle.HIGHLIGHT, end="")
+            ui_print(f" {item_type}\n", PromptStyle.INFO)
         
         # === Processing Configuration ===
         ui_print("  Processing Configuration:", PromptStyle.HIGHLIGHT)
         print_separator(PromptStyle.LIGHT_LINE, 80)
-        ui_print(f"    • Document type: {(config.processing_type or 'unknown').capitalize()}", PromptStyle.INFO)
-        ui_print(f"    • Transcription method: {(config.transcription_method or 'unknown').upper()}", PromptStyle.INFO)
         
-        if config.transcription_method == "gpt":
-            # Show batch/sync mode
-            mode = "Batch (asynchronous)" if config.use_batch_processing else "Synchronous"
-            ui_print(f"    • Processing mode: {mode}", PromptStyle.INFO)
-            
-            # Show schema
+        if is_auto:
+            ui_print(f"    • Document type: Auto (mixed)", PromptStyle.INFO)
+            # Show method breakdown
+            from collections import Counter
+            method_counts = Counter(d.method for d in decisions)
+            for method, count in sorted(method_counts.items(), key=lambda x: -x[1]):
+                ui_print(f"    • {method.upper()}: {count} file(s)", PromptStyle.INFO)
+            ui_print(f"    • Processing mode: Synchronous", PromptStyle.INFO)
+        else:
+            ui_print(f"    • Document type: {(config.processing_type or 'unknown').capitalize()}", PromptStyle.INFO)
+            ui_print(f"    • Transcription method: {(config.transcription_method or 'unknown').upper()}", PromptStyle.INFO)
+            if config.transcription_method == "gpt":
+                mode = "Batch (asynchronous)" if config.use_batch_processing else "Synchronous"
+                ui_print(f"    • Processing mode: {mode}", PromptStyle.INFO)
+        
+        # Schema and context (shown when GPT is involved)
+        if has_gpt:
             if config.selected_schema_name:
                 ui_print(f"    • Schema: {config.selected_schema_name}", PromptStyle.INFO)
-            
-            # Show additional context status
             if config.additional_context_path:
                 ui_print(f"    • Additional context: Yes ({config.additional_context_path.name})", PromptStyle.INFO)
             else:
@@ -735,8 +751,8 @@ class WorkflowUI:
         
         print_separator(PromptStyle.LIGHT_LINE, 80)
         
-        # === Model Configuration (for GPT method) ===
-        if config.transcription_method == "gpt":
+        # === Model Configuration (when GPT is involved) ===
+        if has_gpt:
             ui_print("\n  Model Configuration:", PromptStyle.HIGHLIGHT)
             print_separator(PromptStyle.LIGHT_LINE, 80)
             
@@ -789,6 +805,12 @@ class WorkflowUI:
             max_attempts = retry_config.get("max_attempts", 5)
             ui_print(f"      - Max retry attempts: {max_attempts}", PromptStyle.DIM)
             
+            # Daily token limit
+            daily_limit_cfg = concurrency_config.get("daily_token_limit", {})
+            if daily_limit_cfg.get("enabled", False):
+                daily_tokens = daily_limit_cfg.get("daily_tokens", 0)
+                ui_print(f"    • Daily token limit: {daily_tokens:,}", PromptStyle.INFO)
+            
             print_separator(PromptStyle.LIGHT_LINE, 80)
         
         # === Output Location ===
@@ -798,9 +820,10 @@ class WorkflowUI:
         if use_input_as_output:
             ui_print("    • Output: Same directory as input files", PromptStyle.INFO)
         else:
-            # Show configured output directory
             file_paths = paths_config.get('file_paths', {})
-            if config.processing_type == "images":
+            if is_auto:
+                output_dir = file_paths.get('Auto', {}).get('output', 'auto_out')
+            elif config.processing_type == "images":
                 output_dir = file_paths.get('Images', {}).get('output', 'images_out')
             elif config.processing_type == "pdfs":
                 output_dir = file_paths.get('PDFs', {}).get('output', 'pdfs_out')
@@ -812,13 +835,22 @@ class WorkflowUI:
         print_separator(PromptStyle.LIGHT_LINE, 80)
         
         # === Selected Items ===
-        ui_print("\n  Selected Items (first 5 shown):", PromptStyle.HIGHLIGHT)
-        selected = config.selected_items or []
-        for i, item in enumerate(selected[:5], 1):
-            ui_print(f"    {i}. {item.name}", PromptStyle.DIM)
-        
-        if len(selected) > 5:
-            ui_print(f"    ... and {len(selected) - 5} more", PromptStyle.DIM)
+        if is_auto:
+            # Show first 5 files from auto decisions
+            ui_print("\n  Selected Files (first 5 shown):", PromptStyle.HIGHLIGHT)
+            for i, decision in enumerate(decisions[:5], 1):
+                ui_print(f"    {i}. {decision.file_path.name}", PromptStyle.DIM)
+            if len(decisions) > 5:
+                ui_print(f"    ... and {len(decisions) - 5} more", PromptStyle.DIM)
+            selected_file_paths = [d.file_path for d in decisions]
+        else:
+            ui_print("\n  Selected Items (first 5 shown):", PromptStyle.HIGHLIGHT)
+            selected = config.selected_items or []
+            for i, item in enumerate(selected[:5], 1):
+                ui_print(f"    {i}. {item.name}", PromptStyle.DIM)
+            if len(selected) > 5:
+                ui_print(f"    ... and {len(selected) - 5} more", PromptStyle.DIM)
+            selected_file_paths = list(selected)
         
         # === Resume Information ===
         from modules.core.resume import ResumeChecker, ProcessingState
@@ -827,18 +859,22 @@ class WorkflowUI:
             paths_config=paths_config,
             use_input_as_output=use_input_as_output,
         )
+        # For auto mode, derive processing_type from each decision's file_type;
+        # use "pdfs" as a reasonable default since most auto items are PDFs.
+        resume_processing_type = config.processing_type or "pdfs"
         _, skipped = resume_checker.filter_items(
-            list(selected), config.processing_type or ""
+            selected_file_paths, resume_processing_type
         )
         if skipped:
+            total_count = len(selected_file_paths)
             ui_print("")
             ui_print("  Resume Information:", PromptStyle.WARNING)
             print_separator(PromptStyle.LIGHT_LINE, 80)
             ui_print(
-                f"    • {len(skipped)} of {len(selected)} item(s) already have output and will be skipped",
+                f"    • {len(skipped)} of {total_count} item(s) already have output and will be skipped",
                 PromptStyle.WARNING,
             )
-            new_count = len(selected) - len(skipped)
+            new_count = total_count - len(skipped)
             ui_print(f"    • {new_count} item(s) will be processed", PromptStyle.INFO)
             ui_print(f"    • Resume mode: {config.resume_mode}", PromptStyle.DIM)
             ui_print("    • Use --force / --overwrite to reprocess all items", PromptStyle.DIM)

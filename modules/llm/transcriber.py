@@ -111,7 +111,7 @@ class LangChainTranscriber:
         # Render system prompt with schema
         self.system_prompt_text = render_prompt_with_schema(raw_prompt, self.full_schema_obj)
         
-        # Inject additional context - use explicit path or fall back to global default
+        # Inject additional context - use explicit path or hierarchical resolution
         additional_context = None
         if additional_context_path is not None and Path(additional_context_path).exists():
             try:
@@ -119,12 +119,12 @@ class LangChainTranscriber:
             except Exception as e:
                 logger.warning(f"Failed to load additional context: {e}")
         else:
-            # Check for global default context file
-            from modules.llm.context_utils import load_context_from_path
-            global_context_path = PROJECT_ROOT / "additional_context" / "additional_context.txt"
-            additional_context = load_context_from_path(global_context_path)
-            if additional_context:
-                logger.debug(f"Using global context from: {global_context_path}")
+            # Use hierarchical context resolution (general fallback only at init)
+            from modules.llm.context_utils import _resolve_context, _SUFFIX
+            context_content, context_path = _resolve_context(_SUFFIX)
+            if context_content:
+                additional_context = context_content
+                logger.debug(f"Using general context from: {context_path}")
         
         # Inject context into prompt (or remove section if empty)
         self.system_prompt_text = inject_additional_context(

@@ -218,7 +218,7 @@ class WorkflowManager:
             raise FileNotFoundError(f"System prompt missing: {system_prompt_path}")
         system_prompt = system_prompt_path.read_text(encoding="utf-8").strip()
         
-        # Load additional context - use hierarchical resolution if no explicit path
+        # Load additional context - use explicit path or hierarchical resolution
         additional_context = None
         if self.user_config.additional_context_path:
             ctx_path = Path(self.user_config.additional_context_path)
@@ -227,10 +227,7 @@ class WorkflowManager:
         else:
             # Use hierarchical context resolution for folder/file-specific context
             from modules.llm.context_utils import resolve_context_for_folder
-            context_content, context_path = resolve_context_for_folder(
-                parent_folder,
-                global_context_path=PROJECT_ROOT / "additional_context" / "additional_context.txt"
-            )
+            context_content, context_path = resolve_context_for_folder(parent_folder)
             if context_content:
                 additional_context = context_content
                 logger.info(f"Using resolved context from: {context_path}")

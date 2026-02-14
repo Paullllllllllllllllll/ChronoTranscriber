@@ -69,9 +69,9 @@ Automatic model capability detection. OpenAI reasoning models (GPT-5 and o-serie
 
 Automatically selects the most appropriate contextual guidance:
 
-- File-specific context (e.g., `document.txt` for `document.pdf`)
-- Folder-specific context (e.g., `military_records.txt` for `military_records/` folder)
-- Global fallback context (`additional_context/additional_context.txt`)
+- File-specific context (e.g., `document_transcr_context.txt` for `document.pdf`)
+- Folder-specific context (e.g., `military_records_transcr_context.txt` for `military_records/` folder)
+- General fallback context (`context/transcr_context.txt`)
 
 Enables processing mixed document collections with different transcription requirements.
 
@@ -608,23 +608,18 @@ concurrency:
 
 ### Additional Context Guidance
 
-Hierarchical context resolution automatically selects the most appropriate guidance:
+Hierarchical context resolution automatically selects the most appropriate guidance
+using the `_transcr_context` filename suffix (most specific wins):
 
-**For PDF and EPUB files**:
-1. File-specific: `document.txt` next to `document.pdf`
-2. Folder-specific: `archive.txt` in parent directory
-3. Global fallback: `additional_context/additional_context.txt`
+**Context Resolution Order** (applies to all input types):
+1. **File-specific**: `{input_stem}_transcr_context.txt` next to the input file
+2. **Folder-specific**: `{parent_folder}_transcr_context.txt` next to the input's parent folder
+3. **General fallback**: `context/transcr_context.txt` in the project root
 
-**For image folders**:
-1. Folder-specific: `scans.txt` in parent directory
-2. In-folder: `scans/context.txt` inside folder
-3. Global fallback: `additional_context/additional_context.txt`
-
-**For individual images**:
-1. Image-specific: `page001.txt` next to `page001.png`
-2. Folder-specific: `scans.txt` in parent directory
-3. In-folder: `scans/context.txt`
-4. Global fallback: `additional_context/additional_context.txt`
+**Examples**:
+- For `archive/document.pdf`: looks for `archive/document_transcr_context.txt`, then `archive_transcr_context.txt`, then `context/transcr_context.txt`
+- For `scans/` image folder: looks for `scans_transcr_context.txt`, then `context/transcr_context.txt`
+- For `scans/page001.png`: looks for `scans/page001_transcr_context.txt`, then `scans_transcr_context.txt`, then `context/transcr_context.txt`
 
 **Context File Format**:
 
@@ -896,7 +891,8 @@ ChronoTranscriber/
 │   └── ui/                   # User interface and prompts
 ├── schemas/                   # JSON schemas for structured outputs
 ├── system_prompt/             # System prompt templates
-├── additional_context/        # Optional domain context
+├── context/                   # Hierarchical context directory
+│   └── transcr_context.txt   # General fallback context
 ├── LICENSE
 ├── README.md
 └── requirements.txt

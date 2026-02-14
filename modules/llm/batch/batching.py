@@ -279,7 +279,7 @@ def create_batch_request_line(
     if inject_schema_into_prompt:
         system_prompt = render_prompt_with_schema(system_prompt, loaded_schema)
 
-    # Inject additional context - use hierarchical resolution if no explicit path
+    # Inject additional context - use explicit path or hierarchical resolution
     additional_context = None
     if additional_context_path is not None and additional_context_path.exists():
         try:
@@ -304,10 +304,7 @@ def create_batch_request_line(
             image_path = Path(image_url) if not image_url.startswith("http") else None
         
         if image_path:
-            context_content, context_path = resolve_context_for_file(
-                image_path,
-                global_context_path=PROJECT_ROOT / "additional_context" / "additional_context.txt"
-            )
+            context_content, context_path = resolve_context_for_file(image_path)
             if context_content:
                 additional_context = context_content
                 logger.debug(f"Using resolved context from: {context_path}")

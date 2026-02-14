@@ -444,13 +444,8 @@ async def process_auto_mode(
             if schema_path is None:
                 schema_path = (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json").resolve()
             
-            # Support additional context in auto mode - use user config or global default
+            # Support additional context in auto mode - use user config or hierarchical resolution
             context_path = user_config.additional_context_path
-            if context_path is None:
-                # Check for global default context file
-                global_context = PROJECT_ROOT / "additional_context" / "additional_context.txt"
-                if global_context.exists():
-                    context_path = global_context
             
             # Let open_transcriber get the correct API key based on provider config
             async with open_transcriber(

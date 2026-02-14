@@ -355,29 +355,17 @@ async def process_auto_mode(
     # Check if we should use input paths as output paths
     use_input_as_output = paths_config.get('general', {}).get('input_paths_is_output_path', False)
     
-    # Group decisions by (method, processing_type) to avoid routing
-    # different file types through the wrong processor (e.g. image folders
-    # being sent to process_single_pdf just because they share the "gpt" method).
-    def _file_type_to_processing_type(ft: str) -> str:
-        if ft == "pdf":
-            return "pdfs"
-        elif ft in ("image", "image_folder"):
-            return "images"
-        elif ft == "epub":
-            return "epubs"
-        elif ft == "mobi":
-            return "mobis"
-        return "pdfs"  # fallback
-
-    by_method_and_type: dict[tuple[str, str], list[Any]] = {}
+    # Group decisions by method only.  All file types within the same method
+    # share a single processing queue so that PDFs and image folders are
+    # interleaved, preventing one type from exhausting the daily token budget
+    # before the other is reached.  Per-item routing (PDF vs image folder vs
+    # ebook) happens inside process_selected_items via processing_type="auto".
+    by_method: dict[str, list[Any]] = {}
     for decision in decisions:
-        key = (decision.method, _file_type_to_processing_type(decision.file_type))
-        if key not in by_method_and_type:
-            by_method_and_type[key] = []
-        by_method_and_type[key].append(decision)
+        by_method.setdefault(decision.method, []).append(decision)
     
-    # Process each (method, processing_type) group
-    for (method, processing_type), items in by_method_and_type.items():
+    # Process each method group
+    for method, items in by_method.items():
         print_info(f"Processing {len(items)} file(s) with {method.upper()} method...")
 
         # Create a temporary UserConfiguration for this method
@@ -386,56 +374,26 @@ async def process_auto_mode(
         temp_config.use_batch_processing = False  # Auto mode uses synchronous
         temp_config.selected_items = [d.file_path for d in items]
         temp_config.resume_mode = user_config.resume_mode
-        temp_config.processing_type = processing_type
+        temp_config.processing_type = "auto"  # per-item routing in process_selected_items
         temp_config.page_range = user_config.page_range
 
-        # Determine per-group paths configuration
-        group_paths_config = paths_config
-        override_with_auto_output = not use_input_as_output
-
-        if use_input_as_output:
-            parents: set[Path] = set()
-            for decision in items:
-                if temp_config.processing_type == "images" and decision.file_path.is_dir():
-                    parents.add(decision.file_path)
-                else:
-                    parents.add(decision.file_path.parent)
-
-            if len(parents) == 1:
-                parent_dir = next(iter(parents))
-                group_paths_config = deepcopy(paths_config)
-                file_paths_cfg = group_paths_config.setdefault('file_paths', {})
-
-                if temp_config.processing_type == "pdfs":
-                    pdf_cfg = file_paths_cfg.setdefault('PDFs', {})
-                    pdf_cfg['input'] = str(parent_dir)
-                    pdf_cfg['output'] = str(parent_dir)
-                elif temp_config.processing_type == "images":
-                    image_cfg = file_paths_cfg.setdefault('Images', {})
-                    image_cfg['input'] = str(parent_dir)
-                    image_cfg['output'] = str(parent_dir)
-                elif temp_config.processing_type == "epubs":
-                    epub_cfg = file_paths_cfg.setdefault('EPUBs', {})
-                    epub_cfg['input'] = str(parent_dir)
-                    epub_cfg['output'] = str(parent_dir)
-
-                override_with_auto_output = False
-            else:
-                override_with_auto_output = True
-
-        # Create workflow manager for this batch
+        # Create workflow manager
         workflow_manager = WorkflowManager(
             temp_config,
-            group_paths_config,
+            paths_config,
             model_config,
             concurrency_config,
             image_processing_config
         )
 
-        if override_with_auto_output:
+        # When output is NOT co-located with input, redirect all output
+        # to the configured Auto output directory.
+        if not use_input_as_output:
             workflow_manager.pdf_output_dir = output_dir
             workflow_manager.image_output_dir = output_dir
             workflow_manager.epub_output_dir = output_dir
+            workflow_manager.mobi_output_dir = output_dir
+
         transcriber = None
         if method == "gpt":
             # Use schema from user config (set in interactive or CLI mode)

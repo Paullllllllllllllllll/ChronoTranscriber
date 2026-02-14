@@ -114,6 +114,25 @@ class WorkflowManager:
             self.processing_settings = dict(self.processing_settings)
             self.processing_settings["retain_temporary_jsonl"] = True
 
+    async def _route_auto_item(self, item: Path, transcriber: Optional[Any]) -> None:
+        """Route a single item to the correct processor based on its actual type.
+
+        Used by auto mode and as a fallback when processing_type is unknown.
+        """
+        from modules.config.constants import SUPPORTED_MOBI_EXTENSIONS
+
+        if item.is_dir():
+            await self.process_single_image_folder(item, transcriber)
+        elif item.suffix.lower() == ".pdf":
+            await self.process_single_pdf(item, transcriber)
+        elif item.suffix.lower() == ".epub":
+            await self.process_single_epub(item)
+        elif item.suffix.lower() in SUPPORTED_MOBI_EXTENSIONS:
+            await self.process_single_mobi(item)
+        else:
+            logger.warning(f"Unknown file type for item: {item}")
+            print_warning(f"Skipping unknown file type: {item.name}")
+
     def _ensure_tesseract_available(self) -> bool:
         """Verify that Tesseract is available.
         
@@ -376,16 +395,12 @@ class WorkflowManager:
                     await self.process_single_epub(item)
                 elif self.user_config.processing_type == "mobis":
                     await self.process_single_mobi(item)
+                elif self.user_config.processing_type == "auto":
+                    # Auto mode: route each item based on its actual type
+                    await self._route_auto_item(item, transcriber)
                 else:
                     # Fallback - try to detect type from extension
-                    suffix = item.suffix.lower()
-                    if suffix == ".epub":
-                        await self.process_single_epub(item)
-                    elif suffix == ".mobi" or suffix in {".azw", ".azw3", ".kfx"}:
-                        await self.process_single_mobi(item)
-                    else:
-                        logger.warning(f"Unknown processing type for item: {item}")
-                        print_warning(f"Skipping unknown file type: {item.name}")
+                    await self._route_auto_item(item, transcriber)
             except Exception as e:
                 failed_count += 1
                 logger.exception(f"Failed to process item {idx}/{total_items} ({item.name}): {e}")

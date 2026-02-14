@@ -32,6 +32,7 @@ from modules.processing.text_processing import extract_transcribed_text, format_
 from modules.processing.postprocess import postprocess_transcription
 from modules.core.token_guard import check_and_wait_for_token_limit
 from modules.core.resume import ResumeChecker, ProcessingState
+from modules.core.safe_paths import create_safe_filename
 from modules.operations.jsonl_utils import (
     get_processed_image_names,
     read_jsonl_records,
@@ -483,9 +484,15 @@ class WorkflowManager:
             print_error(f"Failed to extract text from {file_path.name}.")
             return
 
-        # Determine output directory: use input file's parent when input_paths_is_output_path is True
-        output_dir = file_path.parent if self.use_input_as_output else default_output_dir
-        _parent_folder, output_txt_path = processor.prepare_output_folder(output_dir)
+        # Determine output directory and prepare working folder
+        if self.use_input_as_output:
+            # Working files go in a hash-suffixed subdirectory next to the ebook
+            _parent_folder, _ = processor.prepare_output_folder(file_path.parent)
+            # Final .txt goes directly next to the ebook file
+            output_txt_path = file_path.parent / create_safe_filename(
+                file_path.stem, ".txt", file_path.parent)
+        else:
+            _parent_folder, output_txt_path = processor.prepare_output_folder(default_output_dir)
         output_txt_path.parent.mkdir(parents=True, exist_ok=True)
 
         rendered_text = extraction.to_plain_text()
@@ -539,10 +546,16 @@ class WorkflowManager:
             transcriber.update_context(ctx_content)
 
         pdf_processor = PDFProcessor(pdf_path)
-        # Determine output directory: use input file's parent when input_paths_is_output_path is True
-        output_dir = pdf_path.parent if self.use_input_as_output else self.pdf_output_dir
-        parent_folder, output_txt_path, temp_jsonl_path = pdf_processor.prepare_output_folder(
-            output_dir)
+        # Determine output directory and prepare working folder
+        if self.use_input_as_output:
+            # Working files go in a hash-suffixed subdirectory next to the PDF
+            parent_folder, _, temp_jsonl_path = pdf_processor.prepare_output_folder(pdf_path.parent)
+            # Final .txt goes directly next to the PDF
+            output_txt_path = pdf_path.parent / create_safe_filename(
+                pdf_path.stem, ".txt", pdf_path.parent)
+        else:
+            parent_folder, output_txt_path, temp_jsonl_path = pdf_processor.prepare_output_folder(
+                self.pdf_output_dir)
         method: str = self.user_config.transcription_method or "gpt"
 
         print_info(f"Processing PDF: {pdf_path.name}")
@@ -670,11 +683,17 @@ class WorkflowManager:
             ctx_content, ctx_path = resolve_context_for_folder(folder)
             transcriber.update_context(ctx_content)
 
-        # Determine output directory: use input folder itself when input_paths_is_output_path is True
-        # This places output files inside the source folder
-        output_dir = folder if self.use_input_as_output else self.image_output_dir
-        parent_folder, preprocessed_folder, temp_jsonl_path, output_txt_path = ImageProcessor.prepare_image_folder(
-            folder, output_dir)
+        # Determine output directory and prepare working folder
+        if self.use_input_as_output:
+            # Working files go in a hash-suffixed subdirectory next to the image folder
+            parent_folder, preprocessed_folder, temp_jsonl_path, _ = ImageProcessor.prepare_image_folder(
+                folder, folder.parent)
+            # Final .txt goes directly next to the image folder (one level up)
+            output_txt_path = folder.parent / create_safe_filename(
+                folder.name, ".txt", folder.parent)
+        else:
+            parent_folder, preprocessed_folder, temp_jsonl_path, output_txt_path = ImageProcessor.prepare_image_folder(
+                folder, self.image_output_dir)
         method: str = self.user_config.transcription_method or "gpt"
 
         print_info(f"Processing folder: {folder.name}")

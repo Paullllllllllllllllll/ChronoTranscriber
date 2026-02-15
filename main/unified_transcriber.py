@@ -411,6 +411,7 @@ async def process_auto_mode(
                 model=model_config.get("transcription_model", {}).get("name", "gpt-4o"),
                 schema_path=schema_path,
                 additional_context_path=context_path,
+                use_hierarchical_context=getattr(user_config, 'use_hierarchical_context', True),
             ) as t:
                 transcriber = t
                 await workflow_manager.process_selected_items(transcriber)
@@ -457,6 +458,7 @@ async def process_documents(
             model=model_config.get("transcription_model", {}).get("name", "gpt-4o"),
             schema_path=user_config.selected_schema_path,
             additional_context_path=user_config.additional_context_path,
+            use_hierarchical_context=getattr(user_config, 'use_hierarchical_context', True),
         ) as t:
             transcriber = t
             await workflow_manager.process_selected_items(transcriber)

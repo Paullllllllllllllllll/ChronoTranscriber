@@ -38,6 +38,7 @@ class LangChainTranscriber:
         schema_path: Optional[Path] = None,
         system_prompt_path: Optional[Path] = None,
         additional_context_path: Optional[Path] = None,
+        use_hierarchical_context: bool = True,
     ):
         """Initialize the transcriber.
         
@@ -49,7 +50,9 @@ class LangChainTranscriber:
             schema_path: Path to JSON schema file
             system_prompt_path: Path to system prompt file
             additional_context_path: Path to additional context file
+            use_hierarchical_context: Whether to use file/folder-specific context resolution
         """
+        self.use_hierarchical_context = use_hierarchical_context
         config_service = get_config_service()
         
         # Load model config
@@ -118,7 +121,7 @@ class LangChainTranscriber:
                 additional_context = Path(additional_context_path).read_text(encoding="utf-8").strip()
             except Exception as e:
                 logger.warning(f"Failed to load additional context: {e}")
-        else:
+        elif self.use_hierarchical_context:
             # Use hierarchical context resolution (general fallback only at init)
             from modules.llm.context_utils import _resolve_context, _SUFFIX
             context_content, context_path = _resolve_context(_SUFFIX)
@@ -304,6 +307,7 @@ async def open_transcriber(
     schema_path: Optional[Path] = None,
     system_prompt_path: Optional[Path] = None,
     additional_context_path: Optional[Path] = None,
+    use_hierarchical_context: bool = True,
 ) -> AsyncGenerator[LangChainTranscriber, None]:
     """Context manager for LangChainTranscriber with automatic cleanup.
     
@@ -316,6 +320,7 @@ async def open_transcriber(
         schema_path: Path to JSON schema file
         system_prompt_path: Path to system prompt file
         additional_context_path: Path to additional context file
+        use_hierarchical_context: Whether to use file/folder-specific context resolution
     
     Yields:
         LangChainTranscriber instance with managed lifecycle
@@ -327,6 +332,7 @@ async def open_transcriber(
         schema_path=schema_path,
         system_prompt_path=system_prompt_path,
         additional_context_path=additional_context_path,
+        use_hierarchical_context=use_hierarchical_context,
     )
     try:
         yield transcriber

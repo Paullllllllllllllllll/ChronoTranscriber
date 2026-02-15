@@ -217,6 +217,7 @@ def create_batch_request_line(
     system_prompt_path: Optional[Path] = None,
     schema_path: Optional[Path] = None,
     additional_context_path: Optional[Path] = None,
+    use_hierarchical_context: bool = True,
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Create a Responses API batch request line for an image transcription task.
@@ -290,7 +291,7 @@ def create_batch_request_line(
                 additional_context_path,
                 e,
             )
-    else:
+    elif use_hierarchical_context:
         # Use hierarchical context resolution for file-specific context
         from modules.llm.context_utils import resolve_context_for_file
         # Extract image path from image_url if it's a file path
@@ -406,6 +407,7 @@ def process_batch_transcription(
     *,
     schema_path: Optional[Path] = None,
     additional_context_path: Optional[Path] = None,
+    use_hierarchical_context: bool = True,
 ) -> Tuple[List[Any], List[Dict[str, Any]]]:
     """
     Prepare and submit batched image transcriptions using the Responses API.
@@ -463,6 +465,7 @@ def process_batch_transcription(
                     model_config=model_config,
                     schema_path=schema_path,
                     additional_context_path=additional_context_path,
+                    use_hierarchical_context=use_hierarchical_context,
                 )
                 batch_request_lines.append(request_line)
                 metadata_records.append(metadata_record)

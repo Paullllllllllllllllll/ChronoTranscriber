@@ -244,7 +244,7 @@ class WorkflowManager:
             ctx_path = Path(self.user_config.additional_context_path)
             if ctx_path.exists():
                 additional_context = ctx_path.read_text(encoding="utf-8").strip()
-        else:
+        elif getattr(self.user_config, 'use_hierarchical_context', True):
             # Use hierarchical context resolution for folder/file-specific context
             from modules.llm.context_utils import resolve_context_for_folder
             context_content, context_path = resolve_context_for_folder(parent_folder)
@@ -693,7 +693,9 @@ class WorkflowManager:
         Processes all images in a given folder based on the user configuration.
         """
         # Resolve per-folder context and update transcriber before processing
-        if transcriber is not None and not self.user_config.additional_context_path:
+        if (transcriber is not None 
+            and not self.user_config.additional_context_path
+            and getattr(self.user_config, 'use_hierarchical_context', True)):
             from modules.llm.context_utils import resolve_context_for_folder
             ctx_content, ctx_path = resolve_context_for_folder(folder)
             transcriber.update_context(ctx_content)

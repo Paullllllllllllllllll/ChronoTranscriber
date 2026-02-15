@@ -34,7 +34,10 @@ class UserConfiguration:
         process_all: Flag indicating whether to process all items
         selected_schema_name: Name of the selected transcription schema (GPT only)
         selected_schema_path: Path to the selected schema file (GPT only)
-        additional_context_path: Path to additional context file (GPT only)
+        additional_context_path: Path to explicit global context file (GPT only)
+        use_hierarchical_context: Whether to use file/folder-specific context resolution
+            When True and additional_context_path is None, context is resolved per-file
+            using the hierarchy: file-specific > folder-specific > general fallback
         auto_decisions: List of FileDecision objects for auto mode
         auto_selector: Cached AutoSelector instance for auto mode
         page_range: Optional page-range filter (first N, last N, or explicit spans)
@@ -48,6 +51,7 @@ class UserConfiguration:
     selected_schema_name: Optional[str] = None
     selected_schema_path: Optional[Path] = None
     additional_context_path: Optional[Path] = None
+    use_hierarchical_context: bool = True  # Enable file/folder-specific context resolution
     auto_decisions: Optional[List[Any]] = None
     auto_selector: Optional["AutoSelector"] = None
     resume_mode: str = "skip"

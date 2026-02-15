@@ -238,6 +238,16 @@ class WorkflowUI:
     def configure_additional_context(config: UserConfiguration) -> bool:
         """Configure additional context with navigation.
         
+        Context resolution follows a hierarchy (most specific wins):
+        1. File-specific: {input_stem}_transcr_context.txt next to input file
+        2. Folder-specific: {parent_folder}_transcr_context.txt next to parent folder
+        3. General fallback: context/transcr_context.txt in project root
+        
+        The user can choose to:
+        - Use hierarchical resolution (auto-detect file/folder-specific context)
+        - Use the global additional_context.txt (overrides hierarchy)
+        - Use no context at all
+        
         Returns:
             True if configured successfully, False if user wants to go back
         """
@@ -245,32 +255,43 @@ class WorkflowUI:
             return True
         
         context_file = PROJECT_ROOT / "additional_context" / "additional_context.txt"
+        global_context_exists = context_file.exists()
         
-        if not context_file.exists():
-            print_info(f"No additional context file found. Skipping.")
-            config.additional_context_path = None
-            return True
+        # Build options based on available context sources
+        options = [
+            ("hierarchical", "Auto — Use file/folder-specific context if available (recommended)"),
+        ]
+        if global_context_exists:
+            options.append(
+                ("global", f"Global — Use {context_file.name} for all files (overrides file-specific)")
+            )
+        options.append(
+            ("none", "None — Proceed without any additional context")
+        )
         
         result = prompt_select(
-            "Would you like to use additional context to guide transcription?",
-            [
-                ("yes", "Yes — Use domain-specific guidance from additional_context.txt"),
-                ("no", "No — Proceed without additional context"),
-            ],
+            "How should additional context be resolved?",
+            options,
             allow_back=True
         )
         
         if result.action == NavigationAction.BACK:
             return False
         
-        if result.value == "yes":
+        if result.value == "hierarchical":
+            config.additional_context_path = None  # Triggers hierarchical resolution at runtime
+            config.use_hierarchical_context = True
+            print_info("Using hierarchical context resolution (file > folder > general fallback).")
+        elif result.value == "global":
             config.additional_context_path = context_file
-            print_info(f"Additional context loaded from: {context_file.name}")
+            config.use_hierarchical_context = False
+            print_info(f"Using global context from: {context_file.name}")
         else:
             config.additional_context_path = None
+            config.use_hierarchical_context = False
             print_info("Proceeding without additional context.")
         
-        logger.info(f"Additional context: {config.additional_context_path}")
+        logger.info(f"Additional context mode: {result.value}, path: {config.additional_context_path}")
         return True
     
     @staticmethod
@@ -740,10 +761,13 @@ class WorkflowUI:
         if has_gpt:
             if config.selected_schema_name:
                 ui_print(f"    • Schema: {config.selected_schema_name}", PromptStyle.INFO)
+            # Display context resolution mode accurately
             if config.additional_context_path:
-                ui_print(f"    • Additional context: Yes ({config.additional_context_path.name})", PromptStyle.INFO)
+                ui_print(f"    • Additional context: Global ({config.additional_context_path.name})", PromptStyle.INFO)
+            elif getattr(config, 'use_hierarchical_context', False):
+                ui_print(f"    • Additional context: Hierarchical (file/folder-specific)", PromptStyle.INFO)
             else:
-                ui_print(f"    • Additional context: No", PromptStyle.DIM)
+                ui_print(f"    • Additional context: None", PromptStyle.DIM)
 
         # Show page range if configured
         if config.page_range is not None:

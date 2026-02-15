@@ -42,6 +42,82 @@ from modules.operations.jsonl_utils import (
 logger = setup_logger(__name__)
 
 
+class TransientFileTracker:
+    """Tracks transient files created during processing for cleanup on interruption.
+    
+    This class ensures that temporary files (.jsonl) and preprocessed image folders
+    are cleaned up when processing is interrupted (e.g., by token limit exit or Ctrl+C).
+    """
+    
+    def __init__(self) -> None:
+        self._jsonl_files: List[Tuple[Path, str]] = []  # (path, method)
+        self._preprocessed_folders: List[Tuple[Path, str]] = []  # (path, source_name)
+        self._processing_settings: Dict[str, Any] = {}
+        self._use_batch_processing: bool = False
+    
+    def configure(
+        self,
+        processing_settings: Dict[str, Any],
+        use_batch_processing: bool = False
+    ) -> None:
+        """Configure cleanup behavior based on settings."""
+        self._processing_settings = processing_settings
+        self._use_batch_processing = use_batch_processing
+    
+    def register_jsonl(self, path: Path, method: str) -> None:
+        """Register a JSONL file for potential cleanup."""
+        self._jsonl_files.append((path, method))
+    
+    def register_preprocessed_folder(self, path: Path, source_name: str) -> None:
+        """Register a preprocessed images folder for potential cleanup."""
+        self._preprocessed_folders.append((path, source_name))
+    
+    def mark_jsonl_complete(self, path: Path) -> None:
+        """Mark a JSONL file as successfully processed (remove from tracking)."""
+        self._jsonl_files = [(p, m) for p, m in self._jsonl_files if p != path]
+    
+    def mark_preprocessed_complete(self, path: Path) -> None:
+        """Mark a preprocessed folder as successfully processed (remove from tracking)."""
+        self._preprocessed_folders = [(p, n) for p, n in self._preprocessed_folders if p != path]
+    
+    def cleanup_pending(self) -> None:
+        """Clean up all pending transient files that weren't successfully processed.
+        
+        This is called when processing exits prematurely due to interruption.
+        """
+        # Clean up JSONL files
+        for jsonl_path, method in self._jsonl_files:
+            is_batch = method == "gpt" and self._use_batch_processing
+            retain = self._processing_settings.get("retain_temporary_jsonl", True)
+            if not retain and not is_batch:
+                try:
+                    if jsonl_path.exists():
+                        jsonl_path.unlink()
+                        logger.info(f"Cleaned up interrupted JSONL: {jsonl_path.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean up JSONL {jsonl_path}: {e}")
+        
+        # Clean up preprocessed folders
+        keep_preprocessed = self._processing_settings.get("keep_preprocessed_images", True)
+        if not keep_preprocessed:
+            for folder_path, source_name in self._preprocessed_folders:
+                try:
+                    if folder_path.exists():
+                        shutil.rmtree(folder_path, ignore_errors=True)
+                        logger.info(f"Cleaned up interrupted preprocessed folder for {source_name}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean up preprocessed folder {folder_path}: {e}")
+        
+        # Clear tracking lists
+        self._jsonl_files.clear()
+        self._preprocessed_folders.clear()
+    
+    def clear(self) -> None:
+        """Clear all tracked files without cleanup (for successful completion)."""
+        self._jsonl_files.clear()
+        self._preprocessed_folders.clear()
+
+
 class WorkflowManager:
     """
     Manages the processing workflow for PDFs and images based on user configuration.
@@ -113,6 +189,13 @@ class WorkflowManager:
         if self.resume_mode == "skip":
             self.processing_settings = dict(self.processing_settings)
             self.processing_settings["retain_temporary_jsonl"] = True
+
+        # Initialize transient file tracker for cleanup on interruption
+        self._transient_tracker = TransientFileTracker()
+        self._transient_tracker.configure(
+            self.processing_settings,
+            use_batch_processing=user_config.use_batch_processing
+        )
 
     async def _route_auto_item(self, item: Path, transcriber: Optional[Any]) -> None:
         """Route a single item to the correct processor based on its actual type.
@@ -367,59 +450,68 @@ class WorkflowManager:
 
         processed_count = 0
         failed_count = 0
-        for idx, item in enumerate(selected, 1):
-            # Check token limit before starting each new item (only for GPT method)
-            if self.user_config.transcription_method == "gpt":
-                if not await check_and_wait_for_token_limit(self.concurrency_config):
-                    # User cancelled wait - stop processing
-                    logger.info(f"Processing stopped by user. Processed {processed_count}/{total_items} items.")
-                    print_info(f"Processing stopped. Completed {processed_count}/{total_items} items.")
-                    break
-            
-            print_info(f"Processing item {idx}/{total_items}: {item.name}")
+        interrupted = False
+        try:
+            for idx, item in enumerate(selected, 1):
+                # Check token limit before starting each new item (only for GPT method)
+                if self.user_config.transcription_method == "gpt":
+                    if not await check_and_wait_for_token_limit(self.concurrency_config):
+                        # User cancelled wait - stop processing
+                        logger.info(f"Processing stopped by user. Processed {processed_count}/{total_items} items.")
+                        print_info(f"Processing stopped. Completed {processed_count}/{total_items} items.")
+                        interrupted = True
+                        break
+                
+                print_info(f"Processing item {idx}/{total_items}: {item.name}")
 
-            try:
-                if self.user_config.processing_type == "images":
-                    # Process image folder
-                    await self.process_single_image_folder(
-                        item,
-                        transcriber
-                    )
-                elif self.user_config.processing_type == "pdfs":
-                    # Process PDF file
-                    await self.process_single_pdf(
-                        item,
-                        transcriber
-                    )
-                elif self.user_config.processing_type == "epubs":
-                    await self.process_single_epub(item)
-                elif self.user_config.processing_type == "mobis":
-                    await self.process_single_mobi(item)
-                elif self.user_config.processing_type == "auto":
-                    # Auto mode: route each item based on its actual type
-                    await self._route_auto_item(item, transcriber)
-                else:
-                    # Fallback - try to detect type from extension
-                    await self._route_auto_item(item, transcriber)
-            except Exception as e:
-                failed_count += 1
-                logger.exception(f"Failed to process item {idx}/{total_items} ({item.name}): {e}")
-                print_error(f"Failed to process '{item.name}': {e}")
+                try:
+                    if self.user_config.processing_type == "images":
+                        # Process image folder
+                        await self.process_single_image_folder(
+                            item,
+                            transcriber
+                        )
+                    elif self.user_config.processing_type == "pdfs":
+                        # Process PDF file
+                        await self.process_single_pdf(
+                            item,
+                            transcriber
+                        )
+                    elif self.user_config.processing_type == "epubs":
+                        await self.process_single_epub(item)
+                    elif self.user_config.processing_type == "mobis":
+                        await self.process_single_mobi(item)
+                    elif self.user_config.processing_type == "auto":
+                        # Auto mode: route each item based on its actual type
+                        await self._route_auto_item(item, transcriber)
+                    else:
+                        # Fallback - try to detect type from extension
+                        await self._route_auto_item(item, transcriber)
+                except Exception as e:
+                    failed_count += 1
+                    logger.exception(f"Failed to process item {idx}/{total_items} ({item.name}): {e}")
+                    print_error(f"Failed to process '{item.name}': {e}")
 
-            processed_count += 1
-            print_info(f"Completed item {idx}/{total_items}")
-            
-            # Log and print token usage after each item if enabled
-            if token_cfg.get("enabled", False) and self.user_config.transcription_method == "gpt":
-                token_tracker = get_token_tracker()
-                stats = token_tracker.get_stats()
-                usage_msg = (
-                    f"Token usage after item {idx}/{total_items}: "
-                    f"{stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
-                    f"({stats['usage_percentage']:.1f}%)"
-                )
-                logger.info(usage_msg)
-                print_info(usage_msg)
+                processed_count += 1
+                print_info(f"Completed item {idx}/{total_items}")
+                
+                # Log and print token usage after each item if enabled
+                if token_cfg.get("enabled", False) and self.user_config.transcription_method == "gpt":
+                    token_tracker = get_token_tracker()
+                    stats = token_tracker.get_stats()
+                    usage_msg = (
+                        f"Token usage after item {idx}/{total_items}: "
+                        f"{stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
+                        f"({stats['usage_percentage']:.1f}%)"
+                    )
+                    logger.info(usage_msg)
+                    print_info(usage_msg)
+        finally:
+            # Clean up any pending transient files on interruption or error
+            if interrupted or failed_count > 0:
+                self._transient_tracker.cleanup_pending()
+            else:
+                self._transient_tracker.clear()
 
         if failed_count > 0:
             print_warning(
@@ -576,6 +668,9 @@ class WorkflowManager:
         print_info(f"Processing PDF: {pdf_path.name}")
         print_info(f"Using method: {method}")
 
+        # Register transient files for cleanup on interruption
+        self._transient_tracker.register_jsonl(temp_jsonl_path, method)
+
         # Resolve page range if configured
         page_indices = None
         if self.user_config.page_range is not None:
@@ -626,6 +721,8 @@ class WorkflowManager:
                 print_error(f"Failed to write output: {e}")
 
             self._cleanup_temp_jsonl(temp_jsonl_path, method)
+            # Mark JSONL as complete (successfully processed)
+            self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
             return
 
         # Non-native PDF: Extract images
@@ -633,6 +730,7 @@ class WorkflowManager:
             # Use separate folder and pipeline for Tesseract
             preprocessed_folder = parent_folder / "preprocessed_images_tesseract"
             preprocessed_folder.mkdir(exist_ok=True)
+            self._transient_tracker.register_preprocessed_folder(preprocessed_folder, pdf_path.name)
             target_dpi = (self.image_processing_config
                           .get('tesseract_image_processing', {})
                           .get('target_dpi', 300))
@@ -642,6 +740,7 @@ class WorkflowManager:
         else:
             preprocessed_folder = parent_folder / "preprocessed_images"
             preprocessed_folder.mkdir(exist_ok=True)
+            self._transient_tracker.register_preprocessed_folder(preprocessed_folder, pdf_path.name)
             target_dpi = (self.image_processing_config
                           .get('api_image_processing', {})
                           .get('target_dpi', 300))
@@ -668,6 +767,9 @@ class WorkflowManager:
             if handle is not None:
                 # Batch submitted successfully - cleanup and return
                 self._cleanup_preprocessed(preprocessed_folder, pdf_path.name)
+                # Mark transient files as complete (batch will handle JSONL separately)
+                self._transient_tracker.mark_preprocessed_complete(preprocessed_folder)
+                self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
                 return
             # If handle is None, fall through to synchronous processing
 
@@ -686,6 +788,9 @@ class WorkflowManager:
         self._cleanup_preprocessed(preprocessed_folder, pdf_path.name)
         print_success(f"Saved transcription for PDF '{pdf_path.name}' -> {output_txt_path.name}")
         self._cleanup_temp_jsonl(temp_jsonl_path, method)
+        # Mark transient files as complete (successfully processed)
+        self._transient_tracker.mark_preprocessed_complete(preprocessed_folder)
+        self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
 
     async def process_single_image_folder(self, folder: Path,
                                           transcriber: Optional[Any]) -> None:
@@ -716,6 +821,10 @@ class WorkflowManager:
         print_info(f"Processing folder: {folder.name}")
         print_info(f"Using method: {method}")
 
+        # Register transient files for cleanup on interruption
+        self._transient_tracker.register_jsonl(temp_jsonl_path, method)
+        self._transient_tracker.register_preprocessed_folder(preprocessed_folder, folder.name)
+
         # Resolve page range for image folders (indices into sorted file list)
         page_indices = None
         if self.user_config.page_range is not None:
@@ -741,8 +850,11 @@ class WorkflowManager:
 
         # Process images directly from source folder to preprocessed folder
         if method == "tesseract":
+            # Tesseract uses a different preprocessed folder
+            self._transient_tracker.mark_preprocessed_complete(preprocessed_folder)  # Clear initial registration
             preprocessed_folder = parent_folder / "preprocessed_images_tesseract"
             preprocessed_folder.mkdir(exist_ok=True)
+            self._transient_tracker.register_preprocessed_folder(preprocessed_folder, folder.name)
             print_info(f"Preprocessing images for Tesseract...")
             processed_files = ImageProcessor.process_and_save_images_for_tesseract(
                 folder, preprocessed_folder, page_indices=page_indices)
@@ -774,6 +886,9 @@ class WorkflowManager:
             if handle is not None:
                 # Batch submitted successfully - cleanup and return
                 self._cleanup_preprocessed(preprocessed_folder, f"folder '{folder.name}'")
+                # Mark transient files as complete (batch will handle JSONL separately)
+                self._transient_tracker.mark_preprocessed_complete(preprocessed_folder)
+                self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
                 return
             # If handle is None, fall through to synchronous processing
 
@@ -793,6 +908,9 @@ class WorkflowManager:
         self._cleanup_preprocessed(preprocessed_folder, f"folder '{folder.name}'")
         print_success(f"Transcription completed for folder '{folder.name}' -> {output_txt_path.name}")
         self._cleanup_temp_jsonl(temp_jsonl_path, method)
+        # Mark transient files as complete (successfully processed)
+        self._transient_tracker.mark_preprocessed_complete(preprocessed_folder)
+        self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
 
     async def _process_images_with_method(
             self,

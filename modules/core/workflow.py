@@ -1,12 +1,9 @@
 # modules/workflow.py
 from __future__ import annotations
 
-import asyncio
 import datetime
 import json
-import math
 import shutil
-import time
 import aiofiles
 from pathlib import Path
 from typing import Any, List, Optional, Dict, Tuple
@@ -15,28 +12,22 @@ from modules.infra.logger import setup_logger
 from modules.ui.core import UserConfiguration
 from modules.ui import print_info, print_warning, print_error, print_success
 from modules.processing.pdf_utils import PDFProcessor, native_extract_pdf_text
-from modules.processing.epub_utils import EPUBProcessor, EPUBTextExtraction
-from modules.processing.mobi_utils import MOBIProcessor, MOBITextExtraction
+from modules.processing.epub_utils import EPUBProcessor
+from modules.processing.mobi_utils import MOBIProcessor
 from modules.processing.image_utils import ImageProcessor
 from modules.processing.tesseract_utils import (
     configure_tesseract_executable,
     ensure_tesseract_available,
-    perform_ocr,
 )
-from modules.llm.batch.batching import get_batch_chunk_size
-from modules.llm.batch.backends import get_batch_backend, BatchRequest, BatchHandle
-from modules.llm.batch.backends.factory import supports_batch
-from modules.llm import transcribe_image_with_llm
-from modules.infra.concurrency import run_concurrent_transcription_tasks
-from modules.processing.text_processing import extract_transcribed_text, format_page_line
 from modules.processing.postprocess import postprocess_transcription
 from modules.core.token_guard import check_and_wait_for_token_limit
 from modules.core.resume import ResumeChecker, ProcessingState
 from modules.core.safe_paths import create_safe_filename
-from modules.operations.jsonl_utils import (
-    get_processed_image_names,
-    read_jsonl_records,
-    extract_transcription_records,
+from modules.core.path_config import PathConfig
+from modules.core.batch_submission import submit_batch
+from modules.core.transcription_pipeline import (
+    run_transcription_pipeline,
+    write_output_from_jsonl,
 )
 
 logger = setup_logger(__name__)
@@ -148,29 +139,14 @@ class WorkflowManager:
         # Load post-processing configuration from image_processing_config
         self.postprocessing_config = image_processing_config.get("postprocessing", {})
 
-        # Check if output should be colocated with input files
-        self.use_input_as_output = self.processing_settings.get("input_paths_is_output_path", False)
-
-        # Set up default output directories (used when use_input_as_output is False)
-        self.pdf_output_dir = Path(
-            paths_config.get('file_paths', {}).get('PDFs', {}).get('output',
-                                                                   'pdfs_out'))
-        self.image_output_dir = Path(
-            paths_config.get('file_paths', {}).get('Images', {}).get('output',
-                                                                     'images_out'))
-        self.epub_output_dir = Path(
-            paths_config.get('file_paths', {}).get('EPUBs', {}).get('output',
-                                                                    'epubs_out'))
-        self.mobi_output_dir = Path(
-            paths_config.get('file_paths', {}).get('MOBIs', {}).get('output',
-                                                                    'mobis_out'))
-
-        # Ensure default directories exist (only needed when not using input as output)
-        if not self.use_input_as_output:
-            self.pdf_output_dir.mkdir(parents=True, exist_ok=True)
-            self.image_output_dir.mkdir(parents=True, exist_ok=True)
-            self.epub_output_dir.mkdir(parents=True, exist_ok=True)
-            self.mobi_output_dir.mkdir(parents=True, exist_ok=True)
+        # Resolve output directories via PathConfig
+        pc = PathConfig.from_paths_config(paths_config)
+        self.use_input_as_output = pc.use_input_as_output
+        self.pdf_output_dir = pc.pdf_output_dir
+        self.image_output_dir = pc.image_output_dir
+        self.epub_output_dir = pc.epub_output_dir
+        self.mobi_output_dir = pc.mobi_output_dir
+        pc.ensure_output_dirs()
 
         # Resume checker
         self.resume_mode = user_config.resume_mode
@@ -230,185 +206,53 @@ class WorkflowManager:
         temp_jsonl_path: Path,
         parent_folder: Path,
         source_name: str,
-    ) -> Optional[BatchHandle]:
+    ) -> Optional[Any]:
         """Submit a batch using the provider-agnostic batch backend.
         
-        Args:
-            image_files: List of image paths to process
-            temp_jsonl_path: Path to the temp JSONL file for tracking
-            parent_folder: Parent folder for debug artifacts
-            source_name: Name of the source (PDF or folder name)
-        
-        Returns:
-            BatchHandle if submission successful, None otherwise
+        Delegates to :func:`modules.core.batch_submission.submit_batch`.
         """
-        tm = self.model_config.get("transcription_model", {})
-        provider = tm.get("provider", "openai")
-        
-        # Check if provider supports batch processing
-        if not supports_batch(provider):
-            print_warning(
-                f"Provider '{provider}' does not support batch processing. "
-                f"Falling back to synchronous mode."
-            )
-            return None
-        
-        total_images = len(image_files)
-        chunk_size = get_batch_chunk_size()
-        expected_batches = math.ceil(total_images / max(1, chunk_size))
-        
-        # Telemetry
-        logger.info(
-            "[Batch] Preparing submission: provider=%s, images=%d, chunk_size=%d",
-            provider, total_images, chunk_size,
+        return await submit_batch(
+            image_files=image_files,
+            temp_jsonl_path=temp_jsonl_path,
+            parent_folder=parent_folder,
+            source_name=source_name,
+            model_config=self.model_config,
+            user_config=self.user_config,
         )
-        print_info(
-            f"Batch telemetry -> provider={provider}, images={total_images}, chunk_size={chunk_size}"
-        )
-        print_info(f"Submitting batch job for {total_images} images...")
-        
-        # Early marker
-        try:
-            async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as f:
-                await f.write(json.dumps({"batch_session": {"status": "submitting", "provider": provider}}) + "\n")
-        except Exception:
-            logger.warning("Could not write early batch_session marker")
-        
-        # Record image metadata
-        try:
-            async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as f:
-                for idx, img_path in enumerate(image_files):
-                    image_record = {
-                        "image_metadata": {
-                            "pre_processed_image": str(img_path),
-                            "image_name": img_path.name,
-                            "order_index": idx,
-                            "custom_id": f"req-{idx + 1}"
-                        }
-                    }
-                    await f.write(json.dumps(image_record) + "\n")
-        except Exception as e:
-            logger.warning("Failed writing image_metadata before batch submit: %s", e)
-        
-        # Build batch requests
-        batch_requests = [
-            BatchRequest(
-                custom_id=f"req-{idx + 1}",
-                image_path=img_path,
-                order_index=idx,
-                image_info={
-                    "image_name": img_path.name,
-                    "order_index": idx,
-                    "page_number": idx + 1,
-                },
-            )
-            for idx, img_path in enumerate(image_files)
-        ]
-        
-        # Load system prompt
-        from modules.config.config_loader import PROJECT_ROOT
-        from modules.config.service import get_config_service
-        
-        pcfg = get_config_service().get_paths_config()
-        general = pcfg.get("general", {})
-        override_prompt = general.get("transcription_prompt_path")
-        system_prompt_path = (
-            Path(override_prompt)
-            if override_prompt
-            else (PROJECT_ROOT / "system_prompt" / "system_prompt.txt")
-        )
-        if not system_prompt_path.exists():
-            raise FileNotFoundError(f"System prompt missing: {system_prompt_path}")
-        system_prompt = system_prompt_path.read_text(encoding="utf-8").strip()
-        
-        # Load additional context - use explicit path or hierarchical resolution
-        additional_context = None
-        if self.user_config.additional_context_path:
-            ctx_path = Path(self.user_config.additional_context_path)
-            if ctx_path.exists():
-                additional_context = ctx_path.read_text(encoding="utf-8").strip()
-        elif getattr(self.user_config, 'use_hierarchical_context', True):
-            # Use hierarchical context resolution for folder/file-specific context
-            from modules.llm.context_utils import resolve_context_for_folder
-            context_content, context_path = resolve_context_for_folder(parent_folder)
-            if context_content:
-                additional_context = context_content
-                logger.info(f"Using resolved context from: {context_path}")
-        
-        # Submit via backend
-        try:
-            backend = get_batch_backend(provider)
-            handle = await asyncio.to_thread(
-                backend.submit_batch,
-                batch_requests,
-                tm,
-                system_prompt=system_prompt,
-                schema_path=self.user_config.selected_schema_path,
-                additional_context=additional_context,
-            )
-        except Exception as e:
-            logger.exception(f"Batch submission failed for {source_name}: {e}")
-            print_error(
-                f"Batch submission failed for {source_name}. "
-                f"Falling back to synchronous processing."
-            )
-            return None
-        
-        # Write tracking record with provider info
-        try:
-            async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as f:
-                tracking_record = {
-                    "batch_tracking": {
-                        "batch_id": handle.batch_id,
-                        "provider": handle.provider,
-                        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                        "metadata": handle.metadata,
-                    }
-                }
-                await f.write(json.dumps(tracking_record) + "\n")
-        except Exception as e:
-            logger.warning("Post-submission tracking write failed for %s: %s", source_name, e)
-        
-        # Write debug artifact
-        try:
-            debug_payload = {
-                "source": source_name,
-                "provider": provider,
-                "submitted_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                "expected_batches": int(expected_batches),
-                "batch_ids": [handle.batch_id],
-                "total_images": int(total_images),
-                "chunk_size": int(chunk_size),
-            }
-            debug_path = parent_folder / f"{source_name}_batch_submission_debug.json"
-            debug_path.write_text(json.dumps(debug_payload, indent=2), encoding='utf-8')
-        except Exception as e:
-            logger.warning("Failed to write batch submission debug artifact for %s: %s", source_name, e)
-        
-        # Mark submitted
-        try:
-            async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as f:
-                await f.write(json.dumps({"batch_session": {"status": "submitted", "provider": provider}}) + "\n")
-        except Exception:
-            logger.warning("Could not write submitted batch_session marker")
-        
-        print_success(f"Batch submitted for '{source_name}'.")
-        print_info("The batch will be processed asynchronously. Use 'check_batches.py' to monitor status.")
-        
-        return handle
 
-    async def tesseract_ocr_image(self, img_path: Path,
-                                  tesseract_config: str) -> Optional[str]:
-        """Perform OCR on an image using Tesseract.
+    def _log_token_usage(self, phase: str, idx: int = 0, total: int = 0) -> None:
+        """Log and print token usage statistics (consolidated helper).
         
         Args:
-            img_path: Path to image file.
-            tesseract_config: Tesseract configuration string.
-            
-        Returns:
-            Extracted text, or placeholder if no text found, or None on error.
+            phase: Label such as 'Initial', 'after item 3/10', or 'Final'.
+            idx: Current item index (0 for non-item phases).
+            total: Total item count (0 for non-item phases).
         """
-        return perform_ocr(img_path, tesseract_config)
+        token_cfg = self.concurrency_config.get("daily_token_limit", {})
+        if not token_cfg.get("enabled", False):
+            return
+        if self.user_config.transcription_method != "gpt" and phase != "Initial":
+            return
+        from modules.infra.token_tracker import get_token_tracker
+        stats = get_token_tracker().get_stats()
+        if idx and total:
+            msg = (
+                f"Token usage {phase} item {idx}/{total}: "
+                f"{stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
+                f"({stats['usage_percentage']:.1f}%)"
+            )
+        else:
+            msg = (
+                f"{phase} token usage: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
+                f"({stats['usage_percentage']:.1f}%)"
+            )
+            if phase == "Initial":
+                msg_extra = f" - {stats['tokens_remaining']:,} tokens remaining today"
+                logger.info(msg + msg_extra)
+                print_info(f"Daily token usage: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} ({stats['usage_percentage']:.1f}%)")
+                return
+        logger.info(msg)
+        print_info(msg)
 
     async def process_selected_items(self,
                                      transcriber: Optional[Any] = None) -> None:
@@ -431,22 +275,7 @@ class WorkflowManager:
 
         total_items = len(selected)
         print_info(f"Beginning processing of {total_items} item(s)...")
-        
-        # Display initial token usage if enabled
-        token_cfg = self.concurrency_config.get("daily_token_limit", {})
-        if token_cfg.get("enabled", False):
-            from modules.infra.token_tracker import get_token_tracker
-            token_tracker = get_token_tracker()
-            stats = token_tracker.get_stats()
-            logger.info(
-                f"Token usage: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
-                f"({stats['usage_percentage']:.1f}%) - "
-                f"{stats['tokens_remaining']:,} tokens remaining today"
-            )
-            print_info(
-                f"Daily token usage: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
-                f"({stats['usage_percentage']:.1f}%)"
-            )
+        self._log_token_usage("Initial")
 
         processed_count = 0
         failed_count = 0
@@ -466,26 +295,16 @@ class WorkflowManager:
 
                 try:
                     if self.user_config.processing_type == "images":
-                        # Process image folder
-                        await self.process_single_image_folder(
-                            item,
-                            transcriber
-                        )
+                        await self.process_single_image_folder(item, transcriber)
                     elif self.user_config.processing_type == "pdfs":
-                        # Process PDF file
-                        await self.process_single_pdf(
-                            item,
-                            transcriber
-                        )
+                        await self.process_single_pdf(item, transcriber)
                     elif self.user_config.processing_type == "epubs":
                         await self.process_single_epub(item)
                     elif self.user_config.processing_type == "mobis":
                         await self.process_single_mobi(item)
                     elif self.user_config.processing_type == "auto":
-                        # Auto mode: route each item based on its actual type
                         await self._route_auto_item(item, transcriber)
                     else:
-                        # Fallback - try to detect type from extension
                         await self._route_auto_item(item, transcriber)
                 except Exception as e:
                     failed_count += 1
@@ -494,18 +313,7 @@ class WorkflowManager:
 
                 processed_count += 1
                 print_info(f"Completed item {idx}/{total_items}")
-                
-                # Log and print token usage after each item if enabled
-                if token_cfg.get("enabled", False) and self.user_config.transcription_method == "gpt":
-                    token_tracker = get_token_tracker()
-                    stats = token_tracker.get_stats()
-                    usage_msg = (
-                        f"Token usage after item {idx}/{total_items}: "
-                        f"{stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
-                        f"({stats['usage_percentage']:.1f}%)"
-                    )
-                    logger.info(usage_msg)
-                    print_info(usage_msg)
+                self._log_token_usage("after", idx, total_items)
         finally:
             # Clean up any pending transient files on interruption or error
             if interrupted or failed_count > 0:
@@ -520,18 +328,7 @@ class WorkflowManager:
         else:
             print_info(f"All {processed_count}/{total_items} item(s) processed successfully.")
         
-        # Final token usage statistics
-        if token_cfg.get("enabled", False) and self.user_config.transcription_method == "gpt":
-            token_tracker = get_token_tracker()
-            stats = token_tracker.get_stats()
-            logger.info(
-                f"Final token usage: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
-                f"({stats['usage_percentage']:.1f}%)"
-            )
-            print_info(
-                f"Final daily token usage: {stats['tokens_used_today']:,}/{stats['daily_limit']:,} "
-                f"({stats['usage_percentage']:.1f}%)"
-            )
+        self._log_token_usage("Final")
 
     async def process_single_epub(self, epub_path: Path) -> None:
         """Extract and save text from a single EPUB file."""
@@ -922,248 +719,26 @@ class WorkflowManager:
             source_name: str,
             is_folder: bool = False
     ) -> None:
+        """Process images using the specified method.
+
+        Delegates to :func:`modules.core.transcription_pipeline.run_transcription_pipeline`.
         """
-        Helper method to process images using the specified method.
-        Skips images that have already been successfully processed (exist in JSONL).
-        """
-        # Load already-processed image names from existing JSONL to avoid duplicates
-        already_processed = get_processed_image_names(temp_jsonl_path)
-        
-        # Filter out already-processed images
-        if already_processed:
-            original_count = len(image_files)
-            image_files = [img for img in image_files if img.name not in already_processed]
-            skipped_count = original_count - len(image_files)
-            if skipped_count > 0:
-                print_info(f"Skipping {skipped_count} already-processed images (found in JSONL)")
-                logger.info(f"Skipped {skipped_count} images already in {temp_jsonl_path.name}")
-        
-        if not image_files:
-            print_info("All images already processed. Regenerating output file from JSONL...")
-            self._write_output_from_jsonl(temp_jsonl_path, output_txt_path)
-            return
-
-        async def transcribe_single_image_task(
-                img_path: Path,
-                trans: Optional[Any],
-                method: str,
-                tesseract_config: str = "--oem 3 --psm 6",
-                order_index: int = 0,
-        ) -> Tuple[str, str, Optional[str], Optional[Dict[str, Any]], int]:
-            """
-            Transcribes a single image file using either GPT (via OpenAI) or Tesseract OCR.
-            Returns a tuple containing the image path, image name, and the transcription result.
-            """
-            image_name = img_path.name
-            final_text: Optional[str] = None
-            try:
-                if method == "gpt":
-                    if not trans:
-                        logger.error(
-                            "No transcriber instance provided for GPT usage.")
-                        return (str(img_path), image_name,
-                                f"[transcription error: {image_name}]", None, order_index)
-                    result = await transcribe_image_with_llm(img_path, trans)
-                    logger.debug(
-                        f"LLM response for {img_path.name}: {result}")
-                    try:
-                        final_text = extract_transcribed_text(result, image_name)
-                    except Exception as e:
-                        logger.error(
-                            f"Error extracting transcription for {img_path.name}: {e}. Marking as transcription error.")
-                        final_text = f"[transcription error: {image_name}]"
-                    return (str(img_path), image_name, final_text, result, order_index)
-                elif method == "tesseract":
-                    final_text = await self.tesseract_ocr_image(img_path, tesseract_config)
-                else:
-                    logger.error(
-                        f"Unknown transcription method '{method}' for image {img_path.name}")
-                    final_text = None
-                return (str(img_path), image_name, final_text, None, order_index)
-            except Exception as e:
-                logger.exception(
-                    f"Error transcribing {img_path.name} with method '{method}': {e}")
-                return (
-                    str(img_path), image_name,
-                    f"[transcription error: {image_name}]",
-                    None,
-                    order_index
-                )
-
-        # Build a mapping from image name to original order index for correct ordering
-        # We need to preserve the original page order even when resuming
-        all_image_names = {img.name: idx for idx, img in enumerate(image_files)}
-        
-        # Set up args for processing
-        if method == "gpt":
-            args_list = [
-                (
-                    img,
-                    transcriber,
-                    method,
-                    (self.image_processing_config
-                     .get('tesseract_image_processing', {})
-                     .get('ocr', {})
-                     .get('tesseract_config', "--oem 3 --psm 6")),
-                    all_image_names[img.name],  # Use original index for correct ordering
-                )
-                for img in image_files
-            ]
-        else:
-            args_list = [
-                (
-                    img,
-                    None,
-                    method,
-                    (self.image_processing_config
-                     .get('tesseract_image_processing', {})
-                     .get('ocr', {})
-                     .get('tesseract_config', "--oem 3 --psm 6")),
-                    all_image_names[img.name],  # Use original index for correct ordering
-                )
-                for img in image_files
-            ]
-
-        transcription_conf = self.concurrency_config.get("concurrency", {}).get(
-            "transcription", {})
-        concurrency_limit = transcription_conf.get("concurrency_limit", 20)
-        delay_between_tasks = transcription_conf.get("delay_between_tasks", 0)
-
-        # Set up streaming writes to JSONL as results arrive
-        write_lock = asyncio.Lock()
-        async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as jfile:
-            async def on_result_write(result_tuple: Any) -> None:
-                # Expecting: (img_path_str, image_name, text, raw_response, order_index)
-                if not result_tuple or len(result_tuple) < 5:
-                    return
-                img_path_str, image_name, text_chunk, raw_response, order_index = result_tuple
-                if text_chunk is None:
-                    return
-                # Build base record
-                record: Dict[str, Any]
-                if is_folder:
-                    record = {
-                        "folder_name": source_name,
-                        "pre_processed_image": img_path_str,
-                        "image_name": image_name,
-                        "timestamp": datetime.datetime.now().isoformat(),
-                        "method": method,
-                        "order_index": order_index,
-                        "text_chunk": text_chunk,
-                    }
-                else:
-                    record = {
-                        "file_name": source_name,
-                        "pre_processed_image": img_path_str,
-                        "image_name": image_name,
-                        "timestamp": datetime.datetime.now().isoformat(),
-                        "method": method,
-                        "order_index": order_index,
-                        "text_chunk": text_chunk,
-                    }
-
-                # Include raw_response and request_context only for GPT
-                if method == "gpt" and raw_response is not None and transcriber is not None:
-                    try:
-                        # Best-effort request context from the transcriber
-                        ctx = {}
-                        extractor = getattr(transcriber, "extractor", None)
-                        if extractor is not None:
-                            ctx = {
-                                "model": getattr(extractor, "model", None),
-                                "service_tier": getattr(extractor, "service_tier", None),
-                                "max_output_tokens": getattr(extractor, "max_output_tokens", None),
-                                "temperature": getattr(extractor, "temperature", None),
-                                "top_p": getattr(extractor, "top_p", None),
-                                "presence_penalty": getattr(extractor, "presence_penalty", None),
-                                "frequency_penalty": getattr(extractor, "frequency_penalty", None),
-                                "stop": getattr(extractor, "stop", None),
-                                "seed": getattr(extractor, "seed", None),
-                                "reasoning": getattr(extractor, "reasoning", None),
-                                "text": getattr(extractor, "text_params", None),
-                                "detail": None,
-                            }
-                        record["request_context"] = ctx
-                        record["raw_response"] = raw_response
-                    except Exception as _:
-                        # If for any reason we cannot attach context, continue with base record
-                        pass
-
-                # Serialize safely
-                async with write_lock:
-                    await jfile.write(json.dumps(record) + "\n")
-                    await jfile.flush()
-
-            try:
-                print_info(f"Processing with concurrency limit of {concurrency_limit}...")
-                results = await run_concurrent_transcription_tasks(
-                    transcribe_single_image_task,
-                    args_list,
-                    concurrency_limit,
-                    delay_between_tasks,
-                    on_result=on_result_write,
-                )
-            except Exception as e:
-                logger.exception(
-                    f"Error running concurrent transcription tasks for {source_name}: {e}")
-                print_error(f"Concurrency error for {source_name}.")
-                return
-
-        # Combine the transcription text in page order with unified page headers
-        try:
-            # results tuple: (img_path_str, image_name, text, raw_response, order_index)
-            ordered = sorted(
-                [r for r in results if r and r[2] is not None], key=lambda r: r[4]
-            )
-            lines: List[str] = []
-            for (_p, image_name, text_chunk, _raw, order_index) in ordered:
-                page_number = int(order_index) + 1 if isinstance(order_index, int) else None
-                lines.append(format_page_line(text_chunk, page_number, image_name))
-            combined_text = "\n".join(lines)
-            # Apply post-processing if enabled
-            processed_text = postprocess_transcription(combined_text, self.postprocessing_config)
-            output_txt_path.write_text(processed_text, encoding='utf-8')
-        except Exception as e:
-            logger.exception(
-                f"Error writing combined transcription output for {source_name}: {e}")
-            print_error(f"Failed to write combined output for {source_name}.")
-            return
+        await run_transcription_pipeline(
+            image_files=image_files,
+            method=method,
+            transcriber=transcriber,
+            temp_jsonl_path=temp_jsonl_path,
+            output_txt_path=output_txt_path,
+            source_name=source_name,
+            concurrency_config=self.concurrency_config,
+            image_processing_config=self.image_processing_config,
+            postprocessing_config=self.postprocessing_config,
+            is_folder=is_folder,
+        )
 
     def _write_output_from_jsonl(self, jsonl_path: Path, output_path: Path) -> bool:
-        """Write combined output text from JSONL transcription records.
-        
-        Args:
-            jsonl_path: Path to JSONL file with transcription records.
-            output_path: Path to write combined text output.
-            
-        Returns:
-            True if successful, False otherwise.
+        """Write combined output from JSONL records.
+
+        Delegates to :func:`modules.core.transcription_pipeline.write_output_from_jsonl`.
         """
-        try:
-            records = read_jsonl_records(jsonl_path)
-            transcriptions = extract_transcription_records(records, deduplicate=True)
-            
-            if not transcriptions:
-                print_warning(f"No valid transcription records found in {jsonl_path.name}")
-                return False
-            
-            # Sort by order_index for correct page order
-            ordered = sorted(transcriptions, key=lambda r: r.get("order_index", 0))
-            
-            lines: List[str] = []
-            for record in ordered:
-                image_name = record.get("image_name", "")
-                text_chunk = record.get("text_chunk", "")
-                order_index = record.get("order_index", 0)
-                page_number = int(order_index) + 1 if isinstance(order_index, int) else None
-                lines.append(format_page_line(text_chunk, page_number, image_name))
-            
-            combined_text = "\n".join(lines)
-            processed_text = postprocess_transcription(combined_text, self.postprocessing_config)
-            output_path.write_text(processed_text, encoding='utf-8')
-            print_success(f"Output written: {output_path.name}")
-            return True
-        except Exception as e:
-            logger.exception(f"Error writing output from JSONL {jsonl_path.name}: {e}")
-            print_error(f"Failed to write output from {jsonl_path.name}.")
-            return False
+        return write_output_from_jsonl(jsonl_path, output_path, self.postprocessing_config)

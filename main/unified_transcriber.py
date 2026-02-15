@@ -10,10 +10,6 @@ Supports two modes:
 from __future__ import annotations
 
 import sys
-import os
-import asyncio
-import logging
-import traceback
 from pathlib import Path
 from copy import deepcopy
 from typing import Any
@@ -33,8 +29,6 @@ from modules.ui import (
     print_success,
     print_warning,
     print_error,
-    ui_print,
-    PromptStyle,
 )
 from modules.core.workflow import WorkflowManager
 from modules.core.auto_selector import AutoSelector
@@ -45,9 +39,29 @@ from modules.core.cli_args import (
     validate_output_path,
 )
 from modules.core.execution_framework import AsyncDualModeScript
+from modules.core.path_config import PathConfig
 from modules.llm.schema_utils import list_schema_options
 
 logger = setup_logger(__name__)
+
+
+async def _open_transcriber_from_config(
+    user_config: UserConfiguration,
+    model_config: dict[str, Any],
+):
+    """Create an LLM transcriber context manager from config (shared helper).
+
+    Returns an async context manager that yields the transcriber instance.
+    Centralises the identical ``open_transcriber`` call used in both
+    :func:`process_auto_mode` and :func:`process_documents`.
+    """
+    return open_transcriber(
+        api_key=None,
+        model=model_config.get("transcription_model", {}).get("name", "gpt-4o"),
+        schema_path=user_config.selected_schema_path,
+        additional_context_path=user_config.additional_context_path,
+        use_hierarchical_context=getattr(user_config, 'use_hierarchical_context', True),
+    )
 
 
 def _resolve_schema(args_schema: str | None, config: UserConfiguration) -> None:
@@ -352,8 +366,7 @@ async def process_auto_mode(
     user_config.auto_selector = selector
     selector.print_decision_summary(decisions)
     
-    # Check if we should use input paths as output paths
-    use_input_as_output = paths_config.get('general', {}).get('input_paths_is_output_path', False)
+    pc = PathConfig.from_paths_config(paths_config)
     
     # Group decisions by method only.  All file types within the same method
     # share a single processing queue so that PDFs and image folders are
@@ -388,7 +401,7 @@ async def process_auto_mode(
 
         # When output is NOT co-located with input, redirect all output
         # to the configured Auto output directory.
-        if not use_input_as_output:
+        if not pc.use_input_as_output:
             workflow_manager.pdf_output_dir = output_dir
             workflow_manager.image_output_dir = output_dir
             workflow_manager.epub_output_dir = output_dir
@@ -396,23 +409,14 @@ async def process_auto_mode(
 
         transcriber = None
         if method == "gpt":
-            # Use schema from user config (set in interactive or CLI mode)
-            from modules.config.config_loader import PROJECT_ROOT
-            schema_path = user_config.selected_schema_path
-            if schema_path is None:
-                schema_path = (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json").resolve()
-            
-            # Support additional context in auto mode - use user config or hierarchical resolution
-            context_path = user_config.additional_context_path
-            
-            # Let open_transcriber get the correct API key based on provider config
-            async with open_transcriber(
-                api_key=None,  # Factory will get correct key based on provider
-                model=model_config.get("transcription_model", {}).get("name", "gpt-4o"),
-                schema_path=schema_path,
-                additional_context_path=context_path,
-                use_hierarchical_context=getattr(user_config, 'use_hierarchical_context', True),
-            ) as t:
+            # Ensure schema is set (fall back to default if not specified)
+            if user_config.selected_schema_path is None:
+                from modules.config.config_loader import PROJECT_ROOT
+                user_config.selected_schema_path = (
+                    PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json"
+                ).resolve()
+
+            async with await _open_transcriber_from_config(user_config, model_config) as t:
                 transcriber = t
                 await workflow_manager.process_selected_items(transcriber)
         else:
@@ -452,14 +456,7 @@ async def process_documents(
     # Initialize transcriber if needed for synchronous GPT processing
     transcriber = None
     if user_config.transcription_method == "gpt" and not user_config.use_batch_processing:
-        # Let open_transcriber get the correct API key based on provider config
-        async with open_transcriber(
-            api_key=None,  # Factory will get correct key based on provider
-            model=model_config.get("transcription_model", {}).get("name", "gpt-4o"),
-            schema_path=user_config.selected_schema_path,
-            additional_context_path=user_config.additional_context_path,
-            use_hierarchical_context=getattr(user_config, 'use_hierarchical_context', True),
-        ) as t:
+        async with await _open_transcriber_from_config(user_config, model_config) as t:
             transcriber = t
             await workflow_manager.process_selected_items(transcriber)
     else:
@@ -474,37 +471,15 @@ async def transcribe_interactive() -> None:
     # Load configurations
     config_service = get_config_service()
     paths_config = config_service.get_paths_config()
-    
-    # Get directory paths from config
-    pdf_input_dir = Path(
-        paths_config.get('file_paths', {}).get('PDFs', {}).get('input', 'pdfs_in')
-    )
-    image_input_dir = Path(
-        paths_config.get('file_paths', {}).get('Images', {}).get('input', 'images_in')
-    )
-    epub_input_dir = Path(
-        paths_config.get('file_paths', {}).get('EPUBs', {}).get('input', 'epubs_in')
-    )
-    auto_input_dir = Path(
-        paths_config.get('file_paths', {}).get('Auto', {}).get('input', 'auto_in')
-    )
-    auto_output_dir = Path(
-        paths_config.get('file_paths', {}).get('Auto', {}).get('output', 'auto_out')
-    )
-    
-    # Ensure directories exist for interactive mode
-    pdf_input_dir.mkdir(parents=True, exist_ok=True)
-    image_input_dir.mkdir(parents=True, exist_ok=True)
-    epub_input_dir.mkdir(parents=True, exist_ok=True)
-    auto_input_dir.mkdir(parents=True, exist_ok=True)
-    auto_output_dir.mkdir(parents=True, exist_ok=True)
+    pc = PathConfig.from_paths_config(paths_config)
+    pc.ensure_input_dirs()
     
     # Create user configuration through interactive workflow
     user_config = await configure_user_workflow_interactive(
-        pdf_input_dir,
-        image_input_dir,
-        epub_input_dir,
-        auto_input_dir,
+        pc.pdf_input_dir,
+        pc.image_input_dir,
+        pc.epub_input_dir,
+        pc.auto_input_dir,
         paths_config,
     )
     
@@ -516,7 +491,7 @@ async def transcribe_interactive() -> None:
     # Process documents
     if user_config.processing_type == "auto":
         # Override output directory with Auto output
-        user_config.selected_items = [auto_output_dir]
+        user_config.selected_items = [pc.auto_output_dir]
         await process_auto_mode(
             user_config,
             paths_config,
@@ -555,50 +530,11 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> None:
     """
     # Load additional configurations
     config_service = get_config_service()
-    
-    # Get directory paths from config
-    pdf_input_dir = Path(
-        paths_config.get('file_paths', {}).get('PDFs', {}).get('input', 'pdfs_in')
-    )
-    image_input_dir = Path(
-        paths_config.get('file_paths', {}).get('Images', {}).get('input', 'images_in')
-    )
-    pdf_output_dir = Path(
-        paths_config.get('file_paths', {}).get('PDFs', {}).get('output', 'pdfs_out')
-    )
-    image_output_dir = Path(
-        paths_config.get('file_paths', {}).get('Images', {}).get('output', 'images_out')
-    )
-    epub_input_dir = Path(
-        paths_config.get('file_paths', {}).get('EPUBs', {}).get('input', 'epubs_in')
-    )
-    epub_output_dir = Path(
-        paths_config.get('file_paths', {}).get('EPUBs', {}).get('output', 'epubs_out')
-    )
-    mobi_input_dir = Path(
-        paths_config.get('file_paths', {}).get('MOBIs', {}).get('input', 'mobis_in')
-    )
-    mobi_output_dir = Path(
-        paths_config.get('file_paths', {}).get('MOBIs', {}).get('output', 'mobis_out')
-    )
+    pc = PathConfig.from_paths_config(paths_config)
     
     # Determine base directories based on processing type
-    if args.auto:
-        # Auto mode uses Auto paths from config
-        base_input_dir = Path(paths_config.get('file_paths', {}).get('Auto', {}).get('input', 'auto_in'))
-        base_output_dir = Path(paths_config.get('file_paths', {}).get('Auto', {}).get('output', 'auto_out'))
-    elif args.type == "images":
-        base_input_dir = image_input_dir
-        base_output_dir = image_output_dir
-    elif args.type == "pdfs":
-        base_input_dir = pdf_input_dir
-        base_output_dir = pdf_output_dir
-    elif args.type == "epubs":
-        base_input_dir = epub_input_dir
-        base_output_dir = epub_output_dir
-    else:
-        base_input_dir = mobi_input_dir
-        base_output_dir = mobi_output_dir
+    ptype = "auto" if args.auto else (args.type or "pdfs")
+    base_input_dir, base_output_dir = pc.base_dirs_for_type(ptype)
     
     # Create configuration from CLI arguments
     user_config = create_config_from_cli_args(args, base_input_dir, base_output_dir, paths_config)
@@ -610,15 +546,9 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> None:
 
         effective_paths_config = deepcopy(paths_config)
         file_paths_cfg = effective_paths_config.setdefault("file_paths", {})
-
-        if args.type == "images":
-            file_paths_cfg.setdefault("Images", {})["output"] = str(output_path)
-        elif args.type == "pdfs":
-            file_paths_cfg.setdefault("PDFs", {})["output"] = str(output_path)
-        elif args.type == "epubs":
-            file_paths_cfg.setdefault("EPUBs", {})["output"] = str(output_path)
-        else:
-            file_paths_cfg.setdefault("MOBIs", {})["output"] = str(output_path)
+        _TYPE_TO_SECTION = {"images": "Images", "pdfs": "PDFs", "epubs": "EPUBs", "mobis": "MOBIs"}
+        section = _TYPE_TO_SECTION.get(args.type, "PDFs")
+        file_paths_cfg.setdefault(section, {})["output"] = str(output_path)
     
     # Log resume mode for CLI awareness
     if user_config.resume_mode == "skip":

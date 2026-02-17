@@ -172,8 +172,21 @@ class LangChainTranscriber:
         presence_penalty = tm.get("presence_penalty")
         reasoning_cfg = tm.get("reasoning")
         
+        # Load service_tier from concurrency config (synchronous mode)
+        try:
+            cc = config_service.get_concurrency_config()
+            service_tier = (
+                (cc.get("concurrency", {}) or {})
+                .get("transcription", {})
+                .get("service_tier")
+            )
+        except Exception:
+            service_tier = None
+        
         # Build kwargs for optional parameters
         provider_kwargs = {}
+        if service_tier:
+            provider_kwargs["service_tier"] = service_tier
         if top_p is not None:
             provider_kwargs["top_p"] = float(top_p)
         if frequency_penalty is not None:

@@ -391,6 +391,36 @@ class WorkflowUI:
         return True
 
     @staticmethod
+    def configure_resume_mode(config: UserConfiguration) -> bool:
+        """Configure resume/overwrite behavior for existing output.
+
+        Args:
+            config: UserConfiguration object
+
+        Returns:
+            True if configured successfully, False if user wants to go back
+        """
+        result = prompt_select(
+            "How should existing output files be handled?",
+            [
+                ("skip", "Skip — Resume processing, skip files with existing output (default)"),
+                ("overwrite", "Overwrite — Reprocess all files, overwriting existing output"),
+            ],
+            allow_back=True,
+        )
+
+        if result.action == NavigationAction.BACK:
+            return False
+
+        config.resume_mode = result.value or "skip"
+        if config.resume_mode == "overwrite":
+            print_info("Overwrite mode: all files will be reprocessed.")
+        else:
+            print_info("Resume mode: files with existing output will be skipped.")
+        logger.info(f"User selected resume mode: {config.resume_mode}")
+        return True
+
+    @staticmethod
     def select_items_for_processing(
         config: UserConfiguration,
         base_dir: Path,
@@ -817,16 +847,15 @@ class WorkflowUI:
             ui_print(f"    • Image extraction: {img_concurrency} concurrent tasks", PromptStyle.INFO)
             
             # API request concurrency
-            api_requests = concurrency_config.get("api_requests", {})
-            trans_api = api_requests.get("transcription", {})
-            trans_concurrency = trans_api.get("concurrency_limit", 5)
-            trans_service_tier = trans_api.get("service_tier", "default")
+            trans_cfg = concurrency_config.get("concurrency", {}).get("transcription", {})
+            trans_concurrency = trans_cfg.get("concurrency_limit", 5)
+            trans_service_tier = trans_cfg.get("service_tier", "default")
             ui_print(f"    • Transcription API: {trans_concurrency} concurrent requests", PromptStyle.INFO)
             ui_print(f"      - Service tier: {trans_service_tier}", PromptStyle.DIM)
             
             # Retry configuration
-            retry_config = concurrency_config.get("retry", {})
-            max_attempts = retry_config.get("max_attempts", 5)
+            retry_config = trans_cfg.get("retry", {})
+            max_attempts = retry_config.get("attempts", 5)
             ui_print(f"      - Max retry attempts: {max_attempts}", PromptStyle.DIM)
             
             # Daily token limit
@@ -889,20 +918,26 @@ class WorkflowUI:
         _, skipped = resume_checker.filter_items(
             selected_file_paths, resume_processing_type
         )
-        if skipped:
-            total_count = len(selected_file_paths)
-            ui_print("")
-            ui_print("  Resume Information:", PromptStyle.WARNING)
-            print_separator(PromptStyle.LIGHT_LINE, 80)
+        # Always show resume information
+        total_count = len(selected_file_paths)
+        ui_print("")
+        ui_print("  Resume Information:", PromptStyle.HIGHLIGHT)
+        print_separator(PromptStyle.LIGHT_LINE, 80)
+        ui_print(f"    • Resume mode: {config.resume_mode}", PromptStyle.INFO)
+        if skipped and config.resume_mode == "skip":
             ui_print(
                 f"    • {len(skipped)} of {total_count} item(s) already have output and will be skipped",
                 PromptStyle.WARNING,
             )
             new_count = total_count - len(skipped)
             ui_print(f"    • {new_count} item(s) will be processed", PromptStyle.INFO)
-            ui_print(f"    • Resume mode: {config.resume_mode}", PromptStyle.DIM)
-            ui_print("    • Use --force / --overwrite to reprocess all items", PromptStyle.DIM)
-            print_separator(PromptStyle.LIGHT_LINE, 80)
+        elif config.resume_mode == "overwrite":
+            ui_print(f"    • All {total_count} item(s) will be (re)processed", PromptStyle.INFO)
+        else:
+            ui_print(f"    • {total_count} item(s) will be processed", PromptStyle.INFO)
+        print_separator(PromptStyle.LIGHT_LINE, 80)
+        if skipped and config.resume_mode == "skip":
+            new_count = total_count - len(skipped)
             if new_count == 0:
                 print_warning("All items already processed. Nothing to do.")
                 result = prompt_yes_no(

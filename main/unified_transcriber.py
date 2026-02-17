@@ -318,7 +318,7 @@ async def configure_user_workflow_interactive(
 
         elif current_step == "page_range":
             if WorkflowUI.configure_page_range(config):
-                current_step = "summary"
+                current_step = "resume_mode"
             else:
                 # Go back to the previous step
                 if config.processing_type == "auto":
@@ -326,12 +326,18 @@ async def configure_user_workflow_interactive(
                 else:
                     current_step = "item_selection"
 
+        elif current_step == "resume_mode":
+            if WorkflowUI.configure_resume_mode(config):
+                current_step = "summary"
+            else:
+                current_step = "page_range"
+
         elif current_step == "summary":
             confirmed = WorkflowUI.display_processing_summary(config)
             if confirmed:
                 return config
             else:
-                current_step = "page_range"
+                current_step = "resume_mode"
 
 
 async def process_auto_mode(
@@ -552,9 +558,22 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> None:
     
     # Log resume mode for CLI awareness
     if user_config.resume_mode == "skip":
-        print_info(f"Resume mode: skip (use --force to reprocess all)")
+        print_info("Resume mode: skip (use --force to reprocess all)")
     else:
-        print_info(f"Resume mode: overwrite (all files will be reprocessed)")
+        print_info("Resume mode: overwrite (all files will be reprocessed)")
+
+    # Log context resolution for CLI awareness
+    if user_config.transcription_method == "gpt" or (
+        user_config.processing_type == "auto"
+        and user_config.auto_decisions
+        and any(d.method == "gpt" for d in user_config.auto_decisions)
+    ):
+        if user_config.additional_context_path:
+            print_info(f"Additional context: Global ({user_config.additional_context_path.name})")
+        elif getattr(user_config, "use_hierarchical_context", False):
+            print_info("Additional context: Hierarchical (file/folder-specific)")
+        else:
+            print_info("Additional context: None")
 
     # Process documents
     if user_config.processing_type == "auto":

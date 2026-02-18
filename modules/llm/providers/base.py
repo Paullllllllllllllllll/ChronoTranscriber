@@ -352,13 +352,23 @@ class BaseProvider(ABC):
                         total_tokens = input_tokens + output_tokens
 
         # Fallback: LangChain 1.x stores token usage in AIMessage.usage_metadata
-        # (a typed UsageMetadata object) rather than response_metadata["token_usage"].
+        # (a UsageMetadata TypedDict — i.e. a plain dict) rather than
+        # response_metadata["token_usage"].  This is the primary path for the
+        # OpenAI Responses API where response_metadata has no "token_usage" key.
         if total_tokens == 0 and raw_message is not None:
             usage_meta = getattr(raw_message, "usage_metadata", None)
             if usage_meta is not None:
-                input_tokens = int(getattr(usage_meta, "input_tokens", 0) or 0)
-                output_tokens = int(getattr(usage_meta, "output_tokens", 0) or 0)
-                total_tokens = int(getattr(usage_meta, "total_tokens", 0) or 0)
+                # UsageMetadata is a TypedDict (plain dict), so use dict
+                # access (.get) rather than getattr which cannot read dict keys.
+                if isinstance(usage_meta, dict):
+                    input_tokens = int(usage_meta.get("input_tokens", 0) or 0)
+                    output_tokens = int(usage_meta.get("output_tokens", 0) or 0)
+                    total_tokens = int(usage_meta.get("total_tokens", 0) or 0)
+                else:
+                    # Defensive: support object-attribute style (e.g. MagicMock in tests)
+                    input_tokens = int(getattr(usage_meta, "input_tokens", 0) or 0)
+                    output_tokens = int(getattr(usage_meta, "output_tokens", 0) or 0)
+                    total_tokens = int(getattr(usage_meta, "total_tokens", 0) or 0)
                 if total_tokens == 0:
                     total_tokens = input_tokens + output_tokens
 

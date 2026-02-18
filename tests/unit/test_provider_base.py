@@ -584,7 +584,8 @@ class TestProcessLLMResponse:
         """usage_metadata fallback fires when response_metadata has no token_usage.
 
         Regression test for LangChain 1.x / Responses API: token usage is stored
-        in AIMessage.usage_metadata, not response_metadata['token_usage'].
+        in AIMessage.usage_metadata (a TypedDict, i.e. plain dict), not
+        response_metadata['token_usage'].
         """
         import asyncio
         from modules.llm.providers.base import OPENAI_TOKEN_MAPPING
@@ -594,11 +595,12 @@ class TestProcessLLMResponse:
         mock_msg.content = "fallback text"
         mock_msg.response_metadata = {}  # no token_usage key
 
-        usage_meta = MagicMock()
-        usage_meta.input_tokens = 200
-        usage_meta.output_tokens = 80
-        usage_meta.total_tokens = 280
-        mock_msg.usage_metadata = usage_meta
+        # Use a real dict to match UsageMetadata TypedDict behaviour
+        mock_msg.usage_metadata = {
+            "input_tokens": 200,
+            "output_tokens": 80,
+            "total_tokens": 280,
+        }
 
         with patch("modules.infra.token_tracker.get_token_tracker"):
             result = asyncio.run(
@@ -615,7 +617,8 @@ class TestProcessLLMResponse:
 
         When LangChain routes through the Responses API (e.g. due to text.verbosity
         or reasoning parameters), response_metadata contains id/model/object/service_tier
-        but no token_usage.  Token counts must be read from AIMessage.usage_metadata.
+        but no token_usage.  Token counts must be read from AIMessage.usage_metadata
+        which is a TypedDict (plain dict).
         """
         import asyncio
         from modules.llm.providers.base import OPENAI_TOKEN_MAPPING
@@ -633,11 +636,12 @@ class TestProcessLLMResponse:
             "model_name": "gpt-5-mini-2025-08-07",
         }
 
-        usage_meta = MagicMock()
-        usage_meta.input_tokens = 1500
-        usage_meta.output_tokens = 350
-        usage_meta.total_tokens = 1850
-        mock_msg.usage_metadata = usage_meta
+        # Use a real dict to match UsageMetadata TypedDict behaviour
+        mock_msg.usage_metadata = {
+            "input_tokens": 1500,
+            "output_tokens": 350,
+            "total_tokens": 1850,
+        }
 
         with patch("modules.infra.token_tracker.get_token_tracker") as mock_tracker:
             result = asyncio.run(
@@ -666,11 +670,12 @@ class TestProcessLLMResponse:
             "token_usage": {"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70}
         }
 
-        usage_meta = MagicMock()
-        usage_meta.input_tokens = 999
-        usage_meta.output_tokens = 999
-        usage_meta.total_tokens = 1998
-        mock_msg.usage_metadata = usage_meta
+        # Use a real dict to match UsageMetadata TypedDict behaviour
+        mock_msg.usage_metadata = {
+            "input_tokens": 999,
+            "output_tokens": 999,
+            "total_tokens": 1998,
+        }
 
         with patch("modules.infra.token_tracker.get_token_tracker"):
             result = asyncio.run(
@@ -680,6 +685,36 @@ class TestProcessLLMResponse:
         assert result.input_tokens == 50
         assert result.output_tokens == 20
         assert result.total_tokens == 70
+
+    @pytest.mark.unit
+    def test_usage_metadata_fallback_non_dict_object(self):
+        """Defensive fallback: usage_metadata as object (not dict) still works.
+
+        Covers the getattr branch for non-dict usage_metadata implementations.
+        """
+        import asyncio
+        from modules.llm.providers.base import OPENAI_TOKEN_MAPPING
+
+        provider = self._make_provider()
+        mock_msg = MagicMock()
+        mock_msg.content = "object-style text"
+        mock_msg.response_metadata = {}  # no token_usage key
+
+        # Use MagicMock (object-attribute style) for the defensive branch
+        usage_meta = MagicMock()
+        usage_meta.input_tokens = 400
+        usage_meta.output_tokens = 100
+        usage_meta.total_tokens = 500
+        mock_msg.usage_metadata = usage_meta
+
+        with patch("modules.infra.token_tracker.get_token_tracker"):
+            result = asyncio.run(
+                provider._process_llm_response(mock_msg, OPENAI_TOKEN_MAPPING)
+            )
+
+        assert result.input_tokens == 400
+        assert result.output_tokens == 100
+        assert result.total_tokens == 500
 
 
 class TestBaseProviderAsyncContextManager:

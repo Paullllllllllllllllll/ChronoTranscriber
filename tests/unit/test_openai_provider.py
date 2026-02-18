@@ -113,8 +113,8 @@ class TestOpenAIProviderInit:
         assert provider.reasoning_config == {"effort": "high"}
 
     @pytest.mark.unit
-    def test_reasoning_effort_forwarded_to_chat_openai(self):
-        """reasoning_effort is passed to ChatOpenAI for reasoning models."""
+    def test_reasoning_dict_forwarded_to_chat_openai(self):
+        """reasoning dict is passed to ChatOpenAI for reasoning models (Responses API)."""
         from modules.llm.providers.openai_provider import OpenAIProvider
 
         captured: Dict[str, Any] = {}
@@ -128,7 +128,8 @@ class TestOpenAIProviderInit:
                     reasoning_config={"effort": "high"},
                 )
 
-        assert captured.get("reasoning_effort") == "high"
+        assert captured.get("reasoning") == {"effort": "high"}
+        assert "reasoning_effort" not in captured
 
     @pytest.mark.unit
     def test_service_tier_forwarded_to_chat_openai(self):
@@ -197,16 +198,30 @@ class TestOpenAIProviderInit:
         assert captured.get("max_tokens") == 4096
         assert "max_completion_tokens" not in captured
 
+    @pytest.mark.unit
+    def test_use_responses_api_always_set(self):
+        """use_responses_api=True is always passed to ChatOpenAI."""
+        from modules.llm.providers.openai_provider import OpenAIProvider
+
+        captured: Dict[str, Any] = {}
+
+        with patch("modules.llm.providers.openai_provider.ChatOpenAI",
+                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
+            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
+                OpenAIProvider(api_key="sk-test", model="gpt-4o")
+
+        assert captured.get("use_responses_api") is True
+
 
 # =============================================================================
-# CT-3: text.verbosity forwarding through OpenAIProvider
+# CT-3: text.verbosity forwarding through OpenAIProvider (Responses API)
 # =============================================================================
 
 class TestOpenAIProviderTextVerbosity:
     """CT-3 regression tests: text_config stored and verbosity forwarded.
 
-    Before the fix, OpenAIProvider had no text_config parameter; the
-    text.verbosity setting from model_config.yaml was silently discarded.
+    Verbosity is forwarded via the LangChain `verbosity` parameter
+    (Responses API native) rather than `model_kwargs["text"]`.
     """
 
     @pytest.mark.unit
@@ -236,8 +251,8 @@ class TestOpenAIProviderTextVerbosity:
         assert provider.text_config is None
 
     @pytest.mark.unit
-    def test_verbosity_passed_in_model_kwargs_for_reasoning_model(self):
-        """For GPT-5 reasoning models, text verbosity reaches ChatOpenAI model_kwargs."""
+    def test_verbosity_passed_as_parameter_for_reasoning_model(self):
+        """For GPT-5 reasoning models, text verbosity is passed as direct parameter."""
         from modules.llm.providers.openai_provider import OpenAIProvider
 
         captured: Dict[str, Any] = {}
@@ -251,12 +266,11 @@ class TestOpenAIProviderTextVerbosity:
                     text_config={"verbosity": "verbose"},
                 )
 
-        model_kwargs = captured.get("model_kwargs", {})
-        assert model_kwargs.get("text") == {"verbosity": "verbose"}
+        assert captured.get("verbosity") == "verbose"
 
     @pytest.mark.unit
-    def test_verbosity_not_in_model_kwargs_for_non_reasoning_model(self):
-        """For non-reasoning models (gpt-4o), verbosity is NOT added to model_kwargs."""
+    def test_verbosity_not_set_for_non_reasoning_model(self):
+        """For non-reasoning models (gpt-4o), verbosity is NOT passed."""
         from modules.llm.providers.openai_provider import OpenAIProvider
 
         captured: Dict[str, Any] = {}
@@ -270,12 +284,11 @@ class TestOpenAIProviderTextVerbosity:
                     text_config={"verbosity": "concise"},
                 )
 
-        model_kwargs = captured.get("model_kwargs", {})
-        assert "text" not in model_kwargs
+        assert "verbosity" not in captured
 
     @pytest.mark.unit
     def test_verbosity_skipped_when_text_config_empty(self):
-        """Empty text_config dict does not add model_kwargs text entry."""
+        """Empty text_config dict does not add verbosity parameter."""
         from modules.llm.providers.openai_provider import OpenAIProvider
 
         captured: Dict[str, Any] = {}
@@ -289,15 +302,14 @@ class TestOpenAIProviderTextVerbosity:
                     text_config={},
                 )
 
-        model_kwargs = captured.get("model_kwargs", {})
-        assert "text" not in model_kwargs
+        assert "verbosity" not in captured
 
     @pytest.mark.unit
     def test_all_verbosity_levels_forwarded(self):
         """All valid verbosity levels (concise/medium/verbose) are forwarded correctly."""
         from modules.llm.providers.openai_provider import OpenAIProvider
 
-        for verbosity in ("concise", "medium", "verbose"):
+        for level in ("concise", "medium", "verbose"):
             captured: Dict[str, Any] = {}
 
             with patch("modules.llm.providers.openai_provider.ChatOpenAI",
@@ -307,8 +319,7 @@ class TestOpenAIProviderTextVerbosity:
                     OpenAIProvider(
                         api_key="sk-test",
                         model="gpt-5-mini",
-                        text_config={"verbosity": verbosity},
+                        text_config={"verbosity": level},
                     )
 
-            model_kwargs = captured.get("model_kwargs", {})
-            assert model_kwargs.get("text", {}).get("verbosity") == verbosity
+            assert captured.get("verbosity") == level

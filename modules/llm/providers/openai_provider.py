@@ -339,17 +339,19 @@ class OpenAIProvider(BaseProvider):
         # LangChain will automatically filter these out before sending to API
         disabled_params = self._build_disabled_params()
         
-        # Initialize LangChain ChatOpenAI
+        # Initialize LangChain ChatOpenAI with Responses API
         # LangChain handles:
         # - Retry logic with exponential backoff (max_retries)
         # - Parameter filtering for unsupported models (disabled_params)
         # - Converting max_completion_tokens to correct API parameter for reasoning models
+        # - Responses API routing (use_responses_api=True)
         llm_kwargs = {
             "api_key": api_key,
             "model": model,
             "timeout": timeout,
             "max_retries": max_retries,
             "disabled_params": disabled_params,
+            "use_responses_api": True,
         }
         
         # Pass service_tier to LangChain (OpenAI API supports auto/default/flex/priority)
@@ -364,20 +366,17 @@ class OpenAIProvider(BaseProvider):
             llm_kwargs["max_completion_tokens"] = max_tokens
             logger.info(f"Using max_completion_tokens={max_tokens} for reasoning model {model}")
             
-            # Apply reasoning controls for models that support them
+            # Apply reasoning controls via Responses API reasoning dict
             if caps.supports_reasoning_effort and reasoning_config:
-                effort = reasoning_config.get("effort")
-                if effort:
-                    llm_kwargs["reasoning_effort"] = effort
-                    logger.info(f"Using reasoning_effort={effort} for model {model}")
+                llm_kwargs["reasoning"] = reasoning_config
+                logger.info(f"Using reasoning={reasoning_config} for model {model}")
             
-            # Apply text verbosity for GPT-5 family (Responses API parameter)
+            # Apply text verbosity via Responses API verbosity parameter
             if text_config:
                 verbosity = text_config.get("verbosity")
                 if verbosity:
-                    llm_kwargs["model_kwargs"] = llm_kwargs.get("model_kwargs", {})
-                    llm_kwargs["model_kwargs"]["text"] = {"verbosity": verbosity}
-                    logger.info(f"Using text.verbosity={verbosity} for model {model}")
+                    llm_kwargs["verbosity"] = verbosity
+                    logger.info(f"Using verbosity={verbosity} for model {model}")
         else:
             llm_kwargs["max_tokens"] = max_tokens
             # Only pass sampler parameters for non-reasoning models

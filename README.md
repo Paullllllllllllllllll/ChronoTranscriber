@@ -4,6 +4,8 @@ A Python-based document transcription tool for researchers, archivists, and digi
 
 Designed to integrate with [ChronoMiner](https://github.com/Paullllllllllllllllll/ChronoMiner) and [ChronoDownloader](https://github.com/Paullllllllllllllllll/ChronoDownloader) for a complete document retrieval, transcription, and data extraction pipeline.
 
+> **Work in Progress** — ChronoTranscriber is under active development. We aim to keep it continuously maintained and improved, but bugs may be present. If you encounter any issues, please [report them on GitHub](https://github.com/Paullllllllllllllllll/ChronoTranscriber/issues) — your feedback is greatly appreciated.
+
 ## Table of Contents
 
 - [Overview](#overview)

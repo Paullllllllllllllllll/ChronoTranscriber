@@ -189,6 +189,36 @@ def create_config_from_cli_args(args: Any, base_input_dir: Path, base_output_dir
         if not decisions:
             raise ValueError(f"No processable files found in auto mode input directory: {auto_input}")
         
+        # Apply resume filtering to exclude already-completed items
+        if config.resume_mode == "skip":
+            from modules.core.resume import ResumeChecker, ProcessingState
+            from modules.core.path_config import PathConfig
+
+            pc = PathConfig.from_paths_config(paths_config)
+            checker = ResumeChecker(
+                resume_mode=config.resume_mode,
+                paths_config=paths_config,
+                use_input_as_output=pc.use_input_as_output,
+                pdf_output_dir=pc.pdf_output_dir,
+                image_output_dir=pc.image_output_dir,
+                epub_output_dir=pc.epub_output_dir,
+                mobi_output_dir=pc.mobi_output_dir,
+            )
+            total_before = len(decisions)
+            decisions = [
+                d for d in decisions
+                if checker.should_skip(d.file_path, "auto").state != ProcessingState.COMPLETE
+            ]
+            skipped_count = total_before - len(decisions)
+            if skipped_count:
+                print_info(
+                    f"Resume: skipping {skipped_count} already-completed file(s) "
+                    f"({len(decisions)} remaining)"
+                )
+            if not decisions:
+                print_info("All files already processed. Nothing to do.")
+                return config
+
         # Store decisions in config
         config.processing_type = "auto"
         config.auto_decisions = decisions

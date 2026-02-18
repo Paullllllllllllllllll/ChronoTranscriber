@@ -19,16 +19,22 @@ concurrency:
 
     # Delay (seconds) between starting each transcription task.
     # Helps avoid rate limiting; set to 0 for maximum throughput.
-    delay_between_tasks: 0.05
+    delay_between_tasks: 0
 
     # OpenAI service tier for Responses API (synchronous mode only).
     # Values: 'auto', 'default', 'flex', 'priority'
     # Note: 'flex' is synchronous-only; batch processing auto-converts to 'auto'.
-    service_tier: default
+    service_tier: flex
 
     # Number of images per batch file when using OpenAI Batch API.
     # Larger chunks = fewer API calls but larger file uploads.
     batch_chunk_size: 50
+
+    # Request timeout in seconds for each API call.
+    # OpenAI's default SDK timeout is 10 minutes; flex processing can exceed this.
+    # Set to 900 (15 minutes) as recommended by OpenAI for flex service tier.
+    # LangChain will raise APITimeoutError and trigger retry on expiry.
+    request_timeout: 900
 
     # Retry configuration for transient API errors (429, 5xx, timeouts).
     # LangChain handles exponential backoff internally; only 'attempts' is used.
@@ -50,8 +56,11 @@ concurrency:
 
 daily_token_limit:
   # Master toggle. When false, no token tracking or limits are enforced.
-  enabled: false
+  enabled: true
 
   # Maximum tokens allowed per day (input + output combined).
   # Processing pauses when this limit is reached; resumes at midnight.
-  daily_tokens: 9000000
+  # Important: Files started when near the limit will be finished, you will be
+  # charged for additional tokens used. If in doubt, set limit lower than
+  # your budget.
+  daily_tokens: 10_000_000

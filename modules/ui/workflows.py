@@ -878,6 +878,11 @@ class WorkflowUI:
             ui_print(f"    • Transcription API: {trans_concurrency} concurrent requests", PromptStyle.INFO)
             ui_print(f"      - Service tier: {trans_service_tier}", PromptStyle.DIM)
             
+            # Request timeout
+            request_timeout = trans_cfg.get("request_timeout")
+            if request_timeout is not None:
+                ui_print(f"      - Request timeout: {request_timeout} s", PromptStyle.DIM)
+            
             # Retry configuration
             retry_config = trans_cfg.get("retry", {})
             max_attempts = retry_config.get("attempts", 5)

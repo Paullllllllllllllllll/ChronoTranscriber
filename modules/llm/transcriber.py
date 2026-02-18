@@ -173,19 +173,18 @@ class LangChainTranscriber:
         reasoning_cfg = tm.get("reasoning")
         text_cfg = tm.get("text")
         
-        # Load service_tier from concurrency config (synchronous mode)
+        # Load service_tier and request_timeout from concurrency config (synchronous mode)
         try:
             cc = config_service.get_concurrency_config()
-            service_tier = (
-                (cc.get("concurrency", {}) or {})
-                .get("transcription", {})
-                .get("service_tier")
-            )
+            trans_cfg = (cc.get("concurrency", {}) or {}).get("transcription", {}) or {}
+            service_tier = trans_cfg.get("service_tier")
+            request_timeout = trans_cfg.get("request_timeout")
         except Exception:
             service_tier = None
+            request_timeout = None
         
         # Build kwargs for optional parameters
-        provider_kwargs = {}
+        provider_kwargs: Dict[str, Any] = {}
         if service_tier:
             provider_kwargs["service_tier"] = service_tier
         if top_p is not None:
@@ -206,6 +205,7 @@ class LangChainTranscriber:
             api_key=api_key,
             temperature=temperature,
             max_tokens=max_tokens,
+            timeout=float(request_timeout) if request_timeout is not None else None,
             **provider_kwargs,
         )
         

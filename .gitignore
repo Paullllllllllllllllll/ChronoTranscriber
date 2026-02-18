@@ -1,0 +1,11 @@
+/.windsurf/
+.chronotranscriber_token_state.json
+.coverage
+
+# Large test data files (exceed GitHub 100 MB limit)
+eval/test_data/input/bibliography/*.pdf
+
+# IDE and cache
+.idea/
+__pycache__/
+logs/

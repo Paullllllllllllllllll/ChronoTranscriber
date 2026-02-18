@@ -332,7 +332,8 @@ def get_token_tracker() -> DailyTokenTracker:
                 token_cfg = conc_cfg.get("daily_token_limit", {})
                 
                 enabled = bool(token_cfg.get("enabled", False))
-                daily_limit = int(token_cfg.get("daily_tokens", 10000000))
+                _daily_tokens_raw = token_cfg.get("daily_tokens", 10_000_000)
+                daily_limit = int(str(_daily_tokens_raw).replace("_", ""))
                 
                 _tracker_instance = DailyTokenTracker(
                     daily_limit=daily_limit,

@@ -95,6 +95,55 @@ class TestDailyTokenTracker:
         assert tracker.can_use_tokens() is False
 
 
+class TestDailyTokensUnderscoreParsing:
+    """Tests for underscore-formatted daily_tokens ingestion in get_token_tracker()."""
+
+    @pytest.mark.unit
+    def test_underscore_string_parsed(self, temp_dir):
+        """daily_tokens as quoted underscore string (e.g. "10_000_000") is accepted."""
+        import modules.infra.token_tracker as tt
+        original = tt._tracker_instance
+        tt._tracker_instance = None
+        try:
+            mock_cfg = {"daily_token_limit": {"enabled": False, "daily_tokens": "10_000_000"}}
+            with patch("modules.infra.token_tracker.get_config_service") as mock_svc:
+                mock_svc.return_value.get_concurrency_config.return_value = mock_cfg
+                tracker = tt.get_token_tracker()
+                assert tracker.daily_limit == 10_000_000
+        finally:
+            tt._tracker_instance = original
+
+    @pytest.mark.unit
+    def test_plain_int_still_works(self, temp_dir):
+        """daily_tokens as a plain int (standard YAML) is still accepted."""
+        import modules.infra.token_tracker as tt
+        original = tt._tracker_instance
+        tt._tracker_instance = None
+        try:
+            mock_cfg = {"daily_token_limit": {"enabled": False, "daily_tokens": 67500000}}
+            with patch("modules.infra.token_tracker.get_config_service") as mock_svc:
+                mock_svc.return_value.get_concurrency_config.return_value = mock_cfg
+                tracker = tt.get_token_tracker()
+                assert tracker.daily_limit == 67_500_000
+        finally:
+            tt._tracker_instance = original
+
+    @pytest.mark.unit
+    def test_underscore_int_from_yaml_parser(self, temp_dir):
+        """daily_tokens as an already-stripped int (PyYAML may parse 10_000_000 as int) works."""
+        import modules.infra.token_tracker as tt
+        original = tt._tracker_instance
+        tt._tracker_instance = None
+        try:
+            mock_cfg = {"daily_token_limit": {"enabled": False, "daily_tokens": 10000000}}
+            with patch("modules.infra.token_tracker.get_config_service") as mock_svc:
+                mock_svc.return_value.get_concurrency_config.return_value = mock_cfg
+                tracker = tt.get_token_tracker()
+                assert tracker.daily_limit == 10_000_000
+        finally:
+            tt._tracker_instance = original
+
+
 class TestTokenTrackerSingleton:
     """Tests for token tracker singleton functions."""
     

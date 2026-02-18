@@ -313,6 +313,7 @@ class OpenAIProvider(BaseProvider):
         presence_penalty: float = 0.0,
         service_tier: Optional[str] = None,
         reasoning_config: Optional[Dict[str, Any]] = None,
+        text_config: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
     ):
         super().__init__(
@@ -329,6 +330,7 @@ class OpenAIProvider(BaseProvider):
         self.presence_penalty = presence_penalty
         self.service_tier = service_tier
         self.reasoning_config = reasoning_config
+        self.text_config = text_config
         
         self._capabilities = _get_model_capabilities(model)
         max_retries = load_max_retries()
@@ -368,6 +370,14 @@ class OpenAIProvider(BaseProvider):
                 if effort:
                     llm_kwargs["reasoning_effort"] = effort
                     logger.info(f"Using reasoning_effort={effort} for model {model}")
+            
+            # Apply text verbosity for GPT-5 family (Responses API parameter)
+            if text_config:
+                verbosity = text_config.get("verbosity")
+                if verbosity:
+                    llm_kwargs["model_kwargs"] = llm_kwargs.get("model_kwargs", {})
+                    llm_kwargs["model_kwargs"]["text"] = {"verbosity": verbosity}
+                    logger.info(f"Using text.verbosity={verbosity} for model {model}")
         else:
             llm_kwargs["max_tokens"] = max_tokens
             # Only pass sampler parameters for non-reasoning models

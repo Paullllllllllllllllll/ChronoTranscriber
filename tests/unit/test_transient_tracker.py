@@ -296,3 +296,152 @@ class TestTransientTrackerIntegration:
         assert wm._transient_tracker._use_batch_processing is True
         assert wm._transient_tracker._processing_settings.get("retain_temporary_jsonl") is False
         assert wm._transient_tracker._processing_settings.get("keep_preprocessed_images") is False
+
+
+# =============================================================================
+# CT-5: KeyboardInterrupt / asyncio.CancelledError cleanup regression tests
+#
+# Before the fix, process_selected_items() only had `except Exception` guarding
+# individual items.  A KeyboardInterrupt or asyncio.CancelledError propagated
+# directly to the `finally` block with interrupted=False, so clear() was called
+# instead of cleanup_pending(), leaving transient files on disk.
+# =============================================================================
+
+class TestKeyboardInterruptCleanup:
+    """CT-5 regression: process_selected_items calls cleanup_pending on BaseException."""
+
+    def _make_workflow_manager(self):
+        """Build a minimal WorkflowManager with a replaceable tracker."""
+        from modules.core.workflow import WorkflowManager
+        from modules.ui.core import UserConfiguration
+
+        user_config = UserConfiguration()
+        user_config.transcription_method = "tesseract"
+        user_config.use_batch_processing = False
+        user_config.processing_type = "images"
+        user_config.resume_mode = "overwrite"
+        user_config.selected_items = [Path("dummy_folder")]
+
+        with patch("modules.core.workflow.configure_tesseract_executable"):
+            wm = WorkflowManager(
+                user_config=user_config,
+                paths_config={"general": {
+                    "retain_temporary_jsonl": False,
+                    "keep_preprocessed_images": False,
+                }},
+                model_config={},
+                concurrency_config={},
+                image_processing_config={},
+            )
+        return wm
+
+    @pytest.mark.unit
+    def test_keyboard_interrupt_calls_cleanup_pending(self):
+        """KeyboardInterrupt during processing triggers cleanup_pending(), not clear()."""
+        import asyncio
+        from unittest.mock import MagicMock, patch
+
+        wm = self._make_workflow_manager()
+        mock_tracker = MagicMock()
+        wm._transient_tracker = mock_tracker
+
+        async def _raise(*args, **kwargs):
+            raise KeyboardInterrupt
+
+        with patch.object(wm, "process_single_image_folder", side_effect=_raise):
+            with pytest.raises(KeyboardInterrupt):
+                asyncio.run(wm.process_selected_items(transcriber=None))
+
+        mock_tracker.cleanup_pending.assert_called_once()
+        mock_tracker.clear.assert_not_called()
+
+    @pytest.mark.unit
+    def test_cancelled_error_calls_cleanup_pending(self):
+        """asyncio.CancelledError during processing triggers cleanup_pending(), not clear()."""
+        import asyncio
+        from unittest.mock import MagicMock, patch
+
+        wm = self._make_workflow_manager()
+        mock_tracker = MagicMock()
+        wm._transient_tracker = mock_tracker
+
+        async def _raise(*args, **kwargs):
+            raise asyncio.CancelledError
+
+        with patch.object(wm, "process_single_image_folder", side_effect=_raise):
+            with pytest.raises(asyncio.CancelledError):
+                asyncio.run(wm.process_selected_items(transcriber=None))
+
+        mock_tracker.cleanup_pending.assert_called_once()
+        mock_tracker.clear.assert_not_called()
+
+    @pytest.mark.unit
+    def test_successful_run_calls_clear_not_cleanup_pending(self):
+        """Successful processing calls clear(), not cleanup_pending()."""
+        import asyncio
+        from unittest.mock import MagicMock, patch
+
+        wm = self._make_workflow_manager()
+        mock_tracker = MagicMock()
+        wm._transient_tracker = mock_tracker
+
+        async def _succeed(*args, **kwargs):
+            return None
+
+        with patch.object(wm, "process_single_image_folder", side_effect=_succeed):
+            asyncio.run(wm.process_selected_items(transcriber=None))
+
+        mock_tracker.clear.assert_called_once()
+        mock_tracker.cleanup_pending.assert_not_called()
+
+    @pytest.mark.unit
+    def test_item_exception_calls_cleanup_pending(self):
+        """A per-item Exception (caught internally) also triggers cleanup_pending()."""
+        import asyncio
+        from unittest.mock import MagicMock, patch
+
+        wm = self._make_workflow_manager()
+        mock_tracker = MagicMock()
+        wm._transient_tracker = mock_tracker
+
+        async def _raise_runtime(*args, **kwargs):
+            raise RuntimeError("item failed")
+
+        with patch.object(wm, "process_single_image_folder", side_effect=_raise_runtime):
+            # RuntimeError is caught per-item; it should not propagate
+            asyncio.run(wm.process_selected_items(transcriber=None))
+
+        mock_tracker.cleanup_pending.assert_called_once()
+        mock_tracker.clear.assert_not_called()
+
+    @pytest.mark.unit
+    def test_keyboard_interrupt_propagates_after_cleanup(self):
+        """KeyboardInterrupt is re-raised after cleanup_pending() is called."""
+        import asyncio
+        from unittest.mock import MagicMock, patch
+
+        wm = self._make_workflow_manager()
+        wm._transient_tracker = MagicMock()
+
+        async def _raise(*args, **kwargs):
+            raise KeyboardInterrupt
+
+        with patch.object(wm, "process_single_image_folder", side_effect=_raise):
+            with pytest.raises(KeyboardInterrupt):
+                asyncio.run(wm.process_selected_items(transcriber=None))
+
+    @pytest.mark.unit
+    def test_cancelled_error_propagates_after_cleanup(self):
+        """asyncio.CancelledError is re-raised after cleanup_pending() is called."""
+        import asyncio
+        from unittest.mock import MagicMock, patch
+
+        wm = self._make_workflow_manager()
+        wm._transient_tracker = MagicMock()
+
+        async def _raise(*args, **kwargs):
+            raise asyncio.CancelledError
+
+        with patch.object(wm, "process_single_image_folder", side_effect=_raise):
+            with pytest.raises(asyncio.CancelledError):
+                asyncio.run(wm.process_selected_items(transcriber=None))

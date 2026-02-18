@@ -123,6 +123,14 @@ def _build_responses_body(
             body.setdefault("text", {})
             body["text"]["format"] = fmt
 
+    # Text verbosity for GPT-5 family (Responses API parameter)
+    text_cfg = tm.get("text", {})
+    if text_cfg and caps.supports_reasoning_effort:
+        verbosity = text_cfg.get("verbosity")
+        if verbosity:
+            body.setdefault("text", {})
+            body["text"]["verbosity"] = verbosity
+
     # Reasoning controls for GPT-5
     if caps.supports_reasoning_effort and tm.get("reasoning"):
         body["reasoning"] = tm["reasoning"]

@@ -321,3 +321,287 @@ class TestProviderCapabilitiesEdgeCases:
         
         assert caps.supports_structured_output is True
         assert caps.supports_json_mode is True
+
+
+class TestLoadMaxRetries:
+    """Tests for load_max_retries() config loader."""
+
+    @pytest.mark.unit
+    def test_reads_from_concurrency_config(self):
+        """load_max_retries reads attempts from concurrency.transcription.retry."""
+        from modules.llm.providers.base import load_max_retries
+
+        cfg = {"concurrency": {"transcription": {"retry": {"attempts": 7}}}}
+        with patch("modules.llm.providers.base.get_config_service") as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = cfg
+            result = load_max_retries()
+
+        assert result == 7
+
+    @pytest.mark.unit
+    def test_defaults_to_5_when_missing(self):
+        """load_max_retries returns 5 when config key is absent."""
+        from modules.llm.providers.base import load_max_retries
+
+        with patch("modules.llm.providers.base.get_config_service") as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = {}
+            result = load_max_retries()
+
+        assert result == 5
+
+    @pytest.mark.unit
+    def test_returns_5_on_exception(self):
+        """load_max_retries returns 5 when config service raises an exception."""
+        from modules.llm.providers.base import load_max_retries
+
+        with patch("modules.llm.providers.base.get_config_service",
+                   side_effect=RuntimeError("config unavailable")):
+            result = load_max_retries()
+
+        assert result == 5
+
+    @pytest.mark.unit
+    def test_minimum_is_1(self):
+        """load_max_retries returns at least 1 even when configured as 0."""
+        from modules.llm.providers.base import load_max_retries
+
+        cfg = {"concurrency": {"transcription": {"retry": {"attempts": 0}}}}
+        with patch("modules.llm.providers.base.get_config_service") as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = cfg
+            result = load_max_retries()
+
+        assert result >= 1
+
+
+class TestBuildDisabledParams:
+    """Tests for BaseProvider._build_disabled_params()."""
+
+    def _make_provider(self, caps: ProviderCapabilities):
+        """Create a minimal concrete provider with given capabilities."""
+        class _ConcreteProvider(BaseProvider):
+            @property
+            def provider_name(self):
+                return "test"
+            def get_capabilities(self):
+                return caps
+            async def transcribe_image_from_base64(self, *a, **kw):
+                pass
+            async def close(self):
+                pass
+
+        p = _ConcreteProvider.__new__(_ConcreteProvider)
+        p._capabilities = caps
+        return p
+
+    @pytest.mark.unit
+    def test_returns_none_when_all_supported(self):
+        """Returns None when all sampler params are supported."""
+        caps = ProviderCapabilities(
+            provider_name="openai",
+            model_name="gpt-4o",
+            supports_temperature=True,
+            supports_top_p=True,
+            supports_frequency_penalty=True,
+            supports_presence_penalty=True,
+        )
+        provider = self._make_provider(caps)
+        assert provider._build_disabled_params() is None
+
+    @pytest.mark.unit
+    def test_disables_temperature_when_not_supported(self):
+        """Adds temperature=None when supports_temperature is False."""
+        caps = ProviderCapabilities(
+            provider_name="openai",
+            model_name="o3",
+            supports_temperature=False,
+            supports_top_p=False,
+            supports_frequency_penalty=False,
+            supports_presence_penalty=False,
+        )
+        provider = self._make_provider(caps)
+        result = provider._build_disabled_params()
+        assert result is not None
+        assert "temperature" in result
+
+    @pytest.mark.unit
+    def test_only_unsupported_params_disabled(self):
+        """Only params with supports_X=False appear in disabled dict."""
+        caps = ProviderCapabilities(
+            provider_name="anthropic",
+            model_name="claude-sonnet",
+            supports_temperature=True,
+            supports_top_p=False,
+            supports_frequency_penalty=False,
+            supports_presence_penalty=False,
+        )
+        provider = self._make_provider(caps)
+        result = provider._build_disabled_params()
+        assert result is not None
+        assert "temperature" not in result
+        assert "top_p" in result
+        assert "frequency_penalty" in result
+
+    @pytest.mark.unit
+    def test_returns_none_when_capabilities_not_set(self):
+        """Returns None when provider has no _capabilities attribute."""
+        class _BareProvider(BaseProvider):
+            @property
+            def provider_name(self):
+                return "bare"
+            def get_capabilities(self):
+                return None
+            async def transcribe_image_from_base64(self, *a, **kw):
+                pass
+            async def close(self):
+                pass
+
+        p = _BareProvider.__new__(_BareProvider)
+        # Deliberately don't set _capabilities
+        assert p._build_disabled_params() is None
+
+
+class TestProcessLLMResponse:
+    """Tests for BaseProvider._process_llm_response()."""
+
+    def _make_provider(self):
+        """Create a minimal concrete provider for testing _process_llm_response."""
+        class _ConcreteProvider(BaseProvider):
+            @property
+            def provider_name(self):
+                return "test"
+            def get_capabilities(self):
+                return ProviderCapabilities(provider_name="test", model_name="m")
+            async def transcribe_image_from_base64(self, *a, **kw):
+                pass
+            async def close(self):
+                pass
+
+        p = _ConcreteProvider.__new__(_ConcreteProvider)
+        return p
+
+    @pytest.mark.unit
+    def test_plain_ai_message_response(self):
+        """Plain AIMessage with string content is handled correctly."""
+        import asyncio
+        from modules.llm.providers.base import OPENAI_TOKEN_MAPPING
+
+        provider = self._make_provider()
+        mock_msg = MagicMock()
+        mock_msg.content = "Hello transcribed text"
+        mock_msg.response_metadata = {
+            "token_usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        }
+
+        with patch("modules.infra.token_tracker.get_token_tracker"):
+            result = asyncio.run(
+                provider._process_llm_response(mock_msg, OPENAI_TOKEN_MAPPING)
+            )
+
+        assert result.content == "Hello transcribed text"
+        assert result.input_tokens == 10
+        assert result.output_tokens == 5
+        assert result.total_tokens == 15
+
+    @pytest.mark.unit
+    def test_structured_output_dict_response(self):
+        """with_structured_output(include_raw=True) dict response is parsed correctly."""
+        import asyncio
+        from modules.llm.providers.base import OPENAI_TOKEN_MAPPING
+
+        provider = self._make_provider()
+        parsed_data = {"transcription": "Structured text", "no_transcribable_text": False}
+        raw_msg = MagicMock()
+        raw_msg.response_metadata = {}
+        response = {"raw": raw_msg, "parsed": parsed_data}
+
+        with patch("modules.infra.token_tracker.get_token_tracker"):
+            result = asyncio.run(
+                provider._process_llm_response(response, OPENAI_TOKEN_MAPPING)
+            )
+
+        assert result.parsed_output == parsed_data
+        assert "Structured text" in result.content or result.content != ""
+
+    @pytest.mark.unit
+    def test_plain_dict_response_serialized(self):
+        """A plain dict response is JSON-serialized."""
+        import asyncio
+        from modules.llm.providers.base import OPENAI_TOKEN_MAPPING
+
+        provider = self._make_provider()
+        response = {"transcription": "dict content"}
+
+        with patch("modules.infra.token_tracker.get_token_tracker"):
+            result = asyncio.run(
+                provider._process_llm_response(response, OPENAI_TOKEN_MAPPING)
+            )
+
+        assert "dict content" in result.content
+
+    @pytest.mark.unit
+    def test_anthropic_token_mapping(self):
+        """Anthropic token mapping (different key names) extracts tokens correctly."""
+        import asyncio
+        from modules.llm.providers.base import ANTHROPIC_TOKEN_MAPPING
+
+        provider = self._make_provider()
+        mock_msg = MagicMock()
+        mock_msg.content = "anthropic text"
+        mock_msg.response_metadata = {
+            "usage": {"input_tokens": 20, "output_tokens": 8}
+        }
+
+        with patch("modules.infra.token_tracker.get_token_tracker"):
+            result = asyncio.run(
+                provider._process_llm_response(mock_msg, ANTHROPIC_TOKEN_MAPPING)
+            )
+
+        assert result.input_tokens == 20
+        assert result.output_tokens == 8
+        assert result.total_tokens == 28  # computed from in+out
+
+    @pytest.mark.unit
+    def test_zero_tokens_no_tracker_call(self):
+        """Token tracker is not called when total_tokens is 0."""
+        import asyncio
+        from modules.llm.providers.base import OPENAI_TOKEN_MAPPING
+
+        provider = self._make_provider()
+        mock_msg = MagicMock()
+        mock_msg.content = "text"
+        mock_msg.response_metadata = {}  # no usage key
+
+        with patch("modules.infra.token_tracker.get_token_tracker") as mock_tracker:
+            asyncio.run(
+                provider._process_llm_response(mock_msg, OPENAI_TOKEN_MAPPING)
+            )
+
+        mock_tracker.assert_not_called()
+
+
+class TestBaseProviderAsyncContextManager:
+    """Tests for BaseProvider async context manager (__aenter__, __aexit__)."""
+
+    @pytest.mark.unit
+    def test_async_context_manager_returns_self(self):
+        """__aenter__ returns the provider instance."""
+        import asyncio
+
+        class _ConcreteProvider(BaseProvider):
+            @property
+            def provider_name(self):
+                return "test"
+            def get_capabilities(self):
+                return ProviderCapabilities(provider_name="test", model_name="m")
+            async def transcribe_image_from_base64(self, *a, **kw):
+                pass
+            async def close(self):
+                pass
+
+        provider = _ConcreteProvider(api_key="k", model="m")
+
+        async def _check():
+            async with provider as p:
+                assert p is provider
+
+        asyncio.run(_check())

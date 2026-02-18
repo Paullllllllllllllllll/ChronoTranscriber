@@ -171,6 +171,7 @@ class LangChainTranscriber:
         frequency_penalty = tm.get("frequency_penalty")
         presence_penalty = tm.get("presence_penalty")
         reasoning_cfg = tm.get("reasoning")
+        text_cfg = tm.get("text")
         
         # Load service_tier from concurrency config (synchronous mode)
         try:
@@ -195,6 +196,8 @@ class LangChainTranscriber:
             provider_kwargs["presence_penalty"] = float(presence_penalty)
         if reasoning_cfg is not None:
             provider_kwargs["reasoning_config"] = reasoning_cfg
+        if text_cfg:
+            provider_kwargs["text_config"] = text_cfg
         
         # Create provider instance with full config
         self._provider = get_provider(

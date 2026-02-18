@@ -1,6 +1,7 @@
 # modules/workflow.py
 from __future__ import annotations
 
+import asyncio
 import datetime
 import json
 import shutil
@@ -314,6 +315,9 @@ class WorkflowManager:
                 processed_count += 1
                 print_info(f"Completed item {idx}/{total_items}")
                 self._log_token_usage("after", idx, total_items)
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            interrupted = True
+            raise
         finally:
             # Clean up any pending transient files on interruption or error
             if interrupted or failed_count > 0:

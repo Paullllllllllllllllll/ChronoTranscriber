@@ -841,11 +841,6 @@ class WorkflowUI:
             ui_print("\n  Concurrency Configuration:", PromptStyle.HIGHLIGHT)
             print_separator(PromptStyle.LIGHT_LINE, 80)
             
-            # Image processing concurrency
-            img_proc = concurrency_config.get("image_processing", {})
-            img_concurrency = img_proc.get("concurrency_limit", 24)
-            ui_print(f"    • Image extraction: {img_concurrency} concurrent tasks", PromptStyle.INFO)
-            
             # API request concurrency
             trans_cfg = concurrency_config.get("concurrency", {}).get("transcription", {})
             trans_concurrency = trans_cfg.get("concurrency_limit", 5)

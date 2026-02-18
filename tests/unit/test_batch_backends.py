@@ -206,3 +206,93 @@ class TestGetBatchBackend:
         backend1 = get_batch_backend("openai")
         backend2 = get_batch_backend("OpenAI")
         assert type(backend1) == type(backend2)
+
+
+# =============================================================================
+# CT-3: text.verbosity forwarding in OpenAI batch backend (fix for bug where
+#        text.verbosity was never included in batch request bodies)
+# =============================================================================
+
+class TestOpenAIBuildResponsesBodyTextVerbosity:
+    """Verify _build_responses_body includes text.verbosity for reasoning models.
+
+    CT-3 fix: LangChainTranscriber now extracts text_cfg from model config and
+    _build_responses_body reads it to add verbosity to the Responses API body.
+    """
+
+    def _model_cfg(self, model_name: str, verbosity: str) -> dict:
+        return {
+            "name": model_name,
+            "max_output_tokens": 4096,
+            "text": {"verbosity": verbosity},
+        }
+
+    @pytest.mark.unit
+    def test_verbosity_included_for_gpt5_model(self):
+        """text.verbosity is added to the body for GPT-5 (reasoning) models."""
+        from modules.llm.batch.backends.openai_backend import _build_responses_body
+
+        with patch("modules.llm.batch.backends.openai_backend.get_config_service") as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = {}
+            body = _build_responses_body(
+                model_config=self._model_cfg("gpt-5-mini", "concise"),
+                system_prompt="prompt",
+                image_url="data:image/png;base64,abc",
+            )
+
+        assert "text" in body
+        assert body["text"].get("verbosity") == "concise"
+
+    @pytest.mark.unit
+    def test_verbosity_not_included_for_non_reasoning_model(self):
+        """text.verbosity is NOT added for non-reasoning models (e.g. gpt-4o)."""
+        from modules.llm.batch.backends.openai_backend import _build_responses_body
+
+        with patch("modules.llm.batch.backends.openai_backend.get_config_service") as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = {}
+            body = _build_responses_body(
+                model_config=self._model_cfg("gpt-4o", "verbose"),
+                system_prompt="prompt",
+                image_url="data:image/png;base64,abc",
+            )
+
+        assert "verbosity" not in body.get("text", {})
+
+    @pytest.mark.unit
+    def test_verbosity_skipped_when_text_config_absent(self):
+        """No text.verbosity in body when model_config has no text key."""
+        from modules.llm.batch.backends.openai_backend import _build_responses_body
+
+        with patch("modules.llm.batch.backends.openai_backend.get_config_service") as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = {}
+            body = _build_responses_body(
+                model_config={"name": "gpt-5-mini", "max_output_tokens": 4096},
+                system_prompt="prompt",
+                image_url="data:image/png;base64,abc",
+            )
+
+        assert "verbosity" not in body.get("text", {})
+
+    @pytest.mark.unit
+    def test_verbosity_coexists_with_structured_output_format(self):
+        """text.verbosity and text.format can coexist in the request body."""
+        from modules.llm.batch.backends.openai_backend import _build_responses_body
+
+        schema = {
+            "type": "object",
+            "properties": {"transcribed_text": {"type": "string"}},
+            "required": ["transcribed_text"],
+            "additionalProperties": False,
+        }
+
+        with patch("modules.llm.batch.backends.openai_backend.get_config_service") as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = {}
+            body = _build_responses_body(
+                model_config=self._model_cfg("gpt-5-mini", "medium"),
+                system_prompt="prompt",
+                image_url="data:image/png;base64,abc",
+                transcription_schema=schema,
+            )
+
+        assert "text" in body
+        assert body["text"].get("verbosity") == "medium"

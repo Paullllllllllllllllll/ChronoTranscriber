@@ -25,10 +25,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from modules.llm.providers.base import (
     ANTHROPIC_TOKEN_MAPPING,
     BaseProvider,
-    ProviderCapabilities,
     TranscriptionResult,
     load_max_retries,
 )
+from modules.llm.model_capabilities import Capabilities, detect_capabilities
 
 logger = logging.getLogger(__name__)
 
@@ -82,307 +82,6 @@ def _transform_schema_for_anthropic(schema: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
-    """Determine capabilities based on Anthropic model name.
-    
-    Supports (as of February 2026):
-    - Claude 4.6: claude-opus-4-6, claude-sonnet-4-6
-    - Claude 4.5: claude-sonnet-4-5, claude-opus-4-5, claude-haiku-4-5
-    - Claude 4.1: claude-opus-4-1
-    - Claude 4: claude-sonnet-4, claude-opus-4
-    - Claude 3.5: claude-3-5-sonnet, claude-3-5-haiku
-    - Claude 3: claude-3-opus, claude-3-sonnet, claude-3-haiku
-    
-    Model ID formats:
-    - claude-sonnet-4-5-20250929 (Claude Sonnet 4.5)
-    - claude-opus-4-5-XXXXXXXX (Claude Opus 4.5)
-    - claude-haiku-4-5-XXXXXXXX (Claude Haiku 4.5)
-    - claude-opus-4-1-20250805 (Claude Opus 4.1)
-    - claude-sonnet-4-20250514 (Claude Sonnet 4)
-    """
-    m = model_name.lower().strip()
-    
-    # Claude 4.6 Opus (adaptive thinking, 128K output)
-    if "claude-opus-4-6" in m or "claude-opus-4.6" in m:
-        return ProviderCapabilities(
-            provider_name="anthropic",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=False,
-            default_image_detail="auto",
-            supports_structured_output=True,
-            supports_json_mode=True,
-            is_reasoning_model=True,
-            supports_reasoning_effort=True,
-            supports_temperature=True,
-            supports_top_p=False,
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=200000,
-            max_output_tokens=128000,
-        )
-
-    # Claude 4.6 Sonnet (extended thinking, 64K output)
-    if "claude-sonnet-4-6" in m or "claude-sonnet-4.6" in m:
-        return ProviderCapabilities(
-            provider_name="anthropic",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=False,
-            default_image_detail="auto",
-            supports_structured_output=True,
-            supports_json_mode=True,
-            is_reasoning_model=True,
-            supports_reasoning_effort=True,
-            supports_temperature=True,
-            supports_top_p=False,
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=200000,
-            max_output_tokens=65536,
-        )
-
-    # Claude 4.5 Opus (most capable)
-    if "claude-opus-4-5" in m or "claude-opus-4.5" in m:
-        return ProviderCapabilities(
-            provider_name="anthropic",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=False,
-            default_image_detail="auto",
-            supports_structured_output=True,
-            supports_json_mode=True,
-            is_reasoning_model=True,  # Extended thinking support
-            supports_reasoning_effort=True,
-            supports_temperature=True,
-            supports_top_p=False,  # Claude 4.5 doesn't allow both temperature AND top_p
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=200000,
-            max_output_tokens=32768,
-        )
-    
-    # Claude 4.5 Sonnet (balanced, recommended)
-    if "claude-sonnet-4-5" in m or "claude-sonnet-4.5" in m:
-        return ProviderCapabilities(
-            provider_name="anthropic",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=False,
-            default_image_detail="auto",
-            supports_structured_output=True,
-            supports_json_mode=True,
-            is_reasoning_model=True,  # Extended thinking support
-            supports_reasoning_effort=True,
-            supports_temperature=True,
-            supports_top_p=False,  # Claude 4.5 doesn't allow both temperature AND top_p
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=200000,
-            max_output_tokens=16384,
-        )
-    
-    # Claude 4.5 Haiku (fastest, cost-efficient)
-    # Structured outputs GA: supported on Haiku 4.5
-    if "claude-haiku-4-5" in m or "claude-haiku-4.5" in m:
-        return ProviderCapabilities(
-            provider_name="anthropic",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=False,
-            default_image_detail="auto",
-            supports_structured_output=True,
-            supports_json_mode=True,
-            is_reasoning_model=True,  # Extended thinking support
-            supports_reasoning_effort=True,
-            supports_temperature=True,
-            supports_top_p=False,  # Claude 4.5 doesn't allow both temperature AND top_p
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=200000,
-            max_output_tokens=8192,
-        )
-    
-    # Claude 4.1 Opus
-    if "claude-opus-4-1" in m or "claude-opus-4.1" in m:
-        return ProviderCapabilities(
-            provider_name="anthropic",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=False,
-            default_image_detail="auto",
-            supports_structured_output=True,
-            supports_json_mode=True,
-            is_reasoning_model=True,
-            supports_reasoning_effort=True,
-            supports_temperature=True,
-            supports_top_p=True,
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=200000,
-            max_output_tokens=16384,
-        )
-    
-    # Claude 4 Sonnet
-    if "claude-sonnet-4" in m and "4-5" not in m and "4.5" not in m:
-        return ProviderCapabilities(
-            provider_name="anthropic",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=False,
-            default_image_detail="auto",
-            supports_structured_output=True,
-            supports_json_mode=True,
-            is_reasoning_model=False,
-            supports_reasoning_effort=False,
-            supports_temperature=True,
-            supports_top_p=True,
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=200000,
-            max_output_tokens=8192,
-        )
-    
-    # Claude 4 Opus
-    if "claude-opus-4" in m and "4-1" not in m and "4.1" not in m and "4-5" not in m and "4.5" not in m:
-        return ProviderCapabilities(
-            provider_name="anthropic",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=False,
-            default_image_detail="auto",
-            supports_structured_output=True,
-            supports_json_mode=True,
-            is_reasoning_model=True,
-            supports_reasoning_effort=True,
-            supports_temperature=True,
-            supports_top_p=True,
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=200000,
-            max_output_tokens=16384,
-        )
-    
-    # Claude 3.5 Sonnet
-    if "claude-3-5-sonnet" in m or "claude-3.5-sonnet" in m:
-        return ProviderCapabilities(
-            provider_name="anthropic",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=False,
-            default_image_detail="auto",
-            supports_structured_output=True,
-            supports_json_mode=True,
-            is_reasoning_model=False,
-            supports_reasoning_effort=False,
-            supports_temperature=True,
-            supports_top_p=True,
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=200000,
-            max_output_tokens=8192,
-        )
-    
-    # Claude 3.5 Haiku (does NOT support structured outputs)
-    if "claude-3-5-haiku" in m or "claude-3.5-haiku" in m:
-        return ProviderCapabilities(
-            provider_name="anthropic",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=False,
-            default_image_detail="auto",
-            supports_structured_output=False,
-            supports_json_mode=False,
-            is_reasoning_model=False,
-            supports_reasoning_effort=False,
-            supports_temperature=True,
-            supports_top_p=True,
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=200000,
-            max_output_tokens=8192,
-        )
-    
-    # Claude 3 Opus (does NOT support structured outputs)
-    if "claude-3-opus" in m:
-        return ProviderCapabilities(
-            provider_name="anthropic",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=False,
-            default_image_detail="auto",
-            supports_structured_output=False,
-            supports_json_mode=False,
-            is_reasoning_model=False,
-            supports_reasoning_effort=False,
-            supports_temperature=True,
-            supports_top_p=True,
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=200000,
-            max_output_tokens=4096,
-        )
-    
-    # Claude 3 Sonnet (does NOT support structured outputs)
-    if "claude-3-sonnet" in m:
-        return ProviderCapabilities(
-            provider_name="anthropic",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=False,
-            default_image_detail="auto",
-            supports_structured_output=False,
-            supports_json_mode=False,
-            is_reasoning_model=False,
-            supports_reasoning_effort=False,
-            supports_temperature=True,
-            supports_top_p=True,
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=200000,
-            max_output_tokens=4096,
-        )
-    
-    # Claude 3 Haiku (does NOT support structured outputs)
-    if "claude-3-haiku" in m:
-        return ProviderCapabilities(
-            provider_name="anthropic",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=False,
-            default_image_detail="auto",
-            supports_structured_output=False,
-            supports_json_mode=False,
-            is_reasoning_model=False,
-            supports_reasoning_effort=False,
-            supports_temperature=True,
-            supports_top_p=True,
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=200000,
-            max_output_tokens=4096,
-        )
-    
-    # Default/fallback for Claude models (assume latest capabilities)
-    return ProviderCapabilities(
-        provider_name="anthropic",
-        model_name=model_name,
-        supports_vision=True,
-        supports_image_detail=False,
-        default_image_detail="auto",
-        supports_structured_output=True,
-        supports_json_mode=True,
-        is_reasoning_model=False,
-        supports_reasoning_effort=False,
-        supports_temperature=True,
-        supports_top_p=True,
-        supports_frequency_penalty=False,
-        supports_presence_penalty=False,
-        max_context_tokens=200000,
-        max_output_tokens=8192,
-    )
-
-
 class AnthropicProvider(BaseProvider):
     """Anthropic (Claude) LLM provider using LangChain."""
     
@@ -399,7 +98,7 @@ class AnthropicProvider(BaseProvider):
         reasoning_config: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
     ):
-        caps = _get_model_capabilities(model)
+        caps = detect_capabilities(model)
         effective_max_tokens = int(min(max_tokens, caps.max_output_tokens))
 
         super().__init__(
@@ -420,7 +119,7 @@ class AnthropicProvider(BaseProvider):
         
         # Build LangChain model kwargs
         model_kwargs: Dict[str, Any] = {}
-        if self._capabilities.supports_temperature:
+        if self._capabilities.supports_sampler_controls:
             model_kwargs["temperature"] = temperature
         if self._capabilities.supports_top_p:
             model_kwargs["top_p"] = top_p
@@ -460,7 +159,7 @@ class AnthropicProvider(BaseProvider):
     def provider_name(self) -> str:
         return "anthropic"
     
-    def get_capabilities(self) -> ProviderCapabilities:
+    def get_capabilities(self) -> Capabilities:
         return self._capabilities
 
     def _normalize_list_content(self, content_list: list) -> str:
@@ -493,7 +192,7 @@ class AnthropicProvider(BaseProvider):
         """
         caps = self._capabilities
         
-        if not caps.supports_vision:
+        if not caps.supports_image_input:
             return TranscriptionResult(
                 content="",
                 error=f"Model {self.model} does not support vision/image inputs.",
@@ -521,7 +220,7 @@ class AnthropicProvider(BaseProvider):
         
         # Native structured outputs (no function calling)
         # We require json_schema mode so the model returns a validated JSON object.
-        if json_schema and not caps.supports_structured_output:
+        if json_schema and not caps.supports_structured_outputs:
             raise ValueError(
                 f"Selected Anthropic model '{self.model}' does not support native structured outputs. "
                 f"Choose a Claude model that supports structured outputs (e.g. claude-sonnet-4-5-* or claude-opus-4-1-*)."

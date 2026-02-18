@@ -18,65 +18,65 @@ class TestOpenAIProviderCapabilities:
     @pytest.mark.unit
     def test_gpt5_is_reasoning_model(self):
         """GPT-5 family is classified as a reasoning model."""
-        from modules.llm.providers.openai_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("gpt-5-mini")
+        caps = detect_capabilities("gpt-5-mini")
         assert caps.is_reasoning_model is True
         assert caps.supports_reasoning_effort is True
 
     @pytest.mark.unit
     def test_gpt5_1_is_reasoning_model(self):
         """GPT-5.1 family is classified as a reasoning model."""
-        from modules.llm.providers.openai_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("gpt-5.1")
+        caps = detect_capabilities("gpt-5.1")
         assert caps.is_reasoning_model is True
         assert caps.supports_reasoning_effort is True
 
     @pytest.mark.unit
     def test_gpt4o_is_not_reasoning_model(self):
         """GPT-4o is NOT classified as a reasoning model."""
-        from modules.llm.providers.openai_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("gpt-4o")
+        caps = detect_capabilities("gpt-4o")
         assert caps.is_reasoning_model is False
         assert caps.supports_reasoning_effort is False
 
     @pytest.mark.unit
     def test_o3_is_reasoning_model(self):
         """o3 is classified as a reasoning model."""
-        from modules.llm.providers.openai_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("o3")
+        caps = detect_capabilities("o3")
         assert caps.is_reasoning_model is True
         assert caps.supports_reasoning_effort is True
 
     @pytest.mark.unit
     def test_gpt4o_supports_temperature(self):
         """GPT-4o supports sampler controls."""
-        from modules.llm.providers.openai_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("gpt-4o")
-        assert caps.supports_temperature is True
+        caps = detect_capabilities("gpt-4o")
+        assert caps.supports_sampler_controls is True
 
     @pytest.mark.unit
     def test_gpt5_does_not_support_temperature(self):
         """GPT-5 reasoning models do not support temperature."""
-        from modules.llm.providers.openai_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("gpt-5")
-        assert caps.supports_temperature is False
+        caps = detect_capabilities("gpt-5")
+        assert caps.supports_sampler_controls is False
 
     @pytest.mark.unit
     def test_gpt4_1_family_capabilities(self):
         """GPT-4.1 family has correct capability flags."""
-        from modules.llm.providers.openai_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
         for model in ("gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"):
-            caps = _get_model_capabilities(model)
+            caps = detect_capabilities(model)
             assert caps.is_reasoning_model is False
-            assert caps.supports_vision is True
-            assert caps.supports_structured_output is True
+            assert caps.supports_image_input is True
+            assert caps.supports_structured_outputs is True
 
 
 class TestOpenAIProviderInit:

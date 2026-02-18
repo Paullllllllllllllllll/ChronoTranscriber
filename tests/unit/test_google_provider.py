@@ -18,71 +18,71 @@ class TestGoogleGetModelCapabilities:
     @pytest.mark.unit
     def test_gemini_3_flash_is_reasoning_model(self):
         """Gemini 3 Flash supports thinking mode."""
-        from modules.llm.providers.google_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("gemini-3-flash-preview-05-20")
+        caps = detect_capabilities("gemini-3-flash-preview-05-20")
         assert caps.is_reasoning_model is True
         assert caps.supports_reasoning_effort is True
-        assert caps.provider_name == "google"
+        assert caps.provider == "google"
 
     @pytest.mark.unit
     def test_gemini_3_pro_is_reasoning_model(self):
         """Gemini 3 Pro supports thinking mode."""
-        from modules.llm.providers.google_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("gemini-3-pro")
+        caps = detect_capabilities("gemini-3-pro")
         assert caps.is_reasoning_model is True
         assert caps.supports_reasoning_effort is True
 
     @pytest.mark.unit
     def test_gemini_25_pro_is_reasoning_model(self):
         """Gemini 2.5 Pro supports adaptive thinking."""
-        from modules.llm.providers.google_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("gemini-2.5-pro")
+        caps = detect_capabilities("gemini-2.5-pro")
         assert caps.is_reasoning_model is True
         assert caps.supports_reasoning_effort is True
 
     @pytest.mark.unit
     def test_gemini_25_flash_is_reasoning_model(self):
         """Gemini 2.5 Flash supports adaptive thinking."""
-        from modules.llm.providers.google_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("gemini-2.5-flash")
+        caps = detect_capabilities("gemini-2.5-flash")
         assert caps.is_reasoning_model is True
         assert caps.supports_reasoning_effort is True
 
     @pytest.mark.unit
     def test_gemini_20_flash_is_not_reasoning_model(self):
         """Gemini 2.0 Flash does NOT support thinking mode."""
-        from modules.llm.providers.google_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("gemini-2.0-flash")
+        caps = detect_capabilities("gemini-2.0-flash")
         assert caps.is_reasoning_model is False
         assert caps.supports_reasoning_effort is False
 
     @pytest.mark.unit
     def test_gemini_15_pro_is_not_reasoning_model(self):
         """Gemini 1.5 Pro does NOT support thinking mode."""
-        from modules.llm.providers.google_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("gemini-1.5-pro")
+        caps = detect_capabilities("gemini-1.5-pro")
         assert caps.is_reasoning_model is False
         assert caps.supports_reasoning_effort is False
 
     @pytest.mark.unit
     def test_gemini_15_flash_is_not_reasoning_model(self):
         """Gemini 1.5 Flash does NOT support thinking mode."""
-        from modules.llm.providers.google_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("gemini-1.5-flash")
+        caps = detect_capabilities("gemini-1.5-flash")
         assert caps.is_reasoning_model is False
         assert caps.supports_reasoning_effort is False
 
     @pytest.mark.unit
     def test_all_gemini_models_support_vision(self):
         """All supported Gemini models support vision."""
-        from modules.llm.providers.google_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
         for model in (
             "gemini-3-pro",
@@ -91,40 +91,40 @@ class TestGoogleGetModelCapabilities:
             "gemini-1.5-pro",
             "gemini-1.5-flash",
         ):
-            caps = _get_model_capabilities(model)
-            assert caps.supports_vision is True, f"{model} should support vision"
+            caps = detect_capabilities(model)
+            assert caps.supports_image_input is True, f"{model} should support vision"
 
     @pytest.mark.unit
     def test_gemini_models_support_media_resolution(self):
         """Gemini models support the media_resolution parameter."""
-        from modules.llm.providers.google_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("gemini-2.5-pro")
+        caps = detect_capabilities("gemini-2.5-pro")
         assert caps.supports_media_resolution is True
 
     @pytest.mark.unit
     def test_gemini_models_do_not_support_image_detail(self):
         """Gemini models do not use the OpenAI-style image_detail parameter."""
-        from modules.llm.providers.google_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("gemini-2.5-pro")
+        caps = detect_capabilities("gemini-2.5-pro")
         assert caps.supports_image_detail is False
 
     @pytest.mark.unit
     def test_unknown_gemini_model_returns_default_caps(self):
         """Unknown Gemini model names return sensible defaults."""
-        from modules.llm.providers.google_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("gemini-future-model")
-        assert caps.provider_name == "google"
-        assert caps.supports_vision is True
+        caps = detect_capabilities("gemini-future-model")
+        assert caps.provider == "google"
+        assert caps.supports_image_input is True
 
     @pytest.mark.unit
     def test_gemini_25_pro_has_large_context(self):
         """Gemini 2.5 Pro has 2M token context window."""
-        from modules.llm.providers.google_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("gemini-2.5-pro")
+        caps = detect_capabilities("gemini-2.5-pro")
         assert caps.max_context_tokens >= 1_000_000
 
 
@@ -279,7 +279,7 @@ class TestGoogleProviderInit:
     def test_get_capabilities_returns_provider_capabilities(self):
         """get_capabilities() returns a ProviderCapabilities instance."""
         from modules.llm.providers.google_provider import GoogleProvider
-        from modules.llm.providers.base import ProviderCapabilities
+        from modules.llm.model_capabilities import Capabilities
 
         with patch("modules.llm.providers.google_provider.ChatGoogleGenerativeAI"):
             with patch("modules.llm.providers.google_provider.load_max_retries",
@@ -290,5 +290,5 @@ class TestGoogleProviderInit:
                 )
 
         caps = provider.get_capabilities()
-        assert isinstance(caps, ProviderCapabilities)
-        assert caps.provider_name == "google"
+        assert isinstance(caps, Capabilities)
+        assert caps.provider == "google"

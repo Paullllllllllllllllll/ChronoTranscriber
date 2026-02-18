@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from modules.config.constants import SUPPORTED_IMAGE_FORMATS
 from modules.config.service import get_config_service
+from modules.llm.model_capabilities import Capabilities
 
 logger = logging.getLogger(__name__)
 
@@ -65,40 +66,9 @@ GOOGLE_TOKEN_MAPPING = TokenUsageMapping(
 OPENROUTER_TOKEN_MAPPING = TokenUsageMapping()  # same as OpenAI
 
 
-@dataclass(frozen=True)
-class ProviderCapabilities:
-    """Describes capabilities of an LLM provider/model combination."""
-    
-    provider_name: str
-    model_name: str
-    
-    # Vision/multimodal
-    supports_vision: bool = False
-    supports_image_detail: bool = True  # OpenAI-style "detail" parameter
-    default_image_detail: str = "high"  # "low", "high", "auto"
-    supports_media_resolution: bool = False  # Google-style media_resolution parameter
-    default_media_resolution: str = "high"  # "low", "medium", "high", "ultra_high", "auto"
-    
-    # Structured outputs
-    supports_structured_output: bool = False
-    supports_json_mode: bool = False
-    
-    # Reasoning models
-    is_reasoning_model: bool = False
-    supports_reasoning_effort: bool = False
-    
-    # Sampler controls
-    supports_temperature: bool = True
-    supports_top_p: bool = True
-    supports_frequency_penalty: bool = True
-    supports_presence_penalty: bool = True
-    
-    # Streaming
-    supports_streaming: bool = True
-    
-    # Context window
-    max_context_tokens: int = 128000
-    max_output_tokens: int = 4096
+# Backward-compatibility alias — existing code that imports ProviderCapabilities
+# from this module will get the unified Capabilities class instead.
+ProviderCapabilities = Capabilities
 
 
 @dataclass
@@ -413,14 +383,20 @@ class BaseProvider(ABC):
         if caps is None:
             return None
         disabled: Dict[str, Any] = {}
-        if not caps.supports_temperature:
+        if not getattr(caps, "supports_sampler_controls", True):
+            # Master flag: disable ALL sampler controls (reasoning models)
             disabled["temperature"] = None
-        if not caps.supports_top_p:
             disabled["top_p"] = None
-        if not caps.supports_frequency_penalty:
             disabled["frequency_penalty"] = None
-        if not caps.supports_presence_penalty:
             disabled["presence_penalty"] = None
+        else:
+            # Fine-grained flags (e.g. Claude 4.5 accepts temp but not top_p)
+            if not getattr(caps, "supports_top_p", True):
+                disabled["top_p"] = None
+            if not getattr(caps, "supports_frequency_penalty", True):
+                disabled["frequency_penalty"] = None
+            if not getattr(caps, "supports_presence_penalty", True):
+                disabled["presence_penalty"] = None
         return disabled if disabled else None
 
     async def __aenter__(self) -> "BaseProvider":

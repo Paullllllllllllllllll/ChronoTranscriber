@@ -26,269 +26,12 @@ from pydantic import BaseModel
 from modules.llm.providers.base import (
     BaseProvider,
     OPENAI_TOKEN_MAPPING,
-    ProviderCapabilities,
     TranscriptionResult,
     load_max_retries,
 )
+from modules.llm.model_capabilities import Capabilities, detect_capabilities
 
 logger = logging.getLogger(__name__)
-
-
-def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
-    """Determine capabilities based on OpenAI model name.
-    
-    Supports (as of February 2026):
-    - GPT-5.2 family: gpt-5.2, gpt-5.2-pro (flagship, 400K context)
-    - GPT-5.1 family: gpt-5.1, gpt-5.1-mini, gpt-5.1-nano (with thinking variants)
-    - GPT-5 family: gpt-5, gpt-5-mini, gpt-5-nano
-    - o4-mini: Latest small reasoning model
-    - o3 family: o3, o3-pro, o3-mini
-    - o1 family: o1, o1-pro, o1-mini
-    - GPT-4.1 family: gpt-4.1, gpt-4.1-mini, gpt-4.1-nano
-    - GPT-4o family: gpt-4o, gpt-4o-mini
-    """
-    m = model_name.lower().strip()
-    
-    # GPT-5.1 family (with adaptive thinking)
-    # gpt-5.1, gpt-5.1-mini, gpt-5.1-nano, gpt-5.1-instant, gpt-5.1-thinking
-    if m.startswith("gpt-5.1"):
-        return ProviderCapabilities(
-            provider_name="openai",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=True,
-            default_image_detail="high",
-            supports_structured_output=True,
-            supports_json_mode=True,
-            is_reasoning_model=True,
-            supports_reasoning_effort=True,
-            supports_temperature=False,
-            supports_top_p=False,
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=400000,
-            max_output_tokens=128000,
-        )
-    
-    # GPT-5 family (standard, mini, nano, and gpt-5.2 variants)
-    # gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-pro, gpt-5.2, gpt-5.2-pro
-    if m.startswith("gpt-5"):
-        return ProviderCapabilities(
-            provider_name="openai",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=True,
-            default_image_detail="high",
-            supports_structured_output=True,
-            supports_json_mode=True,
-            is_reasoning_model=True,
-            supports_reasoning_effort=True,
-            supports_temperature=False,
-            supports_top_p=False,
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=400000,
-            max_output_tokens=128000,
-        )
-    
-    # o4-mini (newest reasoning model, optimized for speed and cost)
-    if m.startswith("o4-mini") or m.startswith("o4"):
-        return ProviderCapabilities(
-            provider_name="openai",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=True,
-            default_image_detail="high",
-            supports_structured_output=True,
-            supports_json_mode=True,
-            is_reasoning_model=True,
-            supports_reasoning_effort=True,
-            supports_temperature=False,
-            supports_top_p=False,
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=200000,
-            max_output_tokens=100000,
-        )
-    
-    # o3-pro (highest capability reasoning)
-    if m.startswith("o3-pro"):
-        return ProviderCapabilities(
-            provider_name="openai",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=True,
-            default_image_detail="high",
-            supports_structured_output=True,
-            supports_json_mode=True,
-            is_reasoning_model=True,
-            supports_reasoning_effort=True,
-            supports_temperature=False,
-            supports_top_p=False,
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=200000,
-            max_output_tokens=100000,
-        )
-    
-    # o3 family (not o3-mini, not o3-pro)
-    if m == "o3" or m.startswith("o3-20") or (m.startswith("o3") and not m.startswith("o3-mini") and not m.startswith("o3-pro")):
-        return ProviderCapabilities(
-            provider_name="openai",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=True,
-            default_image_detail="high",
-            supports_structured_output=True,
-            supports_json_mode=True,
-            is_reasoning_model=True,
-            supports_reasoning_effort=True,
-            supports_temperature=False,
-            supports_top_p=False,
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=200000,
-            max_output_tokens=100000,
-        )
-    
-    # o3-mini
-    if m.startswith("o3-mini"):
-        return ProviderCapabilities(
-            provider_name="openai",
-            model_name=model_name,
-            supports_vision=False,  # No vision
-            supports_image_detail=False,
-            default_image_detail="high",
-            supports_structured_output=True,
-            supports_json_mode=True,
-            is_reasoning_model=True,
-            supports_reasoning_effort=True,
-            supports_temperature=False,
-            supports_top_p=False,
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=200000,
-            max_output_tokens=100000,
-        )
-    
-    # o1-pro
-    if m.startswith("o1-pro"):
-        return ProviderCapabilities(
-            provider_name="openai",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=True,
-            default_image_detail="high",
-            supports_structured_output=False,
-            supports_json_mode=True,
-            is_reasoning_model=True,
-            supports_reasoning_effort=True,
-            supports_temperature=False,
-            supports_top_p=False,
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=200000,
-            max_output_tokens=100000,
-        )
-    
-    # o1 family (not o1-mini, not o1-pro)
-    if m == "o1" or m.startswith("o1-20") or (m.startswith("o1") and not m.startswith("o1-mini") and not m.startswith("o1-pro")):
-        return ProviderCapabilities(
-            provider_name="openai",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=True,
-            default_image_detail="high",
-            supports_structured_output=False,  # Conservative for o-series
-            supports_json_mode=True,
-            is_reasoning_model=True,
-            supports_reasoning_effort=True,
-            supports_temperature=False,
-            supports_top_p=False,
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=200000,
-            max_output_tokens=100000,
-        )
-    
-    # o1-mini
-    if m.startswith("o1-mini"):
-        return ProviderCapabilities(
-            provider_name="openai",
-            model_name=model_name,
-            supports_vision=False,  # No vision
-            supports_image_detail=False,
-            default_image_detail="high",
-            supports_structured_output=False,
-            supports_json_mode=False,
-            is_reasoning_model=True,
-            supports_reasoning_effort=True,
-            supports_temperature=False,
-            supports_top_p=False,
-            supports_frequency_penalty=False,
-            supports_presence_penalty=False,
-            max_context_tokens=128000,
-            max_output_tokens=65536,
-        )
-    
-    # GPT-4o family (multimodal workhorse)
-    if m.startswith("gpt-4o"):
-        return ProviderCapabilities(
-            provider_name="openai",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=True,
-            default_image_detail="high",
-            supports_structured_output=True,
-            supports_json_mode=True,
-            is_reasoning_model=False,
-            supports_reasoning_effort=False,
-            supports_temperature=True,
-            supports_top_p=True,
-            supports_frequency_penalty=True,
-            supports_presence_penalty=True,
-            max_context_tokens=128000,
-            max_output_tokens=16384,
-        )
-    
-    # GPT-4.1 family (gpt-4.1, gpt-4.1-mini, gpt-4.1-nano)
-    if m.startswith("gpt-4.1"):
-        return ProviderCapabilities(
-            provider_name="openai",
-            model_name=model_name,
-            supports_vision=True,
-            supports_image_detail=True,
-            default_image_detail="high",
-            supports_structured_output=True,
-            supports_json_mode=True,
-            is_reasoning_model=False,
-            supports_reasoning_effort=False,
-            supports_temperature=True,
-            supports_top_p=True,
-            supports_frequency_penalty=True,
-            supports_presence_penalty=True,
-            max_context_tokens=1000000,  # Million token context
-            max_output_tokens=32768,
-        )
-    
-    # Default/fallback (conservative)
-    return ProviderCapabilities(
-        provider_name="openai",
-        model_name=model_name,
-        supports_vision=True,
-        supports_image_detail=True,
-        default_image_detail="high",
-        supports_structured_output=True,
-        supports_json_mode=True,
-        is_reasoning_model=False,
-        supports_reasoning_effort=False,
-        supports_temperature=True,
-        supports_top_p=True,
-        supports_frequency_penalty=True,
-        supports_presence_penalty=True,
-        max_context_tokens=128000,
-        max_output_tokens=4096,
-    )
 
 
 class OpenAIProvider(BaseProvider):
@@ -333,7 +76,7 @@ class OpenAIProvider(BaseProvider):
         self.reasoning_config = reasoning_config
         self.text_config = text_config
         
-        self._capabilities = _get_model_capabilities(model)
+        self._capabilities = detect_capabilities(model)
         max_retries = load_max_retries()
         
         # Build disabled_params for models that don't support certain features
@@ -392,7 +135,7 @@ class OpenAIProvider(BaseProvider):
     def provider_name(self) -> str:
         return "openai"
     
-    def get_capabilities(self) -> ProviderCapabilities:
+    def get_capabilities(self) -> Capabilities:
         return self._capabilities
     
     async def transcribe_image_from_base64(
@@ -413,7 +156,7 @@ class OpenAIProvider(BaseProvider):
         """
         caps = self._capabilities
         
-        if not caps.supports_vision:
+        if not caps.supports_image_input:
             return TranscriptionResult(
                 content="",
                 error=f"Model {self.model} does not support vision/image inputs.",
@@ -452,7 +195,7 @@ class OpenAIProvider(BaseProvider):
         llm_to_use = self._llm
         use_pydantic = False
         
-        if json_schema and caps.supports_structured_output:
+        if json_schema and caps.supports_structured_outputs:
             # Try to use Pydantic model for better validation
             # Use include_raw=True to get token usage from the underlying AIMessage
             try:

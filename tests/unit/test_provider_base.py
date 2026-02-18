@@ -16,6 +16,7 @@ from modules.llm.providers.base import (
     TranscriptionResult,
     BaseProvider,
 )
+from modules.llm.model_capabilities import Capabilities
 
 
 class TestProviderCapabilities:
@@ -24,65 +25,66 @@ class TestProviderCapabilities:
     @pytest.mark.unit
     def test_default_values(self):
         """Test default capability values."""
-        caps = ProviderCapabilities(
-            provider_name="test",
-            model_name="test-model",
+        caps = Capabilities(
+            model="test-model",
+            family="test",
         )
         
-        assert caps.supports_vision is False
-        assert caps.supports_structured_output is False
+        assert caps.supports_image_input is False
+        assert caps.supports_structured_outputs is True
         assert caps.is_reasoning_model is False
-        assert caps.supports_temperature is True
-        assert caps.supports_streaming is True
+        assert caps.supports_sampler_controls is True
     
     @pytest.mark.unit
     def test_vision_capabilities(self):
         """Test vision-related capabilities."""
-        caps = ProviderCapabilities(
-            provider_name="openai",
-            model_name="gpt-4o",
-            supports_vision=True,
+        caps = Capabilities(
+            model="gpt-4o",
+            family="gpt-4o",
+            provider="openai",
+            supports_image_input=True,
             supports_image_detail=True,
             default_image_detail="high",
         )
         
-        assert caps.supports_vision is True
+        assert caps.supports_image_input is True
         assert caps.supports_image_detail is True
         assert caps.default_image_detail == "high"
     
     @pytest.mark.unit
     def test_reasoning_model_capabilities(self):
         """Test reasoning model capabilities."""
-        caps = ProviderCapabilities(
-            provider_name="openai",
-            model_name="o1",
+        caps = Capabilities(
+            model="o1",
+            family="o1",
+            provider="openai",
             is_reasoning_model=True,
             supports_reasoning_effort=True,
-            supports_temperature=False,
+            supports_sampler_controls=False,
             supports_top_p=False,
         )
         
         assert caps.is_reasoning_model is True
         assert caps.supports_reasoning_effort is True
-        assert caps.supports_temperature is False
+        assert caps.supports_sampler_controls is False
     
     @pytest.mark.unit
     def test_frozen_dataclass(self):
         """Test that capabilities are immutable."""
-        caps = ProviderCapabilities(
-            provider_name="test",
-            model_name="test-model",
+        caps = Capabilities(
+            model="test-model",
+            family="test",
         )
         
         with pytest.raises(AttributeError):
-            caps.provider_name = "modified"
+            caps.model = "modified"
     
     @pytest.mark.unit
     def test_token_limits(self):
         """Test token limit attributes."""
-        caps = ProviderCapabilities(
-            provider_name="test",
-            model_name="test-model",
+        caps = Capabilities(
+            model="test-model",
+            family="test",
             max_context_tokens=200000,
             max_output_tokens=8192,
         )
@@ -264,9 +266,9 @@ class TestBaseProviderInit:
                 return "test"
             
             def get_capabilities(self):
-                return ProviderCapabilities(
-                    provider_name="test",
-                    model_name=self.model,
+                return Capabilities(
+                    model=self.model,
+                    family="test",
                 )
             
             async def transcribe_image(self, *args, **kwargs):
@@ -299,9 +301,10 @@ class TestProviderCapabilitiesEdgeCases:
     @pytest.mark.unit
     def test_google_media_resolution(self):
         """Test Google-specific media resolution settings."""
-        caps = ProviderCapabilities(
-            provider_name="google",
-            model_name="gemini-pro",
+        caps = Capabilities(
+            model="gemini-pro",
+            family="gemini",
+            provider="google",
             supports_media_resolution=True,
             default_media_resolution="high",
         )
@@ -312,14 +315,15 @@ class TestProviderCapabilitiesEdgeCases:
     @pytest.mark.unit
     def test_structured_output_capability(self):
         """Test structured output capability."""
-        caps = ProviderCapabilities(
-            provider_name="openai",
-            model_name="gpt-4o",
-            supports_structured_output=True,
+        caps = Capabilities(
+            model="gpt-4o",
+            family="gpt-4o",
+            provider="openai",
+            supports_structured_outputs=True,
             supports_json_mode=True,
         )
         
-        assert caps.supports_structured_output is True
+        assert caps.supports_structured_outputs is True
         assert caps.supports_json_mode is True
 
 
@@ -376,7 +380,7 @@ class TestLoadMaxRetries:
 class TestBuildDisabledParams:
     """Tests for BaseProvider._build_disabled_params()."""
 
-    def _make_provider(self, caps: ProviderCapabilities):
+    def _make_provider(self, caps):
         """Create a minimal concrete provider with given capabilities."""
         class _ConcreteProvider(BaseProvider):
             @property
@@ -396,10 +400,11 @@ class TestBuildDisabledParams:
     @pytest.mark.unit
     def test_returns_none_when_all_supported(self):
         """Returns None when all sampler params are supported."""
-        caps = ProviderCapabilities(
-            provider_name="openai",
-            model_name="gpt-4o",
-            supports_temperature=True,
+        caps = Capabilities(
+            model="gpt-4o",
+            family="gpt-4o",
+            provider="openai",
+            supports_sampler_controls=True,
             supports_top_p=True,
             supports_frequency_penalty=True,
             supports_presence_penalty=True,
@@ -409,11 +414,12 @@ class TestBuildDisabledParams:
 
     @pytest.mark.unit
     def test_disables_temperature_when_not_supported(self):
-        """Adds temperature=None when supports_temperature is False."""
-        caps = ProviderCapabilities(
-            provider_name="openai",
-            model_name="o3",
-            supports_temperature=False,
+        """Adds temperature=None when supports_sampler_controls is False."""
+        caps = Capabilities(
+            model="o3",
+            family="o3",
+            provider="openai",
+            supports_sampler_controls=False,
             supports_top_p=False,
             supports_frequency_penalty=False,
             supports_presence_penalty=False,
@@ -426,10 +432,11 @@ class TestBuildDisabledParams:
     @pytest.mark.unit
     def test_only_unsupported_params_disabled(self):
         """Only params with supports_X=False appear in disabled dict."""
-        caps = ProviderCapabilities(
-            provider_name="anthropic",
-            model_name="claude-sonnet",
-            supports_temperature=True,
+        caps = Capabilities(
+            model="claude-sonnet",
+            family="claude",
+            provider="anthropic",
+            supports_sampler_controls=True,
             supports_top_p=False,
             supports_frequency_penalty=False,
             supports_presence_penalty=False,
@@ -470,7 +477,7 @@ class TestProcessLLMResponse:
             def provider_name(self):
                 return "test"
             def get_capabilities(self):
-                return ProviderCapabilities(provider_name="test", model_name="m")
+                return Capabilities(model="m", family="test")
             async def transcribe_image_from_base64(self, *a, **kw):
                 pass
             async def close(self):
@@ -730,7 +737,7 @@ class TestBaseProviderAsyncContextManager:
             def provider_name(self):
                 return "test"
             def get_capabilities(self):
-                return ProviderCapabilities(provider_name="test", model_name="m")
+                return Capabilities(model="m", family="test")
             async def transcribe_image_from_base64(self, *a, **kw):
                 pass
             async def close(self):

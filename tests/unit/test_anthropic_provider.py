@@ -18,80 +18,80 @@ class TestAnthropicGetModelCapabilities:
     @pytest.mark.unit
     def test_claude_opus_45_is_reasoning_model(self):
         """Claude Opus 4.5 supports extended thinking."""
-        from modules.llm.providers.anthropic_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("claude-opus-4-5-20250929")
+        caps = detect_capabilities("claude-opus-4-5-20250929")
         assert caps.is_reasoning_model is True
         assert caps.supports_reasoning_effort is True
-        assert caps.provider_name == "anthropic"
+        assert caps.provider == "anthropic"
 
     @pytest.mark.unit
     def test_claude_sonnet_45_is_reasoning_model(self):
         """Claude Sonnet 4.5 supports extended thinking."""
-        from modules.llm.providers.anthropic_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("claude-sonnet-4-5-20250929")
+        caps = detect_capabilities("claude-sonnet-4-5-20250929")
         assert caps.is_reasoning_model is True
         assert caps.supports_reasoning_effort is True
 
     @pytest.mark.unit
     def test_claude_haiku_45_is_reasoning_model(self):
         """Claude Haiku 4.5 supports extended thinking."""
-        from modules.llm.providers.anthropic_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("claude-haiku-4-5-20251001")
+        caps = detect_capabilities("claude-haiku-4-5-20251001")
         assert caps.is_reasoning_model is True
         assert caps.supports_reasoning_effort is True
 
     @pytest.mark.unit
     def test_claude_opus_41_is_reasoning_model(self):
         """Claude Opus 4.1 supports extended thinking."""
-        from modules.llm.providers.anthropic_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("claude-opus-4-1-20250805")
+        caps = detect_capabilities("claude-opus-4-1-20250805")
         assert caps.is_reasoning_model is True
         assert caps.supports_reasoning_effort is True
 
     @pytest.mark.unit
     def test_claude_opus_4_is_reasoning_model(self):
         """Claude Opus 4 supports extended thinking."""
-        from modules.llm.providers.anthropic_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("claude-opus-4-20250601")
+        caps = detect_capabilities("claude-opus-4-20250601")
         assert caps.is_reasoning_model is True
         assert caps.supports_reasoning_effort is True
 
     @pytest.mark.unit
     def test_claude_sonnet_4_is_not_reasoning_model(self):
         """Claude Sonnet 4 (non-4.5) does not support extended thinking."""
-        from modules.llm.providers.anthropic_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("claude-sonnet-4-20250514")
+        caps = detect_capabilities("claude-sonnet-4-20250514")
         assert caps.is_reasoning_model is False
         assert caps.supports_reasoning_effort is False
 
     @pytest.mark.unit
     def test_claude_35_sonnet_is_not_reasoning_model(self):
         """Claude 3.5 Sonnet does not support extended thinking."""
-        from modules.llm.providers.anthropic_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("claude-3-5-sonnet-20241022")
+        caps = detect_capabilities("claude-3-5-sonnet-20241022")
         assert caps.is_reasoning_model is False
         assert caps.supports_reasoning_effort is False
 
     @pytest.mark.unit
     def test_claude_3_opus_is_not_reasoning_model(self):
         """Claude 3 Opus does not support extended thinking."""
-        from modules.llm.providers.anthropic_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("claude-3-opus-20240229")
+        caps = detect_capabilities("claude-3-opus-20240229")
         assert caps.is_reasoning_model is False
         assert caps.supports_reasoning_effort is False
 
     @pytest.mark.unit
     def test_all_claude_models_support_vision(self):
         """All supported Claude models support vision."""
-        from modules.llm.providers.anthropic_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
         for model in (
             "claude-opus-4-5-20250929",
@@ -100,41 +100,41 @@ class TestAnthropicGetModelCapabilities:
             "claude-3-5-sonnet-20241022",
             "claude-3-haiku-20240307",
         ):
-            caps = _get_model_capabilities(model)
-            assert caps.supports_vision is True, f"{model} should support vision"
+            caps = detect_capabilities(model)
+            assert caps.supports_image_input is True, f"{model} should support vision"
 
     @pytest.mark.unit
     def test_claude_models_do_not_support_image_detail(self):
         """Claude models do not use the OpenAI-style image_detail parameter."""
-        from modules.llm.providers.anthropic_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("claude-sonnet-4-5-20250929")
+        caps = detect_capabilities("claude-sonnet-4-5-20250929")
         assert caps.supports_image_detail is False
 
     @pytest.mark.unit
     def test_claude_35_haiku_no_structured_output(self):
         """Claude 3.5 Haiku does not support structured outputs."""
-        from modules.llm.providers.anthropic_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("claude-3-5-haiku-20241022")
-        assert caps.supports_structured_output is False
+        caps = detect_capabilities("claude-3-5-haiku-20241022")
+        assert caps.supports_structured_outputs is False
 
     @pytest.mark.unit
     def test_claude_45_sonnet_supports_structured_output(self):
         """Claude 4.5 Sonnet supports native structured outputs."""
-        from modules.llm.providers.anthropic_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("claude-sonnet-4-5-20250929")
-        assert caps.supports_structured_output is True
+        caps = detect_capabilities("claude-sonnet-4-5-20250929")
+        assert caps.supports_structured_outputs is True
 
     @pytest.mark.unit
     def test_unknown_claude_model_returns_default_caps(self):
         """Unknown Claude model names return sensible defaults."""
-        from modules.llm.providers.anthropic_provider import _get_model_capabilities
+        from modules.llm.model_capabilities import detect_capabilities
 
-        caps = _get_model_capabilities("claude-future-model-9000")
-        assert caps.provider_name == "anthropic"
-        assert caps.supports_vision is True
+        caps = detect_capabilities("claude-future-model-9000")
+        assert caps.provider == "anthropic"
+        assert caps.supports_image_input is True
 
 
 class TestAnthropicProviderInit:
@@ -290,7 +290,7 @@ class TestAnthropicProviderInit:
     def test_get_capabilities_returns_provider_capabilities(self):
         """get_capabilities() returns a ProviderCapabilities instance."""
         from modules.llm.providers.anthropic_provider import AnthropicProvider
-        from modules.llm.providers.base import ProviderCapabilities
+        from modules.llm.model_capabilities import Capabilities
 
         with patch("modules.llm.providers.anthropic_provider.ChatAnthropic"):
             with patch("modules.llm.providers.anthropic_provider.load_max_retries",
@@ -301,8 +301,8 @@ class TestAnthropicProviderInit:
                 )
 
         caps = provider.get_capabilities()
-        assert isinstance(caps, ProviderCapabilities)
-        assert caps.provider_name == "anthropic"
+        assert isinstance(caps, Capabilities)
+        assert caps.provider == "anthropic"
 
 
 class TestTransformSchemaForAnthropic:

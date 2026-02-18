@@ -65,7 +65,7 @@ Fully offline processing with configurable engine modes, page segmentation, and 
 
 ### Intelligent Capability Management
 
-Automatic model capability detection. OpenAI reasoning models (GPT-5 and o-series) do not support sampler controls like `temperature`/`top_p`, and ChronoTranscriber filters unsupported parameters automatically. LangChain handles retry logic, token tracking, and structured output parsing.
+A centralized, registry-based capability detection layer covers all four providers (OpenAI, Anthropic, Google, OpenRouter) from a single source of truth in `modules/llm/model_capabilities.py`. Each model family is defined once as a compact registry entry that specifies only the fields differing from its provider baseline. Unsupported parameters — such as sampler controls (`temperature`, `top_p`) for OpenAI reasoning models, or `top_p` for Claude 4.5+ models when extended thinking is active — are filtered automatically before any API call via LangChain's `disabled_params` mechanism. LangChain handles retry logic, token tracking, and structured output parsing.
 
 ### Hierarchical Context Resolution
 
@@ -936,7 +936,7 @@ modules/llm/providers/
 └── openrouter_provider.py # OpenRouter (200+ models)
 ```
 
-Each provider handles capability detection, parameter validation, retry logic, token tracking, and structured output parsing.
+Capability detection is centralized in `modules/llm/model_capabilities.py` (shared registry for all providers). Each provider handles parameter configuration, retry logic, token tracking, and structured output parsing.
 
 ### Operations Layer
 
@@ -1215,6 +1215,8 @@ pip install -r requirements-dev.txt
 ### Recent Updates
 
 For complete release history, see [RELEASE_NOTES_v3.0.md](RELEASE_NOTES_v3.0.md) and [RELEASE_NOTES_v2.0.md](RELEASE_NOTES_v2.0.md).
+
+**February 2026**: Capability guarding refactored to a centralized, registry-based architecture (`_MODEL_REGISTRY` in `model_capabilities.py`) covering all four providers. Replaces ~1,020 lines of per-provider if/elif chains with compact registry tuples and provider base templates. `Capabilities` is now the single source of truth for parameter gating across the entire codebase.
 
 **December 2025**: Dependency updates - All packages updated to latest stable versions with full backward compatibility verified.
 

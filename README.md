@@ -51,9 +51,9 @@ ChronoTranscriber supports two execution modes:
 
 ### Multi-Provider LLM Support
 
-- **OpenAI**: GPT-5.1, GPT-5, GPT-4.1, GPT-4o, o3, o4-mini and variants
-- **Anthropic**: Claude Opus/Sonnet/Haiku 4.5, 4.1, 4, 3.5
-- **Google**: Gemini 3 Pro, Gemini 2.5 Pro/Flash, Gemini 2.0/1.5
+- **OpenAI**: GPT-5.2, GPT-5.1, GPT-5, GPT-4.1, GPT-4o, o3, o4-mini and variants
+- **Anthropic**: Claude Opus/Sonnet 4.6, Opus/Sonnet/Haiku 4.5, 4.1, 4, 3.5
+- **Google**: Gemini 3.0 Flash Preview, Gemini 3.0 Preview, Gemini 3 Pro, Gemini 2.5 Pro/Flash, Gemini 2.0/1.5
 - **OpenRouter**: Access 200+ models through unified API
 - **LangChain Integration**: Unified interface with automatic capability detection and parameter filtering
 
@@ -98,8 +98,9 @@ ChronoTranscriber supports four AI providers through LangChain integration. Set 
 
 | Model Family | Models | Key Features |
 |--------------|--------|--------------|
-| GPT-5.1 | gpt-5.1, gpt-5.1-mini, gpt-5.1-nano | Adaptive thinking, 256K context |
-| GPT-5 | gpt-5, gpt-5-mini, gpt-5-nano | Reasoning, 256K context |
+| GPT-5.2 | gpt-5.2, gpt-5.2-pro | Flagship reasoning, 400K context, 128K output |
+| GPT-5.1 | gpt-5.1, gpt-5.1-mini, gpt-5.1-nano | Adaptive thinking, 400K context |
+| GPT-5 | gpt-5, gpt-5-mini, gpt-5-nano | Reasoning, 400K context |
 | o-series | o4-mini, o3, o3-pro, o3-mini, o1, o1-pro, o1-mini | Advanced reasoning |
 | GPT-4.1 | gpt-4.1, gpt-4.1-mini, gpt-4.1-nano | 1M context, sampler controls |
 | GPT-4o | gpt-4o, gpt-4o-mini | Multimodal, fast |
@@ -110,7 +111,8 @@ Environment variable: `OPENAI_API_KEY`
 
 | Model Family | Models | Key Features |
 |--------------|--------|--------------|
-| Claude 4.5 | claude-sonnet-4-5, claude-opus-4-5, claude-haiku-4-5 | Extended thinking |
+| Claude 4.6 | claude-opus-4-6, claude-sonnet-4-6 | Adaptive/extended thinking; 128K / 64K output |
+| Claude 4.5 | claude-opus-4-5, claude-sonnet-4-5, claude-haiku-4-5 | Extended thinking, 200K context |
 | Claude 4.1 | claude-opus-4-1 | Reasoning support |
 | Claude 4 | claude-sonnet-4, claude-opus-4 | Vision, structured output |
 | Claude 3.5 | claude-3-5-sonnet, claude-3-5-haiku | 200K context |
@@ -121,7 +123,9 @@ Environment variable: `ANTHROPIC_API_KEY`
 
 | Model Family | Models | Key Features |
 |--------------|--------|--------------|
-| Gemini 3 | gemini-3-pro | State-of-the-art reasoning, 2M context |
+| Gemini 3.0 Flash Preview | gemini-3-flash-preview, gemini-3.0-flash-preview | Thinking, near-Pro speed, 1M context |
+| Gemini 3.0 Preview | gemini-3-preview, gemini-3.0-preview | Full reasoning, 1M context |
+| Gemini 3 Pro | gemini-3-pro | State-of-the-art reasoning, 1M context |
 | Gemini 2.5 | gemini-2.5-pro, gemini-2.5-flash | Adaptive thinking |
 | Gemini 2.0 | gemini-2.0-flash | Fast, 1M context |
 | Gemini 1.5 | gemini-1.5-pro, gemini-1.5-flash | 2M context |

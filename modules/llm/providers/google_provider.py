@@ -37,8 +37,8 @@ logger = logging.getLogger(__name__)
 def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
     """Determine capabilities based on Google model name.
     
-    Supports (as of December 2025):
-    - Gemini 3: gemini-3-pro, gemini-3-flash-preview (latest, state-of-the-art)
+    Supports (as of February 2026):
+    - Gemini 3: gemini-3-pro, gemini-3-flash-preview, gemini-3-preview (latest, state-of-the-art)
     - Gemini 2.5: gemini-2.5-pro, gemini-2.5-flash (with adaptive thinking)
     - Gemini 2.0: gemini-2.0-flash
     - Gemini 1.5: gemini-1.5-pro, gemini-1.5-flash
@@ -90,6 +90,28 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             max_output_tokens=65536,
         )
     
+    # Gemini 3.0 Preview (non-flash; gemini-3-preview, gemini-3.0-preview)
+    if ("gemini-3-preview" in m or "gemini-3.0-preview" in m) and "flash" not in m:
+        return ProviderCapabilities(
+            provider_name="google",
+            model_name=model_name,
+            supports_vision=True,
+            supports_image_detail=False,
+            default_image_detail="auto",
+            supports_media_resolution=True,
+            default_media_resolution="high",
+            supports_structured_output=True,
+            supports_json_mode=True,
+            is_reasoning_model=True,
+            supports_reasoning_effort=True,
+            supports_temperature=True,
+            supports_top_p=True,
+            supports_frequency_penalty=False,
+            supports_presence_penalty=False,
+            max_context_tokens=1048576,  # 1M token context
+            max_output_tokens=65536,
+        )
+
     # Catch-all for other Gemini 3 variants
     if "gemini-3" in m or "gemini-3.0" in m:
         return ProviderCapabilities(

@@ -85,7 +85,8 @@ def _transform_schema_for_anthropic(schema: Dict[str, Any]) -> Dict[str, Any]:
 def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
     """Determine capabilities based on Anthropic model name.
     
-    Supports (as of November 2025):
+    Supports (as of February 2026):
+    - Claude 4.6: claude-opus-4-6, claude-sonnet-4-6
     - Claude 4.5: claude-sonnet-4-5, claude-opus-4-5, claude-haiku-4-5
     - Claude 4.1: claude-opus-4-1
     - Claude 4: claude-sonnet-4, claude-opus-4
@@ -101,6 +102,46 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
     """
     m = model_name.lower().strip()
     
+    # Claude 4.6 Opus (adaptive thinking, 128K output)
+    if "claude-opus-4-6" in m or "claude-opus-4.6" in m:
+        return ProviderCapabilities(
+            provider_name="anthropic",
+            model_name=model_name,
+            supports_vision=True,
+            supports_image_detail=False,
+            default_image_detail="auto",
+            supports_structured_output=True,
+            supports_json_mode=True,
+            is_reasoning_model=True,
+            supports_reasoning_effort=True,
+            supports_temperature=True,
+            supports_top_p=False,
+            supports_frequency_penalty=False,
+            supports_presence_penalty=False,
+            max_context_tokens=200000,
+            max_output_tokens=128000,
+        )
+
+    # Claude 4.6 Sonnet (extended thinking, 64K output)
+    if "claude-sonnet-4-6" in m or "claude-sonnet-4.6" in m:
+        return ProviderCapabilities(
+            provider_name="anthropic",
+            model_name=model_name,
+            supports_vision=True,
+            supports_image_detail=False,
+            default_image_detail="auto",
+            supports_structured_output=True,
+            supports_json_mode=True,
+            is_reasoning_model=True,
+            supports_reasoning_effort=True,
+            supports_temperature=True,
+            supports_top_p=False,
+            supports_frequency_penalty=False,
+            supports_presence_penalty=False,
+            max_context_tokens=200000,
+            max_output_tokens=65536,
+        )
+
     # Claude 4.5 Opus (most capable)
     if "claude-opus-4-5" in m or "claude-opus-4.5" in m:
         return ProviderCapabilities(

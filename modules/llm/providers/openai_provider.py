@@ -37,7 +37,8 @@ logger = logging.getLogger(__name__)
 def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
     """Determine capabilities based on OpenAI model name.
     
-    Supports (as of November 2025):
+    Supports (as of February 2026):
+    - GPT-5.2 family: gpt-5.2, gpt-5.2-pro (flagship, 400K context)
     - GPT-5.1 family: gpt-5.1, gpt-5.1-mini, gpt-5.1-nano (with thinking variants)
     - GPT-5 family: gpt-5, gpt-5-mini, gpt-5-nano
     - o4-mini: Latest small reasoning model
@@ -48,7 +49,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
     """
     m = model_name.lower().strip()
     
-    # GPT-5.1 family (newest, with adaptive thinking)
+    # GPT-5.1 family (with adaptive thinking)
     # gpt-5.1, gpt-5.1-mini, gpt-5.1-nano, gpt-5.1-instant, gpt-5.1-thinking
     if m.startswith("gpt-5.1"):
         return ProviderCapabilities(
@@ -65,12 +66,12 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_top_p=False,
             supports_frequency_penalty=False,
             supports_presence_penalty=False,
-            max_context_tokens=256000,
+            max_context_tokens=400000,
             max_output_tokens=128000,
         )
     
-    # GPT-5 family (standard, mini, nano variants)
-    # gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-pro, gpt-5-chat
+    # GPT-5 family (standard, mini, nano, and gpt-5.2 variants)
+    # gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-pro, gpt-5.2, gpt-5.2-pro
     if m.startswith("gpt-5"):
         return ProviderCapabilities(
             provider_name="openai",
@@ -86,7 +87,7 @@ def _get_model_capabilities(model_name: str) -> ProviderCapabilities:
             supports_top_p=False,
             supports_frequency_penalty=False,
             supports_presence_penalty=False,
-            max_context_tokens=256000,
+            max_context_tokens=400000,
             max_output_tokens=128000,
         )
     

@@ -74,26 +74,33 @@ class AutoSelector:
             logger.warning(f"Input directory does not exist or is not a directory: {input_dir}")
             return pdfs, images, epubs, mobis
         
-        # Scan all files (non-recursive for simplicity)
-        for item in input_dir.iterdir():
-            if item.is_file():
-                suffix = item.suffix.lower()
-                if suffix == ".pdf":
-                    pdfs.append(item)
-                elif suffix == ".epub":
-                    epubs.append(item)
-                elif suffix in SUPPORTED_MOBI_EXTENSIONS:
-                    mobis.append(item)
-                elif suffix in SUPPORTED_IMAGE_EXTENSIONS:
-                    images.append(item)
-            elif item.is_dir():
-                # Check if it's an image folder (contains images)
-                has_images = any(
-                    f.is_file() and f.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
-                    for f in item.iterdir()
-                )
-                if has_images:
-                    images.append(item)  # Treat folder as a single image collection
+        # Scan all files (non-recursive for simplicity).
+        # os.scandir() is used instead of Path.iterdir() so that DirEntry
+        # caches is_file()/is_dir() from the OS scan and avoids a separate
+        # stat() syscall per entry (significant on large directories).
+        with os.scandir(input_dir) as it:
+            for entry in it:
+                if entry.is_file(follow_symlinks=False):
+                    suffix = os.path.splitext(entry.name)[1].lower()
+                    if suffix == ".pdf":
+                        pdfs.append(Path(entry.path))
+                    elif suffix == ".epub":
+                        epubs.append(Path(entry.path))
+                    elif suffix in SUPPORTED_MOBI_EXTENSIONS:
+                        mobis.append(Path(entry.path))
+                    elif suffix in SUPPORTED_IMAGE_EXTENSIONS:
+                        images.append(Path(entry.path))
+                elif entry.is_dir(follow_symlinks=False):
+                    # Check if it's an image folder (contains images)
+                    has_images = False
+                    with os.scandir(entry.path) as inner:
+                        for fe in inner:
+                            if fe.is_file(follow_symlinks=False) and \
+                                    os.path.splitext(fe.name)[1].lower() in SUPPORTED_IMAGE_EXTENSIONS:
+                                has_images = True
+                                break
+                    if has_images:
+                        images.append(Path(entry.path))  # Treat folder as a single image collection
         
         logger.info(
             f"Scanned {input_dir}: found {len(pdfs)} PDFs, "

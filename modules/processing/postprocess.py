@@ -183,7 +183,7 @@ def should_wrap_line(line: str) -> bool:
     - Empty or whitespace-only lines
     - Markdown headings (# ...)
     - Page-number markers (<page_number> ...)
-    - Image annotations ([Image: ...])
+    - Image annotations (![Image: ...] or legacy [Image: ...])
     - Markdown-style table rows (| ... |)
     - Lines with failure placeholders ([transcription error], etc.)
     
@@ -206,7 +206,9 @@ def should_wrap_line(line: str) -> bool:
     if stripped.startswith("<page_number>"):
         return False
 
-    # Image description blocks from the OCR pipeline
+    # Image description blocks from the OCR pipeline (Markdown format ![...] and legacy [...])
+    if stripped.startswith("!["):
+        return False
     if stripped.startswith("[") and "Image:" in stripped and stripped.endswith("]"):
         return False
 

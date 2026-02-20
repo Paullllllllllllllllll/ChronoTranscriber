@@ -212,12 +212,19 @@ def find_jsonl_file(base_dir: Path, source_name: str) -> Optional[Path]:
     if legacy.exists():
         return legacy
 
-    # Search subfolder for any JSONL
+    # Search exact subfolder for any JSONL
     subfolder_dir = base_dir / base_name
     if subfolder_dir.exists() and subfolder_dir.is_dir():
         jsonl_files = list(subfolder_dir.glob("*.jsonl"))
         if jsonl_files:
-            return jsonl_files[0]
+            return sorted(jsonl_files)[0]
+
+    # Search hash-suffixed subfolders (transcriber output: e.g. address_books-f12f1e9c/)
+    for hashed_dir in sorted(base_dir.glob(f"{base_name}-*")):
+        if hashed_dir.is_dir():
+            jsonl_files = list(hashed_dir.glob("*.jsonl"))
+            if jsonl_files:
+                return sorted(jsonl_files)[0]
 
     return None
 

@@ -15,15 +15,15 @@ Metrics are computed **page-by-page** using the temporary JSONL files produced b
 
 ## Models Evaluated
 
-| Provider | Model | Reasoning Level |
-|----------|-------|-----------------|
-| Local | Tesseract OCR | None (baseline) |
-| OpenAI | GPT-5.2 | Medium |
-| OpenAI | GPT-5 Mini | Medium |
-| Google | Gemini 3.0 Pro | Medium |
-| Google | Gemini 3.0 Flash | None |
-| Anthropic | Claude Sonnet 4.5 | Medium |
-| Anthropic | Claude Haiku 4.5 | Medium |
+| Provider | Model | `model_id` | Reasoning Level |
+|----------|-------|-----------|-----------------|
+| Local | Tesseract OCR | `tesseract` | None (baseline) |
+| OpenAI | GPT-5.2 | `gpt-5.2` | Medium |
+| OpenAI | GPT-5 Mini | `gpt-5-mini` | Medium |
+| Google | Gemini 3 Pro | `gemini-3-pro` | Medium |
+| Google | Gemini 3 Flash | `gemini-3-flash-preview` | Medium |
+| Anthropic | Claude Sonnet 4.5 | `claude-sonnet-4-5-20250929` | Medium |
+| Anthropic | Claude Haiku 4.5 | `claude-haiku-4-5` | Medium |
 
 ## Dataset Categories
 
@@ -44,69 +44,69 @@ eval/
 │   └── eval_transcription_schema.json
 ├── test_data/
 │   ├── input/                   # Source documents
-│   │   ├── address_books/       # JPEG images
-│   │   ├── bibliography/        # PDF files
+│   │   ├── address_books/       # JPEG images (31 pages, processed as one source)
+│   │   ├── bibliography/        # PDF file(s)
 │   │   └── military_records/    # PDF files
-│   ├── output/                  # Model transcriptions (JSONL per source)
+│   ├── output/                  # Model transcriptions (JSONL per source) — populate via Step 1
 │   │   └── {category}/
 │   │       └── {model_name}/
-│   │           └── {source}/
+│   │           └── {source}-{hash}/
 │   │               └── {source}.jsonl
-│   └── ground_truth/            # Manually corrected transcriptions (JSONL)
+│   └── ground_truth/            # Manually corrected ground truth
 │       └── {category}/
-│           └── {source}.jsonl
-└── reports/                     # Generated evaluation reports
+│           └── {source}.jsonl   # Flat JSONL, one file per source
+└── reports/                     # Generated evaluation reports (auto-created)
 ```
+
+**Ground truth sources**:
+
+| Category | Source | Pages |
+|----------|--------|-------|
+| `address_books` | `address_books.jsonl` | 31 |
+| `bibliography` | `Whitaker_1913_English_Cookery_Books_to_the_Year_1850.jsonl` | 187 |
+| `military_records` | `Antonio Franco.jsonl` | 2 |
+| `military_records` | `Carlos Schimidt.jsonl` | 2 |
+| `military_records` | `Elza Elias.jsonl` | 2 |
 
 ## Workflow
 
 ### Step 1: Run Model Transcriptions
 
-For each model, run transcriptions and save to the appropriate output directory:
+Run transcriptions for each model and category. The
+`--output` directory name must match the `name` field in `eval_config.yaml`.
 
+**address_books** (images folder — pass the folder as `--input`):
 ```bash
-# Example for Tesseract (baseline)
+# Tesseract baseline
 python main/unified_transcriber.py --input eval/test_data/input/address_books \
     --output eval/test_data/output/address_books/tesseract \
     --type images --method tesseract
 
-# Example for GPT-5.2
+# GPT-5.2 (medium reasoning)
 python main/unified_transcriber.py --input eval/test_data/input/address_books \
     --output eval/test_data/output/address_books/gpt_5.2_medium \
-    --type images --method gpt
+    --type images --method gpt --model gpt-5.2
 ```
 
-Repeat for each model and category combination. The transcriber produces JSONL files
+**bibliography** (single PDF):
+```bash
+python main/unified_transcriber.py \
+    --input eval/test_data/input/bibliography/Whitaker_1913_English_Cookery_Books_to_the_Year_1850.pdf \
+    --output eval/test_data/output/bibliography/gpt_5.2_medium \
+    --type pdf --method gpt --model gpt-5.2
+```
+
+**military_records** (each PDF separately, or the whole folder):
+```bash
+python main/unified_transcriber.py --input eval/test_data/input/military_records \
+    --output eval/test_data/output/military_records/gpt_5.2_medium \
+    --type pdf --method gpt --model gpt-5.2
+```
+
+Repeat for every model in `eval_config.yaml`. The transcriber produces JSONL files
 with per-page transcriptions that will be used for evaluation.
 
-### Step 2: Create Ground Truth
-
-Use the helper script to extract transcriptions for manual correction:
-
-1. **Extract** transcriptions to editable text format:
-   ```bash
-   python main/prepare_ground_truth.py --extract --input eval/test_data/output/address_books/gpt_5.2_medium
-   ```
-   This creates `*_editable.txt` files with page markers like `=== page 001 ===`.
-
-2. **Edit** the generated text files to correct transcription errors:
-   - Each page is marked with `=== page NNN ===`
-   - Correct OCR/transcription errors directly in the text
-   - Use `[NO TRANSCRIBABLE TEXT]` for blank pages
-   - Use `[TRANSCRIPTION NOT POSSIBLE]` for illegible pages
-
-3. **Apply** corrections to create ground truth JSONL:
-   ```bash
-   python main/prepare_ground_truth.py --apply --input eval/test_data/output/address_books/gpt_5.2_medium
-   ```
-   This creates JSONL files in `test_data/ground_truth/{category}/`.
-
-4. **Check** ground truth status:
-   ```bash
-   python main/prepare_ground_truth.py --status
-   ```
-
-### Step 3: Run Evaluation
+### Step 2: Run Evaluation
 
 Open and run `transcription_eval.ipynb` in Jupyter:
 

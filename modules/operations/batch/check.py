@@ -253,7 +253,7 @@ def _process_non_openai_batch(
     all_transcriptions.sort(key=get_sorting_key)
     
     # Build final output
-    final_txt_path = temp_file.parent / f"{identifier}_transcription.txt"
+    final_txt_path = temp_file.parent / f"{identifier}.txt"
     
     ordered_lines = []
     for t in all_transcriptions:
@@ -837,7 +837,7 @@ def process_all_batches(
         if can_write_output:
             # Build the final text file path
             identifier = temp_file.stem.replace("_transcription", "")
-            final_txt_path = temp_file.parent / f"{identifier}_transcription.txt"
+            final_txt_path = temp_file.parent / f"{identifier}.txt"
 
             # Apply a multi-level sorting strategy
             print_info(f"Arranging transcriptions in the correct order...")

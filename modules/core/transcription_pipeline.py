@@ -143,6 +143,7 @@ async def run_transcription_pipeline(
     image_processing_config: Dict[str, Any],
     postprocessing_config: Dict[str, Any],
     is_folder: bool = False,
+    resume_mode: str = "skip",
 ) -> None:
     """Execute the full image transcription pipeline.
 
@@ -160,16 +161,24 @@ async def run_transcription_pipeline(
         image_processing_config: Image processing configuration dictionary.
         postprocessing_config: Post-processing configuration dictionary.
         is_folder: True when processing an image folder (affects JSONL key).
+        resume_mode: ``"skip"`` to reuse cached JSONL results; ``"overwrite"``
+            to clear the JSONL and reprocess all images from scratch.
     """
-    # Resume filtering — skip images already in JSONL
-    already_processed = get_processed_image_names(temp_jsonl_path)
-    if already_processed:
-        original_count = len(image_files)
-        image_files = [img for img in image_files if img.name not in already_processed]
-        skipped_count = original_count - len(image_files)
-        if skipped_count > 0:
-            print_info(f"Skipping {skipped_count} already-processed images (found in JSONL)")
-            logger.info(f"Skipped {skipped_count} images already in {temp_jsonl_path.name}")
+    if resume_mode == "overwrite":
+        # Clear stale JSONL so old results do not mix with the new run.
+        if temp_jsonl_path.exists():
+            temp_jsonl_path.write_text("", encoding="utf-8")
+            logger.info(f"Cleared stale JSONL cache: {temp_jsonl_path.name}")
+    else:
+        # Resume filtering — skip images already recorded in the JSONL.
+        already_processed = get_processed_image_names(temp_jsonl_path)
+        if already_processed:
+            original_count = len(image_files)
+            image_files = [img for img in image_files if img.name not in already_processed]
+            skipped_count = original_count - len(image_files)
+            if skipped_count > 0:
+                print_info(f"Skipping {skipped_count} already-processed images (found in JSONL)")
+                logger.info(f"Skipped {skipped_count} images already in {temp_jsonl_path.name}")
 
     if not image_files:
         print_info("All images already processed. Regenerating output file from JSONL...")

@@ -738,6 +738,7 @@ class WorkflowManager:
             image_processing_config=self.image_processing_config,
             postprocessing_config=self.postprocessing_config,
             is_folder=is_folder,
+            resume_mode=self.resume_mode,
         )
 
     def _write_output_from_jsonl(self, jsonl_path: Path, output_path: Path) -> bool:

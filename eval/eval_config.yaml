@@ -51,15 +51,15 @@ models:
   # Google Models
   - name: "gemini_3.0_pro_medium"
     provider: "google"
-    model_id: "gemini-3-pro"
+    model_id: "gemini-3-pro-preview"
     reasoning_effort: "medium"
-    description: "Gemini 3 Pro with medium reasoning"
+    description: "Gemini 3 Pro Preview with medium reasoning"
     
   - name: "gemini_3.0_flash"
     provider: "google"
     model_id: "gemini-3-flash-preview"
     reasoning_effort: "medium"
-    description: "Gemini 3 Flash (no reasoning)"
+    description: "Gemini 3 Flash Preview"
   
   # Anthropic Models
   - name: "claude_sonnet_4.5_medium"

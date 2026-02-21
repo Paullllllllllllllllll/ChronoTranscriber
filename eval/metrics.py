@@ -24,7 +24,7 @@ PAGE_MARKER_PATTERN = re.compile(r'<page_number>.*?</?page_number>', re.IGNORECA
 MARKDOWN_PATTERNS = {
     'bold': re.compile(r'\*\*[^*]+\*\*'),
     'italic': re.compile(r'(?<!\*)\*[^*]+\*(?!\*)'),
-    'heading': re.compile(r'^#{1,6}\s+.+$', re.MULTILINE),
+    'heading': re.compile(r'^#{1,6}', re.MULTILINE),
     'footnote': re.compile(r'\[\^\d+\]:?'),
     'latex': re.compile(r'\$\$[^$]+\$\$'),
     'image_desc': re.compile(r'\[Image:[^\]]+\]'),
@@ -35,7 +35,7 @@ ALL_FORMATTING_PATTERN = re.compile(
     r'(<page_number>.*?</?page_number>)|'  # Page markers
     r'(\*\*[^*]+\*\*)|'  # Bold
     r'(?<!\*)(\*[^*]+\*)(?!\*)|'  # Italic
-    r'(^#{1,6}\s+)|'  # Heading markers (just the # symbols)
+    r'(^#{1,6}\s*)|'  # Heading markers (just the # symbols)
     r'(\[\^\d+\]:?)|'  # Footnotes
     r'(\$\$[^$]+\$\$)|'  # LaTeX
     r'(\[Image:[^\]]+\])',  # Image descriptions
@@ -62,7 +62,15 @@ class FormattingMetrics:
     hyp_markdown_count: int = 0
     ref_markdown_chars: int = 0
     hyp_markdown_chars: int = 0
-    
+
+    # Per-page presence flags (1 if present on this page, 0 if absent; summed when aggregated)
+    ref_page_marker_pages: int = 0   # 1 if reference has a <page_number> tag
+    hyp_page_marker_pages: int = 0   # 1 if hypothesis has a <page_number> tag
+    ref_heading_pages: int = 0       # 1 if reference has a markdown heading
+    hyp_heading_pages: int = 0       # 1 if hypothesis has a markdown heading
+    ref_bold_italic_count: int = 0   # total bold + italic elements in reference
+    hyp_bold_italic_count: int = 0   # total bold + italic elements in hypothesis
+
     def to_dict(self) -> dict:
         """Convert metrics to dictionary for serialization."""
         return {
@@ -80,6 +88,24 @@ class FormattingMetrics:
             "hyp_markdown_count": self.hyp_markdown_count,
             "ref_markdown_chars": self.ref_markdown_chars,
             "hyp_markdown_chars": self.hyp_markdown_chars,
+            "ref_page_marker_pages": self.ref_page_marker_pages,
+            "hyp_page_marker_pages": self.hyp_page_marker_pages,
+            "page_marker_recall": round(self.hyp_page_marker_pages / self.ref_page_marker_pages, 4)
+                if self.ref_page_marker_pages > 0 else None,
+            "page_marker_recall_percent": round(self.hyp_page_marker_pages / self.ref_page_marker_pages * 100, 2)
+                if self.ref_page_marker_pages > 0 else None,
+            "ref_heading_pages": self.ref_heading_pages,
+            "hyp_heading_pages": self.hyp_heading_pages,
+            "heading_recall": round(self.hyp_heading_pages / self.ref_heading_pages, 4)
+                if self.ref_heading_pages > 0 else None,
+            "heading_recall_percent": round(self.hyp_heading_pages / self.ref_heading_pages * 100, 2)
+                if self.ref_heading_pages > 0 else None,
+            "ref_bold_italic_count": self.ref_bold_italic_count,
+            "hyp_bold_italic_count": self.hyp_bold_italic_count,
+            "bold_italic_ratio": round(self.hyp_bold_italic_count / self.ref_bold_italic_count, 4)
+                if self.ref_bold_italic_count > 0 else None,
+            "bold_italic_ratio_percent": round(self.hyp_bold_italic_count / self.ref_bold_italic_count * 100, 2)
+                if self.ref_bold_italic_count > 0 else None,
         }
 
 
@@ -318,13 +344,14 @@ def strip_formatting(text: str) -> str:
     result = re.sub(r'\*\*([^*]+)\*\*', r'\1', result)
     # Italic: *text* -> text
     result = re.sub(r'(?<!\*)\*([^*]+)\*(?!\*)', r'\1', result)
-    # Headings: # Heading -> Heading
-    result = re.sub(r'^#{1,6}\s+', '', result, flags=re.MULTILINE)
-    # Footnotes: [^1]: -> (keep reference text)
-    result = re.sub(r'\[\^(\d+)\]:?', r'[\1]', result)
+    # Headings: # Heading or ##**Heading** -> text (strip leading # chars)
+    result = re.sub(r'^#{1,6}\s*', '', result, flags=re.MULTILINE)
+    # Footnotes: [^1]:, [^*)], [^†)] etc. -> remove entirely
+    result = re.sub(r'\[\^[^\]]*\]:?', '', result)
     # LaTeX: $$equation$$ -> equation
     result = re.sub(r'\$\$([^$]+)\$\$', r'\1', result)
-    # Image descriptions: keep as-is (they're content descriptors)
+    # Image descriptions: ![Image: ...] -> remove (not transcribed text)
+    result = re.sub(r'!\[Image:[^\]]*\]', '', result)
     
     return result
 
@@ -374,6 +401,22 @@ def compute_formatting_metrics(
         md_dist = len(hyp_md_text)
         md_cer = float(md_dist) if md_dist > 0 else 0.0
     
+    # Per-page presence flags
+    ref_has_pm = 1 if ref_page_markers else 0
+    hyp_has_pm = 1 if hyp_page_markers else 0
+
+    ref_headings = MARKDOWN_PATTERNS['heading'].findall(reference or '')
+    hyp_headings = MARKDOWN_PATTERNS['heading'].findall(hypothesis or '')
+    ref_has_heading = 1 if ref_headings else 0
+    hyp_has_heading = 1 if hyp_headings else 0
+
+    ref_bold_list = MARKDOWN_PATTERNS['bold'].findall(reference or '')
+    hyp_bold_list = MARKDOWN_PATTERNS['bold'].findall(hypothesis or '')
+    ref_italic_list = MARKDOWN_PATTERNS['italic'].findall(reference or '')
+    hyp_italic_list = MARKDOWN_PATTERNS['italic'].findall(hypothesis or '')
+    ref_bi_count = len(ref_bold_list) + len(ref_italic_list)
+    hyp_bi_count = len(hyp_bold_list) + len(hyp_italic_list)
+
     return FormattingMetrics(
         page_marker_cer=pm_cer,
         page_marker_distance=pm_dist,
@@ -387,6 +430,12 @@ def compute_formatting_metrics(
         hyp_markdown_count=len(hyp_markdown),
         ref_markdown_chars=ref_md_chars,
         hyp_markdown_chars=hyp_md_chars,
+        ref_page_marker_pages=ref_has_pm,
+        hyp_page_marker_pages=hyp_has_pm,
+        ref_heading_pages=ref_has_heading,
+        hyp_heading_pages=hyp_has_heading,
+        ref_bold_italic_count=ref_bi_count,
+        hyp_bold_italic_count=hyp_bi_count,
     )
 
 
@@ -512,7 +561,14 @@ def aggregate_metrics(metrics_list: List[TranscriptionMetrics]) -> Transcription
         
         agg_pm_cer = total_pm_dist / total_ref_pm_chars if total_ref_pm_chars > 0 else 0.0
         agg_md_cer = total_md_dist / total_ref_md_chars if total_ref_md_chars > 0 else 0.0
-        
+
+        total_ref_pm_pages  = sum(f.ref_page_marker_pages  for f in formatting_metrics_list)
+        total_hyp_pm_pages  = sum(f.hyp_page_marker_pages  for f in formatting_metrics_list)
+        total_ref_hd_pages  = sum(f.ref_heading_pages       for f in formatting_metrics_list)
+        total_hyp_hd_pages  = sum(f.hyp_heading_pages       for f in formatting_metrics_list)
+        total_ref_bi        = sum(f.ref_bold_italic_count   for f in formatting_metrics_list)
+        total_hyp_bi        = sum(f.hyp_bold_italic_count   for f in formatting_metrics_list)
+
         agg_formatting = FormattingMetrics(
             page_marker_cer=agg_pm_cer,
             page_marker_distance=total_pm_dist,
@@ -526,6 +582,12 @@ def aggregate_metrics(metrics_list: List[TranscriptionMetrics]) -> Transcription
             hyp_markdown_count=total_hyp_md_count,
             ref_markdown_chars=total_ref_md_chars,
             hyp_markdown_chars=total_hyp_md_chars,
+            ref_page_marker_pages=total_ref_pm_pages,
+            hyp_page_marker_pages=total_hyp_pm_pages,
+            ref_heading_pages=total_ref_hd_pages,
+            hyp_heading_pages=total_hyp_hd_pages,
+            ref_bold_italic_count=total_ref_bi,
+            hyp_bold_italic_count=total_hyp_bi,
         )
     
     return TranscriptionMetrics(
@@ -573,43 +635,45 @@ def format_metrics_table(
             categories.update(cat_metrics.keys())
         categories = sorted(categories)
     
-    # Build header - show overall and content-only metrics
-    lines = ["| Model | Category | CER (%) | WER (%) | Content CER (%) | Content WER (%) | Ref Chars |"]
-    lines.append("|-------|----------|---------|---------|-----------------|-----------------|-----------|")
-    
-    # Add rows
+    # Table 1: Pure CER/WER (structural markup stripped)
+    lines = ["| Model | Category | CER (%) | WER (%) | Ref Chars |"]
+    lines.append("|-------|----------|---------|---------|-----------|")
+
     for model_name in sorted(model_metrics.keys()):
         for category in categories:
             if category in model_metrics[model_name]:
                 m = model_metrics[model_name][category]
                 lines.append(
-                    f"| {model_name} | {category} | {m.cer*100:.2f} | {m.wer*100:.2f} | "
-                    f"{m.content_cer*100:.2f} | {m.content_wer*100:.2f} | {m.ref_char_count:,} |"
+                    f"| {model_name} | {category} | {m.content_cer*100:.2f} | "
+                    f"{m.content_wer*100:.2f} | {m.ref_content_chars:,} |"
                 )
-    
+
     result = "\n".join(lines)
-    
-    # Optionally add formatting metrics table
+
+    # Always append formatting compliance table
     if include_formatting:
-        fmt_lines = ["\n\n### Formatting Metrics\n"]
-        fmt_lines.append("| Model | Category | Page Marker CER (%) | Markdown CER (%) | Page Markers | Markdown Elements |")
-        fmt_lines.append("|-------|----------|---------------------|------------------|--------------|-------------------|")
-        
+        fmt_lines = ["\n\n### Formatting Compliance\n"]
+        fmt_lines.append("| Model | Category | Page Tag Recall (%) | Heading Recall (%) | Bold/Italic Ratio (%) |")
+        fmt_lines.append("|-------|----------|---------------------|--------------------|-----------------------|")
+
         for model_name in sorted(model_metrics.keys()):
             for category in categories:
                 if category in model_metrics[model_name]:
                     m = model_metrics[model_name][category]
-                    if m.formatting:
-                        f = m.formatting
-                        fmt_lines.append(
-                            f"| {model_name} | {category} | {f.page_marker_cer*100:.2f} | "
-                            f"{f.markdown_cer*100:.2f} | {f.ref_page_marker_count} | {f.ref_markdown_count} |"
-                        )
+                    f = m.formatting
+                    if f:
+                        pm = (f"{f.hyp_page_marker_pages / f.ref_page_marker_pages * 100:.1f}"
+                              if f.ref_page_marker_pages > 0 else "N/A")
+                        hd = (f"{f.hyp_heading_pages / f.ref_heading_pages * 100:.1f}"
+                              if f.ref_heading_pages > 0 else "N/A")
+                        bi = (f"{f.hyp_bold_italic_count / f.ref_bold_italic_count * 100:.1f}"
+                              if f.ref_bold_italic_count > 0 else "N/A")
+                        fmt_lines.append(f"| {model_name} | {category} | {pm} | {hd} | {bi} |")
                     else:
-                        fmt_lines.append(f"| {model_name} | {category} | N/A | N/A | N/A | N/A |")
-        
+                        fmt_lines.append(f"| {model_name} | {category} | N/A | N/A | N/A |")
+
         result += "\n".join(fmt_lines)
-    
+
     return result
 
 

@@ -1,0 +1,19 @@
+{
+  "timestamp": "20260220_201153",
+  "evaluation_method": "page_level_jsonl",
+  "categories": [
+    "address_books",
+    "bibliography",
+    "military_records"
+  ],
+  "models": [
+    "tesseract",
+    "gpt_5.2_medium",
+    "gpt_5_mini_medium",
+    "gemini_2.5_pro_medium",
+    "gemini_2.5_flash",
+    "claude_sonnet_4.5_medium",
+    "claude_haiku_4.5_medium"
+  ],
+  "results": {}
+}

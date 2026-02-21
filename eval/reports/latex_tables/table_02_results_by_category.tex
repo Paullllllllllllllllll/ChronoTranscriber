@@ -1,0 +1,31 @@
+\begin{table}
+\caption{Transcription Accuracy Metrics by Model and Document Category}
+\label{tab:results_by_category}
+\begin{tabular}{llllllll}
+\toprule
+Model & Category & CER (%) & WER (%) & Content CER (%) & Content WER (%) & Ref. Characters & Ref. Words \\
+\midrule
+claude_haiku_4.5_medium & address_books & 9.79 & 38.71 & 7.93 & 35.71 & 101,584 & 12,689 \\
+claude_haiku_4.5_medium & bibliography & 8.09 & 13.56 & 7.18 & 13.36 & 65,953 & 11,308 \\
+claude_haiku_4.5_medium & military_records & 45.06 & 79.39 & 37.44 & 67.22 & 3,109 & 427 \\
+claude_sonnet_4.5_medium & address_books & 6.75 & 23.22 & 5.33 & 20.50 & 101,584 & 12,689 \\
+claude_sonnet_4.5_medium & bibliography & 7.84 & 13.54 & 6.74 & 13.23 & 65,953 & 11,308 \\
+claude_sonnet_4.5_medium & military_records & 32.61 & 50.82 & 29.46 & 43.63 & 3,109 & 427 \\
+gemini_3.0_flash & address_books & 7.89 & 24.17 & 6.49 & 20.46 & 101,584 & 12,689 \\
+gemini_3.0_flash & bibliography & 7.19 & 12.35 & 6.52 & 11.40 & 65,953 & 11,308 \\
+gemini_3.0_flash & military_records & 45.74 & 63.23 & 40.93 & 54.72 & 3,109 & 427 \\
+gemini_3.0_pro_medium & address_books & 3.30 & 19.67 & 1.97 & 16.30 & 101,584 & 12,689 \\
+gemini_3.0_pro_medium & bibliography & 7.08 & 13.36 & 6.78 & 13.19 & 65,953 & 11,308 \\
+gemini_3.0_pro_medium & military_records & 81.63 & 97.42 & 81.66 & 97.41 & 3,109 & 427 \\
+gpt_5.2_medium & address_books & 7.44 & 31.62 & 5.54 & 29.01 & 101,584 & 12,689 \\
+gpt_5.2_medium & bibliography & 6.52 & 9.24 & 6.21 & 9.24 & 65,953 & 11,308 \\
+gpt_5.2_medium & military_records & 29.14 & 38.88 & 28.19 & 38.44 & 3,109 & 427 \\
+gpt_5_mini_medium & address_books & 7.42 & 36.20 & 5.76 & 33.77 & 101,584 & 12,689 \\
+gpt_5_mini_medium & bibliography & 41.87 & 46.26 & 41.63 & 46.09 & 65,953 & 11,308 \\
+gpt_5_mini_medium & military_records & 27.73 & 46.60 & 27.92 & 46.46 & 3,109 & 427 \\
+tesseract & address_books & 86.98 & 144.87 & 87.87 & 145.17 & 101,584 & 12,689 \\
+tesseract & bibliography & 10.96 & 19.38 & 9.53 & 19.34 & 65,953 & 11,308 \\
+tesseract & military_records & 70.28 & 129.51 & 69.93 & 129.95 & 3,109 & 427 \\
+\bottomrule
+\end{tabular}
+\end{table}

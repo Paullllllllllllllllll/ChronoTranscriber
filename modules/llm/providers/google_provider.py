@@ -84,15 +84,16 @@ class GoogleProvider(BaseProvider):
         # Apply thinking mode for Gemini 2.5+ models that support it
         # Maps reasoning_config.effort to Google's thinking_level parameter
         if self._capabilities.supports_reasoning_effort and reasoning_config:
-            effort = reasoning_config.get("effort", "medium")
-            # Map effort levels to Gemini thinking_level
-            # Gemini uses "low" or "high" for thinking_level
-            if effort == "low":
-                llm_kwargs["thinking_level"] = "low"
-            else:
-                # medium and high both map to "high" thinking
-                llm_kwargs["thinking_level"] = "high"
-            logger.info(f"Using thinking_level={llm_kwargs['thinking_level']} for model {model}")
+            effort = reasoning_config.get("effort")
+            if effort:
+                # Map effort levels to Gemini thinking_level
+                # Gemini uses "low" or "high" for thinking_level
+                if effort == "low":
+                    llm_kwargs["thinking_level"] = "low"
+                else:
+                    # medium and high both map to "high" thinking
+                    llm_kwargs["thinking_level"] = "high"
+                logger.info(f"Using thinking_level={llm_kwargs['thinking_level']} for model {model}")
         
         # Initialize LangChain ChatGoogleGenerativeAI
         # LangChain handles retry logic with exponential backoff internally

@@ -64,6 +64,40 @@ class TestCreateTranscriberParser:
         assert args.batch is True
         assert args.schema == "custom_schema"
         assert args.context == "context.txt"
+
+    @pytest.mark.unit
+    def test_parse_model_override_args(self):
+        """Test parsing CLI model override arguments."""
+        parser = create_transcriber_parser()
+        args = parser.parse_args([
+            "--input", "input",
+            "--output", "output",
+            "--type", "pdfs",
+            "--method", "gpt",
+            "--model", "gpt-5.2",
+            "--provider", "openai",
+            "--reasoning-effort", "high",
+            "--model-verbosity", "verbose",
+            "--max-output-tokens", "65536",
+        ])
+        assert args.model == "gpt-5.2"
+        assert args.provider == "openai"
+        assert args.reasoning_effort == "high"
+        assert args.model_verbosity == "verbose"
+        assert args.max_output_tokens == 65536
+
+    @pytest.mark.unit
+    def test_invalid_model_verbosity_choice(self):
+        """Test that invalid --model-verbosity choice raises parser error."""
+        parser = create_transcriber_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args([
+                "--input", "input",
+                "--output", "output",
+                "--type", "pdfs",
+                "--method", "gpt",
+                "--model-verbosity", "low",
+            ])
     
     @pytest.mark.unit
     def test_parse_auto_mode(self):

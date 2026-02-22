@@ -39,6 +39,9 @@ class LangChainTranscriber:
         system_prompt_path: Optional[Path] = None,
         additional_context_path: Optional[Path] = None,
         use_hierarchical_context: bool = True,
+        max_output_tokens: Optional[int] = None,
+        reasoning_config: Optional[Dict[str, Any]] = None,
+        text_config: Optional[Dict[str, Any]] = None,
     ):
         """Initialize the transcriber.
         
@@ -51,6 +54,9 @@ class LangChainTranscriber:
             system_prompt_path: Path to system prompt file
             additional_context_path: Path to additional context file
             use_hierarchical_context: Whether to use file/folder-specific context resolution
+            max_output_tokens: Optional runtime override for max output tokens
+            reasoning_config: Optional runtime override for reasoning settings
+            text_config: Optional runtime override for text settings (verbosity)
         """
         self.use_hierarchical_context = use_hierarchical_context
         config_service = get_config_service()
@@ -159,9 +165,10 @@ class LangChainTranscriber:
         else:
             self.media_resolution = "high"
         
-        # Load max_output_tokens from model config (critical for reasoning models)
+        # Load max_output_tokens from runtime override or model config
         max_tokens = int(
-            tm.get("max_output_tokens")
+            max_output_tokens
+            or tm.get("max_output_tokens")
             or tm.get("max_tokens", 20480)
         )
         
@@ -170,8 +177,8 @@ class LangChainTranscriber:
         top_p = tm.get("top_p")
         frequency_penalty = tm.get("frequency_penalty")
         presence_penalty = tm.get("presence_penalty")
-        reasoning_cfg = tm.get("reasoning")
-        text_cfg = tm.get("text")
+        reasoning_cfg = reasoning_config if reasoning_config is not None else tm.get("reasoning")
+        text_cfg = text_config if text_config is not None else tm.get("text")
         
         # Load service_tier and request_timeout from concurrency config (synchronous mode)
         try:
@@ -324,6 +331,9 @@ async def open_transcriber(
     system_prompt_path: Optional[Path] = None,
     additional_context_path: Optional[Path] = None,
     use_hierarchical_context: bool = True,
+    max_output_tokens: Optional[int] = None,
+    reasoning_config: Optional[Dict[str, Any]] = None,
+    text_config: Optional[Dict[str, Any]] = None,
 ) -> AsyncGenerator[LangChainTranscriber, None]:
     """Context manager for LangChainTranscriber with automatic cleanup.
     
@@ -337,6 +347,9 @@ async def open_transcriber(
         system_prompt_path: Path to system prompt file
         additional_context_path: Path to additional context file
         use_hierarchical_context: Whether to use file/folder-specific context resolution
+        max_output_tokens: Optional runtime override for max output tokens
+        reasoning_config: Optional runtime override for reasoning settings
+        text_config: Optional runtime override for text settings (verbosity)
     
     Yields:
         LangChainTranscriber instance with managed lifecycle
@@ -349,6 +362,9 @@ async def open_transcriber(
         system_prompt_path=system_prompt_path,
         additional_context_path=additional_context_path,
         use_hierarchical_context=use_hierarchical_context,
+        max_output_tokens=max_output_tokens,
+        reasoning_config=reasoning_config,
+        text_config=text_config,
     )
     try:
         yield transcriber

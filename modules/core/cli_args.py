@@ -86,6 +86,37 @@ Examples:
         type=str,
         help="Path to additional context file (for GPT method). If not specified, no additional context is used."
     )
+
+    # Optional model overrides for agentic CLI workflows
+    parser.add_argument(
+        "--model",
+        type=str,
+        help="Override transcription model ID (e.g., 'gpt-5-mini', 'claude-sonnet-4-5-20250929', 'gemini-3-pro-preview')."
+    )
+
+    parser.add_argument(
+        "--provider",
+        choices=["openai", "anthropic", "google", "openrouter"],
+        help="Override model provider. If omitted, provider from config is used."
+    )
+
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=["low", "medium", "high"],
+        help="Override reasoning effort for reasoning-capable models."
+    )
+
+    parser.add_argument(
+        "--model-verbosity",
+        choices=["concise", "medium", "verbose"],
+        help="Override model verbosity. Currently effective for OpenAI GPT-5 family models."
+    )
+
+    parser.add_argument(
+        "--max-output-tokens",
+        type=int,
+        help="Override maximum output tokens per response."
+    )
     
     # Resume / overwrite behavior
     resume_group = parser.add_mutually_exclusive_group()

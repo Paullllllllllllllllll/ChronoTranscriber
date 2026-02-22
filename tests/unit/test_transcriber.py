@@ -33,6 +33,7 @@ def _make_transcriber(
     tmp_path: Path,
     model_cfg: Dict[str, Any],
     concurrency_cfg: Optional[Dict[str, Any]] = None,
+    transcriber_kwargs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Initialize a LangChainTranscriber with mocked dependencies.
 
@@ -60,6 +61,7 @@ def _make_transcriber(
                 schema_path=schema_path,
                 system_prompt_path=prompt_path,
                 use_hierarchical_context=False,
+                **(transcriber_kwargs or {}),
             )
 
     return captured
@@ -244,3 +246,63 @@ class TestLangChainTranscriberTextVerbosity:
             }
             kwargs = _make_transcriber(tmp_path, model_cfg)
             assert kwargs.get("text_config", {}).get("verbosity") == verbosity
+
+
+class TestLangChainTranscriberRuntimeOverrides:
+    """Tests for explicit runtime overrides on LangChainTranscriber init."""
+
+    @pytest.mark.unit
+    def test_max_output_tokens_runtime_override_wins(self, tmp_path: Path):
+        """Explicit max_output_tokens argument should override config value."""
+        model_cfg = {
+            "transcription_model": {
+                "provider": "openai",
+                "name": "gpt-5-mini",
+                "max_output_tokens": 4096,
+                "temperature": 0.0,
+            }
+        }
+        kwargs = _make_transcriber(
+            tmp_path,
+            model_cfg,
+            transcriber_kwargs={"max_output_tokens": 8192},
+        )
+        assert kwargs.get("max_tokens") == 8192
+
+    @pytest.mark.unit
+    def test_reasoning_config_runtime_override_wins(self, tmp_path: Path):
+        """Explicit reasoning_config argument should override config reasoning."""
+        model_cfg = {
+            "transcription_model": {
+                "provider": "openai",
+                "name": "gpt-5-mini",
+                "max_output_tokens": 4096,
+                "temperature": 0.0,
+                "reasoning": {"effort": "low"},
+            }
+        }
+        kwargs = _make_transcriber(
+            tmp_path,
+            model_cfg,
+            transcriber_kwargs={"reasoning_config": {"effort": "high"}},
+        )
+        assert kwargs.get("reasoning_config") == {"effort": "high"}
+
+    @pytest.mark.unit
+    def test_text_config_runtime_override_wins(self, tmp_path: Path):
+        """Explicit text_config argument should override config text settings."""
+        model_cfg = {
+            "transcription_model": {
+                "provider": "openai",
+                "name": "gpt-5-mini",
+                "max_output_tokens": 4096,
+                "temperature": 0.0,
+                "text": {"verbosity": "concise"},
+            }
+        }
+        kwargs = _make_transcriber(
+            tmp_path,
+            model_cfg,
+            transcriber_kwargs={"text_config": {"verbosity": "verbose"}},
+        )
+        assert kwargs.get("text_config") == {"verbosity": "verbose"}

@@ -55,12 +55,18 @@ async def _open_transcriber_from_config(
     Centralises the identical ``open_transcriber`` call used in both
     :func:`process_auto_mode` and :func:`process_documents`.
     """
+    tm = model_config.get("transcription_model", {})
+
     return open_transcriber(
         api_key=None,
-        model=model_config.get("transcription_model", {}).get("name", "gpt-4o"),
+        model=tm.get("name", "gpt-4o"),
+        provider=tm.get("provider"),
         schema_path=user_config.selected_schema_path,
         additional_context_path=user_config.additional_context_path,
         use_hierarchical_context=getattr(user_config, 'use_hierarchical_context', True),
+        max_output_tokens=tm.get("max_output_tokens"),
+        reasoning_config=tm.get("reasoning"),
+        text_config=tm.get("text"),
     )
 
 
@@ -92,6 +98,66 @@ def _resolve_context(args_context: str | None, config: UserConfiguration) -> Non
         config.additional_context_path = context_path
     else:
         config.additional_context_path = None
+
+def _resolve_model_config_from_cli(
+    base_model_config: dict[str, Any],
+    args: Any,
+) -> tuple[dict[str, Any], list[str]]:
+    """Apply supported model-related CLI overrides onto a model config copy."""
+    effective_model_config = deepcopy(base_model_config)
+    tm = effective_model_config.setdefault("transcription_model", {})
+    applied_overrides: list[str] = []
+
+    model = getattr(args, "model", None)
+    if model:
+        tm["name"] = model
+        applied_overrides.append(f"model={model}")
+
+    provider = getattr(args, "provider", None)
+    if provider:
+        tm["provider"] = provider
+        applied_overrides.append(f"provider={provider}")
+    elif model:
+        from modules.llm.providers.factory import detect_provider_from_model
+
+        inferred_provider = detect_provider_from_model(model).value
+        tm["provider"] = inferred_provider
+        applied_overrides.append(f"provider={inferred_provider} (auto)")
+
+    max_output_tokens = getattr(args, "max_output_tokens", None)
+    if max_output_tokens is not None:
+        if int(max_output_tokens) <= 0:
+            raise ValueError("--max-output-tokens must be a positive integer")
+        tm["max_output_tokens"] = int(max_output_tokens)
+        applied_overrides.append(f"max_output_tokens={int(max_output_tokens)}")
+
+    reasoning_effort = getattr(args, "reasoning_effort", None)
+    if reasoning_effort:
+        reasoning_cfg = tm.get("reasoning")
+        if not isinstance(reasoning_cfg, dict):
+            reasoning_cfg = {}
+        reasoning_cfg["effort"] = reasoning_effort
+        tm["reasoning"] = reasoning_cfg
+        applied_overrides.append(f"reasoning.effort={reasoning_effort}")
+
+    model_verbosity = getattr(args, "model_verbosity", None)
+    if model_verbosity:
+        text_cfg = tm.get("text")
+        if not isinstance(text_cfg, dict):
+            text_cfg = {}
+        text_cfg["verbosity"] = model_verbosity
+        tm["text"] = text_cfg
+        applied_overrides.append(f"text.verbosity={model_verbosity}")
+
+        effective_provider = str(tm.get("provider", "")).lower()
+        effective_model = str(tm.get("name", "")).lower()
+        if not (effective_provider == "openai" and effective_model.startswith("gpt-5")):
+            print_warning(
+                "--model-verbosity is currently effective only for OpenAI GPT-5 models "
+                "(gpt-5, gpt-5-mini, gpt-5.1, gpt-5.2)."
+            )
+
+    return effective_model_config, applied_overrides
 
 
 def _collect_files_for_type(
@@ -575,6 +641,14 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> None:
     # Create configuration from CLI arguments
     user_config = create_config_from_cli_args(args, base_input_dir, base_output_dir, paths_config)
 
+    # Resolve model config from base config + optional CLI overrides
+    effective_model_config, applied_model_overrides = _resolve_model_config_from_cli(
+        config_service.get_model_config(),
+        args,
+    )
+    if applied_model_overrides:
+        print_info(f"CLI model overrides: {', '.join(applied_model_overrides)}")
+
     effective_paths_config = paths_config
     if not args.auto:
         output_path = resolve_path(args.output, base_output_dir)
@@ -610,7 +684,7 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> None:
         await process_auto_mode(
             user_config,
             effective_paths_config,
-            config_service.get_model_config(),
+            effective_model_config,
             config_service.get_concurrency_config(),
             config_service.get_image_processing_config()
         )
@@ -618,7 +692,7 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> None:
         await process_documents(
             user_config,
             effective_paths_config,
-            config_service.get_model_config(),
+            effective_model_config,
             config_service.get_concurrency_config(),
             config_service.get_image_processing_config()
         )

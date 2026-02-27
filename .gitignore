@@ -5,7 +5,12 @@
 # Large test data files (exceed GitHub 100 MB limit)
 eval/test_data/input/bibliography/*.pdf
 
+# User-specific configuration
+config/
+
 # IDE and cache
 .idea/
 __pycache__/
 logs/
+
+/eval/transcription_eval.ipynb

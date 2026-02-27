@@ -399,6 +399,42 @@ class BaseProvider(ABC):
                 disabled["presence_penalty"] = None
         return disabled if disabled else None
 
+    async def _ainvoke_with_retry(
+        self,
+        llm: Any,
+        messages: List[Any],
+        **invoke_kwargs: Any,
+    ) -> Any:
+        """Invoke the LangChain LLM with retry on transient connection errors.
+
+        Acts as a safety net on top of LangChain's internal max_retries,
+        specifically targeting raw httpx network failures that can slip through
+        the Responses API code path.
+
+        Retries on:
+            httpx.ConnectError     — TCP/DNS connection failure
+            httpx.TimeoutException — covers all httpx timeout subclasses
+
+        Uses exponential backoff (2 s -> 4 s -> ... -> 60 s max) with jitter.
+        After exhausting all attempts the exception is re-raised to the caller.
+        """
+        import httpx
+        import tenacity
+
+        max_attempts = load_max_retries()
+
+        async for attempt in tenacity.AsyncRetrying(
+            retry=tenacity.retry_if_exception_type(
+                (httpx.ConnectError, httpx.TimeoutException)
+            ),
+            wait=tenacity.wait_exponential_jitter(initial=2, max=60),
+            stop=tenacity.stop_after_attempt(max_attempts),
+            before_sleep=tenacity.before_sleep_log(logger, logging.WARNING),
+            reraise=True,
+        ):
+            with attempt:
+                return await llm.ainvoke(messages, **invoke_kwargs)
+
     async def __aenter__(self) -> "BaseProvider":
         """Async context manager entry."""
         return self

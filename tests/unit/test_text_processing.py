@@ -212,6 +212,22 @@ class TestExtractTranscribedText:
         result = extract_transcribed_text(data)
         assert "[transcription error]" in result
 
+    @pytest.mark.unit
+    def test_extract_error_response_returns_placeholder(self):
+        """Error-response dict with an empty output_text returns the error placeholder."""
+        data = {"output_text": "", "error": "Connection error."}
+        result = extract_transcribed_text(data, "page_001.jpg")
+        assert result == "[transcription error]"
+
+    @pytest.mark.unit
+    def test_extract_error_response_logs_warning(self, caplog):
+        """Error-response dict logs a WARNING that names the actual error."""
+        import logging
+        data = {"output_text": "", "error": "Connection error."}
+        with caplog.at_level(logging.WARNING, logger="modules.processing.text_processing"):
+            extract_transcribed_text(data, "page_001.jpg")
+        assert "Connection error." in caplog.text
+
 
 class TestProcessBatchOutput:
     """Tests for process_batch_output function."""

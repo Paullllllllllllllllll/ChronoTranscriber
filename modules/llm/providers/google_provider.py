@@ -219,14 +219,13 @@ class GoogleProvider(BaseProvider):
         """
         try:
             kwargs = invoke_kwargs or {}
-            response = await llm.ainvoke(messages, **kwargs)
+            response = await self._ainvoke_with_retry(llm, messages, **kwargs)
             return await self._process_llm_response(response, GOOGLE_TOKEN_MAPPING)
         except Exception as e:
             logger.error(f"Error invoking Google Gemini: {e}")
             return TranscriptionResult(
                 content="",
                 error=str(e),
-                transcription_not_possible=True,
             )
     
     async def close(self) -> None:

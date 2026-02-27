@@ -724,6 +724,105 @@ class TestProcessLLMResponse:
         assert result.total_tokens == 500
 
 
+class TestAInvokeWithRetry:
+    """Tests for BaseProvider._ainvoke_with_retry() retry logic."""
+
+    def _make_provider(self):
+        """Create a minimal concrete provider for testing _ainvoke_with_retry."""
+        class _ConcreteProvider(BaseProvider):
+            @property
+            def provider_name(self):
+                return "test"
+
+            def get_capabilities(self):
+                return Capabilities(model="m", family="test")
+
+            async def transcribe_image_from_base64(self, *a, **kw):
+                pass
+
+            async def close(self):
+                pass
+
+        return _ConcreteProvider.__new__(_ConcreteProvider)
+
+    @pytest.mark.unit
+    def test_retries_on_connect_error(self):
+        """Retries on httpx.ConnectError and returns the result on eventual success."""
+        import asyncio
+        import httpx
+        import tenacity
+        from unittest.mock import AsyncMock
+
+        provider = self._make_provider()
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=[
+            httpx.ConnectError("connection refused"),
+            httpx.ConnectError("connection refused"),
+            "success_response",
+        ])
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=5):
+                with patch(
+                    "tenacity.wait_exponential_jitter",
+                    return_value=tenacity.wait_none(),
+                ):
+                    return await provider._ainvoke_with_retry(mock_llm, ["msg"])
+
+        result = asyncio.run(_run())
+        assert result == "success_response"
+        assert mock_llm.ainvoke.call_count == 3
+
+    @pytest.mark.unit
+    def test_reraises_after_exhausting_attempts(self):
+        """Raises httpx.ConnectError after all retry attempts are exhausted."""
+        import asyncio
+        import httpx
+        import tenacity
+        from unittest.mock import AsyncMock
+
+        provider = self._make_provider()
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(
+            side_effect=httpx.ConnectError("always fails")
+        )
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=2):
+                with patch(
+                    "tenacity.wait_exponential_jitter",
+                    return_value=tenacity.wait_none(),
+                ):
+                    return await provider._ainvoke_with_retry(mock_llm, ["msg"])
+
+        with pytest.raises(httpx.ConnectError):
+            asyncio.run(_run())
+        assert mock_llm.ainvoke.call_count == 2
+
+    @pytest.mark.unit
+    def test_does_not_retry_non_transient_error(self):
+        """Non-transient errors (e.g. ValueError) propagate immediately without retry."""
+        import asyncio
+        import tenacity
+        from unittest.mock import AsyncMock
+
+        provider = self._make_provider()
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=ValueError("bad value"))
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=5):
+                with patch(
+                    "tenacity.wait_exponential_jitter",
+                    return_value=tenacity.wait_none(),
+                ):
+                    return await provider._ainvoke_with_retry(mock_llm, ["msg"])
+
+        with pytest.raises(ValueError, match="bad value"):
+            asyncio.run(_run())
+        assert mock_llm.ainvoke.call_count == 1
+
+
 class TestBaseProviderAsyncContextManager:
     """Tests for BaseProvider async context manager (__aenter__, __aexit__)."""
 

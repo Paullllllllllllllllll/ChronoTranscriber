@@ -259,14 +259,13 @@ class AnthropicProvider(BaseProvider):
         BaseProvider._process_llm_response() method.
         """
         try:
-            response = await llm.ainvoke(messages)
+            response = await self._ainvoke_with_retry(llm, messages)
             return await self._process_llm_response(response, ANTHROPIC_TOKEN_MAPPING)
         except Exception as e:
             logger.error(f"Error invoking Anthropic: {e}")
             return TranscriptionResult(
                 content="",
                 error=str(e),
-                transcription_not_possible=True,
             )
     
     async def close(self) -> None:

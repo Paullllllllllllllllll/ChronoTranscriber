@@ -121,6 +121,20 @@ def extract_transcribed_text(result: Dict[str, Any], image_name: str = "") -> st
     str
         The transcription (or a helpful placeholder).
     """
+    # Early exit for error responses (connection failures, etc.)
+    # Intercepts dicts like {"output_text": "", "error": "Connection error."} before
+    # they fall through to Case 2 and produce a misleading "Unrecognized response shape" log.
+    if (
+        isinstance(result, dict)
+        and result.get("error")
+        and not result.get("output_text")
+        and not result.get("choices")
+    ):
+        logger.warning(
+            "API error for %s: %s", image_name, result["error"]
+        )
+        return "[transcription error]"
+
     # Case 1: Already normalized (schema object)
     if isinstance(result, dict) and "transcription" in result:
         if result.get("no_transcribable_text", False):

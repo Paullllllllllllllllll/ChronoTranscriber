@@ -408,7 +408,9 @@ class TestOpenRouterProviderTranscribe:
             mime_type="image/png",
             system_prompt="Transcribe.",
         )
-        assert result.transcription_not_possible is True
+        # Generic non-network exceptions are transient/unexpected, not a permanent
+        # "this page can never be transcribed" condition, so the flag stays False.
+        assert result.transcription_not_possible is False
         assert "API error" in result.error
 
 

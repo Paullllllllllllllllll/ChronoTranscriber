@@ -6,6 +6,7 @@ Tests token usage tracking and daily limit management.
 from __future__ import annotations
 
 import json
+import os
 import pytest
 from datetime import datetime, date
 from pathlib import Path
@@ -172,3 +173,90 @@ class TestTokenTrackerSingleton:
             assert tracker1 is tracker2
         except Exception:
             pytest.skip("Config loading not available in test environment")
+
+
+class TestSaveStateRetry:
+    """Tests for _save_state() retry logic on Windows file lock errors."""
+
+    @pytest.fixture
+    def tracker(self, temp_dir):
+        """Create a DailyTokenTracker with temp state file."""
+        state_file = temp_dir / ".token_state.json"
+        return DailyTokenTracker(
+            daily_limit=100000,
+            state_file=state_file,
+        )
+
+    @pytest.mark.unit
+    def test_retry_succeeds_on_second_attempt(self, tracker):
+        """Atomic replace succeeds after a transient PermissionError."""
+        original_replace = Path.replace
+        call_count = 0
+
+        def flaky_replace(self_path, target):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise PermissionError("WinError 5: Access Denied")
+            return original_replace(self_path, target)
+
+        with patch.object(Path, "replace", flaky_replace), \
+             patch("modules.infra.token_tracker.time.sleep") as mock_sleep:
+            tracker.add_tokens(500)
+
+        assert call_count == 2
+        mock_sleep.assert_called_once_with(0.1)
+
+        with open(tracker.state_file, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        assert state["tokens_used"] == 500
+
+        temp_file = tracker.state_file.with_suffix(".tmp")
+        assert not temp_file.exists()
+
+    @pytest.mark.unit
+    def test_fallback_to_direct_write_after_all_retries_fail(self, tracker):
+        """Falls back to direct write when all retry attempts exhaust."""
+        def always_fail(self_path, target):
+            raise PermissionError("WinError 5: Access Denied")
+
+        with patch.object(Path, "replace", always_fail), \
+             patch("modules.infra.token_tracker.time.sleep"):
+            tracker.add_tokens(750)
+
+        with open(tracker.state_file, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        assert state["tokens_used"] == 750
+
+        temp_file = tracker.state_file.with_suffix(".tmp")
+        assert not temp_file.exists()
+
+    @pytest.mark.unit
+    def test_temp_file_cleaned_up_on_general_error(self, tracker):
+        """Temp file is removed by finally block on non-Permission errors."""
+        temp_file = tracker.state_file.with_suffix(".tmp")
+
+        def fail_replace(self_path, target):
+            raise FileNotFoundError("Target directory missing")
+
+        with patch.object(Path, "replace", fail_replace):
+            tracker._save_state()
+
+        assert not temp_file.exists()
+
+    @pytest.mark.unit
+    def test_no_retry_on_non_permission_error(self, tracker):
+        """Non-PermissionError exceptions are not retried."""
+        call_count = 0
+
+        def fail_with_fnf(self_path, target):
+            nonlocal call_count
+            call_count += 1
+            raise FileNotFoundError("Target directory missing")
+
+        with patch.object(Path, "replace", fail_with_fnf), \
+             patch("modules.infra.token_tracker.time.sleep") as mock_sleep:
+            tracker._save_state()
+
+        assert call_count == 1
+        mock_sleep.assert_not_called()

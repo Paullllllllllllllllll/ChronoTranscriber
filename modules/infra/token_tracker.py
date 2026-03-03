@@ -31,7 +31,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -139,23 +141,56 @@ class DailyTokenTracker:
     
     def _save_state(self) -> None:
         """Save current token usage state to disk."""
+        temp_file = self.state_file.with_suffix(".tmp")
         try:
             state = {
                 "date": self._current_date,
                 "tokens_used": self._tokens_used_today,
                 "last_updated": datetime.now().isoformat(),
             }
-            
+
             # Write atomically using a temp file
-            temp_file = self.state_file.with_suffix(".tmp")
             with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(state, f, indent=2)
-            
-            # Replace original file
-            temp_file.replace(self.state_file)
-            
+
+            # Atomic replace with retry for transient Windows file locks
+            # (antivirus, indexer, etc.)
+            max_retries = 3
+            retry_delay = 0.1
+            for attempt in range(max_retries):
+                try:
+                    temp_file.replace(self.state_file)
+                    return
+                except PermissionError:
+                    if attempt < max_retries - 1:
+                        logger.debug(
+                            f"Transient lock on {self.state_file}, "
+                            f"retrying in {retry_delay * 1000:.0f} ms "
+                            f"(attempt {attempt + 1}/{max_retries})"
+                        )
+                        time.sleep(retry_delay)
+                    else:
+                        logger.warning(
+                            f"Could not atomically replace "
+                            f"{self.state_file} after {max_retries} "
+                            f"attempts; falling back to direct write"
+                        )
+                        with open(
+                            self.state_file, "w", encoding="utf-8"
+                        ) as f:
+                            json.dump(state, f, indent=2)
+
         except Exception as e:
-            logger.error(f"Error saving token state to {self.state_file}: {e}")
+            logger.error(
+                f"Error saving token state to {self.state_file}: {e}"
+            )
+
+        finally:
+            try:
+                if temp_file.exists():
+                    os.remove(temp_file)
+            except OSError:
+                pass
     
     def _check_and_reset_if_new_day(self) -> None:
         """Check if it's a new day and reset counter if needed."""

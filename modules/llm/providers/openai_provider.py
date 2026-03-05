@@ -108,8 +108,17 @@ class OpenAIProvider(BaseProvider):
         caps = self._capabilities
         if caps.is_reasoning_model:
             llm_kwargs["max_completion_tokens"] = max_tokens
+            # Explicitly null out sampler params unsupported by the Responses API.
+            # LangChain's disabled_params only filters bind-time kwargs in
+            # with_structured_output, NOT _default_params used in the main call.
+            # Setting these to None ensures they pass LangChain's exclude_if_none
+            # filter and never reach responses.parse() / responses.create().
+            llm_kwargs["temperature"] = None
+            llm_kwargs["top_p"] = None
+            llm_kwargs["frequency_penalty"] = None
+            llm_kwargs["presence_penalty"] = None
             logger.info(f"Using max_completion_tokens={max_tokens} for reasoning model {model}")
-            
+
             # Apply reasoning controls via Responses API reasoning dict
             if caps.supports_reasoning_effort and reasoning_config:
                 llm_kwargs["reasoning"] = reasoning_config
@@ -234,7 +243,7 @@ class OpenAIProvider(BaseProvider):
         BaseProvider._process_llm_response() method.
         """
         try:
-            response = await self._ainvoke_with_retry(llm, messages)
+            response = await self._ainvoke_with_retry(llm, messages, expect_image_tokens=True)
             return await self._process_llm_response(response, OPENAI_TOKEN_MAPPING)
         except Exception as e:
             logger.error(f"Error invoking OpenAI: {e}")

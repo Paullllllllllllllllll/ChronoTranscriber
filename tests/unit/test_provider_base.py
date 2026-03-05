@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from modules.llm.providers.base import (
+    InputTokensBelowThresholdError,
     ProviderCapabilities,
     TranscriptionResult,
     BaseProvider,
@@ -821,6 +822,436 @@ class TestAInvokeWithRetry:
         with pytest.raises(ValueError, match="bad value"):
             asyncio.run(_run())
         assert mock_llm.ainvoke.call_count == 1
+
+    @pytest.mark.unit
+    def test_retries_on_validation_error(self):
+        """Retries on pydantic.ValidationError and returns result on success."""
+        import asyncio
+        import tenacity
+        from unittest.mock import AsyncMock
+        from pydantic import ValidationError
+
+        provider = self._make_provider()
+        mock_llm = MagicMock()
+
+        val_err = ValidationError.from_exception_data(
+            title="TranscriptionOutput",
+            line_errors=[{
+                "type": "json_invalid",
+                "loc": (),
+                "msg": "Invalid JSON",
+                "input": "short_answer_detection|no",
+                "ctx": {"error": "expected value at line 1 column 1"},
+            }],
+        )
+
+        mock_llm.ainvoke = AsyncMock(side_effect=[
+            val_err,
+            "success_response",
+        ])
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=5):
+                with patch(
+                    "modules.llm.providers.base.load_max_validation_retries",
+                    return_value=3,
+                ):
+                    with patch(
+                        "tenacity.wait_exponential_jitter",
+                        return_value=tenacity.wait_none(),
+                    ):
+                        return await provider._ainvoke_with_retry(
+                            mock_llm, ["msg"]
+                        )
+
+        result = asyncio.run(_run())
+        assert result == "success_response"
+        assert mock_llm.ainvoke.call_count == 2
+
+    @pytest.mark.unit
+    def test_validation_retries_exhausted_separately(self):
+        """ValidationError retries are capped at validation_attempts, not attempts."""
+        import asyncio
+        import tenacity
+        from unittest.mock import AsyncMock
+        from pydantic import ValidationError
+
+        provider = self._make_provider()
+
+        val_err = ValidationError.from_exception_data(
+            title="TranscriptionOutput",
+            line_errors=[{
+                "type": "json_invalid",
+                "loc": (),
+                "msg": "Invalid JSON",
+                "input": "analysis",
+                "ctx": {"error": "expected value at line 1 column 1"},
+            }],
+        )
+
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=val_err)
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=10):
+                with patch(
+                    "modules.llm.providers.base.load_max_validation_retries",
+                    return_value=3,
+                ):
+                    with patch(
+                        "tenacity.wait_exponential_jitter",
+                        return_value=tenacity.wait_none(),
+                    ):
+                        return await provider._ainvoke_with_retry(
+                            mock_llm, ["msg"]
+                        )
+
+        with pytest.raises(ValidationError):
+            asyncio.run(_run())
+        # 1 initial + 2 retries = 3 total (capped at validation_attempts)
+        assert mock_llm.ainvoke.call_count == 3
+
+    @pytest.mark.unit
+    def test_retries_on_silent_parsing_failure(self):
+        """Retries when with_structured_output returns parsing_error in result dict."""
+        import asyncio
+        import tenacity
+        from unittest.mock import AsyncMock
+        from pydantic import ValidationError
+
+        provider = self._make_provider()
+
+        parsing_error = ValidationError.from_exception_data(
+            title="TranscriptionOutput",
+            line_errors=[{
+                "type": "json_invalid",
+                "loc": (),
+                "msg": "Invalid JSON",
+                "input": "junk",
+                "ctx": {"error": "expected value at line 1 column 1"},
+            }],
+        )
+
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=[
+            {
+                "raw": MagicMock(content="junk text"),
+                "parsed": None,
+                "parsing_error": parsing_error,
+            },
+            {
+                "raw": MagicMock(content="good"),
+                "parsed": {"transcription": "good text"},
+                "parsing_error": None,
+            },
+        ])
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=5):
+                with patch(
+                    "modules.llm.providers.base.load_max_validation_retries",
+                    return_value=3,
+                ):
+                    with patch(
+                        "tenacity.wait_exponential_jitter",
+                        return_value=tenacity.wait_none(),
+                    ):
+                        return await provider._ainvoke_with_retry(
+                            mock_llm, ["msg"]
+                        )
+
+        result = asyncio.run(_run())
+        assert result["parsed"] == {"transcription": "good text"}
+        assert mock_llm.ainvoke.call_count == 2
+
+
+class TestLoadMaxValidationRetries:
+    """Tests for load_max_validation_retries() config loader."""
+
+    @pytest.mark.unit
+    def test_reads_from_concurrency_config(self):
+        """Reads validation_attempts from concurrency.transcription.retry."""
+        from modules.llm.providers.base import load_max_validation_retries
+
+        cfg = {
+            "concurrency": {
+                "transcription": {
+                    "retry": {"validation_attempts": 5}
+                }
+            }
+        }
+        with patch("modules.llm.providers.base.get_config_service") as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = cfg
+            result = load_max_validation_retries()
+
+        assert result == 5
+
+    @pytest.mark.unit
+    def test_defaults_to_3_when_missing(self):
+        """Returns 3 when validation_attempts key is absent."""
+        from modules.llm.providers.base import load_max_validation_retries
+
+        with patch("modules.llm.providers.base.get_config_service") as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = {}
+            result = load_max_validation_retries()
+
+        assert result == 3
+
+    @pytest.mark.unit
+    def test_returns_3_on_exception(self):
+        """Returns 3 when config service raises an exception."""
+        from modules.llm.providers.base import load_max_validation_retries
+
+        with patch(
+            "modules.llm.providers.base.get_config_service",
+            side_effect=RuntimeError("config unavailable"),
+        ):
+            result = load_max_validation_retries()
+
+        assert result == 3
+
+
+class TestLoadMinInputTokens:
+    """Tests for load_min_input_tokens() config loader."""
+
+    @pytest.mark.unit
+    def test_reads_from_concurrency_config(self):
+        """Reads min_input_tokens from concurrency.transcription.retry."""
+        from modules.llm.providers.base import load_min_input_tokens
+
+        cfg = {
+            "concurrency": {
+                "transcription": {
+                    "retry": {"min_input_tokens": 750}
+                }
+            }
+        }
+        with patch("modules.llm.providers.base.get_config_service") as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = cfg
+            result = load_min_input_tokens()
+
+        assert result == 750
+
+    @pytest.mark.unit
+    def test_defaults_to_500_when_missing(self):
+        """Returns 500 when min_input_tokens key is absent."""
+        from modules.llm.providers.base import load_min_input_tokens
+
+        with patch("modules.llm.providers.base.get_config_service") as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = {}
+            result = load_min_input_tokens()
+
+        assert result == 500
+
+    @pytest.mark.unit
+    def test_returns_500_on_exception(self):
+        """Returns 500 when config service raises an exception."""
+        from modules.llm.providers.base import load_min_input_tokens
+
+        with patch(
+            "modules.llm.providers.base.get_config_service",
+            side_effect=RuntimeError("config unavailable"),
+        ):
+            result = load_min_input_tokens()
+
+        assert result == 500
+
+    @pytest.mark.unit
+    def test_disabled_with_zero(self):
+        """Returns 0 when configured as 0 (disabled)."""
+        from modules.llm.providers.base import load_min_input_tokens
+
+        cfg = {
+            "concurrency": {
+                "transcription": {
+                    "retry": {"min_input_tokens": 0}
+                }
+            }
+        }
+        with patch("modules.llm.providers.base.get_config_service") as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = cfg
+            result = load_min_input_tokens()
+
+        assert result == 0
+
+
+class TestExtractInputTokens:
+    """Tests for BaseProvider._extract_input_tokens() static helper."""
+
+    @pytest.mark.unit
+    def test_structured_output_dict_with_usage_metadata(self):
+        """Extracts input_tokens from structured-output dict via usage_metadata."""
+        raw_msg = MagicMock()
+        raw_msg.usage_metadata = {"input_tokens": 1500, "output_tokens": 300, "total_tokens": 1800}
+        result = {"raw": raw_msg, "parsed": {"transcription": "text"}}
+
+        assert BaseProvider._extract_input_tokens(result) == 1500
+
+    @pytest.mark.unit
+    def test_plain_ai_message_with_usage_metadata(self):
+        """Extracts input_tokens from plain AIMessage via usage_metadata."""
+        msg = MagicMock()
+        msg.usage_metadata = {"input_tokens": 800, "output_tokens": 200, "total_tokens": 1000}
+
+        assert BaseProvider._extract_input_tokens(msg) == 800
+
+    @pytest.mark.unit
+    def test_fallback_to_response_metadata(self):
+        """Falls back to response_metadata.token_usage.prompt_tokens."""
+        msg = MagicMock()
+        msg.usage_metadata = None
+        msg.response_metadata = {
+            "token_usage": {"prompt_tokens": 600, "completion_tokens": 100, "total_tokens": 700}
+        }
+
+        assert BaseProvider._extract_input_tokens(msg) == 600
+
+    @pytest.mark.unit
+    def test_returns_zero_when_no_metadata(self):
+        """Returns 0 when neither usage_metadata nor response_metadata is available."""
+        msg = MagicMock(spec=[])  # no attributes at all
+
+        assert BaseProvider._extract_input_tokens(msg) == 0
+
+    @pytest.mark.unit
+    def test_returns_zero_for_plain_string(self):
+        """Returns 0 for non-message result types."""
+        assert BaseProvider._extract_input_tokens("just a string") == 0
+
+
+class TestInputTokenThresholdRetry:
+    """Tests for input-token threshold guard in _ainvoke_with_retry."""
+
+    def _make_provider(self):
+        """Create a minimal concrete provider."""
+        class _ConcreteProvider(BaseProvider):
+            @property
+            def provider_name(self):
+                return "test"
+            def get_capabilities(self):
+                return Capabilities(model="m", family="test")
+            async def transcribe_image_from_base64(self, *a, **kw):
+                pass
+            async def close(self):
+                pass
+
+        return _ConcreteProvider.__new__(_ConcreteProvider)
+
+    def _make_response(self, input_tokens):
+        """Create a mock structured-output response with given input_tokens."""
+        raw_msg = MagicMock()
+        raw_msg.usage_metadata = {
+            "input_tokens": input_tokens,
+            "output_tokens": 100,
+            "total_tokens": input_tokens + 100,
+        }
+        return {
+            "raw": raw_msg,
+            "parsed": {"transcription": "some text"},
+            "parsing_error": None,
+        }
+
+    @pytest.mark.unit
+    def test_retries_on_low_input_tokens(self):
+        """Retries when input_tokens < threshold and expect_image_tokens=True."""
+        import asyncio
+        import tenacity
+        from unittest.mock import AsyncMock
+
+        provider = self._make_provider()
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=[
+            self._make_response(234),   # contaminated
+            self._make_response(1500),  # good
+        ])
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=5):
+                with patch("modules.llm.providers.base.load_max_validation_retries", return_value=3):
+                    with patch("modules.llm.providers.base.load_min_input_tokens", return_value=500):
+                        with patch("tenacity.wait_exponential_jitter", return_value=tenacity.wait_none()):
+                            return await provider._ainvoke_with_retry(
+                                mock_llm, ["msg"], expect_image_tokens=True,
+                            )
+
+        result = asyncio.run(_run())
+        assert result["raw"].usage_metadata["input_tokens"] == 1500
+        assert mock_llm.ainvoke.call_count == 2
+
+    @pytest.mark.unit
+    def test_no_check_when_expect_image_tokens_false(self):
+        """234 input_tokens passes through when expect_image_tokens=False."""
+        import asyncio
+        import tenacity
+        from unittest.mock import AsyncMock
+
+        provider = self._make_provider()
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(return_value=self._make_response(234))
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=5):
+                with patch("modules.llm.providers.base.load_max_validation_retries", return_value=3):
+                    with patch("tenacity.wait_exponential_jitter", return_value=tenacity.wait_none()):
+                        return await provider._ainvoke_with_retry(
+                            mock_llm, ["msg"], expect_image_tokens=False,
+                        )
+
+        result = asyncio.run(_run())
+        assert result["raw"].usage_metadata["input_tokens"] == 234
+        assert mock_llm.ainvoke.call_count == 1
+
+    @pytest.mark.unit
+    def test_no_check_when_extraction_returns_zero(self):
+        """Response passes through when token extraction returns 0."""
+        import asyncio
+        import tenacity
+        from unittest.mock import AsyncMock
+
+        provider = self._make_provider()
+        # Response with no usage metadata at all
+        response = {"raw": MagicMock(spec=[]), "parsed": {"t": "x"}, "parsing_error": None}
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(return_value=response)
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=5):
+                with patch("modules.llm.providers.base.load_max_validation_retries", return_value=3):
+                    with patch("modules.llm.providers.base.load_min_input_tokens", return_value=500):
+                        with patch("tenacity.wait_exponential_jitter", return_value=tenacity.wait_none()):
+                            return await provider._ainvoke_with_retry(
+                                mock_llm, ["msg"], expect_image_tokens=True,
+                            )
+
+        result = asyncio.run(_run())
+        assert mock_llm.ainvoke.call_count == 1
+
+    @pytest.mark.unit
+    def test_exhausts_validation_attempts_then_raises(self):
+        """Raises InputTokensBelowThresholdError after exhausting validation_attempts."""
+        import asyncio
+        import tenacity
+        from unittest.mock import AsyncMock
+
+        provider = self._make_provider()
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(return_value=self._make_response(234))
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=10):
+                with patch("modules.llm.providers.base.load_max_validation_retries", return_value=3):
+                    with patch("modules.llm.providers.base.load_min_input_tokens", return_value=500):
+                        with patch("tenacity.wait_exponential_jitter", return_value=tenacity.wait_none()):
+                            return await provider._ainvoke_with_retry(
+                                mock_llm, ["msg"], expect_image_tokens=True,
+                            )
+
+        with pytest.raises(InputTokensBelowThresholdError) as exc_info:
+            asyncio.run(_run())
+        assert exc_info.value.actual == 234
+        assert exc_info.value.threshold == 500
+        # 1 initial + 2 retries = 3 total (capped at validation_attempts)
+        assert mock_llm.ainvoke.call_count == 3
 
 
 class TestBaseProviderAsyncContextManager:

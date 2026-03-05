@@ -20,9 +20,25 @@ from modules.llm.model_capabilities import Capabilities
 logger = logging.getLogger(__name__)
 
 
+class InputTokensBelowThresholdError(Exception):
+    """Raised when an image request returns fewer input tokens than expected.
+
+    This signals that the API silently dropped the image payload and the
+    response likely contains cross-contaminated content from another session.
+    """
+
+    def __init__(self, actual: int, threshold: int) -> None:
+        self.actual = actual
+        self.threshold = threshold
+        super().__init__(
+            f"Input tokens ({actual}) below minimum threshold ({threshold}); "
+            f"image payload may have been dropped"
+        )
+
+
 def load_max_retries() -> int:
     """Load max retries from concurrency_config.yaml.
-    
+
     Used by all LangChain-based providers to configure retry attempts.
     LangChain handles retry logic internally with exponential backoff.
     """
@@ -34,6 +50,41 @@ def load_max_retries() -> int:
         return max(1, attempts)
     except Exception:
         return 5
+
+
+def load_max_validation_retries() -> int:
+    """Load max validation retries from concurrency_config.yaml.
+
+    Controls how many times to retry when the model returns unparseable
+    structured output (pydantic.ValidationError).  Defaults to 3 since
+    these indicate model behavior issues rather than transient
+    infrastructure problems.
+    """
+    try:
+        conc_cfg = get_config_service().get_concurrency_config() or {}
+        trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get("transcription", {}) or {}
+        retry_cfg = trans_cfg.get("retry", {}) or {}
+        attempts = int(retry_cfg.get("validation_attempts", 3))
+        return max(1, attempts)
+    except Exception:
+        return 3
+
+
+def load_min_input_tokens() -> int:
+    """Load minimum expected input tokens for image requests.
+
+    Responses below this threshold are treated as cross-contaminated
+    (image payload silently dropped by the API) and retried.
+    Defaults to 500.  Set to 0 to disable the check.
+    """
+    try:
+        conc_cfg = get_config_service().get_concurrency_config() or {}
+        trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get("transcription", {}) or {}
+        retry_cfg = trans_cfg.get("retry", {}) or {}
+        value = int(retry_cfg.get("min_input_tokens", 500))
+        return max(0, value)
+    except Exception:
+        return 500
 
 
 @dataclass(frozen=True)
@@ -399,41 +450,139 @@ class BaseProvider(ABC):
                 disabled["presence_penalty"] = None
         return disabled if disabled else None
 
+    @staticmethod
+    def _extract_input_tokens(result: Any) -> int:
+        """Extract input token count from an LLM response.
+
+        Checks ``usage_metadata`` first (Responses API / LangChain 1.x path),
+        then falls back to ``response_metadata.token_usage.prompt_tokens``.
+        Returns 0 when extraction fails so callers can guard against false
+        positives.
+        """
+        raw_message = None
+        if isinstance(result, dict) and "raw" in result:
+            raw_message = result.get("raw")
+        elif hasattr(result, "usage_metadata") or hasattr(result, "response_metadata"):
+            raw_message = result
+
+        if raw_message is None:
+            return 0
+
+        # Primary path: usage_metadata (TypedDict / plain dict)
+        usage_meta = getattr(raw_message, "usage_metadata", None)
+        if usage_meta is not None:
+            if isinstance(usage_meta, dict):
+                val = usage_meta.get("input_tokens", 0)
+            else:
+                val = getattr(usage_meta, "input_tokens", 0)
+            val = int(val or 0)
+            if val > 0:
+                return val
+
+        # Fallback: response_metadata["token_usage"]["prompt_tokens"]
+        resp_meta = getattr(raw_message, "response_metadata", None)
+        if isinstance(resp_meta, dict):
+            usage = resp_meta.get("token_usage", {})
+            if isinstance(usage, dict):
+                val = int(usage.get("prompt_tokens", 0) or 0)
+                if val > 0:
+                    return val
+
+        return 0
+
     async def _ainvoke_with_retry(
         self,
         llm: Any,
         messages: List[Any],
+        *,
+        expect_image_tokens: bool = False,
         **invoke_kwargs: Any,
     ) -> Any:
-        """Invoke the LangChain LLM with retry on transient connection errors.
+        """Invoke the LangChain LLM with retry on transient and validation errors.
 
         Acts as a safety net on top of LangChain's internal max_retries,
-        specifically targeting raw httpx network failures that can slip through
-        the Responses API code path.
+        targeting:
+            httpx.ConnectError                — TCP/DNS connection failure
+            httpx.TimeoutException            — covers all httpx timeout subclasses
+            pydantic.ValidationError          — model returned unparseable structured
+                                                output (capped at validation_attempts)
+            InputTokensBelowThresholdError    — image payload silently dropped;
+                                                shares the validation retry budget
 
-        Retries on:
-            httpx.ConnectError     — TCP/DNS connection failure
-            httpx.TimeoutException — covers all httpx timeout subclasses
+        Also detects *silent* parsing failures where LangChain's
+        ``with_structured_output(include_raw=True)`` returns
+        ``{"parsed": None, "parsing_error": <exc>}`` instead of raising.
+        In that case the parsing error is re-raised so tenacity can retry.
 
         Uses exponential backoff (2 s -> 4 s -> ... -> 60 s max) with jitter.
         After exhausting all attempts the exception is re-raised to the caller.
         """
         import httpx
         import tenacity
+        from pydantic import ValidationError
 
         max_attempts = load_max_retries()
+        max_validation_attempts = load_max_validation_retries()
+        min_input_tokens = load_min_input_tokens() if expect_image_tokens else 0
+        validation_attempt_count = 0
+
+        def _should_retry(exc: BaseException) -> bool:
+            if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException)):
+                return True
+            if isinstance(exc, (ValidationError, InputTokensBelowThresholdError)):
+                nonlocal validation_attempt_count
+                validation_attempt_count += 1
+                if validation_attempt_count >= max_validation_attempts:
+                    return False
+                if isinstance(exc, InputTokensBelowThresholdError):
+                    logger.warning(
+                        "Input tokens below threshold on attempt %d/%d "
+                        "(got %d, need %d), retrying",
+                        validation_attempt_count,
+                        max_validation_attempts,
+                        exc.actual,
+                        exc.threshold,
+                    )
+                else:
+                    logger.warning(
+                        "Structured-output validation error on attempt %d/%d, "
+                        "retrying: %s",
+                        validation_attempt_count,
+                        max_validation_attempts,
+                        str(exc)[:200],
+                    )
+                return True
+            return False
 
         async for attempt in tenacity.AsyncRetrying(
-            retry=tenacity.retry_if_exception_type(
-                (httpx.ConnectError, httpx.TimeoutException)
-            ),
+            retry=tenacity.retry_if_exception(_should_retry),
             wait=tenacity.wait_exponential_jitter(initial=2, max=60),
             stop=tenacity.stop_after_attempt(max_attempts),
             before_sleep=tenacity.before_sleep_log(logger, logging.WARNING),
             reraise=True,
         ):
             with attempt:
-                return await llm.ainvoke(messages, **invoke_kwargs)
+                result = await llm.ainvoke(messages, **invoke_kwargs)
+                # Detect silent parsing failures from
+                # with_structured_output(include_raw=True).
+                if (
+                    isinstance(result, dict)
+                    and result.get("parsing_error") is not None
+                ):
+                    logger.warning(
+                        "Structured output parsing failed silently, "
+                        "re-raising for retry: %s",
+                        str(result["parsing_error"])[:200],
+                    )
+                    raise result["parsing_error"]
+                # Check for suspiciously low input tokens (image dropped).
+                if min_input_tokens > 0:
+                    actual = self._extract_input_tokens(result)
+                    if 0 < actual < min_input_tokens:
+                        raise InputTokensBelowThresholdError(
+                            actual, min_input_tokens
+                        )
+                return result
 
     async def __aenter__(self) -> "BaseProvider":
         """Async context manager entry."""

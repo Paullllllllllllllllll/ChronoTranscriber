@@ -369,7 +369,10 @@ class TestOpenRouterProviderTranscribe:
         mock_response = MagicMock()
         mock_response.content = "Transcribed text"
         mock_response.response_metadata = {
-            "token_usage": {"prompt_tokens": 100, "completion_tokens": 50}
+            "token_usage": {"prompt_tokens": 1000, "completion_tokens": 50}
+        }
+        mock_response.usage_metadata = {
+            "input_tokens": 1000, "output_tokens": 50, "total_tokens": 1050,
         }
         mock_llm_instance.ainvoke = AsyncMock(return_value=mock_response)
         mock_chat.return_value = mock_llm_instance

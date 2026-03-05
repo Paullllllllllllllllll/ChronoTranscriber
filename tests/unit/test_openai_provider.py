@@ -199,6 +199,35 @@ class TestOpenAIProviderInit:
         assert "max_completion_tokens" not in captured
 
     @pytest.mark.unit
+    def test_reasoning_model_no_sampler_in_kwargs(self):
+        """Sampler params must be None in ChatOpenAI kwargs for reasoning models.
+
+        Regression test: presence_penalty / frequency_penalty leaked into the
+        Responses API payload causing ``AsyncResponses.parse() got an
+        unexpected keyword argument 'presence_penalty'``.
+        """
+        from modules.llm.providers.openai_provider import OpenAIProvider
+
+        captured: Dict[str, Any] = {}
+
+        with patch("modules.llm.providers.openai_provider.ChatOpenAI",
+                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
+            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
+                OpenAIProvider(
+                    api_key="sk-test",
+                    model="gpt-5-mini",
+                    presence_penalty=0.01,
+                    frequency_penalty=0.01,
+                    top_p=0.9,
+                    temperature=0.5,
+                )
+
+        for param in ("presence_penalty", "frequency_penalty", "top_p", "temperature"):
+            assert captured.get(param) is None, (
+                f"{param} should be None for reasoning models but was {captured.get(param)!r}"
+            )
+
+    @pytest.mark.unit
     def test_use_responses_api_always_set(self):
         """use_responses_api=True is always passed to ChatOpenAI."""
         from modules.llm.providers.openai_provider import OpenAIProvider
@@ -323,3 +352,37 @@ class TestOpenAIProviderTextVerbosity:
                     )
 
             assert captured.get("verbosity") == level
+
+
+class TestOpenAIProviderInvokeLLM:
+    """Tests for OpenAIProvider._invoke_llm() parameter forwarding."""
+
+    @pytest.mark.unit
+    def test_invoke_llm_forwards_expect_image_tokens(self):
+        """_invoke_llm passes expect_image_tokens=True to _ainvoke_with_retry."""
+        import asyncio
+        from unittest.mock import AsyncMock
+        from modules.llm.providers.openai_provider import OpenAIProvider
+
+        with patch("modules.llm.providers.openai_provider.ChatOpenAI"):
+            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
+                provider = OpenAIProvider(api_key="sk-test", model="gpt-4o")
+
+        captured_kwargs = {}
+        original_retry = provider._ainvoke_with_retry
+
+        async def _capture_retry(llm, messages, **kwargs):
+            captured_kwargs.update(kwargs)
+            # Return a minimal AIMessage-like response
+            msg = MagicMock()
+            msg.content = "transcribed"
+            msg.response_metadata = {}
+            msg.usage_metadata = {"input_tokens": 1000, "output_tokens": 100, "total_tokens": 1100}
+            return msg
+
+        provider._ainvoke_with_retry = _capture_retry
+
+        with patch("modules.infra.token_tracker.get_token_tracker"):
+            asyncio.run(provider._invoke_llm(MagicMock(), ["msg"]))
+
+        assert captured_kwargs.get("expect_image_tokens") is True

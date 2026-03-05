@@ -299,7 +299,7 @@ class OpenRouterProvider(BaseProvider):
         BaseProvider._process_llm_response() method.
         """
         try:
-            response = await self._ainvoke_with_retry(llm, messages)
+            response = await self._ainvoke_with_retry(llm, messages, expect_image_tokens=True)
             return await self._process_llm_response(response, OPENROUTER_TOKEN_MAPPING)
         except Exception as e:
             logger.error(f"Error invoking OpenRouter: {e}")

@@ -1,9 +1,10 @@
 """OpenAI provider implementation using LangChain.
 
 Supports all OpenAI models including:
-- GPT-4o, GPT-4o-mini
-- GPT-4.1 family
-- GPT-5 family (with reasoning controls)
+- GPT-5.4, GPT-5.4 Pro (original image detail, xhigh reasoning)
+- GPT-5.3 Instant (non-reasoning, fast)
+- GPT-5.2, GPT-5.1, GPT-5 family (with reasoning controls)
+- GPT-4o, GPT-4o-mini, GPT-4.1 family
 - o1, o3 reasoning models
 
 LangChain handles:
@@ -176,7 +177,10 @@ class OpenAIProvider(BaseProvider):
         detail = image_detail
         if detail:
             detail = detail.lower().strip()
-            if detail not in ("low", "high"):
+            valid_details = {"low", "high"}
+            if caps.supports_image_detail_original:
+                valid_details.add("original")
+            if detail not in valid_details:
                 detail = None
         if detail is None:
             detail = caps.default_image_detail if caps.supports_image_detail else None

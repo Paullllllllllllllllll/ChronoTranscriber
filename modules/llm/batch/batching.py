@@ -99,7 +99,10 @@ def _build_responses_body_for_image(
     detail_norm: Optional[str] = None
     if isinstance(llm_detail, str):
         d = llm_detail.lower().strip()
-        if d in ("low", "high"):
+        valid = {"low", "high"}
+        if caps.supports_image_detail_original:
+            valid.add("original")
+        if d in valid:
             detail_norm = d
         elif d == "auto":
             detail_norm = None
@@ -127,7 +130,7 @@ def _build_responses_body_for_image(
                         **(
                             {"detail": detail_norm}
                             if (
-                                detail_norm in ("low", "high")
+                                detail_norm in ("low", "high", "original")
                                 and caps.supports_image_detail
                             )
                             else {}
@@ -318,7 +321,7 @@ def create_batch_request_line(
         image_cfg = get_config_service().get_image_processing_config().get("api_image_processing", {})
         raw_detail = str(image_cfg.get("llm_detail", "high")).lower().strip()
         llm_detail: Optional[str]
-        if raw_detail in ("low", "high"):
+        if raw_detail in ("low", "high", "original"):
             llm_detail = raw_detail
         elif raw_detail == "auto":
             llm_detail = "auto"
@@ -339,7 +342,7 @@ def create_batch_request_line(
     logger.debug(
         "Batch image body: model=%s include_detail=%s detail=%s",
         model_config.get("name"),
-        isinstance(llm_detail, str) and llm_detail.lower().strip() in ("low", "high"),
+        isinstance(llm_detail, str) and llm_detail.lower().strip() in ("low", "high", "original"),
         llm_detail,
     )
 

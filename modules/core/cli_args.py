@@ -102,7 +102,7 @@ Examples:
 
     parser.add_argument(
         "--reasoning-effort",
-        choices=["low", "medium", "high"],
+        choices=["none", "low", "medium", "high", "xhigh"],
         help="Override reasoning effort for reasoning-capable models."
     )
 

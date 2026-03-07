@@ -79,7 +79,7 @@ class ImageProcessor:
         if resize_profile == 'none':
             return image
         detail_norm = (detail or 'high').lower()
-        if detail_norm not in ('low', 'high', 'auto', 'medium', 'ultra_high'):
+        if detail_norm not in ('low', 'high', 'auto', 'medium', 'ultra_high', 'original'):
             detail_norm = 'high'
         
         # Low detail: cap longest side (same for all providers)
@@ -93,6 +93,25 @@ class ImageProcessor:
             new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
             return image.resize(new_size, Image.Resampling.LANCZOS)
         
+        # Original detail (GPT-5.4+): cap to max side / max pixels, no padding
+        if detail_norm == 'original':
+            max_side = int(img_cfg.get('original_max_side_px', 6000))
+            max_pixels = int(img_cfg.get('original_max_pixels', 10240000))
+            w, h = image.size
+            # Cap longest side
+            longest = max(w, h)
+            if longest > max_side:
+                scale = max_side / float(longest)
+                w = max(1, int(w * scale))
+                h = max(1, int(h * scale))
+                image = image.resize((w, h), Image.Resampling.LANCZOS)
+            # Cap total pixel budget
+            if w * h > max_pixels:
+                scale = (max_pixels / float(w * h)) ** 0.5
+                new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
+                image = image.resize(new_size, Image.Resampling.LANCZOS)
+            return image
+
         # High/auto/medium/ultra_high: provider-specific strategy
         if model_type == "anthropic":
             # Anthropic: cap longest side to high_max_side_px (no padding)
@@ -166,6 +185,10 @@ class ImageProcessor:
                         detail_norm = (detail or 'high').lower()
                         if detail_norm == 'low':
                             max_side = int(self.img_cfg.get('low_max_side_px', 512))
+                            if max(w, h) > max_side:
+                                img.draft(desired_mode, (max_side, max_side))
+                        elif detail_norm == 'original':
+                            max_side = int(self.img_cfg.get('original_max_side_px', 6000))
                             if max(w, h) > max_side:
                                 img.draft(desired_mode, (max_side, max_side))
                         elif self.model_type == "anthropic":

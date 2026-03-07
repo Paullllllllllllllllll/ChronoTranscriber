@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 
-ImageDetail = Literal["auto", "high", "low"]
+ImageDetail = Literal["auto", "high", "low", "original"]
 ApiPref = Literal["responses", "chat_completions", "either", "langchain"]
 ProviderType = Literal["openai", "anthropic", "google", "openrouter", "unknown"]
 
@@ -62,6 +62,7 @@ class Capabilities:
     supports_image_input: bool = False
     supports_image_detail: bool = False
     default_image_detail: str = "high"
+    supports_image_detail_original: bool = False  # Only gpt-5.4+
     supports_media_resolution: bool = False   # Google-style media_resolution
     default_media_resolution: str = "high"
 
@@ -230,6 +231,17 @@ _OPENROUTER_BASE: dict = dict(
 
 _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict, dict]] = [
     # --- OpenAI GPT-5.x family (reasoning, Responses-native) ---
+    (("gpt-5.4-pro",), "gpt-5.4-pro", _OPENAI_REASONING_BASE, dict(
+        supports_chat_completions=False, max_context_tokens=1050000, max_output_tokens=128000,
+        supports_image_detail_original=True,
+    )),
+    (("gpt-5.4",), "gpt-5.4", _OPENAI_REASONING_BASE, dict(
+        supports_chat_completions=False, max_context_tokens=1050000, max_output_tokens=128000,
+        supports_image_detail_original=True,
+    )),
+    (("gpt-5.3",), "gpt-5.3", _OPENAI_STANDARD_BASE, dict(
+        max_context_tokens=400000, max_output_tokens=128000,
+    )),
     (("gpt-5.2",), "gpt-5.2", _OPENAI_REASONING_BASE, dict(
         supports_chat_completions=False, max_context_tokens=400000, max_output_tokens=128000,
     )),
@@ -414,11 +426,20 @@ def detect_capabilities(model_name: str) -> Capabilities:
 
         # GPT-5 via OpenRouter
         if "gpt-5" in m:
-            return _build_caps(model_name, "openrouter-gpt5", _OPENROUTER_BASE, dict(
+            or_overrides = dict(
                 supports_image_detail=True, default_image_detail="high",
                 is_reasoning_model=True, supports_reasoning_effort=True,
                 supports_sampler_controls=False, supports_top_p=False,
-            ))
+            )
+            if "gpt-5.4" in m:
+                or_overrides["supports_image_detail_original"] = True
+            # GPT-5.3 Instant is a non-reasoning standard model
+            if "gpt-5.3" in m:
+                or_overrides["is_reasoning_model"] = False
+                or_overrides["supports_reasoning_effort"] = False
+                or_overrides["supports_sampler_controls"] = True
+                or_overrides["supports_top_p"] = True
+            return _build_caps(model_name, "openrouter-gpt5", _OPENROUTER_BASE, or_overrides)
 
         # o-series via OpenRouter
         if any(x in m for x in ("/o1", "/o3", "/o4", "openai/o1", "openai/o3", "openai/o4")):
@@ -507,6 +528,6 @@ def ensure_image_support(model_name: str, images_required: bool) -> None:
         raise CapabilityError(
             "The current pipeline sends image inputs, but the selected model "
             f"'{model_name}' does not support image inputs. Choose an image-capable model "
-            "(e.g., gpt-5, o1, o3, gpt-4o, gpt-4.1) or set 'expects_image_inputs: false' "
+            "(e.g., gpt-5.4, gpt-5, o1, o3, gpt-4o, gpt-4.1) or set 'expects_image_inputs: false' "
             "in model_config.yaml to run a text-only flow."
         )

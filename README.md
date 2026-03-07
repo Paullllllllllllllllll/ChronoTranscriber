@@ -53,7 +53,7 @@ ChronoTranscriber supports two execution modes:
 
 ### Multi-Provider LLM Support
 
-- **OpenAI**: GPT-5.2, GPT-5.1, GPT-5, GPT-4.1, GPT-4o, o3, o4-mini and variants
+- **OpenAI**: GPT-5.4, GPT-5.3 Instant, GPT-5.2, GPT-5.1, GPT-5, GPT-4.1, GPT-4o, o3, o4-mini and variants
 - **Anthropic**: Claude Opus/Sonnet 4.6, Opus/Sonnet/Haiku 4.5, 4.1, 4, 3.5
 - **Google**: Gemini 3.0 Flash Preview, Gemini 3.0 Preview, Gemini 3 Pro, Gemini 2.5 Pro/Flash, Gemini 2.0/1.5
 - **OpenRouter**: Access 200+ models through unified API
@@ -102,6 +102,8 @@ ChronoTranscriber supports four AI providers through LangChain integration. Set 
 
 | Model Family | Models | Key Features |
 |--------------|--------|--------------|
+| GPT-5.4 | gpt-5.4, gpt-5.4-pro | Reasoning, 1.05M context, 128K output, `original` image detail |
+| GPT-5.3 Instant | gpt-5.3-chat-latest | Non-reasoning fast model, 400K context |
 | GPT-5.2 | gpt-5.2, gpt-5.2-pro | Flagship reasoning, 400K context, 128K output |
 | GPT-5.1 | gpt-5.1, gpt-5.1-mini, gpt-5.1-nano | Adaptive thinking, 400K context |
 | GPT-5 | gpt-5, gpt-5-mini, gpt-5-nano | Reasoning, 400K context |

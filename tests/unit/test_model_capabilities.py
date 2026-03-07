@@ -120,3 +120,54 @@ class TestReasoningModelDetection:
     def test_gpt5_is_reasoning(self):
         """Test that GPT-5 models are reasoning models."""
         assert detect_capabilities("gpt-5").is_reasoning_model is True
+
+
+class TestGPT54Capabilities:
+    """Tests for GPT-5.4 and GPT-5.3 model capabilities."""
+
+    @pytest.mark.unit
+    def test_gpt54_capabilities(self):
+        """Test GPT-5.4 capability values."""
+        caps = detect_capabilities("gpt-5.4")
+        assert caps.max_context_tokens == 1050000
+        assert caps.max_output_tokens == 128000
+        assert caps.is_reasoning_model is True
+        assert caps.supports_reasoning_effort is True
+        assert caps.supports_image_detail_original is True
+        assert caps.supports_image_input is True
+        assert caps.supports_sampler_controls is False
+
+    @pytest.mark.unit
+    def test_gpt54_pro_capabilities(self):
+        """Test GPT-5.4 Pro capability values."""
+        caps = detect_capabilities("gpt-5.4-pro")
+        assert caps.max_context_tokens == 1050000
+        assert caps.max_output_tokens == 128000
+        assert caps.is_reasoning_model is True
+        assert caps.supports_image_detail_original is True
+
+    @pytest.mark.unit
+    def test_gpt53_instant_capabilities(self):
+        """Test GPT-5.3 Instant is a non-reasoning standard model."""
+        caps = detect_capabilities("gpt-5.3")
+        assert caps.max_context_tokens == 400000
+        assert caps.max_output_tokens == 128000
+        assert caps.is_reasoning_model is False
+        assert caps.supports_reasoning_effort is False
+        assert caps.supports_sampler_controls is True
+        assert caps.supports_image_input is True
+
+    @pytest.mark.unit
+    def test_gpt54_original_detail_accepted(self):
+        """Test that original detail is gated to gpt-5.4+."""
+        caps_54 = detect_capabilities("gpt-5.4")
+        assert caps_54.supports_image_detail_original is True
+
+        caps_52 = detect_capabilities("gpt-5.2")
+        assert caps_52.supports_image_detail_original is False
+
+    @pytest.mark.unit
+    def test_gpt52_no_original_detail(self):
+        """Test that GPT-5.2 does not support original image detail."""
+        caps = detect_capabilities("gpt-5.2")
+        assert caps.supports_image_detail_original is False

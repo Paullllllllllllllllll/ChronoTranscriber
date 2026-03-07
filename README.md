@@ -88,6 +88,8 @@ Enables processing mixed document collections with different transcription requi
 ### Reliability Features
 
 - **Multi-tier Retry Strategy**: Automatic exponential backoff for API errors (429, 5xx, timeouts) with jitter
+- **Validation Retries**: Automatic retries when the model returns unparseable structured output (capped separately from network retries to avoid runaway loops)
+- **Input-Token Threshold Guard**: Detects and retries API responses where the image payload was silently dropped, preventing cross-contaminated content from reaching the final output. Configurable minimum token threshold (`min_input_tokens`) shares the validation retry budget.
 - **Transcription-aware Retries**: Optional retries for `no_transcribable_text` or `transcription_not_possible`
 - **Daily Token Budget**: Configurable per-day token limits with automatic midnight reset
 - **Comprehensive Logging**: Detailed logs for troubleshooting and observability
@@ -590,10 +592,12 @@ concurrency:
     
     retry:
       attempts: 10
+      validation_attempts: 3
+      min_input_tokens: 500
       wait_min_seconds: 1
       wait_max_seconds: 30
       jitter_max_seconds: 0.5
-      
+
       transcription_failures:
         no_transcribable_text_retries: 0
         transcription_not_possible_retries: 3
@@ -609,7 +613,9 @@ concurrency:
 **Key Parameters**:
 - `concurrency_limit`: Maximum concurrent tasks
 - `service_tier`: OpenAI service tier (synchronous only; automatically omitted for batch)
-- Retry settings: Exponential backoff configuration
+- `retry.attempts`: Maximum network-level retry attempts with exponential backoff
+- `retry.validation_attempts`: Maximum retries for validation errors (unparseable structured output) and input-token threshold violations. Shared budget prevents runaway loops. Default: 3.
+- `retry.min_input_tokens`: Minimum expected input tokens for image requests. Responses below this threshold are treated as cross-contaminated (image payload silently dropped by the API) and retried. Set to 0 to disable. Default: 500.
 - `transcription_failures`: Optional retries for specific transcription outcomes
 
 ### Additional Context Guidance

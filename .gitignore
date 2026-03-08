@@ -1,9 +1,16 @@
 /.windsurf/
+/.claude/
 .chronotranscriber_token_state.json
 .coverage
 
 # Large test data files (exceed GitHub 100 MB limit)
 eval/test_data/input/bibliography/*.pdf
+
+# Timestamped evaluation run artifacts
+eval/reports/eval_results_*.json
+eval/reports/eval_results_*.csv
+eval/reports/eval_results_*.md
+eval/reports/eval_chart_*.png
 
 # User-specific configuration
 config/

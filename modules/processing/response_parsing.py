@@ -1,4 +1,4 @@
-# modules/text_processing.py
+# modules/processing/response_parsing.py
 # Python 3.11+ • PEP8-compliant
 
 from __future__ import annotations

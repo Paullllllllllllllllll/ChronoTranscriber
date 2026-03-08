@@ -21,6 +21,7 @@ from modules.processing.tesseract_utils import (
     ensure_tesseract_available,
 )
 from modules.processing.postprocess import postprocess_transcription
+from modules.processing.output_writer import write_transcription_output, resolve_output_path
 from modules.core.token_guard import check_and_wait_for_token_limit
 from modules.core.resume import ResumeChecker, ProcessingState
 from modules.core.safe_paths import create_safe_filename
@@ -151,6 +152,7 @@ class WorkflowManager:
 
         # Resume checker
         self.resume_mode = user_config.resume_mode
+        self.output_format = getattr(user_config, "output_format", "txt") or "txt"
         self.resume_checker = ResumeChecker(
             resume_mode=self.resume_mode,
             paths_config=paths_config,
@@ -159,6 +161,7 @@ class WorkflowManager:
             image_output_dir=self.image_output_dir,
             epub_output_dir=self.epub_output_dir,
             mobi_output_dir=self.mobi_output_dir,
+            output_format=self.output_format,
         )
 
         # When resume mode is active, preserve JSONL files so page-level
@@ -404,10 +407,17 @@ class WorkflowManager:
         output_txt_path.parent.mkdir(parents=True, exist_ok=True)
 
         rendered_text = extraction.to_plain_text()
-        # Apply post-processing if enabled
-        processed_text = postprocess_transcription(rendered_text, self.postprocessing_config)
+        # Write output using central writer
+        output_format = getattr(self.user_config, "output_format", "txt") or "txt"
+        pages = [{"text": rendered_text, "page_number": None, "image_name": None}]
         try:
-            output_txt_path.write_text(processed_text, encoding="utf-8")
+            actual_path = write_transcription_output(
+                pages,
+                output_txt_path,
+                output_format=output_format,
+                postprocess=True,
+                postprocessing_config=self.postprocessing_config,
+            )
         except Exception as exc:
             logger.exception("Failed to write %s transcription for %s: %s", format_label, file_path.name, exc)
             print_error(f"Failed to write output for {file_path.name}.")
@@ -416,7 +426,7 @@ class WorkflowManager:
         # Include source_format in success message when available (e.g. MOBI)
         source_fmt = getattr(extraction, "source_format", None)
         suffix = f" (via {source_fmt})" if source_fmt else ""
-        print_success(f"Extracted text from '{file_path.name}'{suffix} -> {output_txt_path.name}")
+        print_success(f"Extracted text from '{file_path.name}'{suffix} -> {actual_path.name}")
 
     def _cleanup_preprocessed(self, preprocessed_folder: Path, source_name: str) -> None:
         """Remove preprocessed images folder if the setting says to discard them."""
@@ -501,6 +511,7 @@ class WorkflowManager:
         # Native PDF extraction
         if method == "native":
             text = native_extract_pdf_text(pdf_path, page_indices=page_indices)
+            output_format = getattr(self.user_config, "output_format", "txt") or "txt"
             try:
                 async with aiofiles.open(temp_jsonl_path, 'a',
                                          encoding='utf-8') as jfile:
@@ -512,10 +523,16 @@ class WorkflowManager:
                         "pre_processed_image": None
                     }
                     await jfile.write(json.dumps(record) + '\n')
-                # Apply post-processing if enabled
-                processed_text = postprocess_transcription(text, self.postprocessing_config)
-                output_txt_path.write_text(processed_text, encoding='utf-8')
-                print_success(f"Extracted text from '{pdf_path.name}' using native method -> {output_txt_path.name}")
+                # Write output using central writer
+                pages = [{"text": text, "page_number": None, "image_name": None}]
+                actual_path = write_transcription_output(
+                    pages,
+                    output_txt_path,
+                    output_format=output_format,
+                    postprocess=True,
+                    postprocessing_config=self.postprocessing_config,
+                )
+                print_success(f"Extracted text from '{pdf_path.name}' using native method -> {actual_path.name}")
             except Exception as e:
                 logger.exception(
                     f"Error writing native extraction output for {pdf_path.name}: {e}")
@@ -727,6 +744,7 @@ class WorkflowManager:
 
         Delegates to :func:`modules.core.transcription_pipeline.run_transcription_pipeline`.
         """
+        output_format = getattr(self.user_config, "output_format", "txt") or "txt"
         await run_transcription_pipeline(
             image_files=image_files,
             method=method,
@@ -739,6 +757,7 @@ class WorkflowManager:
             postprocessing_config=self.postprocessing_config,
             is_folder=is_folder,
             resume_mode=self.resume_mode,
+            output_format=output_format,
         )
 
     def _write_output_from_jsonl(self, jsonl_path: Path, output_path: Path) -> bool:

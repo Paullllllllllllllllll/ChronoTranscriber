@@ -65,10 +65,13 @@ class ResumeChecker:
         image_output_dir: Optional[Path] = None,
         epub_output_dir: Optional[Path] = None,
         mobi_output_dir: Optional[Path] = None,
+        output_format: str = "txt",
     ) -> None:
         self.resume_mode = resume_mode
         self.paths_config = paths_config
         self.use_input_as_output = use_input_as_output
+        self.output_format = output_format
+        self._output_ext = f".{output_format}" if output_format != "txt" else ".txt"
 
         fp = paths_config.get("file_paths", {})
         self.pdf_output_dir = pdf_output_dir or Path(fp.get("PDFs", {}).get("output", "pdfs_out"))
@@ -163,16 +166,16 @@ class ResumeChecker:
     def _check_pdf(self, pdf_path: Path) -> ResumeResult:
         output_dir = self._resolve_output_dir(pdf_path, self.pdf_output_dir)
 
-        # When output is co-located with input, check for .txt directly
+        # When output is co-located with input, check for output file directly
         # next to the PDF first (current output path convention).
         if self.use_input_as_output:
-            txt_name = create_safe_filename(pdf_path.stem, ".txt", pdf_path.parent)
-            txt_path = pdf_path.parent / txt_name
-            if txt_path.exists() and txt_path.stat().st_size > 0:
+            out_name = create_safe_filename(pdf_path.stem, self._output_ext, pdf_path.parent)
+            out_path = pdf_path.parent / out_name
+            if out_path.exists() and out_path.stat().st_size > 0:
                 return ResumeResult(
                     item=pdf_path, state=ProcessingState.COMPLETE,
-                    output_path=txt_path,
-                    reason=f"output exists: {txt_path.name}",
+                    output_path=out_path,
+                    reason=f"output exists: {out_path.name}",
                 )
 
         # Check inside the hash-suffixed working directory (legacy location
@@ -183,7 +186,7 @@ class ResumeChecker:
         if not parent_folder.exists():
             return ResumeResult(item=pdf_path, state=ProcessingState.NONE, reason="no output folder")
 
-        txt_name_in_dir = create_safe_filename(pdf_path.stem, ".txt", parent_folder)
+        txt_name_in_dir = create_safe_filename(pdf_path.stem, self._output_ext, parent_folder)
         txt_path_in_dir = parent_folder / txt_name_in_dir
 
         jsonl_name = create_safe_filename(pdf_path.stem, ".jsonl", parent_folder)
@@ -206,16 +209,16 @@ class ResumeChecker:
         return ResumeResult(item=pdf_path, state=ProcessingState.NONE, reason="no output")
 
     def _check_image_folder(self, folder: Path) -> ResumeResult:
-        # When output is co-located with input, check for .txt next to the
-        # folder (in its parent directory) first — this is the current convention.
+        # When output is co-located with input, check for output file next to
+        # the folder (in its parent directory) first — this is the current convention.
         if self.use_input_as_output:
-            txt_name = create_safe_filename(folder.name, ".txt", folder.parent)
-            txt_path = folder.parent / txt_name
-            if txt_path.exists() and txt_path.stat().st_size > 0:
+            out_name = create_safe_filename(folder.name, self._output_ext, folder.parent)
+            out_path = folder.parent / out_name
+            if out_path.exists() and out_path.stat().st_size > 0:
                 return ResumeResult(
                     item=folder, state=ProcessingState.COMPLETE,
-                    output_path=txt_path,
-                    reason=f"output exists: {txt_path.name}",
+                    output_path=out_path,
+                    reason=f"output exists: {out_path.name}",
                 )
             # Working directory is next to the folder (in parent), not inside it
             working_dir_base = folder.parent
@@ -230,7 +233,7 @@ class ResumeChecker:
         if not parent_folder.exists():
             return ResumeResult(item=folder, state=ProcessingState.NONE, reason="no output folder")
 
-        txt_name_in_dir = create_safe_filename(folder.name, ".txt", parent_folder)
+        txt_name_in_dir = create_safe_filename(folder.name, self._output_ext, parent_folder)
         txt_path_in_dir = parent_folder / txt_name_in_dir
 
         jsonl_name = create_safe_filename(folder.name, ".jsonl", parent_folder)
@@ -255,15 +258,15 @@ class ResumeChecker:
     def _check_epub(self, epub_path: Path) -> ResumeResult:
         output_dir = self._resolve_output_dir(epub_path, self.epub_output_dir)
 
-        # Check for .txt directly next to the EPUB (current convention).
+        # Check for output file directly next to the EPUB (current convention).
         if self.use_input_as_output:
-            txt_name = create_safe_filename(epub_path.stem, ".txt", epub_path.parent)
-            txt_path = epub_path.parent / txt_name
-            if txt_path.exists() and txt_path.stat().st_size > 0:
+            out_name = create_safe_filename(epub_path.stem, self._output_ext, epub_path.parent)
+            out_path = epub_path.parent / out_name
+            if out_path.exists() and out_path.stat().st_size > 0:
                 return ResumeResult(
                     item=epub_path, state=ProcessingState.COMPLETE,
-                    output_path=txt_path,
-                    reason=f"output exists: {txt_path.name}",
+                    output_path=out_path,
+                    reason=f"output exists: {out_path.name}",
                 )
 
         # Legacy: check inside hash-suffixed working directory.
@@ -273,7 +276,7 @@ class ResumeChecker:
         if not parent_folder.exists():
             return ResumeResult(item=epub_path, state=ProcessingState.NONE, reason="no output folder")
 
-        txt_name_in_dir = create_safe_filename(epub_path.stem, ".txt", parent_folder)
+        txt_name_in_dir = create_safe_filename(epub_path.stem, self._output_ext, parent_folder)
         txt_path_in_dir = parent_folder / txt_name_in_dir
 
         if txt_path_in_dir.exists() and txt_path_in_dir.stat().st_size > 0:
@@ -288,15 +291,15 @@ class ResumeChecker:
     def _check_mobi(self, mobi_path: Path) -> ResumeResult:
         output_dir = self._resolve_output_dir(mobi_path, self.mobi_output_dir)
 
-        # Check for .txt directly next to the MOBI (current convention).
+        # Check for output file directly next to the MOBI (current convention).
         if self.use_input_as_output:
-            txt_name = create_safe_filename(mobi_path.stem, ".txt", mobi_path.parent)
-            txt_path = mobi_path.parent / txt_name
-            if txt_path.exists() and txt_path.stat().st_size > 0:
+            out_name = create_safe_filename(mobi_path.stem, self._output_ext, mobi_path.parent)
+            out_path = mobi_path.parent / out_name
+            if out_path.exists() and out_path.stat().st_size > 0:
                 return ResumeResult(
                     item=mobi_path, state=ProcessingState.COMPLETE,
-                    output_path=txt_path,
-                    reason=f"output exists: {txt_path.name}",
+                    output_path=out_path,
+                    reason=f"output exists: {out_path.name}",
                 )
 
         # Legacy: check inside hash-suffixed working directory.
@@ -306,7 +309,7 @@ class ResumeChecker:
         if not parent_folder.exists():
             return ResumeResult(item=mobi_path, state=ProcessingState.NONE, reason="no output folder")
 
-        txt_name_in_dir = create_safe_filename(mobi_path.stem, ".txt", parent_folder)
+        txt_name_in_dir = create_safe_filename(mobi_path.stem, self._output_ext, parent_folder)
         txt_path_in_dir = parent_folder / txt_name_in_dir
 
         if txt_path_in_dir.exists() and txt_path_in_dir.stat().st_size > 0:

@@ -35,7 +35,7 @@ from modules.ui import (
     ui_print,
     PromptStyle,
 )
-from modules.processing.text_processing import extract_transcribed_text, format_page_line, detect_transcription_cause
+from modules.processing.response_parsing import extract_transcribed_text, format_page_line, detect_transcription_cause
 from modules.llm import open_transcriber
 from modules.infra.concurrency import run_concurrent_transcription_tasks
 from modules.llm.openai_sdk_utils import sdk_to_dict, coerce_file_id

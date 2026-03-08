@@ -17,8 +17,9 @@ import aiofiles
 from modules.infra.logger import setup_logger
 from modules.llm import transcribe_image_with_llm
 from modules.infra.concurrency import run_concurrent_transcription_tasks
-from modules.processing.text_processing import extract_transcribed_text, format_page_line
+from modules.processing.response_parsing import extract_transcribed_text, format_page_line
 from modules.processing.postprocess import postprocess_transcription
+from modules.processing.output_writer import write_transcription_output
 from modules.operations.jsonl_utils import (
     get_processed_image_names,
     read_jsonl_records,
@@ -144,6 +145,7 @@ async def run_transcription_pipeline(
     postprocessing_config: Dict[str, Any],
     is_folder: bool = False,
     resume_mode: str = "skip",
+    output_format: str = "txt",
 ) -> None:
     """Execute the full image transcription pipeline.
 
@@ -182,7 +184,10 @@ async def run_transcription_pipeline(
 
     if not image_files:
         print_info("All images already processed. Regenerating output file from JSONL...")
-        write_output_from_jsonl(temp_jsonl_path, output_txt_path, postprocessing_config)
+        write_output_from_jsonl(
+            temp_jsonl_path, output_txt_path, postprocessing_config,
+            output_format=output_format,
+        )
         return
 
     # Build args list for concurrent dispatch
@@ -241,13 +246,21 @@ async def run_transcription_pipeline(
         ordered = sorted(
             [r for r in results if r and r[2] is not None], key=lambda r: r[4]
         )
-        lines: List[str] = []
+        pages: List[Dict[str, Any]] = []
         for (_p, image_name, text_chunk, _raw, order_index) in ordered:
             page_number = int(order_index) + 1 if isinstance(order_index, int) else None
-            lines.append(format_page_line(text_chunk, page_number, image_name))
-        combined_text = "\n".join(lines)
-        processed_text = postprocess_transcription(combined_text, postprocessing_config)
-        output_txt_path.write_text(processed_text, encoding='utf-8')
+            pages.append({
+                "text": text_chunk,
+                "page_number": page_number,
+                "image_name": image_name,
+            })
+        write_transcription_output(
+            pages,
+            output_txt_path,
+            output_format=output_format,
+            postprocess=True,
+            postprocessing_config=postprocessing_config,
+        )
     except Exception as e:
         logger.exception(
             f"Error writing combined transcription output for {source_name}: {e}")
@@ -258,6 +271,7 @@ def write_output_from_jsonl(
     jsonl_path: Path,
     output_path: Path,
     postprocessing_config: Dict[str, Any],
+    output_format: str = "txt",
 ) -> bool:
     """Write combined output text from JSONL transcription records.
 
@@ -265,6 +279,7 @@ def write_output_from_jsonl(
         jsonl_path: Path to JSONL file with transcription records.
         output_path: Path to write combined text output.
         postprocessing_config: Post-processing configuration dictionary.
+        output_format: Output format (``"txt"``, ``"md"``, or ``"json"``).
 
     Returns:
         True if successful, False otherwise.
@@ -279,18 +294,26 @@ def write_output_from_jsonl(
 
         ordered = sorted(transcriptions, key=lambda r: r.get("order_index", 0))
 
-        lines: List[str] = []
+        pages: List[Dict[str, Any]] = []
         for record in ordered:
             image_name = record.get("image_name", "")
             text_chunk = record.get("text_chunk", "")
             order_index = record.get("order_index", 0)
             page_number = int(order_index) + 1 if isinstance(order_index, int) else None
-            lines.append(format_page_line(text_chunk, page_number, image_name))
+            pages.append({
+                "text": text_chunk,
+                "page_number": page_number,
+                "image_name": image_name,
+            })
 
-        combined_text = "\n".join(lines)
-        processed_text = postprocess_transcription(combined_text, postprocessing_config)
-        output_path.write_text(processed_text, encoding='utf-8')
-        print_success(f"Output written: {output_path.name}")
+        actual_path = write_transcription_output(
+            pages,
+            output_path,
+            output_format=output_format,
+            postprocess=True,
+            postprocessing_config=postprocessing_config,
+        )
+        print_success(f"Output written: {actual_path.name}")
         return True
     except Exception as e:
         logger.exception(f"Error writing output from JSONL {jsonl_path.name}: {e}")

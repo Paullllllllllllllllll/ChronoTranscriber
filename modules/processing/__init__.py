@@ -1,12 +1,14 @@
 """Document processing package.
 
-Provides PDF, EPUB, image processing, OCR, text extraction, and post-processing utilities.
+Provides PDF, EPUB, image processing, OCR, text extraction, post-processing,
+and output writing utilities.
 """
 
 # Avoid circular imports - use direct imports instead of re-exporting
 from .epub_utils import EPUBProcessor, EPUBTextExtraction
 from .postprocess import postprocess_transcription, postprocess_file, postprocess_text
 from .model_utils import detect_model_type, get_image_config_section_name
+from .output_writer import write_transcription_output
 
 __all__ = [
     "detect_model_type",
@@ -26,4 +28,6 @@ __all__ = [
     "postprocess_transcription",
     "postprocess_file",
     "postprocess_text",
+    # Output writing
+    "write_transcription_output",
 ]

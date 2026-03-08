@@ -1,4 +1,4 @@
-"""Unit tests for modules/processing/text_processing.py.
+"""Unit tests for modules/processing/response_parsing.py.
 
 Tests text extraction and processing functions for transcription outputs.
 """
@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import pytest
 
-from modules.processing.text_processing import (
+from modules.processing.response_parsing import (
     detect_transcription_cause,
     format_page_line,
     extract_transcribed_text,
@@ -224,7 +224,7 @@ class TestExtractTranscribedText:
         """Error-response dict logs a WARNING that names the actual error."""
         import logging
         data = {"output_text": "", "error": "Connection error."}
-        with caplog.at_level(logging.WARNING, logger="modules.processing.text_processing"):
+        with caplog.at_level(logging.WARNING, logger="modules.processing.response_parsing"):
             extract_transcribed_text(data, "page_001.jpg")
         assert "Connection error." in caplog.text
 

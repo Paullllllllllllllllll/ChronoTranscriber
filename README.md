@@ -19,8 +19,8 @@ Designed to integrate with [ChronoMiner](https://github.com/Paulllllllllllllllll
   - [Common Workflows](#common-workflows)
 - [Configuration](#configuration)
 - [Usage](#usage)
+- [Output Formats](#output-formats)
 - [Batch Processing](#batch-processing)
-- [Fine-Tuning Dataset Preparation](#fine-tuning-dataset-preparation)
 - [Utilities](#utilities)
 - [Architecture](#architecture)
 - [Frequently Asked Questions](#frequently-asked-questions)
@@ -154,7 +154,7 @@ Environment variable: `OPENROUTER_API_KEY`
 ### Model-Specific Features
 
 - **Reasoning / thinking controls**: Provider-specific controls for internal reasoning (OpenAI `reasoning.effort`, Anthropic extended thinking via `thinking.budget_tokens`, Google `thinkingConfig` / thinking level). Availability and valid values differ by model.
-- **Sampler controls**: `temperature`/`top_p` are supported on most non-reasoning models. OpenAI reasoning models don’t support these controls. For Anthropic, extended thinking isn’t compatible with changing `temperature` or `top_k`.
+- **Sampler controls**: `temperature`/`top_p` are supported on most non-reasoning models. OpenAI reasoning models don't support these controls. For Anthropic, extended thinking isn't compatible with changing `temperature` or `top_k`.
 - **Automatic Capability Detection**: Unsupported parameters filtered before API calls
 
 ## System Requirements
@@ -332,13 +332,13 @@ Press 'b' to go back, 'q' to quit at any time.
 
 ```bash
 # Transcribe PDF with AI
-python main/unified_transcriber.py --type pdfs --method gpt --input ./documents/my_document.pdf --output ./results
+python main/unified_transcriber.py --type pdfs --method gpt --output-format md --input ./documents/my_document.pdf --output ./results
 
 # Process images with Tesseract (offline)
 python main/unified_transcriber.py --type images --method tesseract --input ./scans --output ./results
 
 # Batch process multiple PDFs (cost-effective)
-python main/unified_transcriber.py --type pdfs --method gpt --batch --input ./archive --output ./results
+python main/unified_transcriber.py --type pdfs --method gpt --batch --output-format json --input ./archive --output ./results
 ```
 
 ### Common Workflows
@@ -419,18 +419,18 @@ transcription_model:
   provider: openai  # Options: openai, anthropic, google, openrouter (auto-detected from model name)
   name: gpt-5-mini
   max_output_tokens: 128000
-  
+
   # Reasoning / thinking controls.
   # OpenAI: sent as `reasoning: { effort: ... }` in the Responses API (and as `reasoning_effort` in Chat Completions); supported values are model-dependent.
   # Anthropic: mapped to `thinking: { type: "enabled", budget_tokens: ... }`.
   # Google: mapped to the Gemini thinking configuration (thinking level/budget).
   reasoning:
     effort: medium  # Default cross-provider preset. For OpenAI, valid values also include `none`, `minimal`, and `xhigh` (model-dependent).
-  
+
   # OpenAI GPT-5 family only (Responses API): controls verbosity of the model's response.
   text:
     verbosity: medium  # Options: low, medium, high
-  
+
   # Sampler controls (only applied when supported by the selected provider/model).
   # OpenAI: temperature range 0.0–2.0.
   # Anthropic: temperature range 0.0–1.0.
@@ -550,7 +550,7 @@ tesseract_image_processing:
   ocr:
     tesseract_config: "--oem 3 --psm 6"
     tesseract_cmd: 'C:\\Program Files (x86)\\Tesseract-OCR\\tesseract.exe'
-  
+
   preprocessing:
     flatten_alpha: true
     grayscale: true
@@ -591,7 +591,7 @@ concurrency:
     delay_between_tasks: 0.05
     service_tier: default  # Options: auto, default, flex, priority
     batch_chunk_size: 50
-    
+
     retry:
       attempts: 10
       validation_attempts: 3
@@ -606,7 +606,7 @@ concurrency:
         wait_min_seconds: 1
         wait_max_seconds: 30
         jitter_max_seconds: 0.5
-  
+
   image_processing:
     concurrency_limit: 24
     delay_between_tasks: 0.0005
@@ -701,7 +701,7 @@ Guides you through document type, OCR backend, processing mode, schema selection
 
 ```bash
 # Process directory of PDFs with GPT batch mode
-python main/unified_transcriber.py --type pdfs --method gpt --batch --input ./input/pdfs --output ./output/pdfs
+python main/unified_transcriber.py --type pdfs --method gpt --batch --output-format md --input ./input/pdfs --output ./output/pdfs
 
 # Process image folder with Tesseract (offline)
 python main/unified_transcriber.py --type images --method tesseract --input ./input/images --output ./output/images
@@ -723,6 +723,14 @@ Outputs saved to configured directories:
 - `<original_name>_transcription.txt`: Final transcription
 - `<original_name>_temporary.jsonl`: Batch tracking (deleted after completion unless `retain_temporary_jsonl: true`)
 - `<original_name>_batch_submission_debug.json`: Batch metadata for tracking and repair
+
+## Output Formats
+
+ChronoTranscriber supports three output formats via `--output-format`:
+
+- `txt` (default): Plain text, one page per block
+- `md`: Markdown with page headers (`## Page N` or `## image_name`)
+- `json`: Structured JSON array with per-page metadata
 
 ## Batch Processing
 
@@ -760,78 +768,7 @@ python main/cancel_batches.py
 - Cancels all non-terminal batches
 - Shows detailed cancellation results
 
-## Fine-Tuning Dataset Preparation
-
-ChronoTranscriber includes a workflow for preparing OpenAI-compatible vision fine-tuning datasets where the assistant response is a structured JSON string matching your transcription schema.
-
-### Overview
-
-1. Produce transcriptions with `main/unified_transcriber.py`
-2. Export editable correction file: `main/prepare_ground_truth.py --extract`
-3. Apply corrections into ground truth JSONL: `main/prepare_ground_truth.py --apply`
-4. Build OpenAI vision fine-tuning JSONL: `fine_tuning/build_openai_vision_sft_jsonl.py`
-
-### Ground Truth Input
-
-Expects ground truth JSONL from `main/prepare_ground_truth.py --apply`:
-
-- `page_index` (0-based)
-- `transcription` (string or null)
-- `no_transcribable_text` (boolean)
-- `transcription_not_possible` (boolean)
-
-### Manifest Input (JSONL)
-
-JSONL file listing pages for training. Requires:
-
-- `page_index` or `order_index` (0-based)
-- One of: `pre_processed_image`, `image_path`, or `image_url`
-
-### Build Command
-
-```bash
-.venv\Scripts\python fine_tuning\build_openai_vision_sft_jsonl.py --ground-truth eval\test_data\ground_truth\address_books --manifest path\to\manifest.jsonl --output fine_tuning\training.jsonl
-```
-
-**Optional flags**:
-- `--schema <schema_name_or_path>`
-- `--system-prompt <path>`
-- `--additional-context <path>`
-- `--image-detail low|high|auto`
-- `--strict` (fail on first skipped entry)
-
-**Image constraints**:
-- Allowed: `.jpg`, `.jpeg`, `.png`, `.webp`
-- Maximum file size: 10 MB
-
 ## Utilities
-
-### Token Cost Analysis
-
-Inspects preserved `.jsonl` files and produces detailed cost estimates.
-
-**When to Run**:
-- Preserve temporary files: `retain_temporary_jsonl: true` in `paths_config.yaml`
-- After processing completes
-- To validate budgeting assumptions
-
-**Execution Modes**:
-
-```bash
-# Interactive UI
-python main/cost_analysis.py
-
-# CLI Mode
-python main/cost_analysis.py --save-csv --output path/to/report.csv --quiet
-```
-
-**Output Features**:
-- Aggregated totals (uncached input, cached, output, reasoning tokens)
-- Dual pricing (standard + 50% discount for batch/flex)
-- Model normalization (date-stamped variants mapped to parent profiles)
-- CSV export with per-file ledger and summary row
-
-See [OpenAI Pricing](https://platform.openai.com/docs/pricing) for current rates.
 
 ### Daily Token Limit
 
@@ -856,19 +793,6 @@ daily_token_limit:
 2. Add `.chronotranscriber_token_state.json` to `.gitignore`
 3. Delete state file to manually reset counts
 
-### System Diagnostics
-
-Built into `check_batches.py`:
-
-```bash
-python main/check_batches.py
-```
-
-**Checks**:
-1. API Key Presence
-2. Model Listing Access
-3. Batch API Access
-
 ## Architecture
 
 ChronoTranscriber follows a modular architecture with clear separation of concerns.
@@ -882,18 +806,15 @@ ChronoTranscriber/
 │   ├── image_processing_config.yaml
 │   ├── model_config.yaml
 │   └── paths_config.yaml
-├── fine_tuning/               # Fine-tuning dataset preparation
-│   └── build_openai_vision_sft_jsonl.py
+├── eval/                      # Evaluation datasets and scripts
 ├── main/                      # CLI entry points
 │   ├── cancel_batches.py
 │   ├── check_batches.py
-│   ├── cost_analysis.py
 │   ├── repair_transcriptions.py
 │   └── unified_transcriber.py
 ├── modules/                   # Core application modules
 │   ├── config/               # Configuration loading and service
 │   ├── core/                 # Core utilities, workflow, CLI args
-│   ├── diagnostics/          # System health checks
 │   ├── infra/                # Logging, concurrency, async tasks
 │   ├── io/                   # File I/O and path utilities
 │   ├── llm/                  # LLM integration
@@ -902,6 +823,9 @@ ChronoTranscriber/
 │   │   └── ...               # Transcriber, schemas, capabilities
 │   ├── operations/           # High-level operations
 │   ├── processing/           # Image and PDF processing
+│   │   ├── response_parsing.py  # Response parsing utilities
+│   │   └── output_writer.py     # Output writing and formatting
+│   ├── testing/              # Test utilities
 │   └── ui/                   # User interface and prompts
 ├── schemas/                   # JSON schemas for structured outputs
 ├── system_prompt/             # System prompt templates
@@ -924,10 +848,9 @@ ChronoTranscriber/
   - **transcriber.py**: High-level transcription interface
   - **model_capabilities.py**: Capability detection and parameter filtering
   - **schemas.py**: Pydantic models for structured outputs
-- **modules/operations/**: High-level operations (batch checking, repair, cost analysis)
-- **modules/processing/**: Document processing (PDF, image preprocessing, text formatting)
+- **modules/operations/**: High-level operations (batch checking, repair)
+- **modules/processing/**: Document processing (PDF, image preprocessing, response parsing, output writing)
 - **modules/ui/**: User interface (interactive prompts, styled output, navigation)
-- **modules/diagnostics/**: System health checks
 - **modules/testing/**: Test fixtures and utilities
 
 ### LangChain Provider Architecture
@@ -948,7 +871,7 @@ Capability detection is centralized in `modules/llm/model_capabilities.py` (shar
 
 ### Operations Layer
 
-High-level operations in `modules/operations/` (batch checking, repair workflows, cost analysis) are separated from CLI entry points in `main/` for testability and reusability.
+High-level operations in `modules/operations/` (batch checking, repair workflows) are separated from CLI entry points in `main/` for testability and reusability.
 
 ## Frequently Asked Questions
 
@@ -971,8 +894,6 @@ A: With OpenAI gpt-5-mini:
 - 100-page PDF (synchronous): ~$1-2
 - 100-page PDF (batch): ~$0.50-1 (50% discount)
 - 1000-page archive (batch): ~$5-10
-
-Use `python main/cost_analysis.py` to track actual spending.
 
 **Q: Should I use batch or synchronous mode?**
 
@@ -1039,7 +960,7 @@ A: Use different schemas:
 - `plain_text_transcription_schema.json`: Simple plain text
 - `plain_text_transcription_with_markers_schema.json`: Plain text with page markers
 
-Specify with `--schema` flag or select in interactive mode.
+Specify with `--schema` flag or select in interactive mode. Additionally, use `--output-format` to choose between `txt`, `md`, or `json` output.
 
 ### Processing Questions
 
@@ -1138,7 +1059,7 @@ A: Use CLI mode with `interactive_mode: false`:
 
 ```bash
 # In your script or CI/CD pipeline
-python main/unified_transcriber.py --type pdfs --method gpt --input "$INPUT_DIR" --output "$OUTPUT_DIR"
+python main/unified_transcriber.py --type pdfs --method gpt --output-format json --input "$INPUT_DIR" --output "$OUTPUT_DIR"
 
 # Check exit code
 if [ $? -eq 0 ]; then
@@ -1222,13 +1143,15 @@ pip install -r requirements-dev.txt
 
 ### Recent Updates
 
-For complete release history, see [RELEASE_NOTES_v3.0.md](RELEASE_NOTES_v3.0.md) and [RELEASE_NOTES_v2.0.md](RELEASE_NOTES_v2.0.md).
+For complete release history, see [RELEASE_NOTES_v4.0.md](RELEASE_NOTES_v4.0.md).
+
+**March 2026**: Version 4.0 - New output format system (`--output-format` with `txt`, `md`, `json`), refactored response parsing and output writing modules, removed fine-tuning dataset preparation and cost analysis utilities.
 
 **February 2026**: Capability guarding refactored to a centralized, registry-based architecture (`_MODEL_REGISTRY` in `model_capabilities.py`) covering all four providers. Replaces ~1,020 lines of per-provider if/elif chains with compact registry tuples and provider base templates. `Capabilities` is now the single source of truth for parameter gating across the entire codebase.
 
 **December 2025**: Dependency updates - All packages updated to latest stable versions with full backward compatibility verified.
 
-**November 2025**: Version 3.0 - Multi-provider LangChain integration, EPUB/MOBI support, auto mode, cost analysis utilities, daily token budgets.
+**November 2025**: Version 3.0 - Multi-provider LangChain integration, EPUB/MOBI support, auto mode, daily token budgets.
 
 **October 2025**: Version 2.0 - Dual-mode operation (interactive/CLI), Windows Unicode encoding fix, batch API compatibility fix.
 

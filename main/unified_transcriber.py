@@ -230,6 +230,9 @@ def create_config_from_cli_args(args: Any, base_input_dir: Path, base_output_dir
     if getattr(args, "force", None):
         config.resume_mode = "overwrite"
 
+    # Output format
+    config.output_format = getattr(args, "output_format", "txt") or "txt"
+
     # Parse page range if provided
     if getattr(args, "pages", None):
         config.page_range = parse_page_range(args.pages)
@@ -269,6 +272,7 @@ def create_config_from_cli_args(args: Any, base_input_dir: Path, base_output_dir
                 image_output_dir=pc.image_output_dir,
                 epub_output_dir=pc.epub_output_dir,
                 mobi_output_dir=pc.mobi_output_dir,
+                output_format=config.output_format,
             )
             total_before = len(decisions)
             decisions = [

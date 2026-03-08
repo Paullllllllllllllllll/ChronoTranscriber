@@ -239,7 +239,7 @@ class TestTextProcessingIntegration:
     @pytest.mark.integration
     def test_extract_from_various_response_formats(self):
         """Test extraction from multiple API response formats."""
-        from modules.processing.text_processing import extract_transcribed_text
+        from modules.processing.response_parsing import extract_transcribed_text
         
         # Test all supported formats
         formats = [
@@ -280,7 +280,7 @@ class TestTextProcessingIntegration:
     @pytest.mark.integration
     def test_batch_output_processing(self):
         """Test processing batch output with multiple records."""
-        from modules.processing.text_processing import process_batch_output
+        from modules.processing.response_parsing import process_batch_output
         
         # Create batch output with multiple items
         items = []

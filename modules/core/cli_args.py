@@ -147,6 +147,14 @@ Examples:
         help="Process files recursively in subdirectories."
     )
 
+    # Output format
+    parser.add_argument(
+        "--output-format",
+        choices=["txt", "md", "json"],
+        default="txt",
+        help="Output file format (default: txt).",
+    )
+
     # Page range filtering
     parser.add_argument(
         "--pages",
@@ -265,7 +273,14 @@ Examples:
         action="store_true",
         help="Skip running API diagnostics."
     )
-    
+
+    parser.add_argument(
+        "--output-format",
+        choices=["txt", "md", "json"],
+        default="txt",
+        help="Output file format for finalized batches (default: txt).",
+    )
+
     return parser
 
 

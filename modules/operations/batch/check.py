@@ -28,12 +28,13 @@ from modules.config.service import get_config_service
 from modules.infra.logger import setup_logger
 from modules.llm.openai_sdk_utils import coerce_file_id, list_all_batches, sdk_to_dict
 from modules.io.directory_utils import collect_scan_directories
-from modules.processing.text_processing import (
+from modules.processing.response_parsing import (
     extract_transcribed_text,
     process_batch_output,
     format_page_line,
 )
 from modules.processing.postprocess import postprocess_transcription
+from modules.processing.output_writer import write_transcription_output
 from modules.ui import print_info, print_success, print_warning, print_error
 from modules.ui.batch_display import (
     display_batch_summary,
@@ -73,6 +74,7 @@ def _process_non_openai_batch(
     batch_tracking_records: List[Dict[str, Any]],
     processing_settings: Dict[str, Any],
     postprocessing_config: Optional[Dict[str, Any]] = None,
+    output_format: str = "txt",
 ) -> None:
     """Process batch results for non-OpenAI providers (Anthropic, Google).
     
@@ -254,26 +256,26 @@ def _process_non_openai_batch(
     
     # Build final output
     final_txt_path = temp_file.parent / f"{identifier}.txt"
-    
-    ordered_lines = []
+
+    pages = []
     for t in all_transcriptions:
         tx = t.get("transcription", "")
         info = t.get("image_info", {}) or {}
         pn = info.get("page_number")
         iname = info.get("image_name")
-        ordered_lines.append(format_page_line(tx, pn, iname))
-    
-    final_text = "\n\n".join(ordered_lines)
-    
-    # Apply post-processing if enabled
-    if postprocessing_config:
-        final_text = postprocess_transcription(final_text, postprocessing_config)
-    
+        pages.append({"text": tx, "page_number": pn, "image_name": iname})
+
     # Write output
     try:
-        final_txt_path.write_text(final_text, encoding="utf-8")
-        print_success(f"Saved transcription to {final_txt_path.name}")
-        logger.info(f"Wrote final transcription: {final_txt_path}")
+        actual_path = write_transcription_output(
+            pages,
+            final_txt_path,
+            output_format=output_format,
+            postprocess=bool(postprocessing_config),
+            postprocessing_config=postprocessing_config,
+        )
+        print_success(f"Saved transcription to {actual_path.name}")
+        logger.info(f"Wrote final transcription: {actual_path}")
     except Exception as e:
         print_error(f"Failed to write transcription file: {e}")
         logger.exception(f"Error writing {final_txt_path}: {e}")
@@ -293,6 +295,7 @@ def process_all_batches(
     processing_settings: Dict[str, Any],
     client: OpenAI,
     postprocessing_config: Optional[Dict[str, Any]] = None,
+    output_format: str = "txt",
 ) -> None:
     """Finalize all completed batch jobs for a given root folder.
 
@@ -472,6 +475,7 @@ def process_all_batches(
                 batch_tracking_records=batch_tracking_records,
                 processing_settings=processing_settings,
                 postprocessing_config=postprocessing_config,
+                output_format=output_format,
             )
             continue
 
@@ -903,30 +907,30 @@ def process_all_batches(
             if np_entries:
                 display_transcription_not_possible_summary(len(np_entries))
 
-            # Build page-identified lines in sorted order
-            ordered_lines = []
+            # Build page dicts in sorted order
+            pages = []
             for t in all_transcriptions:
                 tx = t.get("transcription", "")
                 info = t.get("image_info", {}) or {}
                 pn = info.get("page_number")
                 iname = info.get("image_name")
-                ordered_lines.append(format_page_line(tx, pn, iname))
-
-            # Combine lines and apply post-processing if enabled
-            combined_text = "\n".join(line for line in ordered_lines if line)
-            if postprocessing_config:
-                combined_text = postprocess_transcription(combined_text, postprocessing_config)
+                pages.append({"text": tx, "page_number": pn, "image_name": iname})
 
             processing_success = False
             try:
-                with final_txt_path.open("w", encoding="utf-8") as fout:
-                    fout.write(combined_text)
+                actual_path = write_transcription_output(
+                    pages,
+                    final_txt_path,
+                    output_format=output_format,
+                    postprocess=bool(postprocessing_config),
+                    postprocessing_config=postprocessing_config,
+                )
                 logger.info(
-                    f"All batches for {temp_file.name} processed and saved to {final_txt_path}"
+                    f"All batches for {temp_file.name} processed and saved to {actual_path}"
                 )
                 print_success(
                     f"Processed all batches for {temp_file.name}. Results saved to "
-                    f"{final_txt_path.name}"
+                    f"{actual_path.name}"
                 )
                 processing_success = True
             except Exception as e:
@@ -985,12 +989,17 @@ def diagnose_api_issues() -> None:
         print_error(f"Batch API access failed: {e}")
 
 
-def run_batch_finalization(run_diagnostics: bool = True, custom_directory: Path | None = None) -> None:
+def run_batch_finalization(
+    run_diagnostics: bool = True,
+    custom_directory: Path | None = None,
+    output_format: str = "txt",
+) -> None:
     """High-level entrypoint used by the CLI to finalize batch results.
-    
+
     Args:
         run_diagnostics: Whether to run API diagnostics before processing
         custom_directory: Optional custom directory to scan instead of config defaults
+        output_format: Output file format (``"txt"``, ``"md"``, or ``"json"``)
     """
     if custom_directory:
         # Use the specified directory instead of loading from config
@@ -1004,13 +1013,16 @@ def run_batch_finalization(run_diagnostics: bool = True, custom_directory: Path 
     else:
         # Load standard configuration
         scan_dirs, processing_settings, postprocessing_config = load_config()
-    
+
     client = OpenAI()
 
     if run_diagnostics:
         diagnose_api_issues()
 
     for directory in scan_dirs:
-        process_all_batches(directory, processing_settings, client, postprocessing_config)
+        process_all_batches(
+            directory, processing_settings, client, postprocessing_config,
+            output_format=output_format,
+        )
     print_info("Batch results processing complete across all directories.")
     logger.info("Batch results processing complete across all directories.")

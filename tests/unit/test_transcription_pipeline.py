@@ -203,7 +203,7 @@ class TestBuildJsonlRecord:
 # ---------------------------------------------------------------------------
 
 class TestWriteOutputFromJsonl:
-    @patch("modules.core.transcription_pipeline.postprocess_transcription")
+    @patch("modules.processing.output_writer.postprocess_transcription")
     @patch("modules.core.transcription_pipeline.read_jsonl_records")
     @patch("modules.core.transcription_pipeline.extract_transcription_records")
     def test_writes_output_file(self, mock_extract, mock_read, mock_pp, tmp_path):
@@ -299,7 +299,7 @@ class TestRunTranscriptionPipeline:
                 (str(img), "page.png", "text", None, 0)
             ],
         ), patch(
-            "modules.core.transcription_pipeline.postprocess_transcription",
+            "modules.processing.output_writer.postprocess_transcription",
             return_value="final text",
         ):
             await run_transcription_pipeline(

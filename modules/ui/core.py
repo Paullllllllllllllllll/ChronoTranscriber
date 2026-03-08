@@ -56,6 +56,7 @@ class UserConfiguration:
     auto_selector: Optional["AutoSelector"] = None
     resume_mode: str = "skip"
     page_range: Optional["PageRange"] = None
+    output_format: str = "txt"
 
     def __post_init__(self) -> None:
         if self.selected_items is None:

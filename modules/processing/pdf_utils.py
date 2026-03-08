@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 import fitz
@@ -15,6 +16,25 @@ from modules.processing.image_utils import ImageProcessor
 from modules.core.safe_paths import create_safe_directory_name, create_safe_filename
 
 logger = logging.getLogger(__name__)
+
+
+def _get_effective_dpi(page: "fitz.Page", dpi: int, max_pixels: int) -> int:
+    """Return DPI reduced so the rendered page stays within max_pixels, or dpi unchanged."""
+    if max_pixels <= 0:
+        return dpi
+    rect = page.rect
+    pixels_at_dpi = (rect.width / 72 * dpi) * (rect.height / 72 * dpi)
+    if pixels_at_dpi <= max_pixels:
+        return dpi
+    effective = max(1, int(dpi * math.sqrt(max_pixels / pixels_at_dpi)))
+    logger.info(
+        "Page: %.0f MP at %d DPI exceeds limit (%.0f MP); reducing to %d DPI",
+        pixels_at_dpi / 1e6,
+        dpi,
+        max_pixels / 1e6,
+        effective,
+    )
+    return effective
 
 
 class PDFProcessor:
@@ -70,19 +90,24 @@ class PDFProcessor:
             dpi (int): DPI for rendering pages.
         """
         output_dir.mkdir(parents=True, exist_ok=True)
-        # Load JPEG quality from config (fallback to 95)
+        # Load JPEG quality and pixel budget from config
         try:
-            img_cfg = get_config_service().get_image_processing_config().get('api_image_processing', {})
+            full_img_cfg = get_config_service().get_image_processing_config()
+            img_cfg = full_img_cfg.get('api_image_processing', {})
             jpeg_quality = int(img_cfg.get('jpeg_quality', 95))
+            max_pixels = int(full_img_cfg.get('max_pixels_per_page', 0))
         except Exception:
             jpeg_quality = 95
+            max_pixels = 0
         try:
-            await asyncio.to_thread(self._extract_images_sync, output_dir, dpi, jpeg_quality)
+            await asyncio.to_thread(self._extract_images_sync, output_dir, dpi, jpeg_quality, max_pixels)
         except Exception as e:
             logger.error(f"Failed to extract images from PDF: {self.pdf_path}, {e}")
             raise
 
-    def _extract_images_sync(self, output_dir: Path, dpi: int, jpeg_quality: int) -> None:
+    def _extract_images_sync(
+        self, output_dir: Path, dpi: int, jpeg_quality: int, max_pixels: int = 0
+    ) -> None:
         """
         Synchronously extract images from the PDF with JPEG compression.
         """
@@ -90,7 +115,8 @@ class PDFProcessor:
             with fitz.open(self.pdf_path) as doc:
                 for page_num, page in enumerate(doc, start=1):
                     try:
-                        mat = fitz.Matrix(dpi / 72, dpi / 72)
+                        effective_dpi = _get_effective_dpi(page, dpi, max_pixels)
+                        mat = fitz.Matrix(effective_dpi / 72, effective_dpi / 72)
                         pix = page.get_pixmap(matrix=mat, alpha=False)
                         # Change format from PNG to JPEG with quality=85
                         image_path = output_dir / f"{self.pdf_path.stem}_page_{page_num}.jpg"
@@ -135,6 +161,10 @@ class PDFProcessor:
             pages_to_process = page_indices if page_indices is not None else list(range(self.doc.page_count))
 
             # Process each page directly
+            max_pixels = int(
+                get_config_service().get_image_processing_config().get('max_pixels_per_page', 0)
+            )
+
             for page_num in pages_to_process:
                 try:
                     # Get the page
@@ -143,8 +173,9 @@ class PDFProcessor:
                     # Create output path for processed image
                     processed_path = preprocessed_folder / f"page_{page_num + 1:04d}_pre_processed.jpg"
 
-                    # Render page to pixmap at target DPI
-                    pix = page.get_pixmap(matrix=fitz.Matrix(target_dpi / 72, target_dpi / 72))
+                    # Render page to pixmap at target DPI (with optional pixel-budget capping)
+                    effective_dpi = _get_effective_dpi(page, target_dpi, max_pixels)
+                    pix = page.get_pixmap(matrix=fitz.Matrix(effective_dpi / 72, effective_dpi / 72))
 
                     # Convert pixmap to PIL Image
                     img_data = pix.samples
@@ -229,6 +260,7 @@ class PDFProcessor:
             preproc_cfg = tip_cfg.get('preprocessing', {})
             output_format = str(preproc_cfg.get('output_format', 'png')).lower()
             embed_dpi = bool(preproc_cfg.get('embed_dpi_metadata', True))
+            max_pixels = int(img_cfg.get('max_pixels_per_page', 0))
             # Concurrency settings
             conc_cfg = config_service.get_concurrency_config()
             img_conc = (conc_cfg.get('concurrency', {})
@@ -256,6 +288,7 @@ class PDFProcessor:
                         out_path,
                         preproc_cfg,
                         embed_dpi,
+                        max_pixels,
                     )
 
             tasks = [bound_worker(pg, op) for pg, op in zip(pages, out_paths)]
@@ -278,8 +311,15 @@ class PDFProcessor:
             return []
 
     @staticmethod
-    def _process_single_page_tesseract(pdf_path: Path, page_index: int, target_dpi: int,
-                                       out_path: Path, tess_cfg: Dict[str, Any], embed_dpi: bool) -> bool:
+    def _process_single_page_tesseract(
+        pdf_path: Path,
+        page_index: int,
+        target_dpi: int,
+        out_path: Path,
+        tess_cfg: Dict[str, Any],
+        embed_dpi: bool,
+        max_pixels: int = 0,
+    ) -> bool:
         """
         Thread worker: open PDF, render a single page, preprocess for Tesseract, and write output.
         Returns True on success.
@@ -288,7 +328,8 @@ class PDFProcessor:
             # Open a local document instance to avoid PyMuPDF thread-safety issues
             with fitz.open(pdf_path) as doc:
                 page = doc[page_index]
-                pix = page.get_pixmap(matrix=fitz.Matrix(target_dpi / 72, target_dpi / 72), alpha=False)
+                effective_dpi = _get_effective_dpi(page, target_dpi, max_pixels)
+                pix = page.get_pixmap(matrix=fitz.Matrix(effective_dpi / 72, effective_dpi / 72), alpha=False)
                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
             processed_img, _diag = ImageProcessor.preprocess_for_tesseract(img, tess_cfg)

@@ -8,7 +8,6 @@ Submodules:
 - mode_selector: Dual-mode execution (run_with_mode_detection, run_sync_with_mode_detection)
 - workflow: WorkflowManager for document processing
 - token_guard: Token limit management (check_and_wait_for_token_limit)
-- utils: Basic utilities (console_print, check_exit, safe_input)
 - auto_selector: Auto mode file detection
 - safe_paths: Windows MAX_PATH handling
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -11,8 +10,9 @@ from ebooklib import epub
 from lxml import html
 
 from modules.core.safe_paths import create_safe_directory_name, create_safe_filename
+from modules.infra.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 @dataclass(slots=True)

@@ -15,13 +15,14 @@ Based on postprocess_chronominer_ocr.py from MiscellaneousHelperScripts.
 
 from __future__ import annotations
 
-import logging
 import re
 import unicodedata
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
+from modules.infra.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 # High-plane icon glyphs sometimes seen in OCR outputs (e.g., Michelin guides),
 # used as bullets or check marks. Map these to a standard bullet character.

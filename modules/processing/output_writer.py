@@ -12,14 +12,14 @@ inlining their own file-writing logic.
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from modules.infra.logger import setup_logger
 from modules.processing.postprocess import postprocess_transcription
 from modules.processing.response_parsing import format_page_line
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 VALID_OUTPUT_FORMATS = {"txt", "md", "json"}
 

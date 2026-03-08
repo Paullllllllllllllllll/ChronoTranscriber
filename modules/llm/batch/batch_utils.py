@@ -6,13 +6,13 @@ Provides diagnostic tools and metadata extraction for batch job management.
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
+from modules.infra.logger import setup_logger
 from modules.llm.openai_sdk_utils import sdk_to_dict
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 def diagnose_batch_failure(batch_id: str, client: Any) -> str:

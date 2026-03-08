@@ -15,9 +15,10 @@ from typing import Any, Dict, List, Optional, Union
 
 from modules.config.constants import SUPPORTED_IMAGE_FORMATS
 from modules.config.service import get_config_service
+from modules.infra.logger import setup_logger
 from modules.llm.model_capabilities import Capabilities
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class InputTokensBelowThresholdError(Exception):
@@ -48,7 +49,8 @@ def load_max_retries() -> int:
         retry_cfg = trans_cfg.get("retry", {}) or {}
         attempts = int(retry_cfg.get("attempts", 5))
         return max(1, attempts)
-    except Exception:
+    except (KeyError, AttributeError, TypeError, ValueError) as e:
+        logger.debug("Could not load max_retries from config, using default: %s", e)
         return 5
 
 
@@ -66,7 +68,8 @@ def load_max_validation_retries() -> int:
         retry_cfg = trans_cfg.get("retry", {}) or {}
         attempts = int(retry_cfg.get("validation_attempts", 3))
         return max(1, attempts)
-    except Exception:
+    except (KeyError, AttributeError, TypeError, ValueError) as e:
+        logger.debug("Could not load max_validation_retries from config, using default: %s", e)
         return 3
 
 
@@ -83,7 +86,8 @@ def load_min_input_tokens() -> int:
         retry_cfg = trans_cfg.get("retry", {}) or {}
         value = int(retry_cfg.get("min_input_tokens", 500))
         return max(0, value)
-    except Exception:
+    except (KeyError, AttributeError, TypeError, ValueError) as e:
+        logger.debug("Could not load min_input_tokens from config, using default: %s", e)
         return 500
 
 
@@ -201,7 +205,8 @@ class BaseProvider(ABC):
         # Load prompt caching configuration
         try:
             caching_cfg = get_config_service().get_prompt_caching_config()
-        except Exception:
+        except (KeyError, AttributeError, TypeError, ValueError) as e:
+            logger.debug("Could not load prompt caching config, disabling: %s", e)
             caching_cfg = {"enabled": False}
         self._caching_enabled: bool = bool(caching_cfg.get("enabled", False))
         self._caching_config: Dict[str, Any] = caching_cfg

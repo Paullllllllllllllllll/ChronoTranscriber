@@ -18,19 +18,19 @@ from __future__ import annotations
 
 import base64
 import json
-import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from modules.llm.model_capabilities import detect_capabilities
-from modules.ui import print_info, print_warning, print_error, print_success
 from modules.config.config_loader import PROJECT_ROOT
-from modules.config.service import get_config_service
-from modules.llm.structured_outputs import build_structured_text_format
-from modules.llm.prompt_utils import render_prompt_with_schema, inject_additional_context, prepare_prompt_with_context
 from modules.config.constants import SUPPORTED_IMAGE_FORMATS
+from modules.config.service import get_config_service
+from modules.infra.logger import setup_logger
+from modules.llm.model_capabilities import detect_capabilities
+from modules.llm.prompt_utils import render_prompt_with_schema, inject_additional_context, prepare_prompt_with_context
+from modules.llm.structured_outputs import build_structured_text_format
+from modules.ui import print_info, print_warning, print_error, print_success
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 # Centralized batch chunk size default and getter (configurable via concurrency_config.yaml)
@@ -59,9 +59,9 @@ def get_batch_chunk_size() -> int:
             if ival < 1:
                 return DEFAULT_BATCH_CHUNK_SIZE
             return ival
-        except Exception:
+        except (ValueError, TypeError):
             return DEFAULT_BATCH_CHUNK_SIZE
-    except Exception:
+    except (KeyError, AttributeError, TypeError):
         return DEFAULT_BATCH_CHUNK_SIZE
 
 
@@ -158,7 +158,7 @@ def _build_responses_body_for_image(
             .get("transcription", {})
             .get("service_tier")
         )
-    except Exception:
+    except (KeyError, AttributeError, TypeError):
         st = None
     # Fallback: use model_config if service_tier not in concurrency_config
     effective_service_tier = st if st is not None else tm.get("service_tier")
@@ -217,8 +217,8 @@ def _build_responses_body_for_image(
             retention = openai_cfg.get("prompt_cache_retention") if isinstance(openai_cfg, dict) else None
             if retention:
                 body["prompt_cache_retention"] = retention
-    except Exception:
-        pass
+    except (KeyError, AttributeError, TypeError):
+        logger.debug("Could not load prompt caching config for batch request; skipping.")
 
     return body
 
@@ -246,7 +246,7 @@ def create_batch_request_line(
         try:
             pcfg = get_config_service().get_paths_config()
             general = pcfg.get("general", {})
-        except Exception:
+        except (KeyError, AttributeError, TypeError):
             general = {}
 
         if system_prompt_path is None:
@@ -289,7 +289,7 @@ def create_batch_request_line(
         inject_schema_into_prompt = bool(
             model_config.get("inject_schema_into_prompt", True)
         )
-    except Exception:
+    except (AttributeError, TypeError):
         inject_schema_into_prompt = True
     if inject_schema_into_prompt:
         system_prompt = render_prompt_with_schema(system_prompt, loaded_schema)
@@ -299,7 +299,7 @@ def create_batch_request_line(
     if additional_context_path is not None and additional_context_path.exists():
         try:
             additional_context = additional_context_path.read_text(encoding="utf-8").strip()
-        except Exception as e:
+        except (OSError, PermissionError, UnicodeDecodeError) as e:
             logger.warning(
                 "Failed to load additional context from %s: %s",
                 additional_context_path,
@@ -338,7 +338,7 @@ def create_batch_request_line(
             llm_detail = "auto"
         else:
             llm_detail = "auto"
-    except Exception:
+    except (KeyError, AttributeError, TypeError):
         llm_detail = "auto"
 
     # Build Responses body (typed input + text.format where supported)
@@ -514,7 +514,7 @@ def process_batch_transcription(
                     print_error(f"Failed to submit batch file {batch_file}: {exc}")
                 try:
                     batch_file.unlink()
-                except Exception:
+                except OSError:
                     logger.warning(
                         "Could not delete temporary batch file: %s", batch_file
                     )
@@ -544,7 +544,7 @@ def process_batch_transcription(
                 print_error(f"Failed to submit batch file {batch_file}: {exc}")
             try:
                 batch_file.unlink()
-            except Exception:
+            except OSError:
                 logger.warning("Could not delete temporary batch file: %s", batch_file)
             batch_index += 1
     total_parts = attempted_parts

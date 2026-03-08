@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any, Dict, List, Optional
 import re
 
-logger = logging.getLogger(__name__)
+from modules.infra.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 # --- Global placeholder detection (exported) ---
 # Allow optional leading header like "image_name:" before the bracket
@@ -83,7 +84,7 @@ def _try_parse_json(text: str) -> Optional[Dict[str, Any]]:
     try:
         result = json.loads(text)
         return result if isinstance(result, dict) else None
-    except Exception:
+    except (json.JSONDecodeError, ValueError, TypeError):
         return None
 
 
@@ -164,7 +165,7 @@ def extract_transcribed_text(result: Dict[str, Any], image_name: str = "") -> st
 
     # Case 3: Legacy Chat Completions object
     choices = result.get("choices")
-    if choices and isinstance(choices, list) and len(choices) > 0:
+    if choices and isinstance(choices, list):
         message = choices[0].get("message", {})
         # Structured (message.parsed)
         if "parsed" in message and message["parsed"]:
@@ -185,7 +186,7 @@ def extract_transcribed_text(result: Dict[str, Any], image_name: str = "") -> st
                         return "[Transcription not possible]"
                     transcription_value = parsed_obj.get("transcription")
                     return transcription_value.strip() if transcription_value is not None else ""
-                except Exception as exc:
+                except (json.JSONDecodeError, ValueError, TypeError) as exc:
                     logger.error("Error parsing structured output for %s: %s", image_name, exc)
                     return ""
         # Plain content
@@ -232,7 +233,7 @@ def process_batch_output(file_content: bytes) -> List[str]:
         try:
             items = json.loads(content)
             lines = [json.dumps(item) for item in items]
-        except Exception:
+        except (json.JSONDecodeError, ValueError, TypeError):
             lines = content.splitlines()
     else:
         lines = content.splitlines()
@@ -243,7 +244,7 @@ def process_batch_output(file_content: bytes) -> List[str]:
             continue
         try:
             obj = json.loads(line)
-        except Exception as exc:
+        except (json.JSONDecodeError, ValueError, TypeError) as exc:
             logger.exception("Error parsing line as JSON: %s", exc)
             continue
 

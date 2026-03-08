@@ -5,14 +5,14 @@ Creates provider instances based on configuration or explicit parameters.
 
 from __future__ import annotations
 
-import logging
 import os
 from enum import Enum
 from typing import Any, Dict, Optional, Type
 
+from modules.infra.logger import setup_logger
 from modules.llm.providers.base import BaseProvider
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class ProviderType(str, Enum):
@@ -194,7 +194,7 @@ def get_provider(
             if "reasoning_config" not in kwargs and tm.get("reasoning") is not None:
                 kwargs["reasoning_config"] = tm.get("reasoning")
                     
-        except Exception as e:
+        except (KeyError, AttributeError, TypeError, ValueError) as e:
             logger.warning(f"Could not load config defaults: {e}")
             if model is None:
                 model = "gpt-4o"
@@ -266,7 +266,8 @@ def get_provider_for_transcription(
             .get("transcription", {})
             .get("service_tier")
         )
-    except Exception:
+    except (KeyError, AttributeError, TypeError, ValueError) as e:
+        logger.debug("Could not load service_tier from config: %s", e)
         service_tier = None
     
     # Build kwargs

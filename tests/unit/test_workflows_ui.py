@@ -24,23 +24,23 @@ class TestDisplayProcessingSummaryConcurrencyConfig:
 
     @pytest.mark.unit
     def test_image_processing_key_not_accessed_in_source(self):
-        """Source of display_processing_summary must not read 'image_processing' from concurrency_config."""
+        """Concurrency helper must not read 'image_processing' from concurrency_config."""
         from modules.ui import workflows as wf_module
 
-        source = inspect.getsource(wf_module.WorkflowUI.display_processing_summary)
+        source = inspect.getsource(wf_module.WorkflowUI._build_concurrency_config_lines)
         assert 'concurrency_config.get("image_processing"' not in source, (
-            "display_processing_summary still contains the non-existent "
+            "_build_concurrency_config_lines still contains the non-existent "
             "'image_processing' key access on concurrency_config"
         )
 
     @pytest.mark.unit
     def test_concurrency_path_reads_from_correct_key(self):
-        """display_processing_summary reads API concurrency from concurrency.transcription.*."""
+        """Concurrency helper reads API concurrency from concurrency.transcription.*."""
         from modules.ui import workflows as wf_module
 
-        source = inspect.getsource(wf_module.WorkflowUI.display_processing_summary)
+        source = inspect.getsource(wf_module.WorkflowUI._build_concurrency_config_lines)
         assert 'concurrency_config.get("concurrency", {}).get("transcription"' in source, (
-            "display_processing_summary is not reading from the correct "
+            "_build_concurrency_config_lines is not reading from the correct "
             "concurrency.transcription path"
         )
 

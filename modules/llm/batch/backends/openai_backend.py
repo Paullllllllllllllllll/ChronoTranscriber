@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import base64
 import json
-import logging
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
+from modules.config.constants import SUPPORTED_IMAGE_FORMATS
+from modules.config.service import get_config_service
+from modules.infra.logger import setup_logger
 from modules.llm.batch.backends.base import (
     BatchBackend,
     BatchHandle,
@@ -20,12 +22,10 @@ from modules.llm.batch.backends.base import (
     BatchStatusInfo,
 )
 from modules.llm.model_capabilities import detect_capabilities
-from modules.llm.structured_outputs import build_structured_text_format
 from modules.llm.prompt_utils import prepare_prompt_with_context
-from modules.config.constants import SUPPORTED_IMAGE_FORMATS
-from modules.config.service import get_config_service
+from modules.llm.structured_outputs import build_structured_text_format
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 # Limits for OpenAI Batch API
 MAX_BATCH_REQUESTS = 50000
@@ -102,7 +102,7 @@ def _build_responses_body(
             .get("transcription", {})
             .get("service_tier")
         )
-    except Exception:
+    except (KeyError, AttributeError, TypeError):
         st = None
     effective_service_tier = st if st is not None else tm.get("service_tier")
 
@@ -204,7 +204,7 @@ class OpenAIBatchBackend(BatchBackend):
             image_cfg = get_config_service().get_image_processing_config().get("api_image_processing", {})
             raw_detail = str(image_cfg.get("llm_detail", "high")).lower().strip()
             llm_detail = raw_detail if raw_detail in ("low", "high") else None
-        except Exception:
+        except (KeyError, AttributeError, TypeError):
             llm_detail = None
 
         # Build JSONL content
@@ -276,8 +276,8 @@ class OpenAIBatchBackend(BatchBackend):
             # Cleanup temp file
             try:
                 temp_path.unlink()
-            except Exception:
-                pass
+            except OSError as e:
+                logger.debug("Failed to remove temp file %s: %s", temp_path, e)
 
     def get_status(self, handle: BatchHandle) -> BatchStatusInfo:
         """Get status of an OpenAI batch job."""

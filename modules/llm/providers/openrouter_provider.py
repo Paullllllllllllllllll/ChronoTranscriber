@@ -21,7 +21,6 @@ LangChain handles:
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -34,10 +33,11 @@ from modules.llm.providers.base import (
     TranscriptionResult,
     load_max_retries,
 )
+from modules.infra.logger import setup_logger
 from modules.llm.model_capabilities import Capabilities, detect_capabilities
 from modules.config.service import get_config_service
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 # OpenRouter API base URL
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -137,8 +137,10 @@ class OpenRouterProvider(BaseProvider):
             if max_reasoning_tokens is not None:
                 try:
                     reasoning_payload["max_tokens"] = int(max_reasoning_tokens)
-                except Exception:
-                    pass
+                except (TypeError, ValueError) as e:
+                    logger.debug(
+                        "Could not convert reasoning max_tokens to int, skipping: %s", e
+                    )
 
             exclude = reasoning_config.get("exclude")
             if exclude is not None:

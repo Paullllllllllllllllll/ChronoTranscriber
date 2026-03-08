@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import math
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
@@ -11,11 +10,12 @@ import asyncio
 from PIL import Image
 
 from modules.config.service import get_config_service
+from modules.infra.logger import setup_logger
 from modules.processing.model_utils import detect_model_type, get_image_config_section_name
 from modules.processing.image_utils import ImageProcessor
 from modules.core.safe_paths import create_safe_directory_name, create_safe_filename
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 def _get_effective_dpi(page: "fitz.Page", dpi: int, max_pixels: int) -> int:

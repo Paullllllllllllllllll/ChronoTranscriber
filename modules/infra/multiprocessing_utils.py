@@ -5,11 +5,12 @@ Provides process pool management for parallel execution of functions.
 
 from __future__ import annotations
 
-import logging
 from multiprocessing import Pool, cpu_count
 from typing import Callable, List, Any, Tuple
 
-logger = logging.getLogger(__name__)
+from modules.infra.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 def wrapper(func: Callable[..., Any], args: Tuple[Any, ...]) -> Any:

@@ -9,18 +9,18 @@ This module provides a high-level transcription interface that:
 from __future__ import annotations
 
 import json
-import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, Optional
 
 from modules.config.config_loader import PROJECT_ROOT
 from modules.config.service import get_config_service
+from modules.infra.logger import setup_logger
 from modules.llm.providers import BaseProvider, get_provider
 from modules.llm.providers.base import TranscriptionResult
 from modules.llm.prompt_utils import render_prompt_with_schema, inject_additional_context
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class LangChainTranscriber:

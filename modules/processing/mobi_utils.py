@@ -6,7 +6,6 @@ by unpacking them to intermediate formats (EPUB/HTML) and extracting text.
 
 from __future__ import annotations
 
-import logging
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,9 +15,10 @@ import mobi
 from lxml import html
 
 from modules.core.safe_paths import create_safe_directory_name, create_safe_filename
+from modules.infra.logger import setup_logger
 from modules.processing.epub_utils import EPUBProcessor, EPUBTextExtraction
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 @dataclass(slots=True)

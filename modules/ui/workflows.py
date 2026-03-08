@@ -756,52 +756,20 @@ class WorkflowUI:
         return False
     
     @staticmethod
-    def display_processing_summary(config: UserConfiguration) -> bool:
-        """Display processing summary and confirm.
-        
-        Returns:
-            True if user confirms, False if they want to go back
+    def _build_processing_config_lines(
+        config: UserConfiguration,
+        is_auto: bool,
+        decisions: List[Any],
+        has_gpt: bool,
+    ) -> None:
+        """Display the 'Processing Configuration' section.
+
+        Shows document type, transcription method, schema, context,
+        and page range details.
         """
-        # Load configs for display
-        from modules.config.service import get_config_service
-        config_service = get_config_service()
-        model_config = config_service.get_model_config()
-        paths_config = config_service.get_paths_config()
-        concurrency_config = config_service.get_concurrency_config()
-        
-        is_auto = config.processing_type == "auto"
-        decisions = config.auto_decisions or []
-        
-        # Determine whether any GPT processing will occur
-        if is_auto:
-            has_gpt = any(d.method == "gpt" for d in decisions)
-        else:
-            has_gpt = config.transcription_method == "gpt"
-        
-        print_header("PROCESSING SUMMARY", "Review your selections before processing")
-        
-        # === Item count ===
-        if is_auto:
-            ui_print(f"  Ready to process ", PromptStyle.INFO, end="")
-            ui_print(f"{len(decisions)}", PromptStyle.HIGHLIGHT, end="")
-            ui_print(f" file(s) in auto mode\n", PromptStyle.INFO)
-        else:
-            if config.processing_type == "images":
-                item_type = "image folder(s)"
-            elif config.processing_type == "pdfs":
-                item_type = "PDF file(s)"
-            elif config.processing_type == "epubs":
-                item_type = "EPUB file(s)"
-            else:
-                item_type = "file(s)"
-            ui_print(f"  Ready to process ", PromptStyle.INFO, end="")
-            ui_print(f"{len(config.selected_items or [])}", PromptStyle.HIGHLIGHT, end="")
-            ui_print(f" {item_type}\n", PromptStyle.INFO)
-        
-        # === Processing Configuration ===
         ui_print("  Processing Configuration:", PromptStyle.HIGHLIGHT)
         print_separator(PromptStyle.LIGHT_LINE, 80)
-        
+
         if is_auto:
             ui_print(f"    • Document type: Auto (mixed)", PromptStyle.INFO)
             # Show method breakdown
@@ -816,7 +784,7 @@ class WorkflowUI:
             if config.transcription_method == "gpt":
                 mode = "Batch (asynchronous)" if config.use_batch_processing else "Synchronous"
                 ui_print(f"    • Processing mode: {mode}", PromptStyle.INFO)
-        
+
         # Schema and context (shown when GPT is involved)
         if has_gpt:
             if config.selected_schema_name:
@@ -832,71 +800,93 @@ class WorkflowUI:
         # Show page range if configured
         if config.page_range is not None:
             ui_print(f"    • Page range: {config.page_range.describe()}", PromptStyle.INFO)
-        
+
         print_separator(PromptStyle.LIGHT_LINE, 80)
-        
-        # === Model Configuration (when GPT is involved) ===
-        if has_gpt:
-            ui_print("\n  Model Configuration:", PromptStyle.HIGHLIGHT)
-            print_separator(PromptStyle.LIGHT_LINE, 80)
-            
-            tm = model_config.get("transcription_model", {})
-            provider = tm.get("provider", "openai")
-            model_name = tm.get("name", "gpt-4o")
-            ui_print(f"    • Provider: {provider.upper()}", PromptStyle.INFO)
-            ui_print(f"    • Model: {model_name}", PromptStyle.INFO)
-            
-            # Show key model parameters
-            temperature = tm.get("temperature")
-            max_tokens = tm.get("max_output_tokens") or tm.get("max_tokens", 20480)
-            if temperature is not None:
-                ui_print(f"      - Temperature: {temperature}", PromptStyle.DIM)
-            ui_print(f"      - Max output tokens: {max_tokens:,}", PromptStyle.DIM)
-            
-            # Show reasoning configuration if present
-            reasoning = tm.get("reasoning", {})
-            if reasoning:
-                effort = reasoning.get("effort", "medium")
-                ui_print(f"      - Reasoning effort: {effort}", PromptStyle.DIM)
-            
-            # Show text verbosity if present (GPT-5 specific)
-            text_config = tm.get("text", {})
-            if text_config:
-                verbosity = text_config.get("verbosity", "medium")
-                ui_print(f"      - Text verbosity: {verbosity}", PromptStyle.DIM)
-            
-            print_separator(PromptStyle.LIGHT_LINE, 80)
-            
-            # === Concurrency Configuration ===
-            ui_print("\n  Concurrency Configuration:", PromptStyle.HIGHLIGHT)
-            print_separator(PromptStyle.LIGHT_LINE, 80)
-            
-            # API request concurrency
-            trans_cfg = concurrency_config.get("concurrency", {}).get("transcription", {})
-            trans_concurrency = trans_cfg.get("concurrency_limit", 5)
-            trans_service_tier = trans_cfg.get("service_tier", "default")
-            ui_print(f"    • Transcription API: {trans_concurrency} concurrent requests", PromptStyle.INFO)
-            ui_print(f"      - Service tier: {trans_service_tier}", PromptStyle.DIM)
-            
-            # Request timeout
-            request_timeout = trans_cfg.get("request_timeout")
-            if request_timeout is not None:
-                ui_print(f"      - Request timeout: {request_timeout} s", PromptStyle.DIM)
-            
-            # Retry configuration
-            retry_config = trans_cfg.get("retry", {})
-            max_attempts = retry_config.get("attempts", 5)
-            ui_print(f"      - Max retry attempts: {max_attempts}", PromptStyle.DIM)
-            
-            # Daily token limit
-            daily_limit_cfg = concurrency_config.get("daily_token_limit", {})
-            if daily_limit_cfg.get("enabled", False):
-                daily_tokens = daily_limit_cfg.get("daily_tokens", 0)
-                ui_print(f"    • Daily token limit: {daily_tokens:,}", PromptStyle.INFO)
-            
-            print_separator(PromptStyle.LIGHT_LINE, 80)
-        
-        # === Output Location ===
+
+    @staticmethod
+    def _build_model_config_lines(
+        model_config: Dict[str, Any],
+        concurrency_config: Dict[str, Any],
+    ) -> None:
+        """Display the 'Model Configuration' section.
+
+        Shows provider, model name, temperature, max output tokens,
+        reasoning effort, and text verbosity.
+        """
+        ui_print("\n  Model Configuration:", PromptStyle.HIGHLIGHT)
+        print_separator(PromptStyle.LIGHT_LINE, 80)
+
+        tm = model_config.get("transcription_model", {})
+        provider = tm.get("provider", "openai")
+        model_name = tm.get("name", "gpt-4o")
+        ui_print(f"    • Provider: {provider.upper()}", PromptStyle.INFO)
+        ui_print(f"    • Model: {model_name}", PromptStyle.INFO)
+
+        # Show key model parameters
+        temperature = tm.get("temperature")
+        max_tokens = tm.get("max_output_tokens") or tm.get("max_tokens", 20480)
+        if temperature is not None:
+            ui_print(f"      - Temperature: {temperature}", PromptStyle.DIM)
+        ui_print(f"      - Max output tokens: {max_tokens:,}", PromptStyle.DIM)
+
+        # Show reasoning configuration if present
+        reasoning = tm.get("reasoning", {})
+        if reasoning:
+            effort = reasoning.get("effort", "medium")
+            ui_print(f"      - Reasoning effort: {effort}", PromptStyle.DIM)
+
+        # Show text verbosity if present (GPT-5 specific)
+        text_config = tm.get("text", {})
+        if text_config:
+            verbosity = text_config.get("verbosity", "medium")
+            ui_print(f"      - Text verbosity: {verbosity}", PromptStyle.DIM)
+
+        print_separator(PromptStyle.LIGHT_LINE, 80)
+
+    @staticmethod
+    def _build_concurrency_config_lines(
+        concurrency_config: Dict[str, Any],
+    ) -> None:
+        """Display the 'Concurrency Configuration' section.
+
+        Shows API concurrency limit, service tier, request timeout,
+        retry attempts, and daily token limits.
+        """
+        ui_print("\n  Concurrency Configuration:", PromptStyle.HIGHLIGHT)
+        print_separator(PromptStyle.LIGHT_LINE, 80)
+
+        # API request concurrency
+        trans_cfg = concurrency_config.get("concurrency", {}).get("transcription", {})
+        trans_concurrency = trans_cfg.get("concurrency_limit", 5)
+        trans_service_tier = trans_cfg.get("service_tier", "default")
+        ui_print(f"    • Transcription API: {trans_concurrency} concurrent requests", PromptStyle.INFO)
+        ui_print(f"      - Service tier: {trans_service_tier}", PromptStyle.DIM)
+
+        # Request timeout
+        request_timeout = trans_cfg.get("request_timeout")
+        if request_timeout is not None:
+            ui_print(f"      - Request timeout: {request_timeout} s", PromptStyle.DIM)
+
+        # Retry configuration
+        retry_config = trans_cfg.get("retry", {})
+        max_attempts = retry_config.get("attempts", 5)
+        ui_print(f"      - Max retry attempts: {max_attempts}", PromptStyle.DIM)
+
+        # Daily token limit
+        daily_limit_cfg = concurrency_config.get("daily_token_limit", {})
+        if daily_limit_cfg.get("enabled", False):
+            daily_tokens = daily_limit_cfg.get("daily_tokens", 0)
+            ui_print(f"    • Daily token limit: {daily_tokens:,}", PromptStyle.INFO)
+
+        print_separator(PromptStyle.LIGHT_LINE, 80)
+
+    @staticmethod
+    def _build_output_location_lines(
+        config: UserConfiguration,
+        paths_config: Dict[str, Any],
+        is_auto: bool,
+    ) -> None:
+        """Display the 'Output Location' section."""
         ui_print("\n  Output Location:", PromptStyle.HIGHLIGHT)
         print_separator(PromptStyle.LIGHT_LINE, 80)
         use_input_as_output = paths_config.get('general', {}).get('input_paths_is_output_path', False)
@@ -916,27 +906,26 @@ class WorkflowUI:
                 output_dir = "configured output directory"
             ui_print(f"    • Output directory: {output_dir}", PromptStyle.INFO)
         print_separator(PromptStyle.LIGHT_LINE, 80)
-        
-        # === Selected Items ===
-        if is_auto:
-            # Show first 5 files from auto decisions
-            ui_print("\n  Selected Files (first 5 shown):", PromptStyle.HIGHLIGHT)
-            for i, decision in enumerate(decisions[:5], 1):
-                ui_print(f"    {i}. {decision.file_path.name}", PromptStyle.DIM)
-            if len(decisions) > 5:
-                ui_print(f"    ... and {len(decisions) - 5} more", PromptStyle.DIM)
-            selected_file_paths = [d.file_path for d in decisions]
-        else:
-            ui_print("\n  Selected Items (first 5 shown):", PromptStyle.HIGHLIGHT)
-            selected = config.selected_items or []
-            for i, item in enumerate(selected[:5], 1):
-                ui_print(f"    {i}. {item.name}", PromptStyle.DIM)
-            if len(selected) > 5:
-                ui_print(f"    ... and {len(selected) - 5} more", PromptStyle.DIM)
-            selected_file_paths = list(selected)
-        
-        # === Resume Information ===
+
+    @staticmethod
+    def _build_resume_info_lines(
+        config: UserConfiguration,
+        paths_config: Dict[str, Any],
+        selected_file_paths: List[Path],
+        is_auto: bool,
+    ) -> Tuple[bool, bool]:
+        """Display the 'Resume Information' section.
+
+        Handles the special case where all items are already processed
+        and prompts the user to force-reprocess.
+
+        Returns:
+            A ``(should_return, return_value)`` tuple.  When
+            *should_return* is ``True`` the caller must return
+            *return_value* immediately.
+        """
         from modules.core.resume import ResumeChecker, ProcessingState
+        use_input_as_output = paths_config.get('general', {}).get('input_paths_is_output_path', False)
         resume_checker = ResumeChecker(
             resume_mode=config.resume_mode,
             paths_config=paths_config,
@@ -977,20 +966,101 @@ class WorkflowUI:
                 )
                 if result.action == NavigationAction.CONTINUE and result.value:
                     config.resume_mode = "overwrite"
-                    return True
-                return False
-        
+                    return (True, True)
+                return (True, False)
+
+        return (False, False)
+
+    @staticmethod
+    def display_processing_summary(config: UserConfiguration) -> bool:
+        """Display processing summary and confirm.
+
+        Returns:
+            True if user confirms, False if they want to go back
+        """
+        # Load configs for display
+        from modules.config.service import get_config_service
+        config_service = get_config_service()
+        model_config = config_service.get_model_config()
+        paths_config = config_service.get_paths_config()
+        concurrency_config = config_service.get_concurrency_config()
+
+        is_auto = config.processing_type == "auto"
+        decisions = config.auto_decisions or []
+
+        # Determine whether any GPT processing will occur
+        if is_auto:
+            has_gpt = any(d.method == "gpt" for d in decisions)
+        else:
+            has_gpt = config.transcription_method == "gpt"
+
+        print_header("PROCESSING SUMMARY", "Review your selections before processing")
+
+        # === Item count ===
+        if is_auto:
+            ui_print(f"  Ready to process ", PromptStyle.INFO, end="")
+            ui_print(f"{len(decisions)}", PromptStyle.HIGHLIGHT, end="")
+            ui_print(f" file(s) in auto mode\n", PromptStyle.INFO)
+        else:
+            if config.processing_type == "images":
+                item_type = "image folder(s)"
+            elif config.processing_type == "pdfs":
+                item_type = "PDF file(s)"
+            elif config.processing_type == "epubs":
+                item_type = "EPUB file(s)"
+            else:
+                item_type = "file(s)"
+            ui_print(f"  Ready to process ", PromptStyle.INFO, end="")
+            ui_print(f"{len(config.selected_items or [])}", PromptStyle.HIGHLIGHT, end="")
+            ui_print(f" {item_type}\n", PromptStyle.INFO)
+
+        # === Processing Configuration ===
+        WorkflowUI._build_processing_config_lines(config, is_auto, decisions, has_gpt)
+
+        # === Model & Concurrency Configuration (when GPT is involved) ===
+        if has_gpt:
+            WorkflowUI._build_model_config_lines(model_config, concurrency_config)
+            WorkflowUI._build_concurrency_config_lines(concurrency_config)
+
+        # === Output Location ===
+        WorkflowUI._build_output_location_lines(config, paths_config, is_auto)
+
+        # === Selected Items ===
+        if is_auto:
+            # Show first 5 files from auto decisions
+            ui_print("\n  Selected Files (first 5 shown):", PromptStyle.HIGHLIGHT)
+            for i, decision in enumerate(decisions[:5], 1):
+                ui_print(f"    {i}. {decision.file_path.name}", PromptStyle.DIM)
+            if len(decisions) > 5:
+                ui_print(f"    ... and {len(decisions) - 5} more", PromptStyle.DIM)
+            selected_file_paths = [d.file_path for d in decisions]
+        else:
+            ui_print("\n  Selected Items (first 5 shown):", PromptStyle.HIGHLIGHT)
+            selected = config.selected_items or []
+            for i, item in enumerate(selected[:5], 1):
+                ui_print(f"    {i}. {item.name}", PromptStyle.DIM)
+            if len(selected) > 5:
+                ui_print(f"    ... and {len(selected) - 5} more", PromptStyle.DIM)
+            selected_file_paths = list(selected)
+
+        # === Resume Information ===
+        should_return, return_value = WorkflowUI._build_resume_info_lines(
+            config, paths_config, selected_file_paths, is_auto
+        )
+        if should_return:
+            return return_value
+
         ui_print("")
-        
+
         result = prompt_yes_no(
             "Proceed with processing?",
             default=True,
             allow_back=True
         )
-        
+
         if result.action == NavigationAction.CONTINUE:
             return bool(result.value)
-        
+
         return False
     
     @staticmethod

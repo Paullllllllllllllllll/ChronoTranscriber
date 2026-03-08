@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import base64
 import json
-import logging
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
+from modules.config.constants import SUPPORTED_IMAGE_FORMATS
+from modules.config.service import get_config_service
+from modules.infra.logger import setup_logger
 from modules.llm.batch.backends.base import (
     BatchBackend,
     BatchHandle,
@@ -21,10 +23,8 @@ from modules.llm.batch.backends.base import (
     BatchStatusInfo,
 )
 from modules.llm.prompt_utils import prepare_prompt_with_context
-from modules.config.constants import SUPPORTED_IMAGE_FORMATS
-from modules.config.service import get_config_service
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 # Limits for Anthropic Message Batches API
 MAX_BATCH_REQUESTS = 100000
@@ -101,7 +101,7 @@ class AnthropicBatchBackend(BatchBackend):
         # Determine whether to add cache_control to system parameter
         try:
             caching_cfg = get_config_service().get_prompt_caching_config()
-        except Exception:
+        except (KeyError, AttributeError, TypeError):
             caching_cfg = {"enabled": False}
         caching_enabled = bool(caching_cfg.get("enabled", False))
 

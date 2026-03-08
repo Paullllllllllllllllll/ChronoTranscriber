@@ -360,7 +360,7 @@ class TestLoadMaxRetries:
         from modules.llm.providers.base import load_max_retries
 
         with patch("modules.llm.providers.base.get_config_service",
-                   side_effect=RuntimeError("config unavailable")):
+                   side_effect=AttributeError("config unavailable")):
             result = load_max_retries()
 
         assert result == 5
@@ -1004,7 +1004,7 @@ class TestLoadMaxValidationRetries:
 
         with patch(
             "modules.llm.providers.base.get_config_service",
-            side_effect=RuntimeError("config unavailable"),
+            side_effect=AttributeError("config unavailable"),
         ):
             result = load_max_validation_retries()
 
@@ -1050,7 +1050,7 @@ class TestLoadMinInputTokens:
 
         with patch(
             "modules.llm.providers.base.get_config_service",
-            side_effect=RuntimeError("config unavailable"),
+            side_effect=AttributeError("config unavailable"),
         ):
             result = load_min_input_tokens()
 

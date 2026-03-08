@@ -5,12 +5,12 @@ Provides a unified way to get the appropriate batch backend for a given provider
 
 from __future__ import annotations
 
-import logging
 from typing import Optional
 
+from modules.infra.logger import setup_logger
 from modules.llm.batch.backends.base import BatchBackend
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 # Lazy-loaded backend instances (singletons)
 _backends: dict[str, BatchBackend] = {}
@@ -37,8 +37,8 @@ def get_batch_backend(provider: Optional[str] = None) -> BatchBackend:
             mc = get_config_service().get_model_config()
             tm = mc.get("transcription_model", {})
             provider = tm.get("provider")
-        except Exception:
-            pass
+        except (KeyError, AttributeError, TypeError, ValueError) as e:
+            logger.debug("Could not auto-detect provider from config: %s", e)
 
     if provider is None:
         raise ValueError(

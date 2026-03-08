@@ -30,7 +30,6 @@ Usage:
 from __future__ import annotations
 
 import json
-import logging
 import os
 import threading
 import time
@@ -39,8 +38,9 @@ from pathlib import Path
 from typing import Optional
 
 from modules.config.service import get_config_service
+from modules.infra.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 # Default path for token tracker state file
 _TOKEN_TRACKER_FILE = Path.cwd() / ".chronotranscriber_token_state.json"

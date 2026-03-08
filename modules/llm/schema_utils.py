@@ -7,13 +7,13 @@ structured outputs in transcription tasks.
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from modules.config.config_loader import PROJECT_ROOT
+from modules.infra.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 REQUIRED_PROPERTIES = {
     "image_analysis",

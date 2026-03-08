@@ -15,7 +15,6 @@ LangChain handles:
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -28,9 +27,10 @@ from modules.llm.providers.base import (
     TranscriptionResult,
     load_max_retries,
 )
+from modules.infra.logger import setup_logger
 from modules.llm.model_capabilities import Capabilities, detect_capabilities
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 def _transform_schema_for_anthropic(schema: Dict[str, Any]) -> Dict[str, Any]:

@@ -53,20 +53,18 @@ def __getattr__(name: str) -> Any:
         return list_schema_options
     
     if name in ("detect_capabilities", "detect_provider", "ensure_image_support",
-                 "Capabilities", "ProviderType"):
+                 "Capabilities"):
         from modules.llm.model_capabilities import (
             detect_capabilities,
             detect_provider,
             ensure_image_support,
             Capabilities,
-            ProviderType,
         )
         return {
             "detect_capabilities": detect_capabilities,
             "detect_provider": detect_provider,
             "ensure_image_support": ensure_image_support,
             "Capabilities": Capabilities,
-            "ProviderType": ProviderType,
         }[name]
     
     if name in ("resolve_context_for_file", "resolve_context_for_folder", 

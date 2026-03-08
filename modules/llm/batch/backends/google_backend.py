@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import base64
 import json
-import logging
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
+from modules.config.constants import SUPPORTED_IMAGE_FORMATS
+from modules.infra.logger import setup_logger
 from modules.llm.batch.backends.base import (
     BatchBackend,
     BatchHandle,
@@ -22,9 +23,8 @@ from modules.llm.batch.backends.base import (
     BatchStatusInfo,
 )
 from modules.llm.prompt_utils import prepare_prompt_with_context
-from modules.config.constants import SUPPORTED_IMAGE_FORMATS
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 # Limits for Google Batch API
 MAX_BATCH_REQUESTS = 50000
@@ -214,8 +214,8 @@ class GoogleBatchBackend(BatchBackend):
             finally:
                 try:
                     temp_path.unlink()
-                except Exception:
-                    pass
+                except OSError as e:
+                    logger.debug("Failed to remove temp file %s: %s", temp_path, e)
 
         batch_name = batch_job.name
         logger.info("Batch submitted; job name: %s", batch_name)

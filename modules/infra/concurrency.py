@@ -6,10 +6,11 @@ Provides semaphore-based concurrency control for async operations.
 from __future__ import annotations
 
 import asyncio
-import logging
 from typing import Any, Callable, List, Tuple, Awaitable, Optional
 
-logger = logging.getLogger(__name__)
+from modules.infra.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 async def run_concurrent_transcription_tasks(

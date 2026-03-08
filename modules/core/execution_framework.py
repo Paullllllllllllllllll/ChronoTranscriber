@@ -28,7 +28,7 @@ class _DualModeBase:
     so that DualModeScript and AsyncDualModeScript avoid duplicating them.
     """
     
-    def __init__(self, script_name: str):
+    def __init__(self, script_name: str) -> None:
         self.script_name = script_name
         self.logger = setup_logger(script_name)
         self.config_service: Optional[ConfigService] = None

@@ -31,7 +31,7 @@ class FileDecision:
 class AutoSelector:
     """Automatically selects transcription methods based on file inspection."""
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any]) -> None:
         """Initialize auto selector with configuration.
         
         Args:

@@ -62,7 +62,7 @@ def collect_transcription_files(
     return sorted(input_path.glob(pattern))
 
 
-def build_config_from_args(args, base_config: Dict[str, Any]) -> Dict[str, Any]:
+def build_config_from_args(args: Any, base_config: Dict[str, Any]) -> Dict[str, Any]:
     """Build post-processing config from CLI arguments and base config.
     
     Args:
@@ -107,7 +107,7 @@ def build_config_from_args(args, base_config: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 
-def postprocess_cli(args) -> int:
+def postprocess_cli(args: Any) -> int:
     """Handle CLI mode post-processing.
     
     Args:
@@ -423,7 +423,7 @@ def postprocess_interactive() -> int:
 class PostprocessScript(DualModeScript):
     """Script for post-processing transcription output files."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("postprocess_transcriptions")
     
     def create_argument_parser(self) -> ArgumentParser:

@@ -121,8 +121,8 @@ class WorkflowManager:
                  paths_config: Dict[str, Any],
                  model_config: Dict[str, Any],
                  concurrency_config: Dict[str, Any],
-                 image_processing_config: Dict[str, Any]
-                 ):
+                 image_processing_config: Dict[str, Any],
+                 ) -> None:
         self.user_config = user_config
         self.paths_config = paths_config
         self.model_config = model_config

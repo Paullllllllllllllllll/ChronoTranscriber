@@ -63,7 +63,7 @@ class DailyTokenTracker:
         daily_limit: int,
         enabled: bool = True,
         state_file: Optional[Path] = None,
-    ):
+    ) -> None:
         """
         Initialize the token tracker.
         

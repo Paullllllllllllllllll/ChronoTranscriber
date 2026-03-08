@@ -236,7 +236,7 @@ def _process_non_openai_batch(
         return
     
     # Sort transcriptions by order
-    def get_sorting_key(entry):
+    def get_sorting_key(entry: Dict[str, Any]) -> tuple[int, Any]:
         order_info = entry.get("order_info")
         if order_info is not None:
             return (0, order_info)
@@ -855,7 +855,7 @@ def process_all_batches(
                 f"Using multi-level sorting to ensure correct page order."
             )
 
-            def get_sorting_key(transcription_entry):
+            def get_sorting_key(transcription_entry: Dict[str, Any]) -> tuple[int, Any]:
                 """Return a sorting key tuple for stable page ordering."""
                 # 1) order_info attached during parsing (authoritative)
                 order_info = transcription_entry.get("order_info")

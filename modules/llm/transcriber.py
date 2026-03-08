@@ -42,7 +42,7 @@ class LangChainTranscriber:
         max_output_tokens: Optional[int] = None,
         reasoning_config: Optional[Dict[str, Any]] = None,
         text_config: Optional[Dict[str, Any]] = None,
-    ):
+    ) -> None:
         """Initialize the transcriber.
         
         Args:

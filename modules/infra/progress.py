@@ -97,7 +97,7 @@ class ProgressTracker:
         total: int,
         on_update: Optional[Callable[[ProgressState], None]] = None,
         update_interval: int = 10,
-    ):
+    ) -> None:
         """Initialize progress tracker.
         
         Args:

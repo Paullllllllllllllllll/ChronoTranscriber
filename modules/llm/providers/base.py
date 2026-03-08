@@ -175,7 +175,7 @@ class BaseProvider(ABC):
         max_tokens: int = 4096,
         timeout: Optional[float] = None,
         **kwargs: Any,
-    ):
+    ) -> None:
         """Initialize the provider.
         
         Args:

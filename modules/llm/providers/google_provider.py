@@ -49,7 +49,7 @@ class GoogleProvider(BaseProvider):
         top_k: Optional[int] = None,
         reasoning_config: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
-    ):
+    ) -> None:
         caps = detect_capabilities(model)
         effective_max_tokens = int(min(max_tokens, caps.max_output_tokens))
 

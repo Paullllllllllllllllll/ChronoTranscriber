@@ -60,7 +60,7 @@ class OpenAIProvider(BaseProvider):
         reasoning_config: Optional[Dict[str, Any]] = None,
         text_config: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
-    ):
+    ) -> None:
         super().__init__(
             api_key=api_key,
             model=model,

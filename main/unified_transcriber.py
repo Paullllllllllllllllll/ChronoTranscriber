@@ -48,7 +48,7 @@ logger = setup_logger(__name__)
 async def _open_transcriber_from_config(
     user_config: UserConfiguration,
     model_config: dict[str, Any],
-):
+) -> Any:
     """Create an LLM transcriber context manager from config (shared helper).
 
     Returns an async context manager that yields the transcriber instance.

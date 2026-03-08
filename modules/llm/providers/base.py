@@ -137,6 +137,11 @@ class TranscriptionResult:
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
+
+    # Cache token usage (prompt caching)
+    cached_input_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_hit: bool = False
     
     # Transcription status flags (from schema response)
     no_transcribable_text: bool = False
@@ -192,6 +197,14 @@ class BaseProvider(ABC):
         self.max_tokens = max_tokens
         self.timeout = timeout
         self.extra_config = kwargs
+
+        # Load prompt caching configuration
+        try:
+            caching_cfg = get_config_service().get_prompt_caching_config()
+        except Exception:
+            caching_cfg = {"enabled": False}
+        self._caching_enabled: bool = bool(caching_cfg.get("enabled", False))
+        self._caching_config: Dict[str, Any] = caching_cfg
     
     @property
     @abstractmethod
@@ -358,6 +371,10 @@ class BaseProvider(ABC):
         else:
             content = str(response)
 
+        # Cache token accumulators
+        cached_input_tokens = 0
+        cache_creation_tokens = 0
+
         # Extract token usage from response_metadata
         if raw_message and hasattr(raw_message, "response_metadata"):
             metadata = raw_message.response_metadata
@@ -371,6 +388,23 @@ class BaseProvider(ABC):
                         total_tokens = usage.get(token_mapping.total_key, 0)
                     if total_tokens == 0:
                         total_tokens = input_tokens + output_tokens
+
+                    # Extract cache tokens from provider-specific usage dicts:
+                    # Anthropic: usage.cache_read_input_tokens / cache_creation_input_tokens
+                    cached_input_tokens = int(
+                        usage.get("cache_read_input_tokens", 0) or 0
+                    )
+                    cache_creation_tokens = int(
+                        usage.get("cache_creation_input_tokens", 0) or 0
+                    )
+
+                    # OpenAI: token_usage.prompt_tokens_details.cached_tokens
+                    if cached_input_tokens == 0:
+                        prompt_details = usage.get("prompt_tokens_details")
+                        if isinstance(prompt_details, dict):
+                            cached_input_tokens = int(
+                                prompt_details.get("cached_tokens", 0) or 0
+                            )
 
         # Fallback: LangChain 1.x stores token usage in AIMessage.usage_metadata
         # (a UsageMetadata TypedDict — i.e. a plain dict) rather than
@@ -393,18 +427,36 @@ class BaseProvider(ABC):
                 if total_tokens == 0:
                     total_tokens = input_tokens + output_tokens
 
+                # Extract cache tokens from usage_metadata
+                if cached_input_tokens == 0 and isinstance(usage_meta, dict):
+                    details = usage_meta.get("input_token_details")
+                    if isinstance(details, dict):
+                        cached_input_tokens = int(
+                            details.get("cache_read", 0) or 0
+                        )
+                        cache_creation_tokens = int(
+                            details.get("cache_creation", 0) or 0
+                        )
+
         # Track tokens using daily tracker
         if total_tokens > 0:
             try:
                 from modules.infra.token_tracker import get_token_tracker
                 token_tracker = get_token_tracker()
                 token_tracker.add_tokens(total_tokens)
+                cache_msg = ""
+                if cached_input_tokens > 0 and input_tokens > 0:
+                    pct = cached_input_tokens / input_tokens * 100
+                    cache_msg = f", cache hit {pct:.0f}%"
                 logger.debug(
                     f"[TOKEN] API call consumed {total_tokens:,} tokens "
-                    f"(daily total: {token_tracker.get_tokens_used_today():,})"
+                    f"(daily total: {token_tracker.get_tokens_used_today():,}"
+                    f"{cache_msg})"
                 )
             except Exception as e:
                 logger.warning(f"Error tracking tokens: {e}")
+
+        cache_hit = cached_input_tokens > 0 or cache_creation_tokens > 0
 
         result = TranscriptionResult(
             content=content,
@@ -412,6 +464,9 @@ class BaseProvider(ABC):
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             total_tokens=total_tokens,
+            cached_input_tokens=cached_input_tokens,
+            cache_creation_tokens=cache_creation_tokens,
+            cache_hit=cache_hit,
         )
 
         if parsed_output and isinstance(parsed_output, dict):

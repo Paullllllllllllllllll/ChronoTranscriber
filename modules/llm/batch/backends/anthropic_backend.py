@@ -22,6 +22,7 @@ from modules.llm.batch.backends.base import (
 )
 from modules.llm.prompt_utils import prepare_prompt_with_context
 from modules.config.constants import SUPPORTED_IMAGE_FORMATS
+from modules.config.service import get_config_service
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,25 @@ class AnthropicBatchBackend(BatchBackend):
             or model_config.get("max_tokens", 4096)
         )
 
+        # Determine whether to add cache_control to system parameter
+        try:
+            caching_cfg = get_config_service().get_prompt_caching_config()
+        except Exception:
+            caching_cfg = {"enabled": False}
+        caching_enabled = bool(caching_cfg.get("enabled", False))
+
+        if caching_enabled:
+            anthropic_cfg = caching_cfg.get("anthropic", {})
+            ttl = anthropic_cfg.get("ttl", "5m") if isinstance(anthropic_cfg, dict) else "5m"
+            cache_control: dict = {"type": "ephemeral"}
+            if ttl == "1h":
+                cache_control["ttl"] = "1h"
+            system_param: Any = [
+                {"type": "text", "text": final_prompt, "cache_control": cache_control}
+            ]
+        else:
+            system_param = final_prompt
+
         # Build batch requests
         batch_requests = []
         for req in requests:
@@ -126,7 +146,7 @@ class AnthropicBatchBackend(BatchBackend):
             params: Dict[str, Any] = {
                 "model": model_name,
                 "max_tokens": max_tokens,
-                "system": final_prompt,
+                "system": system_param,
                 "messages": [
                     {"role": "user", "content": user_content},
                 ],
@@ -261,6 +281,12 @@ class AnthropicBatchBackend(BatchBackend):
                         if usage:
                             result_item.input_tokens = getattr(usage, "input_tokens", 0)
                             result_item.output_tokens = getattr(usage, "output_tokens", 0)
+                            result_item.cached_input_tokens = getattr(
+                                usage, "cache_read_input_tokens", 0
+                            ) or 0
+                            result_item.cache_creation_tokens = getattr(
+                                usage, "cache_creation_input_tokens", 0
+                            ) or 0
                     else:
                         result_item.success = True
                         result_item.content = ""

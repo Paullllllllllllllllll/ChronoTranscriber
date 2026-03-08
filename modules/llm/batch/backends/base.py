@@ -98,6 +98,8 @@ class BatchResultItem:
     raw_response: Dict[str, Any] = field(default_factory=dict)
     input_tokens: int = 0
     output_tokens: int = 0
+    cached_input_tokens: int = 0
+    cache_creation_tokens: int = 0
     
     @property
     def no_transcribable_text(self) -> bool:

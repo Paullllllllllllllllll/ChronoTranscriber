@@ -209,6 +209,17 @@ def _build_responses_body_for_image(
             if k in tm and tm[k] is not None:
                 body[k] = tm[k]
 
+    # Prompt cache retention (OpenAI automatic caching extension)
+    try:
+        caching_cfg = get_config_service().get_prompt_caching_config()
+        if caching_cfg.get("enabled"):
+            openai_cfg = caching_cfg.get("openai", {})
+            retention = openai_cfg.get("prompt_cache_retention") if isinstance(openai_cfg, dict) else None
+            if retention:
+                body["prompt_cache_retention"] = retention
+    except Exception:
+        pass
+
     return body
 
 

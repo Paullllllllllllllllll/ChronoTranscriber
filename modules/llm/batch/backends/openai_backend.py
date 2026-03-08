@@ -411,6 +411,12 @@ class OpenAIBatchBackend(BatchBackend):
                     if isinstance(usage, dict):
                         result_item.input_tokens = usage.get("input_tokens", 0)
                         result_item.output_tokens = usage.get("output_tokens", 0)
+                        # Extract cached tokens from prompt_tokens_details
+                        prompt_details = usage.get("prompt_tokens_details")
+                        if isinstance(prompt_details, dict):
+                            result_item.cached_input_tokens = int(
+                                prompt_details.get("cached_tokens", 0) or 0
+                            )
 
             yield result_item
 

@@ -210,14 +210,31 @@ class AnthropicProvider(BaseProvider):
             },
         }
         
+        # Build system message — with cache_control when prompt caching is enabled
+        if self._caching_enabled:
+            anthropic_cfg = self._caching_config.get("anthropic", {})
+            ttl = anthropic_cfg.get("ttl", "5m") if isinstance(anthropic_cfg, dict) else "5m"
+            cache_control: Dict[str, Any] = {"type": "ephemeral"}
+            if ttl == "1h":
+                cache_control["ttl"] = "1h"
+            system_message = SystemMessage(content=[
+                {
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": cache_control,
+                }
+            ])
+        else:
+            system_message = SystemMessage(content=system_prompt)
+
         messages = [
-            SystemMessage(content=system_prompt),
+            system_message,
             HumanMessage(content=[
                 {"type": "text", "text": user_instruction},
                 image_content,
             ]),
         ]
-        
+
         # Native structured outputs (no function calling)
         # We require json_schema mode so the model returns a validated JSON object.
         if json_schema and not caps.supports_structured_outputs:

@@ -252,14 +252,32 @@ class OpenRouterProvider(BaseProvider):
         if detail and caps.supports_image_detail and detail in ("low", "high"):
             image_content["image_url"]["detail"] = detail
         
+        # Build system message — with cache_control for Anthropic models via OpenRouter
+        use_cache_control = (
+            self._caching_enabled
+            and isinstance(self._caching_config.get("openrouter"), dict)
+            and self._caching_config["openrouter"].get("anthropic_cache_control", False)
+            and ("claude" in self.model.lower() or "anthropic/" in self.model.lower())
+        )
+        if use_cache_control:
+            system_message = SystemMessage(content=[
+                {
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ])
+        else:
+            system_message = SystemMessage(content=system_prompt)
+
         messages = [
-            SystemMessage(content=system_prompt),
+            system_message,
             HumanMessage(content=[
                 {"type": "text", "text": user_instruction},
                 image_content,
             ]),
         ]
-        
+
         # Use structured output if schema provided and supported
         # Use include_raw=True to get token usage from the underlying AIMessage
         llm_to_use = self._llm

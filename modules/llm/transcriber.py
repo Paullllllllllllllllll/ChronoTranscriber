@@ -216,6 +216,12 @@ class LangChainTranscriber:
             **provider_kwargs,
         )
         
+        # Session-level cache accumulators for run summary
+        self._total_cached_tokens: int = 0
+        self._total_input_tokens: int = 0
+        self._cache_request_count: int = 0
+        self._total_request_count: int = 0
+
         logger.info(
             f"LangChainTranscriber initialized: provider={self._provider.provider_name}, "
             f"model={self.model}, max_tokens={max_tokens}"
@@ -292,32 +298,60 @@ class LangChainTranscriber:
     
     def _result_to_dict(self, result: TranscriptionResult) -> Dict[str, Any]:
         """Convert TranscriptionResult to dict format for backward compatibility."""
+        # Accumulate session-level cache stats
+        self._total_request_count += 1
+        self._total_input_tokens += result.input_tokens
+        self._total_cached_tokens += result.cached_input_tokens
+        if result.cache_hit:
+            self._cache_request_count += 1
+
         # Build response in format expected by existing workflow code
-        response = {
-            "output_text": result.content,
-            "usage": {
-                "input_tokens": result.input_tokens,
-                "output_tokens": result.output_tokens,
-                "total_tokens": result.total_tokens,
-            },
+        usage_dict: Dict[str, Any] = {
+            "input_tokens": result.input_tokens,
+            "output_tokens": result.output_tokens,
+            "total_tokens": result.total_tokens,
         }
-        
+        if result.cached_input_tokens > 0:
+            usage_dict["cached_input_tokens"] = result.cached_input_tokens
+        if result.cache_creation_tokens > 0:
+            usage_dict["cache_creation_tokens"] = result.cache_creation_tokens
+
+        response: Dict[str, Any] = {
+            "output_text": result.content,
+            "usage": usage_dict,
+        }
+
         # Include raw response metadata if available
         if result.raw_response:
             response["metadata"] = result.raw_response
-        
+
         # Include parsed output if available
         if result.parsed_output:
             response["parsed"] = result.parsed_output
-        
+
         # Include error if present
         if result.error:
             response["error"] = result.error
-        
+
         return response
     
     async def close(self) -> None:
-        """Clean up resources."""
+        """Clean up resources and log aggregate cache statistics."""
+        if self._total_request_count > 0 and self._total_cached_tokens > 0:
+            cache_pct = (
+                self._total_cached_tokens / self._total_input_tokens * 100
+                if self._total_input_tokens > 0
+                else 0.0
+            )
+            logger.info(
+                "[CACHE] Session summary: %d/%d requests had cache hits, "
+                "%s/%s input tokens served from cache (%.1f%%)",
+                self._cache_request_count,
+                self._total_request_count,
+                f"{self._total_cached_tokens:,}",
+                f"{self._total_input_tokens:,}",
+                cache_pct,
+            )
         await self._provider.close()
 
 

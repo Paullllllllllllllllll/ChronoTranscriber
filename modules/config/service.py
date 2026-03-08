@@ -102,7 +102,7 @@ class ConfigService:
     
     def get_image_processing_config(self) -> Dict[str, Any]:
         """Get image processing configuration (cached).
-        
+
         Returns:
             Image processing configuration dictionary.
         """
@@ -112,6 +112,16 @@ class ConfigService:
                 if self._image_processing_config is None and self._loader is not None:
                     self._image_processing_config = self._loader.get_image_processing_config()
         return self._image_processing_config.copy() if self._image_processing_config else {}
+
+    def get_prompt_caching_config(self) -> Dict[str, Any]:
+        """Get prompt caching configuration from concurrency config.
+
+        Returns:
+            Prompt caching configuration dictionary.  Falls back to
+            ``{"enabled": False}`` when the section is absent.
+        """
+        conc_cfg = self.get_concurrency_config() or {}
+        return conc_cfg.get("prompt_caching", {"enabled": False})
     
     def reload(self, config_path: Optional[Path] = None) -> None:
         """Force reload of all configurations.
@@ -167,8 +177,17 @@ def get_concurrency_config() -> Dict[str, Any]:
 
 def get_image_processing_config() -> Dict[str, Any]:
     """Get image processing configuration.
-    
+
     Returns:
         Image processing configuration dictionary.
     """
     return get_config_service().get_image_processing_config()
+
+
+def get_prompt_caching_config() -> Dict[str, Any]:
+    """Get prompt caching configuration.
+
+    Returns:
+        Prompt caching configuration dictionary.
+    """
+    return get_config_service().get_prompt_caching_config()

@@ -139,6 +139,13 @@ class OpenAIProvider(BaseProvider):
             llm_kwargs["frequency_penalty"] = frequency_penalty
             llm_kwargs["presence_penalty"] = presence_penalty
         
+        # Prompt cache retention (OpenAI automatic caching extension)
+        if self._caching_enabled:
+            openai_cfg = self._caching_config.get("openai", {})
+            retention = openai_cfg.get("prompt_cache_retention") if isinstance(openai_cfg, dict) else None
+            if retention:
+                llm_kwargs["prompt_cache_retention"] = retention
+
         self._llm = ChatOpenAI(**llm_kwargs)  # type: ignore[arg-type]
     
     @property

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import tempfile
 from PIL import Image, ImageOps
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -233,16 +235,42 @@ class ImageProcessor:
             return f"Processed and saved: {jpg_output_path.name}"
         except Exception as e:
             global _JP2_WARNING_EMITTED
-            if (not _JP2_WARNING_EMITTED
-                    and isinstance(e, OSError)
-                    and self.image_path.suffix.lower() in {".jp2", ".j2k"}):
-                logger.warning(
-                    "JPEG2000 (.jp2/.j2k) decoding failed. Pillow requires the openjpeg "
-                    "codec. Verify support with: "
-                    "python -c \"from PIL import features; print(features.check_codec('jpg_2000'))\". "
-                    "If False, reinstall Pillow: pip install --upgrade pillow"
-                )
-                _JP2_WARNING_EMITTED = True
+            if isinstance(e, OSError) and self.image_path.suffix.lower() in {".jp2", ".j2k"}:
+                if not _JP2_WARNING_EMITTED:
+                    logger.warning(
+                        "JPEG2000 (.jp2/.j2k) decoding failed with Pillow/openjpeg (%s). "
+                        "This is likely a sub-8-bit (bilevel) JP2 file unsupported by openjpeg. "
+                        "Attempting FFmpeg fallback.", e
+                    )
+                    _JP2_WARNING_EMITTED = True
+                # Recompute detail level (it may not be bound if Image.open() itself failed)
+                if self.model_type == "google":
+                    _detail = self.img_cfg.get("media_resolution", "high") or "high"
+                elif self.model_type == "anthropic":
+                    _detail = self.img_cfg.get("resize_profile", "auto") or "auto"
+                else:
+                    _detail = self.img_cfg.get("llm_detail", "high") or "high"
+                try:
+                    ffmpeg_img = ImageProcessor._decode_with_ffmpeg(self.image_path)
+                    ffmpeg_img = self.handle_transparency(ffmpeg_img)
+                    ffmpeg_img = self.convert_to_grayscale(ffmpeg_img)
+                    ffmpeg_img = ImageProcessor.resize_for_detail(
+                        ffmpeg_img, _detail, self.img_cfg, self.model_type
+                    )
+                    if ffmpeg_img.mode not in ("RGB", "L"):
+                        ffmpeg_img = ffmpeg_img.convert("RGB")
+                    jpg_output_path = output_path.with_suffix(".jpg")
+                    jpeg_quality = int(self.img_cfg.get("jpeg_quality", 95))
+                    ffmpeg_img.save(jpg_output_path, format="JPEG", quality=jpeg_quality)
+                    logger.debug(
+                        f"Saved FFmpeg-decoded image {jpg_output_path.name} "
+                        f"size={ffmpeg_img.size} quality={jpeg_quality} detail={_detail}"
+                    )
+                    return f"Processed and saved (via FFmpeg): {jpg_output_path.name}"
+                except Exception as ffmpeg_err:
+                    logger.error(
+                        f"FFmpeg fallback also failed for {self.image_path.name}: {ffmpeg_err}"
+                    )
             logger.error(f"Error processing image {self.image_path.name}: {e}")
             return f"Failed to process {self.image_path.name}: {e}"
 
@@ -391,6 +419,45 @@ class ImageProcessor:
             )
 
         return successful_outputs
+
+    # ================== FFmpeg fallback decoding ==================
+
+    @staticmethod
+    def _decode_with_ffmpeg(image_path: Path) -> Image.Image:
+        """Decode an image file via FFmpeg and return a PIL Image.
+
+        Used as a fallback for JP2/J2K files that openjpeg cannot handle
+        (e.g. sub-8-bit / bilevel codestreams).
+
+        Args:
+            image_path: Source image path.
+
+        Returns:
+            PIL Image loaded into memory.
+
+        Raises:
+            OSError: If FFmpeg returns a non-zero exit code.
+            RuntimeError: If FFmpeg is not available on PATH.
+        """
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        try:
+            result = subprocess.run(
+                ["ffmpeg", "-y", "-i", str(image_path), "-frames:v", "1", str(tmp_path)],
+                capture_output=True,
+                timeout=120,
+            )
+            if result.returncode != 0:
+                stderr_tail = result.stderr.decode(errors="replace")[-300:]
+                raise OSError(
+                    f"FFmpeg exited with code {result.returncode}: {stderr_tail}"
+                )
+            img = Image.open(tmp_path)
+            img.load()
+            return img
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
 
     # ================== Tesseract-specific preprocessing ==================
 

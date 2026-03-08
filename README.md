@@ -166,6 +166,10 @@ Environment variable: `OPENROUTER_API_KEY`
   - Windows: Install from [UB Mannheim](https://github.com/UB-Mannheim/tesseract/wiki), configure path in `image_processing_config.yaml`
   - Linux: `sudo apt-get install tesseract-ocr`
   - macOS: `brew install tesseract`
+- **FFmpeg** (optional): Required for JPEG2000 files with sub-8-bit (bilevel) codestreams, which the bundled openjpeg library cannot decode. Invoked automatically as a fallback; no configuration needed if FFmpeg is on the system PATH.
+  - Windows: Download from [https://ffmpeg.org/download.html](https://ffmpeg.org/download.html) and add to PATH
+  - Linux: `sudo apt-get install ffmpeg`
+  - macOS: `brew install ffmpeg`
 
 ### API Requirements
 
@@ -230,6 +234,14 @@ For local OCR:
 - **Windows**: Download from [https://github.com/UB-Mannheim/tesseract/wiki](https://github.com/UB-Mannheim/tesseract/wiki)
 - **Linux**: `sudo apt-get install tesseract-ocr`
 - **macOS**: `brew install tesseract`
+
+### Install FFmpeg (Optional)
+
+Required for JPEG2000 image collections that use sub-8-bit (bilevel) codestreams — a format produced by some digital library scanners that the bundled openjpeg library cannot decode. When FFmpeg is on the system PATH, ChronoTranscriber uses it automatically as a fallback decoder; no additional configuration is needed.
+
+- **Windows**: Download from [https://ffmpeg.org/download.html](https://ffmpeg.org/download.html) and add the `bin/` folder to the system PATH
+- **Linux**: `sudo apt-get install ffmpeg`
+- **macOS**: `brew install ffmpeg`
 
 ### Configure API Keys
 

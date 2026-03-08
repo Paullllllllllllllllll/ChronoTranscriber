@@ -19,6 +19,9 @@ from modules.infra.multiprocessing_utils import run_multiprocessing_tasks
 
 logger = setup_logger(__name__)
 
+IMAGE_FAILURE_RATE_THRESHOLD = 0.5
+_JP2_WARNING_EMITTED = False
+
 
 class ImageProcessor:
     def __init__(self, image_path: Path, provider: str = "openai", model_name: str = "") -> None:
@@ -229,6 +232,17 @@ class ImageProcessor:
                 )
             return f"Processed and saved: {jpg_output_path.name}"
         except Exception as e:
+            global _JP2_WARNING_EMITTED
+            if (not _JP2_WARNING_EMITTED
+                    and isinstance(e, OSError)
+                    and self.image_path.suffix.lower() in {".jp2", ".j2k"}):
+                logger.warning(
+                    "JPEG2000 (.jp2/.j2k) decoding failed. Pillow requires the openjpeg "
+                    "codec. Verify support with: "
+                    "python -c \"from PIL import features; print(features.check_codec('jpg_2000'))\". "
+                    "If False, reinstall Pillow: pip install --upgrade pillow"
+                )
+                _JP2_WARNING_EMITTED = True
             logger.error(f"Error processing image {self.image_path.name}: {e}")
             return f"Failed to process {self.image_path.name}: {e}"
 
@@ -362,7 +376,21 @@ class ImageProcessor:
         ImageProcessor.process_images_multiprocessing(image_files, output_paths, provider, model_name)
 
         # Return all processed image paths that exist
-        return [p for p in output_paths if p.exists()]
+        successful_outputs = [p for p in output_paths if p.exists()]
+
+        n_total = len(output_paths)
+        n_ok = len(successful_outputs)
+        n_failed = n_total - n_ok
+
+        if (n_total > 1
+                and n_failed >= 2
+                and (n_failed / n_total) >= IMAGE_FAILURE_RATE_THRESHOLD):
+            raise RuntimeError(
+                f"Image preprocessing failed for {n_failed}/{n_total} images in "
+                f"'{source_folder.name}'. Check format support and file integrity."
+            )
+
+        return successful_outputs
 
     # ================== Tesseract-specific preprocessing ==================
 

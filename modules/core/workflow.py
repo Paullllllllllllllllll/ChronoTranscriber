@@ -682,9 +682,13 @@ class WorkflowManager:
             provider = tm.get("provider", "openai")
             model_name = tm.get("name", "")
             print_info(f"Processing images from folder for {provider.upper()}...")
-            processed_files = ImageProcessor.process_and_save_images(
-                folder, preprocessed_folder, provider=provider, model_name=model_name,
-                page_indices=page_indices)
+            try:
+                processed_files = ImageProcessor.process_and_save_images(
+                    folder, preprocessed_folder, provider=provider, model_name=model_name,
+                    page_indices=page_indices)
+            except RuntimeError as e:
+                print_error(f"Skipping folder '{folder.name}': {e}")
+                return
 
         if not processed_files:
             print_warning(f"No images found or processed in {folder}.")

@@ -407,7 +407,7 @@ class TestOpenAIProviderCacheRetention:
                         model="gpt-4o",
                     )
 
-        assert captured.get("prompt_cache_retention") == "24h"
+        assert captured.get("model_kwargs", {}).get("prompt_cache_retention") == "24h"
 
     @pytest.mark.unit
     def test_no_retention_when_null(self):

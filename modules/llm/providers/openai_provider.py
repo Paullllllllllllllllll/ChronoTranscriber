@@ -144,7 +144,7 @@ class OpenAIProvider(BaseProvider):
             openai_cfg = self._caching_config.get("openai", {})
             retention = openai_cfg.get("prompt_cache_retention") if isinstance(openai_cfg, dict) else None
             if retention:
-                llm_kwargs["prompt_cache_retention"] = retention
+                llm_kwargs.setdefault("model_kwargs", {})["prompt_cache_retention"] = retention
 
         self._llm = ChatOpenAI(**llm_kwargs)  # type: ignore[arg-type]
     

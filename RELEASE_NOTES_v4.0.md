@@ -28,6 +28,18 @@ The format setting is threaded through the entire pipeline: CLI entry points,
 `WorkflowManager`, `ResumeChecker`, transcription pipeline, and batch
 finalization.
 
+### Config-level output format default (`paths_config.yaml`)
+
+The `--output-format` flag now falls back to a new `output_format` key in the
+`general` section of `paths_config.yaml` instead of a hardcoded `"txt"` default.
+An explicit CLI flag still takes precedence when supplied. This allows projects
+to set a persistent output format without modifying every invocation:
+
+```yaml
+general:
+  output_format: 'md'   # txt | md | json
+```
+
 ### Centralized output writer
 
 A new `modules/processing/output_writer.py` module provides

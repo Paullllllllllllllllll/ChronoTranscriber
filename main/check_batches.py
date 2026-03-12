@@ -41,7 +41,8 @@ class CheckBatchesScript(DualModeScript):
         """Check batches in CLI mode with command-line arguments."""
         run_diagnostics = not args.no_diagnostics
         custom_directory = None
-        output_format = getattr(args, "output_format", "txt") or "txt"
+        config_default = self.paths_config.get("general", {}).get("output_format", "txt")
+        output_format = getattr(args, "output_format", None) or config_default
 
         # If directory specified, validate and use it
         if args.directory:

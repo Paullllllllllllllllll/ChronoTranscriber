@@ -151,8 +151,8 @@ Examples:
     parser.add_argument(
         "--output-format",
         choices=["txt", "md", "json"],
-        default="txt",
-        help="Output file format (default: txt).",
+        default=None,
+        help="Output file format: txt, md, or json. Defaults to the value in paths_config.yaml.",
     )
 
     # Page range filtering
@@ -277,8 +277,8 @@ Examples:
     parser.add_argument(
         "--output-format",
         choices=["txt", "md", "json"],
-        default="txt",
-        help="Output file format for finalized batches (default: txt).",
+        default=None,
+        help="Output file format: txt, md, or json. Defaults to the value in paths_config.yaml.",
     )
 
     return parser

@@ -230,8 +230,9 @@ def create_config_from_cli_args(args: Any, base_input_dir: Path, base_output_dir
     if getattr(args, "force", None):
         config.resume_mode = "overwrite"
 
-    # Output format
-    config.output_format = getattr(args, "output_format", "txt") or "txt"
+    # Output format: CLI flag takes precedence; fall back to paths_config.yaml default
+    config_default = paths_config.get("general", {}).get("output_format", "txt")
+    config.output_format = getattr(args, "output_format", None) or config_default
 
     # Parse page range if provided
     if getattr(args, "pages", None):

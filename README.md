@@ -479,6 +479,7 @@ general:
   input_paths_is_output_path: true
   logs_dir: './logs'
   keep_preprocessed_images: false
+  output_format: 'txt'             # txt | md | json
   auto_mode_pdf_use_ocr_for_scanned: true
   auto_mode_pdf_use_ocr_for_searchable: false
   auto_mode_pdf_ocr_method: 'gpt'
@@ -740,9 +741,13 @@ Outputs saved to configured directories:
 
 ChronoTranscriber supports three output formats via `--output-format`:
 
-- `txt` (default): Plain text, one page per block
+- `txt`: Plain text, one page per block
 - `md`: Markdown with page headers (`## Page N` or `## image_name`)
 - `json`: Structured JSON array with per-page metadata
+
+The default format is determined by the `output_format` key in `paths_config.yaml`
+(`general.output_format`; falls back to `txt` if unset). The `--output-format` CLI
+flag overrides this default for a single run.
 
 ## Batch Processing
 

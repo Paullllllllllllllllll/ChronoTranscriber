@@ -6,7 +6,6 @@ prompting utilities for a consistent and navigable user experience.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -158,10 +157,7 @@ class WorkflowUI:
         api_key = os.getenv(env_var)
         
         if not api_key:
-            print_error(f"{env_var} environment variable is required for {provider.upper()} transcription.")
-            print_info(f"Please set your API key and try again.")
-            print_info(f"  (Configured provider: {provider} in model_config.yaml)")
-            sys.exit(1)
+            raise ValueError(f"{env_var} environment variable is required for {provider.upper()} transcription.")
         
         # Ask about batch processing
         result = prompt_select(
@@ -478,7 +474,7 @@ class WorkflowUI:
             all_epubs = list(epub_dir.rglob("*.epub"))
             if not all_epubs:
                 print_error(f"No EPUB files found in {epub_dir} or its subfolders.")
-                sys.exit(1)
+                return False
             config.selected_items = all_epubs
             config.process_all = True
             print_success(f"Selected all {len(all_epubs)} EPUB(s) for processing.")
@@ -525,7 +521,7 @@ class WorkflowUI:
         if not subfolders and not direct_images:
             print_error(f"No image folders or images found in {image_dir}")
             print_info("Please add image folders and try again.")
-            sys.exit(1)
+            return False
         
         if not subfolders and direct_images:
             print_info(f"Found {len(direct_images)} images directly in the input directory.")
@@ -546,7 +542,7 @@ class WorkflowUI:
                 return True
             else:
                 print_info("Please organize your images into subfolders and try again.")
-                sys.exit(0)
+                return False
         
         # Select folders
         print_info(f"Found {len(subfolders)} image folder(s) in the input directory.")
@@ -606,7 +602,7 @@ class WorkflowUI:
             all_pdfs = list(pdf_dir.rglob("*.pdf"))
             if not all_pdfs:
                 print_error(f"No PDF files found in {pdf_dir} or its subfolders.")
-                sys.exit(1)
+                return False
             config.selected_items = all_pdfs
             config.process_all = True
             print_success(f"Selected all {len(all_pdfs)} PDF(s) for processing.")
@@ -616,7 +612,7 @@ class WorkflowUI:
             subfolders = [d for d in pdf_dir.iterdir() if d.is_dir()]
             if not subfolders:
                 print_error(f"No subfolders found in {pdf_dir}")
-                sys.exit(1)
+                return False
             
             folder_items = [(str(f), f.name) for f in subfolders]
             selection_result = prompt_multiselect(
@@ -640,7 +636,7 @@ class WorkflowUI:
             
             if not pdf_files:
                 print_error("No PDF files found in selected folders.")
-                sys.exit(1)
+                return False
             
             config.selected_items = pdf_files
             print_success(f"Selected {len(pdf_files)} PDF(s) from {len(selected_folders)} folder(s).")
@@ -650,7 +646,7 @@ class WorkflowUI:
         all_pdfs = list(pdf_dir.glob("*.pdf"))
         if not all_pdfs:
             print_error(f"No PDF files found in {pdf_dir}")
-            sys.exit(1)
+            return False
         
         pdf_items = [(str(f), f.name) for f in all_pdfs]
         selection_result = prompt_multiselect(

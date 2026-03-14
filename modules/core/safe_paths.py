@@ -32,6 +32,18 @@ HASH_LENGTH = 8
 MIN_READABLE_LENGTH = 20
 
 
+def _compute_name_hash(name: str) -> str:
+    """Return an 8-character SHA-256 hex digest of *name*."""
+    return hashlib.sha256(name.encode("utf-8")).hexdigest()[:HASH_LENGTH]
+
+
+def _truncate_name(name: str, max_length: int) -> str:
+    """Truncate *name* to *max_length*, stripping trailing punctuation."""
+    if len(name) <= max_length:
+        return name
+    return name[:max_length].rstrip(".-_ ")
+
+
 def create_safe_directory_name(original_name: str, suffix: str = "") -> str:
 	"""
 	Create a safe directory name that won't exceed Windows path limits.
@@ -48,25 +60,19 @@ def create_safe_directory_name(original_name: str, suffix: str = "") -> str:
 		Output: "Beukers etal 2025 Grape (Vitis vinifera) use in the earl-a3f8d9e2_working_files"
 	"""
 	# Calculate hash of full original name for uniqueness
-	name_hash = hashlib.sha256(original_name.encode('utf-8')).hexdigest()[:HASH_LENGTH]
-	
+	name_hash = _compute_name_hash(original_name)
+
 	# Calculate how much space we have for the actual name
 	# Format: [truncated_name]-[hash][suffix]
 	reserved_length = len(suffix) + HASH_LENGTH + 1  # +1 for the dash
 	available_length = MAX_SAFE_NAME_LENGTH - reserved_length
-	
+
 	# Truncate the name if necessary
-	if len(original_name) > available_length:
-		# Try to break at a word boundary for better readability
-		truncated = original_name[:available_length].rstrip()
-		# Remove trailing punctuation/spaces that might look odd
-		truncated = truncated.rstrip('.-_ ')
-	else:
-		truncated = original_name
-	
+	truncated = _truncate_name(original_name, available_length)
+
 	# Combine truncated name with hash and suffix
 	safe_name = f"{truncated}-{name_hash}{suffix}"
-	
+
 	return safe_name
 
 
@@ -87,33 +93,35 @@ def create_safe_filename(original_name: str, extension: str, parent_path: Path =
 		Output: "Nippard_2025_Bodybuilding_Transformation_System_Inte-a3f8d9e2.txt"
 	"""
 	# Calculate hash of full original name for uniqueness
-	name_hash = hashlib.sha256(original_name.encode('utf-8')).hexdigest()[:HASH_LENGTH]
-	
+	name_hash = _compute_name_hash(original_name)
+
 	# Calculate maximum filename length based on context
 	if parent_path is not None:
 		# Calculate remaining path budget from Windows MAX_PATH
 		parent_len = len(str(parent_path)) + 1  # +1 for path separator
 		max_filename_len = WINDOWS_MAX_PATH - parent_len - 10  # -10 for safety margin
 		# Ensure we stay within reasonable bounds
-		max_filename_len = max(MIN_READABLE_LENGTH + HASH_LENGTH + len(extension) + 1, 
+		max_filename_len = max(MIN_READABLE_LENGTH + HASH_LENGTH + len(extension) + 1,
 							   min(max_filename_len, MAX_SAFE_NAME_LENGTH))
 	else:
 		max_filename_len = MAX_SAFE_NAME_LENGTH
-	
+
 	# Calculate how much space we have for the actual name
 	# Format: [truncated_name]-[hash][extension]
 	reserved_length = len(extension) + HASH_LENGTH + 1  # +1 for the dash
 	available_length = max_filename_len - reserved_length
-	
+
 	# Truncate the name if necessary
 	if len(original_name) > available_length:
-		truncated = original_name[:max(MIN_READABLE_LENGTH, available_length)].rstrip('.-_ ')
+		truncated = _truncate_name(
+			original_name, max(MIN_READABLE_LENGTH, available_length)
+		)
 		# Combine truncated name with hash
 		safe_name = f"{truncated}-{name_hash}{extension}"
 	else:
 		# No truncation needed - use original name without hash
 		safe_name = f"{original_name}{extension}"
-	
+
 	return safe_name
 
 
@@ -133,23 +141,20 @@ def create_safe_log_filename(base_name: str, log_type: str) -> str:
 		Output: "Very long document name...-a3f8d9e2_transcription_log.json"
 	"""
 	suffix = f"_{log_type}_log.json"
-	
+
 	# Calculate hash for uniqueness
-	name_hash = hashlib.sha256(base_name.encode('utf-8')).hexdigest()[:HASH_LENGTH]
-	
+	name_hash = _compute_name_hash(base_name)
+
 	# Calculate available space
 	reserved_length = len(suffix) + HASH_LENGTH + 1  # +1 for dash
 	available_length = MAX_SAFE_NAME_LENGTH - reserved_length
-	
+
 	# Truncate if necessary
-	if len(base_name) > available_length:
-		truncated = base_name[:available_length].rstrip('.-_ ')
-	else:
-		truncated = base_name
-	
+	truncated = _truncate_name(base_name, available_length)
+
 	# Combine
 	safe_filename = f"{truncated}-{name_hash}{suffix}"
-	
+
 	return safe_filename
 
 

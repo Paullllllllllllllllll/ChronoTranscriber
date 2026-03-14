@@ -10,7 +10,7 @@ import asyncio
 import datetime
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import aiofiles
 
@@ -33,18 +33,18 @@ logger = setup_logger(__name__)
 
 async def transcribe_single_image(
     img_path: Path,
-    transcriber: Optional[Any],
+    transcriber: Any | None,
     method: str,
     tesseract_config: str = "--oem 3 --psm 6",
     order_index: int = 0,
-) -> Tuple[str, str, Optional[str], Optional[Dict[str, Any]], int]:
+) -> Tuple[str, str, str | None, Dict[str, Any] | None, int]:
     """Transcribe a single image file using either GPT or Tesseract OCR.
 
     Returns:
         Tuple of (image_path_str, image_name, text, raw_response, order_index).
     """
     image_name = img_path.name
-    final_text: Optional[str] = None
+    final_text: str | None = None
     try:
         if method == "gpt":
             if not transcriber:
@@ -77,12 +77,12 @@ async def transcribe_single_image(
 
 
 def _build_jsonl_record(
-    result_tuple: Tuple[str, str, Optional[str], Optional[Dict[str, Any]], int],
+    result_tuple: Tuple[str, str, str | None, Dict[str, Any] | None, int],
     source_name: str,
     method: str,
     is_folder: bool,
-    transcriber: Optional[Any],
-) -> Optional[Dict[str, Any]]:
+    transcriber: Any | None,
+) -> Dict[str, Any] | None:
     """Build a JSONL record dict from a transcription result tuple.
 
     Returns None if the result should be skipped (no text).
@@ -136,7 +136,7 @@ def _build_jsonl_record(
 async def run_transcription_pipeline(
     image_files: List[Path],
     method: str,
-    transcriber: Optional[Any],
+    transcriber: Any | None,
     temp_jsonl_path: Path,
     output_txt_path: Path,
     source_name: str,
@@ -172,7 +172,10 @@ async def run_transcription_pipeline(
             temp_jsonl_path.write_text("", encoding="utf-8")
             logger.info(f"Cleared stale JSONL cache: {temp_jsonl_path.name}")
     else:
-        # Resume filtering — skip images already recorded in the JSONL.
+        # Page-level resume: skip images already recorded in the JSONL.
+        # This is the second layer of resume filtering; the first (item-level)
+        # layer in WorkflowManager.process_selected_items() skips items whose
+        # final output file already exists.
         already_processed = get_processed_image_names(temp_jsonl_path)
         if already_processed:
             original_count = len(image_files)

@@ -7,7 +7,7 @@ batch summaries, progress indicators, and transcription error reporting.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from modules.ui.prompts import (
     ui_print,
@@ -20,11 +20,27 @@ from modules.ui.prompts import (
 )
 
 
-def _format_page_image(page_number: Optional[int], image_name: str) -> str:
+def _format_page_image(page_number: int | None, image_name: str) -> str:
     """Format page/image identifier for display."""
     if page_number is None:
         return f"({image_name})"
     return f"page {page_number} ({image_name})"
+
+
+def _format_error_detail(
+    status_code: int | None,
+    code: str | None,
+    message: str | None,
+) -> str:
+    """Build a compact error detail string from optional status, code, and message."""
+    parts: list[str] = []
+    if status_code is not None:
+        parts.append(f"status={status_code}")
+    if code:
+        parts.append(f"code={code}")
+    if message:
+        parts.append(f"message={message}")
+    return " ".join(parts)
 
 
 def display_batch_summary(batches: List[Dict[str, Any]]) -> None:
@@ -143,10 +159,10 @@ def display_batch_cancellation_results(
 
 def print_transcription_item_error(
     image_name: str,
-    page_number: Optional[int] = None,
-    status_code: Optional[int] = None,
-    err_code: Optional[str] = None,
-    err_message: Optional[str] = None,
+    page_number: int | None = None,
+    status_code: int | None = None,
+    err_code: str | None = None,
+    err_message: str | None = None,
 ) -> None:
     """Print an error for a single transcription item.
     
@@ -158,18 +174,11 @@ def print_transcription_item_error(
         err_message: Optional error message
     """
     label = _format_page_image(page_number, image_name)
-    parts: List[str] = []
-    if status_code is not None:
-        parts.append(f"status={status_code}")
-    if err_code:
-        parts.append(f"code={err_code}")
-    if err_message:
-        parts.append(f"message={err_message}")
-    detail = " ".join(parts)
+    detail = _format_error_detail(status_code, err_code, err_message)
     print_error(f"{label} failed in batch" + (f": {detail}" if detail else ""))
 
 
-def print_transcription_not_possible(image_name: str, page_number: Optional[int] = None) -> None:
+def print_transcription_not_possible(image_name: str, page_number: int | None = None) -> None:
     """Print a warning that transcription was not possible for an item.
     
     Args:
@@ -180,7 +189,7 @@ def print_transcription_not_possible(image_name: str, page_number: Optional[int]
     print_warning(f"Model reported transcription not possible for {label}.")
 
 
-def print_no_transcribable_text(image_name: str, page_number: Optional[int] = None) -> None:
+def print_no_transcribable_text(image_name: str, page_number: int | None = None) -> None:
     """Print info that no transcribable text was detected.
     
     Args:
@@ -205,18 +214,9 @@ def display_page_error_summary(error_entries: List[Dict[str, Any]]) -> None:
         img = (e.get("image_info", {}) or {}).get("image_name") or e.get("custom_id", "[unknown image]")
         page = (e.get("image_info", {}) or {}).get("page_number")
         det = (e.get("error_details", {}) or {})
-        status = det.get("status_code")
-        code = det.get("code")
-        msg = det.get("message")
         label = _format_page_image(page, img)
-        parts: List[str] = []
-        if status is not None:
-            parts.append(f"status={status}")
-        if code:
-            parts.append(f"code={code}")
-        if msg:
-            parts.append(f"message={msg}")
-        ui_print("  • " + label + (": " + " ".join(parts) if parts else ""), PromptStyle.DIM)
+        detail = _format_error_detail(det.get("status_code"), det.get("code"), det.get("message"))
+        ui_print("  • " + label + (": " + detail if detail else ""), PromptStyle.DIM)
 
 
 def display_transcription_not_possible_summary(count: int) -> None:

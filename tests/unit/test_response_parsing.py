@@ -334,3 +334,39 @@ class TestProcessBatchOutput:
         """Test handling of whitespace-only content."""
         result = process_batch_output(b"   \n  \n  ")
         assert result == []
+
+
+class TestCheckTranscriptionFlags:
+    """Tests for _check_transcription_flags helper."""
+
+    @pytest.mark.unit
+    def test_no_transcribable_text(self):
+        from modules.processing.response_parsing import _check_transcription_flags
+        assert _check_transcription_flags({"no_transcribable_text": True}) == "[No transcribable text]"
+
+    @pytest.mark.unit
+    def test_transcription_not_possible(self):
+        from modules.processing.response_parsing import _check_transcription_flags
+        assert _check_transcription_flags({"transcription_not_possible": True}) == "[Transcription not possible]"
+
+    @pytest.mark.unit
+    def test_no_flags_returns_none(self):
+        from modules.processing.response_parsing import _check_transcription_flags
+        assert _check_transcription_flags({"transcription": "hello"}) is None
+
+    @pytest.mark.unit
+    def test_both_flags_false_returns_none(self):
+        from modules.processing.response_parsing import _check_transcription_flags
+        assert _check_transcription_flags({
+            "no_transcribable_text": False,
+            "transcription_not_possible": False,
+        }) is None
+
+    @pytest.mark.unit
+    def test_no_transcribable_text_takes_precedence(self):
+        from modules.processing.response_parsing import _check_transcription_flags
+        result = _check_transcription_flags({
+            "no_transcribable_text": True,
+            "transcription_not_possible": True,
+        })
+        assert result == "[No transcribable text]"

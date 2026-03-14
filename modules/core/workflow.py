@@ -7,7 +7,7 @@ import json
 import shutil
 import aiofiles
 from pathlib import Path
-from typing import Any, List, Optional, Dict, Tuple
+from typing import Any, List, Dict, Tuple
 
 from modules.infra.logger import setup_logger
 from modules.ui.core import UserConfiguration
@@ -27,10 +27,7 @@ from modules.core.resume import ResumeChecker, ProcessingState
 from modules.core.safe_paths import create_safe_filename
 from modules.core.path_config import PathConfig
 from modules.core.batch_submission import submit_batch
-from modules.core.transcription_pipeline import (
-    run_transcription_pipeline,
-    write_output_from_jsonl,
-)
+from modules.core.transcription_pipeline import run_transcription_pipeline
 
 logger = setup_logger(__name__)
 
@@ -177,7 +174,7 @@ class WorkflowManager:
             use_batch_processing=user_config.use_batch_processing
         )
 
-    async def _route_auto_item(self, item: Path, transcriber: Optional[Any]) -> None:
+    async def _route_auto_item(self, item: Path, transcriber: Any | None) -> None:
         """Route a single item to the correct processor based on its actual type.
 
         Used by auto mode and as a fallback when processing_type is unknown.
@@ -210,7 +207,7 @@ class WorkflowManager:
         temp_jsonl_path: Path,
         parent_folder: Path,
         source_name: str,
-    ) -> Optional[Any]:
+    ) -> Any | None:
         """Submit a batch using the provider-agnostic batch backend.
         
         Delegates to :func:`modules.core.batch_submission.submit_batch`.
@@ -259,13 +256,17 @@ class WorkflowManager:
         print_info(msg)
 
     async def process_selected_items(self,
-                                     transcriber: Optional[Any] = None) -> None:
+                                     transcriber: Any | None = None) -> None:
         """
         Process all selected items based on the user configuration.
         """
         selected = list(self.user_config.selected_items or [])
 
-        # --- Resume filtering ---
+        # Resume filtering (item level): skip items with complete output files.
+        # A second layer of page-level resume filtering occurs inside
+        # run_transcription_pipeline() via JSONL scanning; both layers are
+        # intentional — this one avoids re-entering the pipeline entirely,
+        # while the inner one allows resuming partially-transcribed items.
         processing_type = self.user_config.processing_type or ""
         if self.resume_mode != "overwrite" and processing_type:
             selected, skipped = self.resume_checker.filter_items(selected, processing_type)
@@ -309,6 +310,11 @@ class WorkflowManager:
                     elif self.user_config.processing_type == "auto":
                         await self._route_auto_item(item, transcriber)
                     else:
+                        logger.warning(
+                            "Unexpected processing_type %r for item %s; routing via auto",
+                            self.user_config.processing_type,
+                            item.name,
+                        )
                         await self._route_auto_item(item, transcriber)
                 except Exception as e:
                     failed_count += 1
@@ -438,6 +444,34 @@ class WorkflowManager:
                     logger.exception(
                         f"Error cleaning up preprocessed images for {source_name}: {e}")
 
+    async def _handle_batch_submission(
+        self,
+        method: str,
+        image_files: list[Path],
+        temp_jsonl_path: Path,
+        parent_folder: Path,
+        source_stem: str,
+        preprocessed_folder: Path,
+        source_display_name: str,
+    ) -> bool:
+        """Try to submit a batch job; return True if submitted, False to fall through."""
+        if method != "gpt" or not self.user_config.use_batch_processing:
+            return False
+        handle = await self._submit_batch_with_backend(
+            image_files, temp_jsonl_path, parent_folder, source_stem,
+        )
+        if handle is None:
+            return False
+        self._cleanup_preprocessed(preprocessed_folder, source_display_name)
+        self._transient_tracker.mark_preprocessed_complete(preprocessed_folder)
+        self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
+        return True
+
+    def _resolve_target_dpi(self, method: str) -> int:
+        """Return the configured DPI for the given transcription method."""
+        section = "tesseract_image_processing" if method == "tesseract" else "api_image_processing"
+        return int(self.image_processing_config.get(section, {}).get("target_dpi", 300))
+
     def _cleanup_temp_jsonl(self, temp_jsonl_path: Path, method: str) -> None:
         """Remove temporary JSONL unless retained or needed for batch tracking."""
         is_batch = method == "gpt" and self.user_config.use_batch_processing
@@ -453,7 +487,7 @@ class WorkflowManager:
             print_info(f"Preserving {temp_jsonl_path.name} for batch tracking (required for retrieval)")
 
     async def process_single_pdf(self, pdf_path: Path,
-                                 transcriber: Optional[Any]) -> None:
+                                 transcriber: Any | None) -> None:
         """
         Processes a single PDF file for transcription based on the user configuration.
         """
@@ -549,9 +583,7 @@ class WorkflowManager:
             preprocessed_folder = parent_folder / "preprocessed_images_tesseract"
             preprocessed_folder.mkdir(exist_ok=True)
             self._transient_tracker.register_preprocessed_folder(preprocessed_folder, pdf_path.name)
-            target_dpi = (self.image_processing_config
-                          .get('tesseract_image_processing', {})
-                          .get('target_dpi', 300))
+            target_dpi = self._resolve_target_dpi(method)
             print_info(f"Extracting and preprocessing images for Tesseract at {target_dpi} DPI...")
             processed_image_files = await pdf_processor.process_images_for_tesseract(
                 preprocessed_folder, target_dpi, page_indices=page_indices)
@@ -559,9 +591,7 @@ class WorkflowManager:
             preprocessed_folder = parent_folder / "preprocessed_images"
             preprocessed_folder.mkdir(exist_ok=True)
             self._transient_tracker.register_preprocessed_folder(preprocessed_folder, pdf_path.name)
-            target_dpi = (self.image_processing_config
-                          .get('api_image_processing', {})
-                          .get('target_dpi', 300))
+            target_dpi = self._resolve_target_dpi(method)
             # Get provider and model name from model config for provider-specific preprocessing
             tm = self.model_config.get("transcription_model", {})
             provider = tm.get("provider", "openai")
@@ -575,21 +605,11 @@ class WorkflowManager:
         print_info(f"Extracted {len(processed_image_files)} page images from PDF.")
 
         # Handle GPT batch mode (multi-provider via batch backends)
-        if method == "gpt" and self.user_config.use_batch_processing:
-            handle = await self._submit_batch_with_backend(
-                processed_image_files,
-                temp_jsonl_path,
-                parent_folder,
-                pdf_path.stem,
-            )
-            if handle is not None:
-                # Batch submitted successfully - cleanup and return
-                self._cleanup_preprocessed(preprocessed_folder, pdf_path.name)
-                # Mark transient files as complete (batch will handle JSONL separately)
-                self._transient_tracker.mark_preprocessed_complete(preprocessed_folder)
-                self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
-                return
-            # If handle is None, fall through to synchronous processing
+        if await self._handle_batch_submission(
+            method, processed_image_files, temp_jsonl_path, parent_folder,
+            pdf_path.stem, preprocessed_folder, pdf_path.name,
+        ):
+            return
 
         # Synchronous processing for GPT or Tesseract
         print_info(f"Starting {method} transcription for {len(processed_image_files)} images...")
@@ -611,7 +631,7 @@ class WorkflowManager:
         self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
 
     async def process_single_image_folder(self, folder: Path,
-                                          transcriber: Optional[Any]) -> None:
+                                          transcriber: Any | None) -> None:
         """
         Processes all images in a given folder based on the user configuration.
         """
@@ -698,21 +718,11 @@ class WorkflowManager:
         processed_files.sort(key=lambda x: x.name.lower())
 
         # Handle batch mode for GPT (multi-provider via batch backends)
-        if method == "gpt" and self.user_config.use_batch_processing:
-            handle = await self._submit_batch_with_backend(
-                processed_files,
-                temp_jsonl_path,
-                parent_folder,
-                folder.name,
-            )
-            if handle is not None:
-                # Batch submitted successfully - cleanup and return
-                self._cleanup_preprocessed(preprocessed_folder, f"folder '{folder.name}'")
-                # Mark transient files as complete (batch will handle JSONL separately)
-                self._transient_tracker.mark_preprocessed_complete(preprocessed_folder)
-                self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
-                return
-            # If handle is None, fall through to synchronous processing
+        if await self._handle_batch_submission(
+            method, processed_files, temp_jsonl_path, parent_folder,
+            folder.name, preprocessed_folder, f"folder '{folder.name}'",
+        ):
+            return
 
         # Synchronous processing (non-batch GPT or Tesseract)
         print_info(f"Starting {method} transcription for {len(processed_files)} images...")
@@ -738,7 +748,7 @@ class WorkflowManager:
             self,
             image_files: List[Path],
             method: str,
-            transcriber: Optional[Any],
+            transcriber: Any | None,
             temp_jsonl_path: Path,
             output_txt_path: Path,
             source_name: str,
@@ -763,10 +773,3 @@ class WorkflowManager:
             resume_mode=self.resume_mode,
             output_format=output_format,
         )
-
-    def _write_output_from_jsonl(self, jsonl_path: Path, output_path: Path) -> bool:
-        """Write combined output from JSONL records.
-
-        Delegates to :func:`modules.core.transcription_pipeline.write_output_from_jsonl`.
-        """
-        return write_output_from_jsonl(jsonl_path, output_path, self.postprocessing_config)

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -44,10 +44,10 @@ class GoogleProvider(BaseProvider):
         *,
         temperature: float = 0.0,
         max_tokens: int = 4096,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
         top_p: float = 1.0,
-        top_k: Optional[int] = None,
-        reasoning_config: Optional[Dict[str, Any]] = None,
+        top_k: int | None = None,
+        reasoning_config: Dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         caps = detect_capabilities(model)
@@ -123,9 +123,9 @@ class GoogleProvider(BaseProvider):
         *,
         system_prompt: str,
         user_instruction: str = "Please transcribe the text from this image.",
-        json_schema: Optional[Dict[str, Any]] = None,
-        image_detail: Optional[str] = None,
-        media_resolution: Optional[str] = None,
+        json_schema: Dict[str, Any] | None = None,
+        image_detail: str | None = None,
+        media_resolution: str | None = None,
     ) -> TranscriptionResult:
         """Transcribe text from a base64-encoded image using LangChain."""
         caps = self._capabilities
@@ -191,16 +191,10 @@ class GoogleProvider(BaseProvider):
                 include_raw=True,
             )
         
-        # Apply media_resolution if supported
-        # LangChain's ChatGoogleGenerativeAI doesn't directly expose generation_config,
-        # so we pass it via model_kwargs if needed
+        # media_resolution: LangChain's ChatGoogleGenerativeAI does not
+        # expose per-request media_resolution; the parameter is validated
+        # above for logging purposes only.
         invoke_kwargs: Dict[str, Any] = {}
-        if media_resolution_enum and caps.supports_media_resolution:
-            # For LangChain, we can't easily set per-request generation config
-            # Log the resolution for debugging
-            logger.debug(f"Using media_resolution: {resolution} ({media_resolution_enum})")
-            # Note: Current LangChain implementation may not expose this parameter
-            # Future enhancement: Pass via generation_config if LangChain supports it
         
         # Invoke LLM - LangChain handles retries internally
         return await self._invoke_llm(llm_to_use, messages, invoke_kwargs)
@@ -209,7 +203,7 @@ class GoogleProvider(BaseProvider):
         self,
         llm: Any,
         messages: List[Any],
-        invoke_kwargs: Optional[Dict[str, Any]] = None,
+        invoke_kwargs: Dict[str, Any] | None = None,
     ) -> TranscriptionResult:
         """Invoke the LLM and process the response.
         

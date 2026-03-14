@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
 
+from modules.config.constants import DOCUMENT_CATEGORIES
 from modules.infra.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -91,13 +92,13 @@ def get_output_directories_from_config(paths_config: dict) -> dict[str, Path]:
     file_paths = paths_config.get("file_paths", {})
     output_dirs = {}
     
-    for category, key in [("PDFs", "pdfs"), ("Images", "images"), 
-                          ("EPUBs", "epubs"), ("Auto", "auto")]:
+    for category in DOCUMENT_CATEGORIES:
+        key = category.lower()
         if category in file_paths:
             output_path = file_paths[category].get("output")
             if output_path:
                 output_dirs[key] = ensure_directory(Path(output_path))
-    
+
     return output_dirs
 
 
@@ -114,13 +115,13 @@ def get_input_directories_from_config(paths_config: dict) -> dict[str, Path]:
     file_paths = paths_config.get("file_paths", {})
     input_dirs = {}
     
-    for category, key in [("PDFs", "pdfs"), ("Images", "images"), 
-                          ("EPUBs", "epubs"), ("Auto", "auto")]:
+    for category in DOCUMENT_CATEGORIES:
+        key = category.lower()
         if category in file_paths:
             input_path = file_paths[category].get("input")
             if input_path:
                 input_dirs[key] = Path(input_path)
-    
+
     return input_dirs
 
 
@@ -155,7 +156,7 @@ def collect_scan_directories(paths_config: dict) -> List[Path]:
     file_paths = paths_config.get("file_paths", {})
     scan_dirs = set()
     
-    for category in ["PDFs", "Images", "EPUBs", "Auto"]:
+    for category in DOCUMENT_CATEGORIES:
         if category in file_paths:
             for key in ["input", "output"]:
                 path_str = file_paths[category].get(key)

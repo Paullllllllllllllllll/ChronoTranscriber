@@ -89,6 +89,18 @@ class TestCacheTokenExtraction:
         msg.usage_metadata = usage_metadata
         return msg
 
+    @staticmethod
+    def _make_provider_mock() -> MagicMock:
+        """Create a BaseProvider mock with real helper methods bound."""
+        from modules.llm.providers.base import BaseProvider
+
+        provider = MagicMock(spec=BaseProvider)
+        provider._normalize_list_content = BaseProvider._normalize_list_content
+        provider._extract_content = lambda resp: BaseProvider._extract_content(provider, resp)
+        provider._extract_token_usage = BaseProvider._extract_token_usage
+        provider._track_token_usage = lambda *a: BaseProvider._track_token_usage(provider, *a)
+        return provider
+
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_anthropic_cache_tokens_from_response_metadata(self):
@@ -110,8 +122,7 @@ class TestCacheTokenExtraction:
         )
 
         # Use a concrete subclass to call _process_llm_response
-        provider = MagicMock(spec=BaseProvider)
-        provider._normalize_list_content = BaseProvider._normalize_list_content
+        provider = self._make_provider_mock()
         result = await BaseProvider._process_llm_response(provider, msg, ANTHROPIC_TOKEN_MAPPING)
 
         assert result.cached_input_tokens == 800
@@ -138,8 +149,7 @@ class TestCacheTokenExtraction:
             }
         )
 
-        provider = MagicMock(spec=BaseProvider)
-        provider._normalize_list_content = BaseProvider._normalize_list_content
+        provider = self._make_provider_mock()
         result = await BaseProvider._process_llm_response(provider, msg, ANTHROPIC_TOKEN_MAPPING)
 
         assert result.cache_creation_tokens == 1200
@@ -165,8 +175,7 @@ class TestCacheTokenExtraction:
             }
         )
 
-        provider = MagicMock(spec=BaseProvider)
-        provider._normalize_list_content = BaseProvider._normalize_list_content
+        provider = self._make_provider_mock()
         result = await BaseProvider._process_llm_response(provider, msg, OPENAI_TOKEN_MAPPING)
 
         assert result.cached_input_tokens == 1500
@@ -191,8 +200,7 @@ class TestCacheTokenExtraction:
             }
         )
 
-        provider = MagicMock(spec=BaseProvider)
-        provider._normalize_list_content = BaseProvider._normalize_list_content
+        provider = self._make_provider_mock()
         result = await BaseProvider._process_llm_response(provider, msg, OPENAI_TOKEN_MAPPING)
 
         assert result.cached_input_tokens == 0
@@ -221,8 +229,7 @@ class TestCacheTokenExtraction:
             },
         )
 
-        provider = MagicMock(spec=BaseProvider)
-        provider._normalize_list_content = BaseProvider._normalize_list_content
+        provider = self._make_provider_mock()
         result = await BaseProvider._process_llm_response(provider, msg, OPENAI_TOKEN_MAPPING)
 
         assert result.cached_input_tokens == 1800

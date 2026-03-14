@@ -481,3 +481,100 @@ class TestResumeResultDataclass:
         )
         assert r.state == ProcessingState.COMPLETE
         assert r.output_path == p
+
+
+# ===========================================================================
+# _check_output_exists generic method
+# ===========================================================================
+
+class TestCheckOutputExists:
+    """Tests for ResumeChecker._check_output_exists generic method."""
+
+    @pytest.mark.unit
+    def test_returns_none_in_overwrite_mode(self, tmp_path):
+        """Overwrite mode bypasses existence checks (handled by should_skip)."""
+        checker = ResumeChecker(
+            resume_mode="skip",
+            paths_config={},
+            output_format="txt",
+        )
+        result = checker._check_output_exists(
+            tmp_path / "test.pdf", "test", tmp_path,
+        )
+        assert result.state == ProcessingState.NONE
+
+    @pytest.mark.unit
+    def test_finds_colocated_output(self, tmp_path):
+        """Detects output file next to input when use_input_as_output."""
+        checker = ResumeChecker(
+            resume_mode="skip",
+            paths_config={},
+            use_input_as_output=True,
+            output_format="txt",
+        )
+        pdf_path = tmp_path / "doc.pdf"
+        pdf_path.touch()
+        out = tmp_path / "doc.txt"
+        out.write_text("content")
+
+        result = checker._check_output_exists(pdf_path, "doc", tmp_path)
+        assert result.state == ProcessingState.COMPLETE
+
+    @pytest.mark.unit
+    def test_finds_output_in_working_dir(self, tmp_path):
+        """Detects output inside hash-suffixed working directory."""
+        checker = ResumeChecker(
+            resume_mode="skip",
+            paths_config={},
+            output_format="txt",
+        )
+
+        safe_dir = create_safe_directory_name("test_doc")
+        working = tmp_path / safe_dir
+        working.mkdir()
+        out_name = create_safe_filename("test_doc", ".txt", working)
+        (working / out_name).write_text("content")
+
+        item = tmp_path / "test_doc.pdf"
+        result = checker._check_output_exists(item, "test_doc", tmp_path)
+        assert result.state == ProcessingState.COMPLETE
+
+    @pytest.mark.unit
+    def test_partial_jsonl_detected(self, tmp_path):
+        """Partial JSONL file produces PARTIAL state."""
+        checker = ResumeChecker(
+            resume_mode="skip",
+            paths_config={},
+            output_format="txt",
+        )
+
+        safe_dir = create_safe_directory_name("test_doc")
+        working = tmp_path / safe_dir
+        working.mkdir()
+        jsonl_name = create_safe_filename("test_doc", ".jsonl", working)
+        (working / jsonl_name).write_text('{"data": true}\n')
+
+        item = tmp_path / "test_doc.pdf"
+        result = checker._check_output_exists(item, "test_doc", tmp_path)
+        assert result.state == ProcessingState.PARTIAL
+
+    @pytest.mark.unit
+    def test_no_partial_jsonl_when_disabled(self, tmp_path):
+        """JSONL ignored when supports_partial_jsonl=False."""
+        checker = ResumeChecker(
+            resume_mode="skip",
+            paths_config={},
+            output_format="txt",
+        )
+
+        safe_dir = create_safe_directory_name("test_doc")
+        working = tmp_path / safe_dir
+        working.mkdir()
+        jsonl_name = create_safe_filename("test_doc", ".jsonl", working)
+        (working / jsonl_name).write_text('{"data": true}\n')
+
+        item = tmp_path / "test_doc.epub"
+        result = checker._check_output_exists(
+            item, "test_doc", tmp_path, supports_partial_jsonl=False
+        )
+        assert result.state == ProcessingState.NONE

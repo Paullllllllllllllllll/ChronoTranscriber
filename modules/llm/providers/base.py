@@ -5,15 +5,13 @@ Defines the common interface that all LLM providers must implement.
 
 from __future__ import annotations
 
-import base64
 import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Union
 
-from modules.config.constants import SUPPORTED_IMAGE_FORMATS
 from modules.config.service import get_config_service
 from modules.infra.logger import setup_logger
 from modules.llm.model_capabilities import Capabilities
@@ -135,7 +133,7 @@ class TranscriptionResult:
     raw_response: Dict[str, Any] = field(default_factory=dict)
     
     # Parsed structured output (if schema was provided)
-    parsed_output: Optional[Dict[str, Any]] = None
+    parsed_output: Dict[str, Any] | None = None
     
     # Token usage
     input_tokens: int = 0
@@ -152,7 +150,7 @@ class TranscriptionResult:
     transcription_not_possible: bool = False
     
     # Error information
-    error: Optional[str] = None
+    error: str | None = None
     
     def __post_init__(self) -> None:
         """Parse transcription status flags from content if available."""
@@ -182,7 +180,7 @@ class BaseProvider(ABC):
         *,
         temperature: float = 0.0,
         max_tokens: int = 4096,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize the provider.
@@ -228,9 +226,9 @@ class BaseProvider(ABC):
         *,
         system_prompt: str,
         user_instruction: str = "Please transcribe the text from this image.",
-        json_schema: Optional[Dict[str, Any]] = None,
-        image_detail: Optional[str] = None,
-        media_resolution: Optional[str] = None,
+        json_schema: Dict[str, Any] | None = None,
+        image_detail: str | None = None,
+        media_resolution: str | None = None,
     ) -> TranscriptionResult:
         """Transcribe text from an image file.
         
@@ -267,9 +265,9 @@ class BaseProvider(ABC):
         *,
         system_prompt: str,
         user_instruction: str = "Please transcribe the text from this image.",
-        json_schema: Optional[Dict[str, Any]] = None,
-        image_detail: Optional[str] = None,
-        media_resolution: Optional[str] = None,
+        json_schema: Dict[str, Any] | None = None,
+        image_detail: str | None = None,
+        media_resolution: str | None = None,
     ) -> TranscriptionResult:
         """Transcribe text from a base64-encoded image.
         
@@ -306,31 +304,17 @@ class BaseProvider(ABC):
         """
         return str(content_list)
 
-    async def _process_llm_response(
+    def _extract_content(
         self,
         response: Any,
-        token_mapping: TokenUsageMapping,
-    ) -> TranscriptionResult:
-        """Process a LangChain LLM response into a TranscriptionResult.
-        
-        Shared logic for all providers: extracts content, parses structured output,
-        extracts token usage, and tracks daily token consumption.
-        
-        Args:
-            response: Raw response from llm.ainvoke() — either an AIMessage,
-                      a dict (from with_structured_output(include_raw=True)),
-                      or another type.
-            token_mapping: Provider-specific mapping for token usage keys.
-        
+    ) -> tuple[str, dict[str, Any] | None, Any]:
+        """Extract content, parsed_output, and raw_message from an LLM response.
+
         Returns:
-            TranscriptionResult with content, tokens, and parsed output.
+            Tuple of (content_string, parsed_output_or_none, raw_message_or_none).
         """
-        input_tokens = 0
-        output_tokens = 0
-        total_tokens = 0
-        raw_response: Dict[str, Any] = {}
+        parsed_output: dict[str, Any] | None = None
         raw_message = None
-        parsed_output: Optional[Dict[str, Any]] = None
 
         if isinstance(response, dict) and "raw" in response and "parsed" in response:
             # with_structured_output(include_raw=True) → {"raw": AIMessage, "parsed": ...}
@@ -376,15 +360,32 @@ class BaseProvider(ABC):
         else:
             content = str(response)
 
-        # Cache token accumulators
+        return content, parsed_output, raw_message
+
+    @staticmethod
+    def _extract_token_usage(
+        raw_message: Any,
+        token_mapping: TokenUsageMapping,
+    ) -> tuple[int, int, int, int, int]:
+        """Extract token counts from the raw LLM message.
+
+        Returns:
+            Tuple of (input_tokens, output_tokens, total_tokens,
+                      cached_input_tokens, cache_creation_tokens).
+        """
+        input_tokens = 0
+        output_tokens = 0
+        total_tokens = 0
         cached_input_tokens = 0
         cache_creation_tokens = 0
 
+        if raw_message is None:
+            return input_tokens, output_tokens, total_tokens, cached_input_tokens, cache_creation_tokens
+
         # Extract token usage from response_metadata
-        if raw_message and hasattr(raw_message, "response_metadata"):
+        if hasattr(raw_message, "response_metadata"):
             metadata = raw_message.response_metadata
             if isinstance(metadata, dict):
-                raw_response = metadata
                 usage = metadata.get(token_mapping.usage_key, {})
                 if isinstance(usage, dict):
                     input_tokens = usage.get(token_mapping.input_key, 0)
@@ -415,7 +416,7 @@ class BaseProvider(ABC):
         # (a UsageMetadata TypedDict — i.e. a plain dict) rather than
         # response_metadata["token_usage"].  This is the primary path for the
         # OpenAI Responses API where response_metadata has no "token_usage" key.
-        if total_tokens == 0 and raw_message is not None:
+        if total_tokens == 0:
             usage_meta = getattr(raw_message, "usage_metadata", None)
             if usage_meta is not None:
                 # UsageMetadata is a TypedDict (plain dict), so use dict
@@ -443,7 +444,15 @@ class BaseProvider(ABC):
                             details.get("cache_creation", 0) or 0
                         )
 
-        # Track tokens using daily tracker
+        return input_tokens, output_tokens, total_tokens, cached_input_tokens, cache_creation_tokens
+
+    def _track_token_usage(
+        self,
+        total_tokens: int,
+        cached_input_tokens: int,
+        input_tokens: int,
+    ) -> None:
+        """Record token consumption in the daily tracker."""
         if total_tokens > 0:
             try:
                 from modules.infra.token_tracker import get_token_tracker
@@ -461,7 +470,38 @@ class BaseProvider(ABC):
             except Exception as e:
                 logger.warning(f"Error tracking tokens: {e}")
 
-        cache_hit = cached_input_tokens > 0 or cache_creation_tokens > 0
+    async def _process_llm_response(
+        self,
+        response: Any,
+        token_mapping: TokenUsageMapping,
+    ) -> TranscriptionResult:
+        """Process a LangChain LLM response into a TranscriptionResult.
+
+        Shared logic for all providers: extracts content, parses structured output,
+        extracts token usage, and tracks daily token consumption.
+
+        Args:
+            response: Raw response from llm.ainvoke() — either an AIMessage,
+                      a dict (from with_structured_output(include_raw=True)),
+                      or another type.
+            token_mapping: Provider-specific mapping for token usage keys.
+
+        Returns:
+            TranscriptionResult with content, tokens, and parsed output.
+        """
+        content, parsed_output, raw_message = self._extract_content(response)
+
+        input_tokens, output_tokens, total_tokens, cached_input_tokens, cache_creation_tokens = (
+            self._extract_token_usage(raw_message, token_mapping)
+        )
+
+        self._track_token_usage(total_tokens, cached_input_tokens, input_tokens)
+
+        raw_response: Dict[str, Any] = {}
+        if raw_message and hasattr(raw_message, "response_metadata"):
+            metadata = raw_message.response_metadata
+            if isinstance(metadata, dict):
+                raw_response = metadata
 
         result = TranscriptionResult(
             content=content,
@@ -471,7 +511,7 @@ class BaseProvider(ABC):
             total_tokens=total_tokens,
             cached_input_tokens=cached_input_tokens,
             cache_creation_tokens=cache_creation_tokens,
-            cache_hit=cache_hit,
+            cache_hit=cached_input_tokens > 0 or cache_creation_tokens > 0,
         )
 
         if parsed_output and isinstance(parsed_output, dict):
@@ -650,9 +690,9 @@ class BaseProvider(ABC):
     
     async def __aexit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[Any],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any | None,
     ) -> bool:
         """Async context manager exit."""
         await self.close()
@@ -661,25 +701,11 @@ class BaseProvider(ABC):
     @staticmethod
     def encode_image_to_base64(image_path: Path) -> tuple[str, str]:
         """Encode an image file to base64.
-        
-        Args:
-            image_path: Path to the image file
-        
-        Returns:
-            Tuple of (base64_data, mime_type)
-        
-        Raises:
-            ValueError: If the image format is not supported
+
+        Delegates to modules.llm.image_encoding for the shared implementation.
         """
-        ext = image_path.suffix.lower()
-        mime_type = SUPPORTED_IMAGE_FORMATS.get(ext)
-        if not mime_type:
-            raise ValueError(f"Unsupported image format: {ext}")
-        
-        with open(image_path, "rb") as f:
-            data = base64.b64encode(f.read()).decode("utf-8")
-        
-        return data, mime_type
+        from modules.llm.image_encoding import encode_image_to_base64 as _encode
+        return _encode(image_path)
     
     @staticmethod
     def create_data_url(base64_data: str, mime_type: str) -> str:

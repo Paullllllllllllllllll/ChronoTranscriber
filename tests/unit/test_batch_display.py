@@ -93,3 +93,39 @@ def test_display_batch_summary_groups_by_status(monkeypatch: pytest.MonkeyPatch)
 
     # Should render header lines and at least one status group summary
     assert bd.ui_print.call_count > 0
+
+
+class TestFormatErrorDetail:
+    """Tests for _format_error_detail helper."""
+
+    @pytest.mark.unit
+    def test_all_fields(self) -> None:
+        from modules.ui.batch_display import _format_error_detail
+
+        result = _format_error_detail(500, "server_error", "Internal error")
+        assert "status=500" in result
+        assert "code=server_error" in result
+        assert "message=Internal error" in result
+
+    @pytest.mark.unit
+    def test_status_only(self) -> None:
+        from modules.ui.batch_display import _format_error_detail
+
+        result = _format_error_detail(404, None, None)
+        assert result == "status=404"
+
+    @pytest.mark.unit
+    def test_all_none(self) -> None:
+        from modules.ui.batch_display import _format_error_detail
+
+        result = _format_error_detail(None, None, None)
+        assert result == ""
+
+    @pytest.mark.unit
+    def test_code_and_message(self) -> None:
+        from modules.ui.batch_display import _format_error_detail
+
+        result = _format_error_detail(None, "rate_limit", "Too many requests")
+        assert "code=rate_limit" in result
+        assert "message=Too many requests" in result
+        assert "status=" not in result

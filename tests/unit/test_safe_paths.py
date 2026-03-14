@@ -206,3 +206,51 @@ class TestConstants:
         """Test MIN_READABLE_LENGTH is reasonable."""
         assert MIN_READABLE_LENGTH >= 10  # Should be readable
         assert MIN_READABLE_LENGTH < MAX_SAFE_NAME_LENGTH / 2
+
+
+class TestComputeNameHash:
+    """Tests for _compute_name_hash helper."""
+
+    @pytest.mark.unit
+    def test_returns_8_char_hex(self):
+        from modules.core.safe_paths import _compute_name_hash
+        result = _compute_name_hash("test")
+        assert len(result) == 8
+        assert all(c in "0123456789abcdef" for c in result)
+
+    @pytest.mark.unit
+    def test_deterministic(self):
+        from modules.core.safe_paths import _compute_name_hash
+        assert _compute_name_hash("hello") == _compute_name_hash("hello")
+
+    @pytest.mark.unit
+    def test_different_inputs_different_hashes(self):
+        from modules.core.safe_paths import _compute_name_hash
+        assert _compute_name_hash("a") != _compute_name_hash("b")
+
+
+class TestTruncateName:
+    """Tests for _truncate_name helper."""
+
+    @pytest.mark.unit
+    def test_no_truncation_when_within_limit(self):
+        from modules.core.safe_paths import _truncate_name
+        assert _truncate_name("short", 10) == "short"
+
+    @pytest.mark.unit
+    def test_truncates_to_max_length(self):
+        from modules.core.safe_paths import _truncate_name
+        result = _truncate_name("a" * 20, 10)
+        assert len(result) <= 10
+
+    @pytest.mark.unit
+    def test_strips_trailing_punctuation(self):
+        from modules.core.safe_paths import _truncate_name
+        # "hello world." truncated to 12 chars = "hello world." but that ends with '.'
+        result = _truncate_name("hello world. more text", 12)
+        assert not result.endswith(".")
+
+    @pytest.mark.unit
+    def test_exact_length_no_truncation(self):
+        from modules.core.safe_paths import _truncate_name
+        assert _truncate_name("12345", 5) == "12345"

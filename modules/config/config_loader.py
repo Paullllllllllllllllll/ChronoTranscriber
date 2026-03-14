@@ -17,6 +17,7 @@ from typing import Optional
 
 import yaml
 
+from modules.config.constants import DOCUMENT_CATEGORIES
 from modules.llm.model_capabilities import ensure_image_support
 
 
@@ -232,7 +233,7 @@ class ConfigLoader:
 
         # Normalize file_paths sections
         file_paths = dict(out.get("file_paths", {}))
-        for section in ("PDFs", "Images", "EPUBs", "Auto"):
+        for section in DOCUMENT_CATEGORIES:
             if section in file_paths and isinstance(file_paths[section], dict):
                 sec = dict(file_paths[section])
                 for k in ("input", "output"):

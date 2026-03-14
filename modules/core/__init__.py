@@ -1,11 +1,10 @@
 """Core utilities package.
 
-Provides CLI argument parsing, mode selection, workflow management, token guards,
+Provides CLI argument parsing, workflow management, token guards,
 and utility functions.
 
 Submodules:
 - cli_args: CLI argument parsers (create_transcriber_parser, etc.)
-- mode_selector: Dual-mode execution (run_with_mode_detection, run_sync_with_mode_detection)
 - workflow: WorkflowManager for document processing
 - token_guard: Token limit management (check_and_wait_for_token_limit)
 - auto_selector: Auto mode file detection

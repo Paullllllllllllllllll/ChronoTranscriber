@@ -95,14 +95,22 @@ def detect_provider(model_name: str) -> ProviderType:
     """
     m = _norm(model_name)
 
-    if m.startswith("openrouter/") or "/" in m:
+    if m.startswith("openrouter/"):
         return "openrouter"
+    if "/" in m:
+        prefix = m.split("/")[0]
+        if prefix in ("openai", "anthropic", "google", "meta", "mistral"):
+            return "openrouter"
     if m.startswith("claude") or "anthropic" in m:
         return "anthropic"
-    if m.startswith("gemini") or "google" in m:
+    if m.startswith("gemini") or m.startswith("models/") or "google" in m:
         return "google"
-    if any(m.startswith(p) for p in ("gpt", "o1", "o3", "o4", "text-")):
+    if any(m.startswith(p) for p in ("gpt", "o1", "o3", "o4", "chatgpt", "text-")):
         return "openai"
+    if any(x in m for x in ("llama", "mistral", "mixtral", "qwen", "deepseek")):
+        return "openrouter"
+    if "/" in m:
+        return "openrouter"
     return "unknown"
 
 

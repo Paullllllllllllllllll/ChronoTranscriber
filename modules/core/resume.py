@@ -14,7 +14,7 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from modules.core.safe_paths import create_safe_directory_name, create_safe_filename
 from modules.infra.logger import setup_logger
@@ -34,7 +34,7 @@ class ResumeResult:
     """Result of a resume check for a single item."""
     item: Path
     state: ProcessingState
-    output_path: Optional[Path] = None
+    output_path: Path | None = None
     reason: str = ""
 
 
@@ -61,10 +61,10 @@ class ResumeChecker:
         paths_config: Dict[str, Any],
         *,
         use_input_as_output: bool = False,
-        pdf_output_dir: Optional[Path] = None,
-        image_output_dir: Optional[Path] = None,
-        epub_output_dir: Optional[Path] = None,
-        mobi_output_dir: Optional[Path] = None,
+        pdf_output_dir: Path | None = None,
+        image_output_dir: Path | None = None,
+        epub_output_dir: Path | None = None,
+        mobi_output_dir: Path | None = None,
         output_format: str = "txt",
     ) -> None:
         self.resume_mode = resume_mode
@@ -163,160 +163,116 @@ class ResumeChecker:
             return item.parent if item.is_file() else item
         return default_output_dir
 
-    def _check_pdf(self, pdf_path: Path) -> ResumeResult:
-        output_dir = self._resolve_output_dir(pdf_path, self.pdf_output_dir)
+    def _check_output_exists(
+        self,
+        item: Path,
+        item_stem: str,
+        default_output_dir: Path,
+        *,
+        supports_partial_jsonl: bool = True,
+        working_dir_base_override: Path | None = None,
+    ) -> ResumeResult:
+        """Generic output-existence check shared by all document types.
 
-        # When output is co-located with input, check for output file directly
-        # next to the PDF first (current output path convention).
+        Args:
+            item: Input file or folder path.
+            item_stem: Name used for output file derivation (e.g.
+                ``pdf_path.stem``, ``folder.name``).
+            default_output_dir: Configured output directory for this type.
+            supports_partial_jsonl: If ``True``, also check for partial JSONL.
+            working_dir_base_override: If provided, use this as the base for
+                the hash-suffixed working directory instead of deriving from
+                ``use_input_as_output`` / *default_output_dir*.  Used by image
+                folders whose working directory lives in the parent, not inside
+                the folder.
+        """
+        # -- Co-located output check (use_input_as_output) ----------------
+        # For files the co-locate directory is item.parent; for folders it is
+        # also item.parent (the caller passes the folder itself as *item*).
+        co_locate_dir = item.parent
+
         if self.use_input_as_output:
-            out_name = create_safe_filename(pdf_path.stem, self._output_ext, pdf_path.parent)
-            out_path = pdf_path.parent / out_name
+            out_name = create_safe_filename(
+                item_stem, self._output_ext, co_locate_dir,
+            )
+            out_path = co_locate_dir / out_name
             if out_path.exists() and out_path.stat().st_size > 0:
                 return ResumeResult(
-                    item=pdf_path, state=ProcessingState.COMPLETE,
+                    item=item,
+                    state=ProcessingState.COMPLETE,
                     output_path=out_path,
                     reason=f"output exists: {out_path.name}",
                 )
 
-        # Check inside the hash-suffixed working directory (legacy location
-        # and also where the JSONL for page-level resume lives).
-        safe_dir = create_safe_directory_name(pdf_path.stem)
-        parent_folder = output_dir / safe_dir
-
-        if not parent_folder.exists():
-            return ResumeResult(item=pdf_path, state=ProcessingState.NONE, reason="no output folder")
-
-        txt_name_in_dir = create_safe_filename(pdf_path.stem, self._output_ext, parent_folder)
-        txt_path_in_dir = parent_folder / txt_name_in_dir
-
-        jsonl_name = create_safe_filename(pdf_path.stem, ".jsonl", parent_folder)
-        jsonl_path = parent_folder / jsonl_name
-
-        if txt_path_in_dir.exists() and txt_path_in_dir.stat().st_size > 0:
-            return ResumeResult(
-                item=pdf_path, state=ProcessingState.COMPLETE,
-                output_path=txt_path_in_dir,
-                reason=f"output exists: {txt_path_in_dir.name}",
-            )
-
-        if jsonl_path.exists() and jsonl_path.stat().st_size > 0:
-            return ResumeResult(
-                item=pdf_path, state=ProcessingState.PARTIAL,
-                output_path=jsonl_path,
-                reason=f"partial JSONL exists: {jsonl_path.name}",
-            )
-
-        return ResumeResult(item=pdf_path, state=ProcessingState.NONE, reason="no output")
-
-    def _check_image_folder(self, folder: Path) -> ResumeResult:
-        # When output is co-located with input, check for output file next to
-        # the folder (in its parent directory) first — this is the current convention.
-        if self.use_input_as_output:
-            out_name = create_safe_filename(folder.name, self._output_ext, folder.parent)
-            out_path = folder.parent / out_name
-            if out_path.exists() and out_path.stat().st_size > 0:
-                return ResumeResult(
-                    item=folder, state=ProcessingState.COMPLETE,
-                    output_path=out_path,
-                    reason=f"output exists: {out_path.name}",
-                )
-            # Working directory is next to the folder (in parent), not inside it
-            working_dir_base = folder.parent
+        # -- Determine working-dir base -----------------------------------
+        if working_dir_base_override is not None:
+            working_dir_base = working_dir_base_override
+        elif self.use_input_as_output:
+            working_dir_base = item.parent
         else:
-            working_dir_base = self.image_output_dir
+            working_dir_base = default_output_dir
 
-        # Check inside the hash-suffixed working directory (legacy location
-        # and also where the JSONL for page-level resume lives).
-        safe_dir = create_safe_directory_name(folder.name)
+        # -- Hash-suffixed working directory (legacy / JSONL location) -----
+        safe_dir = create_safe_directory_name(item_stem)
         parent_folder = working_dir_base / safe_dir
 
         if not parent_folder.exists():
-            return ResumeResult(item=folder, state=ProcessingState.NONE, reason="no output folder")
+            return ResumeResult(
+                item=item, state=ProcessingState.NONE, reason="no output folder",
+            )
 
-        txt_name_in_dir = create_safe_filename(folder.name, self._output_ext, parent_folder)
+        txt_name_in_dir = create_safe_filename(
+            item_stem, self._output_ext, parent_folder,
+        )
         txt_path_in_dir = parent_folder / txt_name_in_dir
-
-        jsonl_name = create_safe_filename(folder.name, ".jsonl", parent_folder)
-        jsonl_path = parent_folder / jsonl_name
 
         if txt_path_in_dir.exists() and txt_path_in_dir.stat().st_size > 0:
             return ResumeResult(
-                item=folder, state=ProcessingState.COMPLETE,
+                item=item,
+                state=ProcessingState.COMPLETE,
                 output_path=txt_path_in_dir,
                 reason=f"output exists: {txt_path_in_dir.name}",
             )
 
-        if jsonl_path.exists() and jsonl_path.stat().st_size > 0:
-            return ResumeResult(
-                item=folder, state=ProcessingState.PARTIAL,
-                output_path=jsonl_path,
-                reason=f"partial JSONL exists: {jsonl_path.name}",
-            )
+        # -- Optional partial-JSONL check ----------------------------------
+        if supports_partial_jsonl:
+            jsonl_name = create_safe_filename(item_stem, ".jsonl", parent_folder)
+            jsonl_path = parent_folder / jsonl_name
+            if jsonl_path.exists() and jsonl_path.stat().st_size > 0:
+                return ResumeResult(
+                    item=item,
+                    state=ProcessingState.PARTIAL,
+                    output_path=jsonl_path,
+                    reason=f"partial JSONL exists: {jsonl_path.name}",
+                )
 
-        return ResumeResult(item=folder, state=ProcessingState.NONE, reason="no output")
+        return ResumeResult(item=item, state=ProcessingState.NONE, reason="no output")
+
+    # -- Thin per-type wrappers -------------------------------------------
+
+    def _check_pdf(self, pdf_path: Path) -> ResumeResult:
+        return self._check_output_exists(
+            pdf_path, pdf_path.stem, self.pdf_output_dir,
+        )
+
+    def _check_image_folder(self, folder: Path) -> ResumeResult:
+        return self._check_output_exists(
+            folder,
+            folder.name,
+            self.image_output_dir,
+            working_dir_base_override=(
+                folder.parent if self.use_input_as_output else None
+            ),
+        )
 
     def _check_epub(self, epub_path: Path) -> ResumeResult:
-        output_dir = self._resolve_output_dir(epub_path, self.epub_output_dir)
-
-        # Check for output file directly next to the EPUB (current convention).
-        if self.use_input_as_output:
-            out_name = create_safe_filename(epub_path.stem, self._output_ext, epub_path.parent)
-            out_path = epub_path.parent / out_name
-            if out_path.exists() and out_path.stat().st_size > 0:
-                return ResumeResult(
-                    item=epub_path, state=ProcessingState.COMPLETE,
-                    output_path=out_path,
-                    reason=f"output exists: {out_path.name}",
-                )
-
-        # Legacy: check inside hash-suffixed working directory.
-        safe_dir = create_safe_directory_name(epub_path.stem)
-        parent_folder = output_dir / safe_dir
-
-        if not parent_folder.exists():
-            return ResumeResult(item=epub_path, state=ProcessingState.NONE, reason="no output folder")
-
-        txt_name_in_dir = create_safe_filename(epub_path.stem, self._output_ext, parent_folder)
-        txt_path_in_dir = parent_folder / txt_name_in_dir
-
-        if txt_path_in_dir.exists() and txt_path_in_dir.stat().st_size > 0:
-            return ResumeResult(
-                item=epub_path, state=ProcessingState.COMPLETE,
-                output_path=txt_path_in_dir,
-                reason=f"output exists: {txt_path_in_dir.name}",
-            )
-
-        return ResumeResult(item=epub_path, state=ProcessingState.NONE, reason="no output")
+        return self._check_output_exists(
+            epub_path, epub_path.stem, self.epub_output_dir,
+            supports_partial_jsonl=False,
+        )
 
     def _check_mobi(self, mobi_path: Path) -> ResumeResult:
-        output_dir = self._resolve_output_dir(mobi_path, self.mobi_output_dir)
-
-        # Check for output file directly next to the MOBI (current convention).
-        if self.use_input_as_output:
-            out_name = create_safe_filename(mobi_path.stem, self._output_ext, mobi_path.parent)
-            out_path = mobi_path.parent / out_name
-            if out_path.exists() and out_path.stat().st_size > 0:
-                return ResumeResult(
-                    item=mobi_path, state=ProcessingState.COMPLETE,
-                    output_path=out_path,
-                    reason=f"output exists: {out_path.name}",
-                )
-
-        # Legacy: check inside hash-suffixed working directory.
-        safe_dir = create_safe_directory_name(mobi_path.stem)
-        parent_folder = output_dir / safe_dir
-
-        if not parent_folder.exists():
-            return ResumeResult(item=mobi_path, state=ProcessingState.NONE, reason="no output folder")
-
-        txt_name_in_dir = create_safe_filename(mobi_path.stem, self._output_ext, parent_folder)
-        txt_path_in_dir = parent_folder / txt_name_in_dir
-
-        if txt_path_in_dir.exists() and txt_path_in_dir.stat().st_size > 0:
-            return ResumeResult(
-                item=mobi_path, state=ProcessingState.COMPLETE,
-                output_path=txt_path_in_dir,
-                reason=f"output exists: {txt_path_in_dir.name}",
-            )
-
-        return ResumeResult(item=mobi_path, state=ProcessingState.NONE, reason="no output")
+        return self._check_output_exists(
+            mobi_path, mobi_path.stem, self.mobi_output_dir,
+            supports_partial_jsonl=False,
+        )

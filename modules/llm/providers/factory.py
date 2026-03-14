@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 from enum import Enum
-from typing import Any, Dict, Optional, Type
+from typing import Any, Dict, Type
 
 from modules.infra.logger import setup_logger
 from modules.llm.providers.base import BaseProvider
@@ -60,45 +60,23 @@ def get_available_providers() -> list[ProviderType]:
 
 
 def detect_provider_from_model(model_name: str) -> ProviderType:
-    """Attempt to detect the provider from the model name.
-    
-    Args:
-        model_name: The model name/identifier
-    
-    Returns:
-        Best-guess ProviderType based on model name patterns
+    """Detect provider from model name, returning a ProviderType enum.
+
+    Delegates to the canonical detect_provider() in model_capabilities
+    and wraps the result in the ProviderType enum.
     """
-    m = model_name.lower().strip()
-    
-    # OpenRouter format: provider/model
-    if "/" in m:
-        prefix = m.split("/")[0]
-        if prefix in ("openai", "anthropic", "google", "meta", "mistral"):
-            return ProviderType.OPENROUTER
-    
-    # OpenAI models
-    if m.startswith(("gpt-", "o1", "o3", "o4", "chatgpt")):
-        return ProviderType.OPENAI
-    
-    # Anthropic models
-    if "claude" in m:
-        return ProviderType.ANTHROPIC
-    
-    # Google models
-    if "gemini" in m or m.startswith("models/"):
-        return ProviderType.GOOGLE
-    
-    # Llama, Mistral, etc. via OpenRouter
-    if any(x in m for x in ["llama", "mistral", "mixtral", "qwen", "deepseek"]):
-        return ProviderType.OPENROUTER
-    
-    # Default to OpenAI
-    return ProviderType.OPENAI
+    from modules.llm.model_capabilities import detect_provider
+
+    result = detect_provider(model_name)
+    try:
+        return ProviderType(result)
+    except ValueError:
+        return ProviderType.OPENAI  # Default fallback
 
 
 def get_api_key_for_provider(
     provider_type: ProviderType,
-    api_key: Optional[str] = None,
+    api_key: str | None = None,
 ) -> str:
     """Get the API key for a provider.
     
@@ -138,13 +116,13 @@ def get_api_key_for_provider(
 
 
 def get_provider(
-    provider: Optional[str] = None,
-    model: Optional[str] = None,
-    api_key: Optional[str] = None,
+    provider: str | None = None,
+    model: str | None = None,
+    api_key: str | None = None,
     *,
     temperature: float = 0.0,
     max_tokens: int = 4096,
-    timeout: Optional[float] = None,
+    timeout: float | None = None,
     **kwargs,
 ) -> BaseProvider:
     """Create a provider instance.
@@ -229,13 +207,13 @@ def get_provider(
 
 
 def get_provider_for_transcription(
-    api_key: Optional[str] = None,
-    model: Optional[str] = None,
-    provider: Optional[str] = None,
+    api_key: str | None = None,
+    model: str | None = None,
+    provider: str | None = None,
     *,
-    schema_path: Optional[str] = None,
-    system_prompt_path: Optional[str] = None,
-    additional_context_path: Optional[str] = None,
+    schema_path: str | None = None,
+    system_prompt_path: str | None = None,
+    additional_context_path: str | None = None,
 ) -> BaseProvider:
     """Create a provider configured for transcription.
     

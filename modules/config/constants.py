@@ -31,3 +31,6 @@ SUPPORTED_MOBI_EXTENSIONS = {".mobi", ".azw", ".azw3", ".kfx"}
 
 # OpenAI Batch API terminal statuses (states that indicate batch completion)
 TERMINAL_BATCH_STATUSES = {"completed", "expired", "cancelled", "failed"}
+
+# Document category labels used in paths_config.yaml
+DOCUMENT_CATEGORIES = ("PDFs", "Images", "EPUBs", "Auto")

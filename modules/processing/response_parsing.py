@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 import re
 
 from modules.infra.logger import setup_logger
@@ -33,7 +33,7 @@ def detect_transcription_cause(text: str) -> str:
     return "ok"
 
 
-def format_page_line(text: str, page_number: Optional[int], image_name: Optional[str]) -> str:
+def format_page_line(text: str, page_number: int | None, image_name: str | None) -> str:
     """Return a unified, page-identified output for final files.
 
     - Prefer the image file name as the header: '<image_name>:'
@@ -80,7 +80,7 @@ def _extract_from_responses_object(data: Dict[str, Any]) -> str:
     return "".join(parts).strip()
 
 
-def _try_parse_json(text: str) -> Optional[Dict[str, Any]]:
+def _try_parse_json(text: str) -> Dict[str, Any] | None:
     try:
         result = json.loads(text)
         return result if isinstance(result, dict) else None
@@ -88,7 +88,7 @@ def _try_parse_json(text: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _salvage_last_json_object(text: str) -> Optional[Dict[str, Any]]:
+def _salvage_last_json_object(text: str) -> Dict[str, Any] | None:
     """
     When the model returns concatenated JSON objects or mixed prose+JSON,
     try to salvage the last valid JSON object near the end of the string.
@@ -110,6 +110,69 @@ def _salvage_last_json_object(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _check_transcription_flags(parsed: dict[str, Any]) -> str | None:
+    """Return a placeholder string if schema flags indicate no usable text, else None."""
+    if parsed.get("no_transcribable_text", False):
+        return "[No transcribable text]"
+    if parsed.get("transcription_not_possible", False):
+        return "[Transcription not possible]"
+    return None
+
+
+def _extract_from_schema_object(result: dict[str, Any]) -> str:
+    """Extract transcription from a normalized schema object."""
+    flag = _check_transcription_flags(result)
+    if flag is not None:
+        return flag
+    return str(result.get("transcription", "")).strip()
+
+
+def _extract_from_chat_completions(result: dict[str, Any], image_name: str) -> str:
+    """Extract transcription from a Chat Completions response."""
+    choices = result.get("choices")
+    if not choices or not isinstance(choices, list):
+        return ""
+
+    message = choices[0].get("message", {})
+
+    # Structured (message.parsed)
+    if "parsed" in message and message["parsed"]:
+        parsed = message["parsed"]
+        if isinstance(parsed, dict):
+            flag = _check_transcription_flags(parsed)
+            if flag is not None:
+                return flag
+            transcription_value = parsed.get("transcription")
+            return transcription_value.strip() if transcription_value is not None else ""
+        else:
+            try:
+                parsed_obj = json.loads(parsed)
+                flag = _check_transcription_flags(parsed_obj)
+                if flag is not None:
+                    return flag
+                transcription_value = parsed_obj.get("transcription")
+                return transcription_value.strip() if transcription_value is not None else ""
+            except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                logger.error("Error parsing structured output for %s: %s", image_name, exc)
+                return ""
+
+    # Plain content
+    content = str(message.get("content", "")).strip()
+    if content:
+        if content.startswith("{"):
+            parsed = _try_parse_json(content)
+            if parsed is not None:
+                flag = _check_transcription_flags(parsed)
+                if flag is not None:
+                    return flag
+                if "transcription" in parsed:
+                    return str(parsed["transcription"]).strip()
+        return content
+
+    logger.error("Empty content field in response for %s: %s", image_name, json.dumps(result))
+    return "[transcription error]"
+
+
 def extract_transcribed_text(result: Dict[str, Any], image_name: str = "") -> str:
     """
     Extract a transcription string from either:
@@ -123,26 +186,18 @@ def extract_transcribed_text(result: Dict[str, Any], image_name: str = "") -> st
         The transcription (or a helpful placeholder).
     """
     # Early exit for error responses (connection failures, etc.)
-    # Intercepts dicts like {"output_text": "", "error": "Connection error."} before
-    # they fall through to Case 2 and produce a misleading "Unrecognized response shape" log.
     if (
         isinstance(result, dict)
         and result.get("error")
         and not result.get("output_text")
         and not result.get("choices")
     ):
-        logger.warning(
-            "API error for %s: %s", image_name, result["error"]
-        )
+        logger.warning("API error for %s: %s", image_name, result["error"])
         return "[transcription error]"
 
     # Case 1: Already normalized (schema object)
     if isinstance(result, dict) and "transcription" in result:
-        if result.get("no_transcribable_text", False):
-            return "[No transcribable text]"
-        if result.get("transcription_not_possible", False):
-            return "[Transcription not possible]"
-        return str(result.get("transcription", "")).strip()
+        return _extract_from_schema_object(result)
 
     # Case 2: Responses API object
     if isinstance(result, dict) and ("output_text" in result or "output" in result):
@@ -152,60 +207,21 @@ def extract_transcribed_text(result: Dict[str, Any], image_name: str = "") -> st
             if stripped.startswith("{"):
                 parsed = _try_parse_json(stripped)
                 if parsed is None:
-                    # Improved salvage: locate the last valid JSON object
                     parsed = _salvage_last_json_object(stripped)
                 if parsed is not None:
-                    if parsed.get("no_transcribable_text", False):
-                        return "[No transcribable text]"
-                    if parsed.get("transcription_not_possible", False):
-                        return "[Transcription not possible]"
+                    flag = _check_transcription_flags(parsed)
+                    if flag is not None:
+                        return flag
                     if "transcription" in parsed:
                         return str(parsed["transcription"]).strip()
             return text
 
-    # Case 3: Legacy Chat Completions object
-    choices = result.get("choices")
-    if choices and isinstance(choices, list):
-        message = choices[0].get("message", {})
-        # Structured (message.parsed)
-        if "parsed" in message and message["parsed"]:
-            parsed = message["parsed"]
-            if isinstance(parsed, dict):
-                if parsed.get("no_transcribable_text", False):
-                    return "[No transcribable text]"
-                if parsed.get("transcription_not_possible", False):
-                    return "[Transcription not possible]"
-                transcription_value = parsed.get("transcription")
-                return transcription_value.strip() if transcription_value is not None else ""
-            else:
-                try:
-                    parsed_obj = json.loads(parsed)
-                    if parsed_obj.get("no_transcribable_text", False):
-                        return "[No transcribable text]"
-                    if parsed_obj.get("transcription_not_possible", False):
-                        return "[Transcription not possible]"
-                    transcription_value = parsed_obj.get("transcription")
-                    return transcription_value.strip() if transcription_value is not None else ""
-                except (json.JSONDecodeError, ValueError, TypeError) as exc:
-                    logger.error("Error parsing structured output for %s: %s", image_name, exc)
-                    return ""
-        # Plain content
-        content = str(message.get("content", "")).strip()
-        if content:
-            if content.startswith("{"):
-                parsed = _try_parse_json(content)
-                if parsed is not None:
-                    if parsed.get("no_transcribable_text", False):
-                        return "[No transcribable text]"
-                    if parsed.get("transcription_not_possible", False):
-                        return "[Transcription not possible]"
-                    if "transcription" in parsed:
-                        return str(parsed["transcription"]).strip()
-            return content
-        logger.error("Empty content field in response for %s: %s", image_name, json.dumps(result))
-        return "[transcription error]"
+    # Case 3: Legacy Chat Completions
+    chat_result = _extract_from_chat_completions(result, image_name)
+    if chat_result:
+        return chat_result
 
-    # Last resort: log and return raw JSON
+    # Last resort
     logger.error("Unrecognized response shape for image %s: %s", image_name, json.dumps(result))
     return "[transcription error]"
 
@@ -249,7 +265,7 @@ def process_batch_output(file_content: bytes) -> List[str]:
             continue
 
         # Prefer Responses 'response.body'
-        data: Optional[Dict[str, Any]] = None
+        data: Dict[str, Any] | None = None
         if "response" in obj and isinstance(obj["response"], dict):
             body = obj["response"].get("body")
             if isinstance(body, dict):

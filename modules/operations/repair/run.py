@@ -125,23 +125,19 @@ def _write_repair_jsonl_line(path: Path, record: Dict[str, Any]) -> None:
     return ru_write_repair_jsonl_line(path, record)
 
 
-async def _repair_sync_mode(
+def _resolve_repair_targets(
     job: Job,
-    model_config: Dict[str, Any],
     image_entries: List[ImageEntry],
     failure_indices: List[int],
     final_lines: List[str],
-    repair_jsonl_path: Path,
-    schema_path: Optional[Path] = None,
-    additional_context_path: Optional[Path] = None,
-) -> None:
-    from modules.llm import transcribe_image_with_llm
+) -> List[RepairTarget]:
+    """Resolve failure line indices to concrete RepairTarget objects.
 
-    # Build mapping by image_name for robust lookup
+    Shared between sync and batch repair modes.
+    """
     name_to_entry: Dict[str, ImageEntry] = {e.image_name: e for e in image_entries}
-
-    # Attempt to resolve each failure line by extracting its image name
     targets: List[RepairTarget] = []
+
     for idx in failure_indices:
         image_name = _extract_image_name_from_failure_line(final_lines[idx])
         entry = name_to_entry.get(image_name) if image_name else None
@@ -153,7 +149,6 @@ async def _repair_sync_mode(
             resolved_path = _resolve_image_path(job.parent_folder, entry)
             resolved_order_index = entry.order_index
         else:
-            # Fallback: try to locate by image name in known folders
             if image_name:
                 for sub in ("preprocessed_images", "preprocessed_images_tesseract"):
                     cand = job.parent_folder / sub / image_name
@@ -169,7 +164,6 @@ async def _repair_sync_mode(
             )
             continue
 
-        # Compute page number from metadata if available
         pn: Optional[int] = None
         if entry and isinstance(entry.page_number, int):
             pn = entry.page_number
@@ -186,6 +180,33 @@ async def _repair_sync_mode(
                 page_number=pn,
             )
         )
+
+    return targets
+
+
+def _persist_repaired_file(
+    job: Job,
+    final_lines: List[str],
+) -> Path:
+    """Back up the original file and write updated lines. Returns backup path."""
+    backup = _backup_file(job.final_txt_path)
+    job.final_txt_path.write_text("\n".join(final_lines), encoding="utf-8")
+    return backup
+
+
+async def _repair_sync_mode(
+    job: Job,
+    model_config: Dict[str, Any],
+    image_entries: List[ImageEntry],
+    failure_indices: List[int],
+    final_lines: List[str],
+    repair_jsonl_path: Path,
+    schema_path: Optional[Path] = None,
+    additional_context_path: Optional[Path] = None,
+) -> None:
+    from modules.llm import transcribe_image_with_llm
+
+    targets = _resolve_repair_targets(job, image_entries, failure_indices, final_lines)
 
     # Always record a session entry, even with zero targets
     _write_repair_jsonl_line(
@@ -298,8 +319,7 @@ async def _repair_sync_mode(
                 )
                 final_lines[line_index] = format_page_line(text, pn, t.image_name)
 
-    backup = _backup_file(job.final_txt_path)
-    job.final_txt_path.write_text("\n".join(final_lines), encoding="utf-8")
+    backup = _persist_repaired_file(job, final_lines)
     print_success(
         f"[SUCCESS] Synchronous repair complete for '{job.identifier}'. "
         f"Backup written to: {backup.name}"
@@ -391,48 +411,8 @@ async def _repair_batch_mode(
     schema_path: Optional[Path] = None,
     additional_context_path: Optional[Path] = None,
 ) -> None:
-    targets: List[RepairTarget] = []
-    images_for_batch: List[Path] = []
-
-    # Map by image name from failure lines (same strategy as sync mode)
-    name_to_entry: Dict[str, ImageEntry] = {e.image_name: e for e in image_entries}
-
-    for idx in failure_indices:
-        image_name = _extract_image_name_from_failure_line(final_lines[idx])
-        entry = name_to_entry.get(image_name) if image_name else None
-
-        resolved_path: Optional[Path] = None
-        resolved_order_index: int = -1
-
-        if entry:
-            resolved_path = _resolve_image_path(job.parent_folder, entry)
-            resolved_order_index = entry.order_index
-        else:
-            if image_name:
-                for sub in ("preprocessed_images", "preprocessed_images_tesseract"):
-                    cand = job.parent_folder / sub / image_name
-                    if cand.exists():
-                        resolved_path = cand
-                        break
-
-        if resolved_path is None or not resolved_path.exists():
-            logger.warning(
-                "Could not resolve image for failure line %s (%s); skipping.",
-                idx,
-                image_name or "[unknown]",
-            )
-            continue
-
-        targets.append(
-            RepairTarget(
-                order_index=resolved_order_index,
-                image_name=image_name or resolved_path.name,
-                image_path=resolved_path,
-                custom_id=None,
-                line_index=idx,
-            )
-        )
-        images_for_batch.append(resolved_path)
+    targets = _resolve_repair_targets(job, image_entries, failure_indices, final_lines)
+    images_for_batch: List[Path] = [t.image_path for t in targets]
 
     # Always write a session record (even if zero targets)
     repairs_dir = job.parent_folder / "repairs"
@@ -581,9 +561,7 @@ async def _repair_batch_mode(
                 pn = oi + 1
             final_lines[li] = format_page_line(text, pn, img_name)
 
-    backup = _backup_file(job.final_txt_path)
-    job.final_txt_path.write_text("\n".join(final_lines), encoding="utf-8")
-
+    backup = _persist_repaired_file(job, final_lines)
     print_success(
         f"[SUCCESS] Batch repair complete for '{job.identifier}'. "
         f"Backup written to: {backup.name}"

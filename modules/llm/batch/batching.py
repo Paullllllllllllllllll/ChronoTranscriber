@@ -16,13 +16,11 @@ Note:
 
 from __future__ import annotations
 
-import base64
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from modules.config.config_loader import PROJECT_ROOT
-from modules.config.constants import SUPPORTED_IMAGE_FORMATS
 from modules.config.service import get_config_service
 from modules.infra.logger import setup_logger
 from modules.llm.model_capabilities import detect_capabilities
@@ -66,17 +64,12 @@ def get_batch_chunk_size() -> int:
 
 
 def encode_image_to_data_url(image_path: Path) -> str:
+    """Encode an image file as a data URL.
+
+    Delegates to modules.llm.image_encoding for the shared implementation.
     """
-    Encode an image file as a data URL.
-    """
-    ext = image_path.suffix.lower()
-    mime = SUPPORTED_IMAGE_FORMATS.get(ext)
-    if not mime:
-        logger.error("Unsupported image format: %s", image_path.suffix)
-        raise ValueError(f"Unsupported image format: {image_path.suffix}")
-    with image_path.open("rb") as f:
-        encoded = base64.b64encode(f.read()).decode("utf-8")
-    return f"data:{mime};base64,{encoded}"
+    from modules.llm.image_encoding import encode_image_to_data_url as _encode
+    return _encode(image_path)
 
 
 def _build_responses_body_for_image(

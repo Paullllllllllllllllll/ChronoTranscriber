@@ -590,6 +590,43 @@ class BaseProvider(ABC):
 
         return 0
 
+    @staticmethod
+    def _extract_total_tokens(result: Any) -> int:
+        """Extract total token count from an LLM response.
+
+        Uses ``usage_metadata`` (LangChain's provider-normalized dict) so it
+        works for all providers without needing ``TokenUsageMapping``.
+        Falls back to ``input_tokens + output_tokens`` when ``total_tokens``
+        is zero.  Returns 0 when extraction fails.
+        """
+        raw_message = None
+        if isinstance(result, dict) and "raw" in result:
+            raw_message = result.get("raw")
+        elif hasattr(result, "usage_metadata"):
+            raw_message = result
+
+        if raw_message is None:
+            return 0
+
+        usage_meta = getattr(raw_message, "usage_metadata", None)
+        if usage_meta is None:
+            return 0
+
+        if isinstance(usage_meta, dict):
+            total = int(usage_meta.get("total_tokens", 0) or 0)
+            if total > 0:
+                return total
+            inp = int(usage_meta.get("input_tokens", 0) or 0)
+            out = int(usage_meta.get("output_tokens", 0) or 0)
+            return inp + out
+        else:
+            total = int(getattr(usage_meta, "total_tokens", 0) or 0)
+            if total > 0:
+                return total
+            inp = int(getattr(usage_meta, "input_tokens", 0) or 0)
+            out = int(getattr(usage_meta, "output_tokens", 0) or 0)
+            return inp + out
+
     async def _ainvoke_with_retry(
         self,
         llm: Any,
@@ -616,6 +653,10 @@ class BaseProvider(ABC):
 
         Uses exponential backoff (2 s -> 4 s -> ... -> 60 s max) with jitter.
         After exhausting all attempts the exception is re-raised to the caller.
+
+        Known limitation: LangChain-internal HTTP retries (rate limits, 5xx)
+        are invisible at this layer.  Tokens consumed by those retries are not
+        tracked by the daily budget.
         """
         import httpx
         import tenacity
@@ -674,11 +715,27 @@ class BaseProvider(ABC):
                         "re-raising for retry: %s",
                         str(result["parsing_error"])[:200],
                     )
+                    discarded_tokens = self._extract_total_tokens(result)
+                    if discarded_tokens > 0:
+                        self._track_token_usage(discarded_tokens, 0, 0)
+                        logger.debug(
+                            "Tracked %d tokens from discarded retry "
+                            "(parsing failure)",
+                            discarded_tokens,
+                        )
                     raise result["parsing_error"]
                 # Check for suspiciously low input tokens (image dropped).
                 if min_input_tokens > 0:
                     actual = self._extract_input_tokens(result)
                     if 0 < actual < min_input_tokens:
+                        discarded_tokens = self._extract_total_tokens(result)
+                        if discarded_tokens > 0:
+                            self._track_token_usage(discarded_tokens, 0, 0)
+                            logger.debug(
+                                "Tracked %d tokens from discarded retry "
+                                "(input below threshold)",
+                                discarded_tokens,
+                            )
                         raise InputTokensBelowThresholdError(
                             actual, min_input_tokens
                         )

@@ -1253,6 +1253,146 @@ class TestInputTokenThresholdRetry:
         # 1 initial + 2 retries = 3 total (capped at validation_attempts)
         assert mock_llm.ainvoke.call_count == 3
 
+    @pytest.mark.unit
+    def test_tracks_tokens_on_validation_error_retry(self):
+        """Tokens from discarded parsing-failure retries are tracked."""
+        import asyncio
+        import tenacity
+        from unittest.mock import AsyncMock
+        from pydantic import ValidationError
+
+        provider = self._make_provider()
+        bad_response = self._make_response(800)
+        bad_response["parsed"] = None
+        bad_response["parsing_error"] = ValidationError.from_exception_data(
+            title="TestModel",
+            line_errors=[
+                {
+                    "type": "missing",
+                    "loc": ("field",),
+                    "msg": "Field required",
+                    "input": {},
+                }
+            ],
+        )
+        good_response = self._make_response(1500)
+
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=[bad_response, good_response])
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=5):
+                with patch("modules.llm.providers.base.load_max_validation_retries", return_value=3):
+                    with patch("modules.llm.providers.base.load_min_input_tokens", return_value=0):
+                        with patch("tenacity.wait_exponential_jitter", return_value=tenacity.wait_none()):
+                            with patch("modules.infra.token_tracker.get_token_tracker") as mock_tracker_fn:
+                                mock_tracker = MagicMock()
+                                mock_tracker_fn.return_value = mock_tracker
+                                result = await provider._ainvoke_with_retry(
+                                    mock_llm, ["msg"], expect_image_tokens=False,
+                                )
+                                return result, mock_tracker
+
+        result, mock_tracker = asyncio.run(_run())
+        assert result["raw"].usage_metadata["input_tokens"] == 1500
+        assert mock_llm.ainvoke.call_count == 2
+        # The discarded first attempt's total_tokens (800 + 100 = 900) was tracked
+        mock_tracker.add_tokens.assert_called_once_with(900)
+
+    @pytest.mark.unit
+    def test_tracks_tokens_on_input_below_threshold_retry(self):
+        """Tokens from discarded input-below-threshold retries are tracked."""
+        import asyncio
+        import tenacity
+        from unittest.mock import AsyncMock
+
+        provider = self._make_provider()
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=[
+            self._make_response(234),   # below threshold -> discarded
+            self._make_response(1500),  # good
+        ])
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=5):
+                with patch("modules.llm.providers.base.load_max_validation_retries", return_value=3):
+                    with patch("modules.llm.providers.base.load_min_input_tokens", return_value=500):
+                        with patch("tenacity.wait_exponential_jitter", return_value=tenacity.wait_none()):
+                            with patch("modules.infra.token_tracker.get_token_tracker") as mock_tracker_fn:
+                                mock_tracker = MagicMock()
+                                mock_tracker_fn.return_value = mock_tracker
+                                result = await provider._ainvoke_with_retry(
+                                    mock_llm, ["msg"], expect_image_tokens=True,
+                                )
+                                return result, mock_tracker
+
+        result, mock_tracker = asyncio.run(_run())
+        assert result["raw"].usage_metadata["input_tokens"] == 1500
+        assert mock_llm.ainvoke.call_count == 2
+        # The discarded first attempt's total_tokens (234 + 100 = 334) was tracked
+        mock_tracker.add_tokens.assert_called_once_with(334)
+
+
+class TestExtractTotalTokens:
+    """Tests for _extract_total_tokens static method."""
+
+    def _make_provider(self):
+        """Create a minimal concrete provider."""
+        class _ConcreteProvider(BaseProvider):
+            @property
+            def provider_name(self):
+                return "test"
+            def get_capabilities(self):
+                return Capabilities(model="m", family="test")
+            async def transcribe_image_from_base64(self, *a, **kw):
+                pass
+            async def close(self):
+                pass
+
+        return _ConcreteProvider.__new__(_ConcreteProvider)
+
+    @pytest.mark.unit
+    def test_from_structured_output_dict(self):
+        """Extracts total_tokens from a dict with 'raw' key."""
+        raw_msg = MagicMock()
+        raw_msg.usage_metadata = {
+            "input_tokens": 500,
+            "output_tokens": 200,
+            "total_tokens": 700,
+        }
+        result = {"raw": raw_msg, "parsed": {}, "parsing_error": None}
+        assert self._make_provider()._extract_total_tokens(result) == 700
+
+    @pytest.mark.unit
+    def test_from_plain_ai_message(self):
+        """Extracts total_tokens from a plain AIMessage-like object."""
+        msg = MagicMock()
+        msg.usage_metadata = {
+            "input_tokens": 300,
+            "output_tokens": 100,
+            "total_tokens": 400,
+        }
+        assert self._make_provider()._extract_total_tokens(msg) == 400
+
+    @pytest.mark.unit
+    def test_computes_from_sum_when_total_zero(self):
+        """Falls back to input + output when total_tokens is 0."""
+        raw_msg = MagicMock()
+        raw_msg.usage_metadata = {
+            "input_tokens": 800,
+            "output_tokens": 150,
+            "total_tokens": 0,
+        }
+        result = {"raw": raw_msg, "parsed": {}, "parsing_error": None}
+        assert self._make_provider()._extract_total_tokens(result) == 950
+
+    @pytest.mark.unit
+    def test_returns_zero_when_no_metadata(self):
+        """Returns 0 when no usage_metadata is present."""
+        raw_msg = MagicMock(spec=[])  # no usage_metadata attr
+        result = {"raw": raw_msg, "parsed": {}, "parsing_error": None}
+        assert self._make_provider()._extract_total_tokens(result) == 0
+
 
 class TestBaseProviderAsyncContextManager:
     """Tests for BaseProvider async context manager (__aenter__, __aexit__)."""

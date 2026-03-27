@@ -112,8 +112,12 @@ def _find_failure_indices(
     return ru_find_failure_indices(lines, include_no_text)
 
 
-def _resolve_image_path(parent_folder: Path, entry: ImageEntry) -> Optional[Path]:
-    return ru_resolve_image_path(parent_folder, entry)
+def _resolve_image_path(
+    parent_folder: Path,
+    entry: ImageEntry,
+    identifier: Optional[str] = None,
+) -> Optional[Path]:
+    return ru_resolve_image_path(parent_folder, entry, identifier)
 
 
 
@@ -146,7 +150,7 @@ def _resolve_repair_targets(
         resolved_order_index: int = -1
 
         if entry:
-            resolved_path = _resolve_image_path(job.parent_folder, entry)
+            resolved_path = _resolve_image_path(job.parent_folder, entry, job.identifier)
             resolved_order_index = entry.order_index
         else:
             if image_name:
@@ -155,6 +159,18 @@ def _resolve_repair_targets(
                     if cand.exists():
                         resolved_path = cand
                         break
+                # Search entry's own image directory with suffix stripping
+                if resolved_path is None and job.identifier:
+                    entry_dir = job.parent_folder / job.identifier
+                    if entry_dir.is_dir():
+                        raw_stem = Path(image_name).stem
+                        for sfx in ("_pre_processed", "_preprocessed"):
+                            raw_stem = raw_stem.replace(sfx, "")
+                        for ext in (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".jp2"):
+                            cand = entry_dir / f"{raw_stem}{ext}"
+                            if cand.exists():
+                                resolved_path = cand
+                                break
 
         if resolved_path is None or not resolved_path.exists():
             logger.warning(
@@ -789,8 +805,8 @@ async def main_cli(args: Any, paths_config: Dict[str, Any]) -> None:
     transcription_path = resolve_path(args.transcription, PROJECT_ROOT)
     validate_input_path(transcription_path)
     
-    if not transcription_path.suffix == ".txt":
-        print_error(f"Expected .txt transcription file, got: {transcription_path.name}")
+    if transcription_path.suffix not in (".txt", ".md"):
+        print_error(f"Expected .txt or .md transcription file, got: {transcription_path.name}")
         return
     
     # Find corresponding temp JSONL file
@@ -802,7 +818,18 @@ async def main_cli(args: Any, paths_config: Dict[str, Any]) -> None:
     temp_jsonl_path = parent_folder / f"{identifier}.jsonl"
     if not temp_jsonl_path.exists():
         temp_jsonl_path = parent_folder / f"{identifier}_transcription.jsonl"
-    
+    # Search well-known subdirectories (e.g. after sync_manifest consolidation)
+    if not temp_jsonl_path.exists():
+        for subdir_name in ("transcription_jsonl", "temp_jsonl"):
+            candidate = parent_folder / subdir_name / f"{identifier}.jsonl"
+            if candidate.exists():
+                temp_jsonl_path = candidate
+                break
+            legacy_candidate = parent_folder / subdir_name / f"{identifier}_transcription.jsonl"
+            if legacy_candidate.exists():
+                temp_jsonl_path = legacy_candidate
+                break
+
     # Create job object
     job = Job(
         identifier=identifier,

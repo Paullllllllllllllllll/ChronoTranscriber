@@ -17,7 +17,7 @@ import aiofiles
 from modules.infra.logger import setup_logger
 from modules.llm import transcribe_image_with_llm
 from modules.infra.concurrency import run_concurrent_transcription_tasks
-from modules.processing.response_parsing import extract_transcribed_text, format_page_line
+from modules.processing.response_parsing import extract_transcribed_text
 from modules.processing.postprocess import postprocess_transcription
 from modules.processing.output_writer import write_transcription_output
 from modules.operations.jsonl_utils import (

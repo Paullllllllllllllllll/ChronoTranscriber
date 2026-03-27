@@ -352,3 +352,75 @@ class TestJob:
         assert job.parent_folder == temp_dir
         assert job.identifier == "test_doc"
         assert job.kind == "PDF"
+
+
+class TestDiscoverJobs:
+    """Tests for discover_jobs function."""
+
+    @pytest.mark.unit
+    def test_discovers_txt_files(self, temp_dir):
+        """discover_jobs should find .txt transcription files."""
+        from modules.operations.repair.utils import discover_jobs
+
+        out = temp_dir / "output"
+        out.mkdir()
+        (out / "book.txt").write_text("content", encoding="utf-8")
+
+        config = {"file_paths": {"PDFs": {"output": str(out)}, "Images": {"output": None}}}
+        jobs = discover_jobs(config)
+        assert any(j.final_txt_path.name == "book.txt" for j in jobs)
+
+    @pytest.mark.unit
+    def test_discovers_md_files(self, temp_dir):
+        """discover_jobs should find .md transcription files."""
+        from modules.operations.repair.utils import discover_jobs
+
+        out = temp_dir / "output"
+        out.mkdir()
+        (out / "book.md").write_text("content", encoding="utf-8")
+
+        config = {"file_paths": {"PDFs": {"output": str(out)}, "Images": {"output": None}}}
+        jobs = discover_jobs(config)
+        assert any(j.final_txt_path.name == "book.md" for j in jobs)
+
+    @pytest.mark.unit
+    def test_discovers_both_txt_and_md(self, temp_dir):
+        """discover_jobs should find both .txt and .md files in the same folder."""
+        from modules.operations.repair.utils import discover_jobs
+
+        out = temp_dir / "output"
+        out.mkdir()
+        (out / "book.txt").write_text("txt content", encoding="utf-8")
+        (out / "book.md").write_text("md content", encoding="utf-8")
+
+        config = {"file_paths": {"PDFs": {"output": str(out)}, "Images": {"output": None}}}
+        jobs = discover_jobs(config)
+        names = {j.final_txt_path.name for j in jobs}
+        assert "book.txt" in names
+        assert "book.md" in names
+
+
+class TestBackupFile:
+    """Tests for backup_file function."""
+
+    @pytest.mark.unit
+    def test_backup_preserves_txt_extension(self, temp_dir):
+        """Backup of .txt file should have .txt extension."""
+        from modules.operations.repair.utils import backup_file
+
+        original = temp_dir / "doc.txt"
+        original.write_text("content", encoding="utf-8")
+        backup = backup_file(original)
+        assert backup.name.endswith(".txt")
+        assert ".bak." in backup.name
+
+    @pytest.mark.unit
+    def test_backup_preserves_md_extension(self, temp_dir):
+        """Backup of .md file should have .md extension."""
+        from modules.operations.repair.utils import backup_file
+
+        original = temp_dir / "doc.md"
+        original.write_text("content", encoding="utf-8")
+        backup = backup_file(original)
+        assert backup.name.endswith(".md")
+        assert ".bak." in backup.name

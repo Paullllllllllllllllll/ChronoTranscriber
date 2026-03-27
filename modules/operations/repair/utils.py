@@ -44,24 +44,35 @@ class Job:
 def extract_image_name_from_failure_line(line: str) -> Optional[str]:
     """
     Extract the image file name from a placeholder line such as:
-      - "[Transcription not possible: IMG_0001.png]"
-      - "[No transcribable text: page_12.jpg]"
+      - "0089_pre_processed.jpg: [transcription error]"       (prefix format)
+      - "page_12.jpg: [Transcription not possible]"           (prefix format)
+      - "[Transcription not possible: IMG_0001.png]"          (inline format)
+      - "[No transcribable text: page_12.jpg]"                (inline format)
       - "[transcription error: scan_03.png; status 400; code invalid_image]"
     Returns the extracted image name if found, else None.
     """
-    # Strip any leading "Page N:" or "Image xyz:" prefixes
-    core = re.sub(r"^[^\[]*?:\s*", "", line.strip())
+    stripped = line.strip()
+
+    # Prefix format: "image_name.ext: [placeholder]"
+    prefix_m = re.match(
+        r"^(.+?\.(?:jpg|jpeg|png|tif|tiff|jp2|bmp|webp))\s*:\s*\[",
+        stripped,
+        re.IGNORECASE,
+    )
+    if prefix_m:
+        return prefix_m.group(1).strip()
+
+    # Inline format: "[placeholder: image_name; ...]"
+    core = re.sub(r"^[^\[]*?:\s*", "", stripped)
     pattern = re.compile(
         r"^\[(?:transcription error|Transcription not possible|No transcribable text):\s*([^;]+)",
         re.IGNORECASE,
     )
     m = pattern.match(core)
     if m:
-        # Some lines do not include a semicolon and end with a closing bracket,
-        # which gets captured into group(1). Strip common trailing artifacts.
         name = m.group(1).strip()
-        name = name.rstrip("]\")' ")  # remove trailing ], quotes, and spaces
-        name = name.lstrip("'\" ")      # remove leading quotes/spaces if any
+        name = name.rstrip("]\")' ")
+        name = name.lstrip("'\" ")
         return name
     return None
 
@@ -156,7 +167,11 @@ def find_failure_indices(lines: List[str], include_no_text: bool) -> List[int]:
     return idxs
 
 
-def resolve_image_path(parent_folder: Path, entry: ImageEntry) -> Optional[Path]:
+def resolve_image_path(
+    parent_folder: Path,
+    entry: ImageEntry,
+    identifier: Optional[str] = None,
+) -> Optional[Path]:
     if entry.pre_processed_image:
         p = Path(entry.pre_processed_image)
         if p.exists():
@@ -172,12 +187,29 @@ def resolve_image_path(parent_folder: Path, entry: ImageEntry) -> Optional[Path]
             cand = d / entry.image_name
             if cand.exists():
                 return cand
+
+    # Search entry's own image directory (raw source images)
+    if identifier:
+        entry_dir = parent_folder / identifier
+        if entry_dir.is_dir():
+            cand = entry_dir / entry.image_name
+            if cand.exists():
+                return cand
+            # Strip _pre_processed suffix and try common extensions
+            raw_stem = Path(entry.image_name).stem
+            for suffix in ("_pre_processed", "_preprocessed"):
+                raw_stem = raw_stem.replace(suffix, "")
+            for ext in (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".jp2"):
+                cand = entry_dir / f"{raw_stem}{ext}"
+                if cand.exists():
+                    return cand
+
     return None
 
 
 def backup_file(path: Path) -> Path:
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup = path.with_suffix(f".bak.{ts}.txt")
+    backup = path.with_suffix(f".bak.{ts}{path.suffix}")
     backup.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
     return backup
 
@@ -190,9 +222,11 @@ def write_repair_jsonl_line(path: Path, record: Dict[str, Any]) -> None:
 def discover_jobs(paths_config: Dict[str, Any]) -> List[Job]:
     """
     Discover repairable jobs by scanning the configured output folders for
-    transcription .txt files and locating their corresponding temporary JSONL.
+    transcription .txt and .md files and locating their corresponding temporary
+    JSONL.
 
-    Supports both legacy (*_transcription.txt) and new (*.txt) naming conventions.
+    Supports both legacy (*_transcription.txt) and new (*.txt / *.md) naming
+    conventions.
 
     Returns a list of Job records sorted by parent folder path.
     """
@@ -209,6 +243,15 @@ def discover_jobs(paths_config: Dict[str, Any]) -> List[Job]:
         legacy_format = parent / f"{identifier}_transcription.jsonl"
         if legacy_format.exists():
             return legacy_format
+        # Search well-known subdirectories (e.g. after sync_manifest consolidation)
+        for subdir_name in ("transcription_jsonl", "temp_jsonl"):
+            subdir = parent / subdir_name
+            candidate = subdir / f"{identifier}.jsonl"
+            if candidate.exists():
+                return candidate
+            legacy_candidate = subdir / f"{identifier}_transcription.jsonl"
+            if legacy_candidate.exists():
+                return legacy_candidate
         return None
 
     def scan_root(root: Optional[str], kind: str) -> None:
@@ -217,21 +260,22 @@ def discover_jobs(paths_config: Dict[str, Any]) -> List[Job]:
         root_path = Path(root)
         if not root_path.exists():
             return
-        # Scan for all .txt files in output folders
-        for p in root_path.rglob("*.txt"):
-            parent = p.parent
-            # Determine identifier (strip _transcription suffix if present)
-            identifier = p.stem.replace("_transcription", "").strip()
-            temp = find_companion_jsonl(p, identifier)
-            jobs.append(
-                Job(
-                    parent_folder=parent,
-                    identifier=identifier,
-                    final_txt_path=p,
-                    temp_jsonl_path=temp,
-                    kind=kind,
+        # Scan for all .txt and .md files in output folders
+        for ext in ("*.txt", "*.md"):
+            for p in root_path.rglob(ext):
+                parent = p.parent
+                # Determine identifier (strip _transcription suffix if present)
+                identifier = p.stem.replace("_transcription", "").strip()
+                temp = find_companion_jsonl(p, identifier)
+                jobs.append(
+                    Job(
+                        parent_folder=parent,
+                        identifier=identifier,
+                        final_txt_path=p,
+                        temp_jsonl_path=temp,
+                        kind=kind,
+                    )
                 )
-            )
 
     file_paths = paths_config.get("file_paths", {})
     pdf_out = file_paths.get("PDFs", {}).get("output", None)

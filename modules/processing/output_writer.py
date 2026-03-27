@@ -112,21 +112,22 @@ def _write_md(
     postprocess: bool,
     config: Optional[Dict],
 ) -> None:
-    """Markdown with ``## <header>`` before each page block."""
+    """Markdown — pages joined by double newline, post-processing applied.
+
+    Uses :func:`format_page_line` so that only failure placeholders receive
+    a header (image name or page number); normal transcription text is
+    emitted as-is, preserving LLM-produced ``<page_number>`` tags as the
+    authoritative page identification.
+    """
     blocks = []
     for page in pages:
-        image_name = (page.get("image_name") or "").strip()
-        page_number = page.get("page_number")
-        if image_name:
-            header = f"## {image_name}"
-        elif isinstance(page_number, int) and page_number > 0:
-            header = f"## Page {page_number}"
-        else:
-            header = "## [unknown page]"
-
-        text = (page.get("text") or "").strip()
-        blocks.append(f"{header}\n\n{text}")
-
+        blocks.append(
+            format_page_line(
+                page.get("text", ""),
+                page.get("page_number"),
+                page.get("image_name"),
+            )
+        )
     combined = "\n\n".join(blocks)
     if postprocess:
         combined = postprocess_transcription(combined, config or {})

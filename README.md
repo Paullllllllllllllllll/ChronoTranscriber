@@ -96,7 +96,7 @@ Enables processing mixed document collections with different transcription requi
 
 ## Supported Providers and Models
 
-ChronoTranscriber supports four AI providers through LangChain integration. Set the provider in `config/model_config.yaml` or let the system auto-detect from the model name.
+ChronoTranscriber supports four cloud AI providers plus custom OpenAI-compatible endpoints through LangChain integration. Set the provider in `config/model_config.yaml` or let the system auto-detect from the model name.
 
 ### OpenAI
 
@@ -146,6 +146,27 @@ Environment variable: `OPENROUTER_API_KEY`
 
 **Note**: OpenRouter does not support batch processing.
 
+### Custom OpenAI-Compatible Endpoint
+
+Connect to any self-hosted or third-party endpoint that implements the OpenAI Chat Completions API with vision support. This enables use of locally hosted OCR models, university-hosted inference servers, or other OpenAI-compatible services.
+
+Set `provider: custom` explicitly in `config/model_config.yaml` and configure the `custom_endpoint` block:
+
+```yaml
+transcription_model:
+  provider: custom
+  name: "org/model-name"
+  custom_endpoint:
+    base_url: "https://your-endpoint.example.com/v1"
+    api_key_env_var: "YOUR_CUSTOM_API_KEY"
+  max_output_tokens: 4096
+  temperature: 0.0
+```
+
+The `base_url` and `api_key_env_var` are fully user-configured. The model name is passed verbatim to the endpoint. Image preprocessing uses the `custom_image_processing` section in `config/image_processing_config.yaml`, which defaults to aggressive compression suitable for models with small context windows.
+
+**Note**: Custom endpoints do not support batch processing or structured output.
+
 ### Processing Modes
 
 - **Synchronous**: Real-time responses for interactive workflows
@@ -181,6 +202,7 @@ At least one API key required for AI-powered transcription:
 | Anthropic | `ANTHROPIC_API_KEY` |
 | Google | `GOOGLE_API_KEY` |
 | OpenRouter | `OPENROUTER_API_KEY` |
+| Custom | User-configured via `custom_endpoint.api_key_env_var` |
 
 For OpenAI batch processing, ensure your account has Batch API access.
 
@@ -303,7 +325,7 @@ Edit `config/model_config.yaml`:
 
 ```yaml
 transcription_model:
-  provider: openai  # Options: openai, anthropic, google, openrouter
+  provider: openai  # Options: openai, anthropic, google, openrouter, custom
   name: gpt-5-mini
   reasoning:
     effort: low  # Options: low, medium, high
@@ -428,7 +450,7 @@ ChronoTranscriber uses four YAML configuration files in the `config/` directory.
 
 ```yaml
 transcription_model:
-  provider: openai  # Options: openai, anthropic, google, openrouter (auto-detected from model name)
+  provider: openai  # Options: openai, anthropic, google, openrouter, custom (auto-detected from model name)
   name: gpt-5-mini
   max_output_tokens: 128000
 

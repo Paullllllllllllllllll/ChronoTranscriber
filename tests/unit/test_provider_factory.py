@@ -32,7 +32,7 @@ class TestProviderType:
     @pytest.mark.unit
     def test_provider_count(self):
         """Test expected number of providers."""
-        assert len(ProviderType) == 4
+        assert len(ProviderType) == 5
 
 
 class TestGetAvailableProviders:

@@ -21,6 +21,7 @@ class ProviderType(str, Enum):
     ANTHROPIC = "anthropic"
     GOOGLE = "google"
     OPENROUTER = "openrouter"
+    CUSTOM = "custom"
 
 
 # Lazy import mapping to avoid circular imports and unnecessary dependencies
@@ -29,6 +30,7 @@ _PROVIDER_CLASSES: Dict[ProviderType, str] = {
     ProviderType.ANTHROPIC: "modules.llm.providers.anthropic_provider.AnthropicProvider",
     ProviderType.GOOGLE: "modules.llm.providers.google_provider.GoogleProvider",
     ProviderType.OPENROUTER: "modules.llm.providers.openrouter_provider.OpenRouterProvider",
+    ProviderType.CUSTOM: "modules.llm.providers.custom_provider.CustomProvider",
 }
 
 # Environment variable names for API keys
@@ -37,6 +39,8 @@ _API_KEY_ENV_VARS: Dict[ProviderType, str] = {
     ProviderType.ANTHROPIC: "ANTHROPIC_API_KEY",
     ProviderType.GOOGLE: "GOOGLE_API_KEY",
     ProviderType.OPENROUTER: "OPENROUTER_API_KEY",
+    # Note: ProviderType.CUSTOM is intentionally omitted -- its API key env var
+    # is user-configured via custom_endpoint.api_key_env_var in model_config.yaml.
 }
 
 
@@ -109,6 +113,30 @@ def get_api_key_for_provider(
             )
             return key
     
+    # Custom provider: read env var name from model config
+    if provider_type == ProviderType.CUSTOM:
+        try:
+            from modules.config.service import get_config_service
+            config = get_config_service().get_model_config()
+            tm = config.get("transcription_model", {})
+            custom_cfg = tm.get("custom_endpoint", {})
+            env_var_name = custom_cfg.get("api_key_env_var")
+            if env_var_name:
+                key = os.environ.get(env_var_name)
+                if key:
+                    return key
+            raise ValueError(
+                f"Custom endpoint API key not found. "
+                f"Set the environment variable specified in "
+                f"custom_endpoint.api_key_env_var (currently: {env_var_name!r})."
+            )
+        except (KeyError, AttributeError, TypeError) as e:
+            raise ValueError(
+                f"Could not load custom endpoint config: {e}. "
+                f"Ensure custom_endpoint.api_key_env_var is set in "
+                f"model_config.yaml."
+            ) from e
+
     raise ValueError(
         f"No API key found for provider {provider_type.value}. "
         f"Set {env_var} environment variable or pass api_key parameter."
@@ -171,12 +199,33 @@ def get_provider(
             # Load reasoning config (cross-provider)
             if "reasoning_config" not in kwargs and tm.get("reasoning") is not None:
                 kwargs["reasoning_config"] = tm.get("reasoning")
-                    
+
         except (KeyError, AttributeError, TypeError, ValueError) as e:
             logger.warning(f"Could not load config defaults: {e}")
             if model is None:
                 model = "gpt-4o"
-    
+
+    # Load custom endpoint config (must run even when provider/model are explicit)
+    if (provider or "").lower() == "custom" and "base_url" not in kwargs:
+        try:
+            from modules.config.service import get_config_service
+            config = get_config_service().get_model_config()
+            tm = config.get("transcription_model", {})
+            custom_cfg = tm.get("custom_endpoint", {})
+            base_url = custom_cfg.get("base_url")
+            if not base_url:
+                raise ValueError(
+                    "provider: custom requires "
+                    "custom_endpoint.base_url in model_config.yaml"
+                )
+            kwargs["base_url"] = base_url
+        except (KeyError, AttributeError, TypeError) as e:
+            raise ValueError(
+                f"Could not load custom endpoint config: {e}. "
+                f"Ensure custom_endpoint.base_url is set in "
+                f"model_config.yaml."
+            ) from e
+
     # Determine provider type
     if provider is None:
         provider_type = detect_provider_from_model(model)

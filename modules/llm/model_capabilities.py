@@ -20,7 +20,7 @@ from typing import Literal
 
 ImageDetail = Literal["auto", "high", "low", "original"]
 ApiPref = Literal["responses", "chat_completions", "either", "langchain"]
-ProviderType = Literal["openai", "anthropic", "google", "openrouter", "unknown"]
+ProviderType = Literal["openai", "anthropic", "google", "openrouter", "custom", "unknown"]
 
 
 @dataclass(frozen=True, slots=True)

@@ -24,6 +24,8 @@ def detect_model_type(provider: str, model_name: Optional[str] = None) -> str:
     model_name = model_name.lower() if model_name else ""
     
     # Direct providers take precedence
+    if provider == "custom":
+        return "custom"
     if provider == "google":
         return "google"
     if provider == "anthropic":
@@ -56,7 +58,9 @@ def get_image_config_section_name(model_type: str) -> str:
     Returns:
         Config section name (e.g., 'google_image_processing', 'api_image_processing')
     """
-    if model_type == "google":
+    if model_type == "custom":
+        return "custom_image_processing"
+    elif model_type == "google":
         return "google_image_processing"
     elif model_type == "anthropic":
         return "anthropic_image_processing"

@@ -13,9 +13,7 @@ eval/reports/eval_results_*.md
 eval/reports/eval_chart_*.png
 
 # User-specific configuration (runtime values vary per machine)
-config/*
-# Re-track model_config.yaml as reference for custom endpoint config keys
-!config/model_config.yaml
+config/
 
 # IDE and cache
 .idea/

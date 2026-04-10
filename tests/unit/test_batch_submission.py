@@ -26,7 +26,7 @@ class TestLoadSystemPrompt:
     def test_loads_default_prompt(self, mock_root, mock_svc, tmp_path):
         prompt_dir = tmp_path / "system_prompt"
         prompt_dir.mkdir()
-        prompt_file = prompt_dir / "system_prompt.txt"
+        prompt_file = prompt_dir / "transcription_prompt_schema.txt"
         prompt_file.write_text("  Default prompt text  ", encoding="utf-8")
 
         mock_root.__truediv__ = MagicMock(side_effect=lambda x: tmp_path / x)

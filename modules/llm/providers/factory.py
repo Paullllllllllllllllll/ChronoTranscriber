@@ -221,18 +221,22 @@ def get_provider(
             kwargs["base_url"] = base_url
 
             # Forward user-configurable capabilities and prompt mode
-            custom_caps = dict(custom_cfg.get("capabilities", {}))
-            use_plain = bool(custom_cfg.get("use_plain_text_prompt", False))
+            custom_capabilities = dict(custom_cfg.get("capabilities", {}))
+            use_plain_text_prompt = bool(
+                custom_cfg.get("use_plain_text_prompt", False)
+            )
 
-            if use_plain and custom_caps.get("supports_structured_output", False):
+            if use_plain_text_prompt and custom_capabilities.get(
+                "supports_structured_output", False
+            ):
                 logger.warning(
                     "use_plain_text_prompt=true is incompatible with "
                     "supports_structured_output=true; disabling structured output."
                 )
-                custom_caps["supports_structured_output"] = False
+                custom_capabilities["supports_structured_output"] = False
 
-            kwargs["custom_capabilities"] = custom_caps
-            kwargs["use_plain_text_prompt"] = use_plain
+            kwargs["custom_capabilities"] = custom_capabilities
+            kwargs["use_plain_text_prompt"] = use_plain_text_prompt
         except (KeyError, AttributeError, TypeError) as e:
             raise ValueError(
                 f"Could not load custom endpoint config: {e}. "

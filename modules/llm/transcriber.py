@@ -71,10 +71,10 @@ class LangChainTranscriber:
         # Detect plain-text prompt mode for custom endpoints.
         # Read directly from config because the provider instance is
         # created later but prompt loading must happen first.
-        self._plain_text_mode = False
+        self._use_plain_text_prompt = False
         if (self.provider_name or "").lower() == "custom":
             custom_cfg = tm.get("custom_endpoint", {})
-            self._plain_text_mode = bool(
+            self._use_plain_text_prompt = bool(
                 custom_cfg.get("use_plain_text_prompt", False)
             )
 
@@ -85,7 +85,7 @@ class LangChainTranscriber:
         override_prompt = general.get("transcription_prompt_path")
         override_schema = general.get("transcription_schema_path")
 
-        if self._plain_text_mode:
+        if self._use_plain_text_prompt:
             # Mode C: plain-text prompt, no schema
             self.system_prompt_path = (
                 Path(system_prompt_path)
@@ -93,7 +93,7 @@ class LangChainTranscriber:
                 else (
                     Path(override_prompt)
                     if override_prompt
-                    else (PROJECT_ROOT / "system_prompt" / "plain_text_prompt.txt")
+                    else (PROJECT_ROOT / "system_prompt" / "transcription_prompt_plain.txt")
                 )
             )
             # Schema not used in plain-text mode
@@ -108,7 +108,7 @@ class LangChainTranscriber:
                 else (
                     Path(override_prompt)
                     if override_prompt
-                    else (PROJECT_ROOT / "system_prompt" / "system_prompt.txt")
+                    else (PROJECT_ROOT / "system_prompt" / "transcription_prompt_schema.txt")
                 )
             )
             self.schema_path = (

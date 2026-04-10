@@ -247,7 +247,7 @@ def create_batch_request_line(
             system_prompt_path = (
                 Path(override_prompt)
                 if override_prompt
-                else (PROJECT_ROOT / "system_prompt" / "system_prompt.txt")
+                else (PROJECT_ROOT / "system_prompt" / "transcription_prompt_schema.txt")
             )
         if schema_path is None:
             override_schema = general.get("transcription_schema_path")

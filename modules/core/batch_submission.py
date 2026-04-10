@@ -191,7 +191,7 @@ def _load_system_prompt() -> str:
     system_prompt_path = (
         Path(override_prompt)
         if override_prompt
-        else (PROJECT_ROOT / "system_prompt" / "system_prompt.txt")
+        else (PROJECT_ROOT / "system_prompt" / "transcription_prompt_schema.txt")
     )
     if not system_prompt_path.exists():
         raise FileNotFoundError(f"System prompt missing: {system_prompt_path}")

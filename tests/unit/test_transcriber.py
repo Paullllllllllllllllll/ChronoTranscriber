@@ -44,7 +44,7 @@ def _make_transcriber(
 
     schema_path = tmp_path / "schema.json"
     schema_path.write_text('{"type": "object", "properties": {}}', encoding="utf-8")
-    prompt_path = PROJECT_ROOT / "system_prompt" / "system_prompt.txt"
+    prompt_path = PROJECT_ROOT / "system_prompt" / "transcription_prompt_schema.txt"
 
     captured: Dict[str, Any] = {}
 

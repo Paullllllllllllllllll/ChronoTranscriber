@@ -13,6 +13,8 @@ from modules.processing.response_parsing import (
     format_page_line,
     extract_transcribed_text,
     process_batch_output,
+    _strip_code_fences,
+    _normalize_llm_text,
 )
 
 
@@ -370,3 +372,157 @@ class TestCheckTranscriptionFlags:
             "transcription_not_possible": True,
         })
         assert result == "[No transcribable text]"
+
+
+class TestStripCodeFences:
+    """Tests for _strip_code_fences helper."""
+
+    @pytest.mark.unit
+    def test_json_code_fence(self):
+        text = '```json\n{"transcription": "hello"}\n```'
+        assert _strip_code_fences(text) == '{"transcription": "hello"}'
+
+    @pytest.mark.unit
+    def test_plain_code_fence(self):
+        text = '```\n{"transcription": "hello"}\n```'
+        assert _strip_code_fences(text) == '{"transcription": "hello"}'
+
+    @pytest.mark.unit
+    def test_no_fence_returns_unchanged(self):
+        text = '{"transcription": "hello"}'
+        assert _strip_code_fences(text) == text
+
+    @pytest.mark.unit
+    def test_multiple_fences_returns_last(self):
+        text = '```\nthinking...\n```\n```json\n{"transcription": "real"}\n```'
+        assert _strip_code_fences(text) == '{"transcription": "real"}'
+
+    @pytest.mark.unit
+    def test_fence_with_surrounding_prose(self):
+        text = 'Here is the result:\n```json\n{"transcription": "hello"}\n```\nDone!'
+        assert _strip_code_fences(text) == '{"transcription": "hello"}'
+
+
+class TestNormalizeLlmText:
+    """Tests for _normalize_llm_text helper."""
+
+    @pytest.mark.unit
+    def test_clean_json_unchanged(self):
+        text = '{"transcription": "hello"}'
+        assert _normalize_llm_text(text) == text
+
+    @pytest.mark.unit
+    def test_code_fenced_json(self):
+        text = '```json\n{"transcription": "hello"}\n```'
+        result = _normalize_llm_text(text)
+        assert result.startswith("{")
+        assert json.loads(result)["transcription"] == "hello"
+
+    @pytest.mark.unit
+    def test_preamble_postamble(self):
+        text = (
+            "Here is the transcription:\n"
+            '{"transcription": "hello", "no_transcribable_text": false, '
+            '"transcription_not_possible": false, "image_analysis": "text"}\n'
+            "I hope this helps!"
+        )
+        result = _normalize_llm_text(text)
+        assert result.startswith("{")
+        assert json.loads(result)["transcription"] == "hello"
+
+    @pytest.mark.unit
+    def test_plain_text_unchanged(self):
+        text = "The text on this page reads: Lorem ipsum"
+        assert _normalize_llm_text(text) == text
+
+    @pytest.mark.unit
+    def test_empty_string(self):
+        assert _normalize_llm_text("") == ""
+
+    @pytest.mark.unit
+    def test_whitespace_stripped(self):
+        assert _normalize_llm_text("   \n\t  ") == ""
+
+
+class TestExtractCodeFencedAndPreamble:
+    """Integration tests: extract_transcribed_text with code-fenced and
+    preamble-wrapped LLM responses (custom provider scenarios)."""
+
+    @pytest.mark.unit
+    def test_code_fenced_json_output_text(self):
+        """Scenario A: Code-fenced JSON from custom provider via output_text."""
+        data = {
+            "output_text": (
+                '```json\n{"transcription": "fenced text", '
+                '"image_analysis": "...", "no_transcribable_text": false, '
+                '"transcription_not_possible": false}\n```'
+            )
+        }
+        assert extract_transcribed_text(data, "test.png") == "fenced text"
+
+    @pytest.mark.unit
+    def test_json_with_preamble_output_text(self):
+        """Scenario B: JSON with conversational preamble/postamble."""
+        data = {
+            "output_text": (
+                "Here is the transcription:\n"
+                '{"transcription": "preamble text", "image_analysis": "...", '
+                '"no_transcribable_text": false, "transcription_not_possible": false}\n'
+                "I hope this helps!"
+            )
+        }
+        assert extract_transcribed_text(data, "test.png") == "preamble text"
+
+    @pytest.mark.unit
+    def test_plain_text_fallback_output_text(self):
+        """Scenario C: Plain text with no JSON at all."""
+        data = {
+            "output_text": "The text on this page reads:\nLorem ipsum dolor sit amet."
+        }
+        result = extract_transcribed_text(data, "test.png")
+        assert "Lorem ipsum" in result
+        assert "[transcription error]" not in result
+
+    @pytest.mark.unit
+    def test_code_fenced_no_transcribable_text_flag(self):
+        """Code-fenced JSON with no_transcribable_text=true."""
+        data = {
+            "output_text": (
+                '```json\n{"transcription": null, "image_analysis": "blank page", '
+                '"no_transcribable_text": true, "transcription_not_possible": false}\n```'
+            )
+        }
+        assert extract_transcribed_text(data, "test.png") == "[No transcribable text]"
+
+    @pytest.mark.unit
+    def test_code_fenced_chat_completions(self):
+        """Code-fenced JSON in Chat Completions content field."""
+        data = {
+            "choices": [{
+                "message": {
+                    "content": (
+                        '```json\n{"transcription": "chat fenced", '
+                        '"image_analysis": "...", "no_transcribable_text": false, '
+                        '"transcription_not_possible": false}\n```'
+                    )
+                }
+            }]
+        }
+        assert extract_transcribed_text(data, "test.png") == "chat fenced"
+
+    @pytest.mark.unit
+    def test_preamble_chat_completions(self):
+        """JSON with preamble in Chat Completions content field."""
+        data = {
+            "choices": [{
+                "message": {
+                    "content": (
+                        "Sure! Here you go:\n"
+                        '{"transcription": "preamble chat", '
+                        '"image_analysis": "...", "no_transcribable_text": false, '
+                        '"transcription_not_possible": false}'
+                    )
+                }
+            }]
+        }
+        assert extract_transcribed_text(data, "test.png") == "preamble chat"

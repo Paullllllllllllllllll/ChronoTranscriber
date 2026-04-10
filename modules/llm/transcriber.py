@@ -67,58 +67,90 @@ class LangChainTranscriber:
         
         self.model = model or tm.get("name", "gpt-4o")
         self.provider_name = provider or tm.get("provider")
-        
+
+        # Detect plain-text prompt mode for custom endpoints.
+        # Read directly from config because the provider instance is
+        # created later but prompt loading must happen first.
+        self._plain_text_mode = False
+        if (self.provider_name or "").lower() == "custom":
+            custom_cfg = tm.get("custom_endpoint", {})
+            self._plain_text_mode = bool(
+                custom_cfg.get("use_plain_text_prompt", False)
+            )
+
         # Resolve prompt/schema paths
         pcfg = config_service.get_paths_config()
         general = pcfg.get("general", {})
-        
+
         override_prompt = general.get("transcription_prompt_path")
         override_schema = general.get("transcription_schema_path")
-        
-        self.system_prompt_path = (
-            Path(system_prompt_path)
-            if system_prompt_path is not None
-            else (
-                Path(override_prompt)
-                if override_prompt
-                else (PROJECT_ROOT / "system_prompt" / "system_prompt.txt")
+
+        if self._plain_text_mode:
+            # Mode C: plain-text prompt, no schema
+            self.system_prompt_path = (
+                Path(system_prompt_path)
+                if system_prompt_path is not None
+                else (
+                    Path(override_prompt)
+                    if override_prompt
+                    else (PROJECT_ROOT / "system_prompt" / "plain_text_prompt.txt")
+                )
             )
-        )
-        self.schema_path = (
-            Path(schema_path)
-            if schema_path is not None
-            else (
-                Path(override_schema)
-                if override_schema
-                else (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json")
+            # Schema not used in plain-text mode
+            self.schema_path = None
+            self.full_schema_obj = None
+            self.transcription_schema = None
+        else:
+            # Modes A and B: normal prompt with schema
+            self.system_prompt_path = (
+                Path(system_prompt_path)
+                if system_prompt_path is not None
+                else (
+                    Path(override_prompt)
+                    if override_prompt
+                    else (PROJECT_ROOT / "system_prompt" / "system_prompt.txt")
+                )
             )
-        )
-        
+            self.schema_path = (
+                Path(schema_path)
+                if schema_path is not None
+                else (
+                    Path(override_schema)
+                    if override_schema
+                    else (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json")
+                )
+            )
+
         # Validate paths
         if not self.system_prompt_path.exists():
             raise FileNotFoundError(f"System prompt missing: {self.system_prompt_path}")
-        if not self.schema_path.exists():
+        if self.schema_path is not None and not self.schema_path.exists():
             raise FileNotFoundError(f"Schema file missing: {self.schema_path}")
-        
+
         # Load prompt and schema
         raw_prompt = self.system_prompt_path.read_text(encoding="utf-8").strip()
-        
-        with self.schema_path.open("r", encoding="utf-8") as sf:
-            loaded_schema = json.load(sf)
-            self.full_schema_obj = loaded_schema
-            
-            # Accept wrapper form {name, strict, schema: {...}} or bare schema {...}
-            if (
-                isinstance(loaded_schema, dict)
-                and "schema" in loaded_schema
-                and isinstance(loaded_schema["schema"], dict)
-            ):
-                self.transcription_schema = loaded_schema["schema"]
-            else:
-                self.transcription_schema = loaded_schema
-        
+
+        if self.schema_path is not None:
+            with self.schema_path.open("r", encoding="utf-8") as sf:
+                loaded_schema = json.load(sf)
+                self.full_schema_obj = loaded_schema
+
+                # Accept wrapper form {name, strict, schema: {...}} or bare schema {...}
+                if (
+                    isinstance(loaded_schema, dict)
+                    and "schema" in loaded_schema
+                    and isinstance(loaded_schema["schema"], dict)
+                ):
+                    self.transcription_schema = loaded_schema["schema"]
+                else:
+                    self.transcription_schema = loaded_schema
+
         # Render system prompt with schema (but NOT yet with context)
-        self._base_prompt = render_prompt_with_schema(raw_prompt, self.full_schema_obj)
+        if self.full_schema_obj is not None:
+            self._base_prompt = render_prompt_with_schema(raw_prompt, self.full_schema_obj)
+        else:
+            # Plain-text mode: no schema injection
+            self._base_prompt = raw_prompt
         
         # Inject additional context - use explicit path or hierarchical resolution
         additional_context = None

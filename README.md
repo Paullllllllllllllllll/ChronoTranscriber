@@ -158,14 +158,34 @@ transcription_model:
   name: "org/model-name"
   custom_endpoint:
     base_url: "https://your-endpoint.example.com/v1"
-    api_key_env_var: "YOUR_CUSTOM_API_KEY"
+    api_key_env_var: "CUSTOM_API_KEY"
+    use_plain_text_prompt: false        # Use simplified prompt without JSON/markdown
+    capabilities:
+      supports_vision: true             # Model accepts image input (default: true)
+      supports_structured_output: false # Model can enforce JSON schema (default: false)
   max_output_tokens: 4096
   temperature: 0.0
 ```
 
 The `base_url` and `api_key_env_var` are fully user-configured. The model name is passed verbatim to the endpoint. Image preprocessing uses the `custom_image_processing` section in `config/image_processing_config.yaml`, which defaults to aggressive compression suitable for models with small context windows.
 
-**Note**: Custom endpoints do not support batch processing or structured output.
+**Operating Modes**:
+
+The custom provider supports three modes controlled by `capabilities.supports_structured_output` and `use_plain_text_prompt`:
+
+| Mode | Configuration | Use When |
+|------|--------------|----------|
+| **Structured** | `supports_structured_output: true` | Endpoint supports JSON schema enforcement, or you want validation retries until the model produces valid schema output |
+| **JSON-instructed** (default) | `supports_structured_output: false`, `use_plain_text_prompt: false` | Model can follow JSON instructions but lacks API-level enforcement |
+| **Plain text** | `supports_structured_output: false`, `use_plain_text_prompt: true` | Model works best with simple text instructions (no JSON, markdown, or special tags) |
+
+**Structured mode** uses the same pipeline as commercial providers (OpenAI, Anthropic, Google): the full transcription schema is enforced via Pydantic validation, and responses that do not conform (missing `image_analysis`, `transcription`, or boolean flag fields, or invalid JSON) are automatically retried up to `validation_attempts` times (configured in `concurrency_config.yaml`). This allows non-structured-output models to use the full pipeline: the model is prompted for JSON and retried on validation failure until it produces a conforming response.
+
+**JSON-instructed mode** sends the standard prompt with the JSON schema as a text instruction but does not enforce it at the API level. Response sanitization handles common local-model quirks such as code-fenced JSON and conversational preamble/postamble.
+
+**Plain text mode** uses a simplified prompt that asks only for verbatim text transcription. No JSON, markdown formatting, `<page_number>` tags, or LaTeX is requested. The model's raw text output is used directly as the transcription.
+
+**Note**: Custom endpoints do not support batch processing.
 
 ### Processing Modes
 
@@ -651,7 +671,7 @@ concurrency:
 - `concurrency_limit`: Maximum concurrent tasks
 - `service_tier`: OpenAI service tier (synchronous only; automatically omitted for batch)
 - `retry.attempts`: Maximum network-level retry attempts with exponential backoff
-- `retry.validation_attempts`: Maximum retries for validation errors (unparseable structured output) and input-token threshold violations. Shared budget prevents runaway loops. Default: 3.
+- `retry.validation_attempts`: Maximum retries for validation errors (unparseable structured output, missing schema fields) and input-token threshold violations. Applies to all providers including custom endpoints in structured mode. Shared budget prevents runaway loops. Default: 3.
 - `retry.min_input_tokens`: Minimum expected input tokens for image requests. Responses below this threshold are treated as cross-contaminated (image payload silently dropped by the API) and retried. Set to 0 to disable. Default: 500.
 - `transcription_failures`: Optional retries for specific transcription outcomes
 

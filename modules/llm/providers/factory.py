@@ -219,6 +219,20 @@ def get_provider(
                     "custom_endpoint.base_url in model_config.yaml"
                 )
             kwargs["base_url"] = base_url
+
+            # Forward user-configurable capabilities and prompt mode
+            custom_caps = dict(custom_cfg.get("capabilities", {}))
+            use_plain = bool(custom_cfg.get("use_plain_text_prompt", False))
+
+            if use_plain and custom_caps.get("supports_structured_output", False):
+                logger.warning(
+                    "use_plain_text_prompt=true is incompatible with "
+                    "supports_structured_output=true; disabling structured output."
+                )
+                custom_caps["supports_structured_output"] = False
+
+            kwargs["custom_capabilities"] = custom_caps
+            kwargs["use_plain_text_prompt"] = use_plain
         except (KeyError, AttributeError, TypeError) as e:
             raise ValueError(
                 f"Could not load custom endpoint config: {e}. "

@@ -193,8 +193,40 @@ class TestTranscriptionResult:
         }) + "  \n"
         
         result = TranscriptionResult(content=json_content)
-        
+
         assert result.parsed_output is not None
+
+    @pytest.mark.unit
+    def test_code_fenced_json_parsed(self):
+        """Test __post_init__ handles code-fenced JSON content."""
+        content = (
+            '```json\n'
+            + json.dumps({
+                "transcription": "test",
+                "no_transcribable_text": True,
+                "transcription_not_possible": False,
+            })
+            + '\n```'
+        )
+        result = TranscriptionResult(content=content)
+        assert result.parsed_output is not None
+        assert result.no_transcribable_text is True
+        assert result.transcription_not_possible is False
+
+    @pytest.mark.unit
+    def test_preamble_wrapped_json_parsed(self):
+        """Test __post_init__ handles JSON with conversational preamble."""
+        content = (
+            "Here is the JSON:\n"
+            + json.dumps({
+                "transcription": "test",
+                "no_transcribable_text": False,
+                "transcription_not_possible": True,
+            })
+        )
+        result = TranscriptionResult(content=content)
+        assert result.parsed_output is not None
+        assert result.transcription_not_possible is True
 
 
 class TestBaseProviderStatics:

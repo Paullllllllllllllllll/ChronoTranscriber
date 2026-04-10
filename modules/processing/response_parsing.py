@@ -88,6 +88,71 @@ def _try_parse_json(text: str) -> Dict[str, Any] | None:
         return None
 
 
+# Regex to match code-fenced blocks: ```json ... ``` or ``` ... ```
+_CODE_FENCE_RE = re.compile(
+    r"```(?:json|JSON)?\s*\n(.*?)\n\s*```",
+    re.DOTALL,
+)
+
+
+def _strip_code_fences(text: str) -> str:
+    """Extract content from markdown code fences if present.
+
+    Handles patterns like::
+
+        ```json
+        {"transcription": "..."}
+        ```
+
+    If one or more fenced blocks are found, returns the last one (models
+    sometimes emit a "thinking" block followed by the real output).
+    If no fences are found, returns the original text unchanged.
+    """
+    matches = _CODE_FENCE_RE.findall(text)
+    if matches:
+        return matches[-1].strip()
+    return text
+
+
+def _normalize_llm_text(text: str) -> str:
+    """Normalize raw LLM text output for JSON extraction.
+
+    Applies two transformations in order:
+
+    1. Strip leading/trailing whitespace.
+    2. Extract content from code fences (if present).
+    3. If the result still does not start with ``{``, attempt to isolate a
+       JSON object by stripping preamble/postamble prose.
+
+    The function is idempotent: passing already-clean JSON through returns
+    it unchanged.
+    """
+    if not text:
+        return text
+
+    stripped = text.strip()
+
+    # Step 1: Code fence extraction
+    defenced = _strip_code_fences(stripped)
+    if defenced != stripped:
+        return defenced.strip()
+
+    # Step 2: If text doesn't start with '{' but contains '{' and '}',
+    # try to isolate the JSON object (handles preamble/postamble).
+    trimmed = stripped.lstrip()
+    if not trimmed.startswith("{") and "{" in trimmed:
+        first_brace = trimmed.index("{")
+        candidate = trimmed[first_brace:]
+        last_brace = candidate.rfind("}")
+        if last_brace != -1:
+            json_candidate = candidate[: last_brace + 1]
+            parsed = _try_parse_json(json_candidate)
+            if parsed is not None:
+                return json_candidate.strip()
+
+    return stripped
+
+
 def _salvage_last_json_object(text: str) -> Dict[str, Any] | None:
     """
     When the model returns concatenated JSON objects or mixed prose+JSON,
@@ -159,15 +224,18 @@ def _extract_from_chat_completions(result: dict[str, Any], image_name: str) -> s
     # Plain content
     content = str(message.get("content", "")).strip()
     if content:
-        if content.startswith("{"):
-            parsed = _try_parse_json(content)
+        normalized = _normalize_llm_text(content)
+        if normalized.lstrip().startswith("{"):
+            parsed = _try_parse_json(normalized)
+            if parsed is None:
+                parsed = _salvage_last_json_object(normalized)
             if parsed is not None:
                 flag = _check_transcription_flags(parsed)
                 if flag is not None:
                     return flag
                 if "transcription" in parsed:
                     return str(parsed["transcription"]).strip()
-        return content
+        return normalized if normalized else content
 
     logger.error("Empty content field in response for %s: %s", image_name, json.dumps(result))
     return "[transcription error]"
@@ -203,7 +271,8 @@ def extract_transcribed_text(result: Dict[str, Any], image_name: str = "") -> st
     if isinstance(result, dict) and ("output_text" in result or "output" in result):
         text = _extract_from_responses_object(result)
         if text:
-            stripped = text.lstrip()
+            normalized = _normalize_llm_text(text)
+            stripped = normalized.lstrip()
             if stripped.startswith("{"):
                 parsed = _try_parse_json(stripped)
                 if parsed is None:
@@ -214,7 +283,18 @@ def extract_transcribed_text(result: Dict[str, Any], image_name: str = "") -> st
                         return flag
                     if "transcription" in parsed:
                         return str(parsed["transcription"]).strip()
-            return text
+            # If normalization changed the text but JSON parsing failed,
+            # still try salvaging from the original text
+            if normalized != text.strip() and "{" in text:
+                parsed = _salvage_last_json_object(text)
+                if parsed is not None:
+                    flag = _check_transcription_flags(parsed)
+                    if flag is not None:
+                        return flag
+                    if "transcription" in parsed:
+                        return str(parsed["transcription"]).strip()
+            # Fallback: return normalized text (fences stripped)
+            return normalized if normalized else text
 
     # Case 3: Legacy Chat Completions
     chat_result = _extract_from_chat_completions(result, image_name)

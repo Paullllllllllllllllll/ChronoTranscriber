@@ -156,14 +156,15 @@ class TranscriptionResult:
         """Parse transcription status flags from content if available."""
         if self.content and not self.parsed_output:
             try:
-                stripped = self.content.strip()
-                if stripped.startswith("{"):
-                    parsed = json.loads(stripped)
+                from modules.processing.response_parsing import _normalize_llm_text
+                normalized = _normalize_llm_text(self.content)
+                if normalized.lstrip().startswith("{"):
+                    parsed = json.loads(normalized)
                     if isinstance(parsed, dict):
                         self.parsed_output = parsed
                         self.no_transcribable_text = parsed.get("no_transcribable_text", False)
                         self.transcription_not_possible = parsed.get("transcription_not_possible", False)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, ImportError):
                 pass
 
 
@@ -214,7 +215,16 @@ class BaseProvider(ABC):
     def provider_name(self) -> str:
         """Return the provider name (e.g., 'openai', 'anthropic')."""
         pass
-    
+
+    @property
+    def use_plain_text_prompt(self) -> bool:
+        """Whether the provider requires a simplified plain-text prompt.
+
+        Subclasses may override to return ``True`` when a custom endpoint
+        is configured with ``use_plain_text_prompt: true``.
+        """
+        return False
+
     @abstractmethod
     def get_capabilities(self) -> ProviderCapabilities:
         """Return the capabilities of this provider/model combination."""

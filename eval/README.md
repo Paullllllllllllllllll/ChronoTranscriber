@@ -63,7 +63,7 @@ eval/
 | Category | Source | Pages |
 |----------|--------|-------|
 | `address_books` | `address_books.jsonl` | 31 |
-| `bibliography` | `Whitaker_1913_English_Cookery_Books_to_the_Year_1850.jsonl` | 187 |
+| `bibliography` | `Whitaker_1913_English_Cookery_Books_to_the_Year_1850.jsonl` | 189 (36 evaluated) |
 | `military_records` | `Antonio Franco.jsonl` | 2 |
 | `military_records` | `Carlos Schimidt.jsonl` | 2 |
 | `military_records` | `Elza Elias.jsonl` | 2 |

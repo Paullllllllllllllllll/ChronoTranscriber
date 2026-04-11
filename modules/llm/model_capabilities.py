@@ -103,7 +103,7 @@ def detect_provider(model_name: str) -> ProviderType:
             return "openrouter"
     if m.startswith("claude") or "anthropic" in m:
         return "anthropic"
-    if m.startswith("gemini") or m.startswith("models/") or "google" in m:
+    if m.startswith("gemini") or m.startswith("gemma") or m.startswith("models/") or "google" in m:
         return "google"
     if any(m.startswith(p) for p in ("gpt", "o1", "o3", "o4", "chatgpt", "text-")):
         return "openai"
@@ -336,6 +336,19 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict, dict]] = [
     )),
     # Claude generic fallback
     (("claude",), "claude", _ANTHROPIC_BASE, {}),
+    # --- Google Gemma models (via Gemini API) ---
+    (("gemma-4-31b-it",), "gemma-4-31b", _GOOGLE_BASE, dict(
+        is_reasoning_model=True, supports_reasoning_effort=True,
+        max_context_tokens=262144,
+    )),
+    (("gemma-4-26b-a4b-it",), "gemma-4-26b-moe", _GOOGLE_BASE, dict(
+        is_reasoning_model=True, supports_reasoning_effort=True,
+        max_context_tokens=262144,
+    )),
+    (("gemma",), "gemma", _GOOGLE_BASE, dict(
+        is_reasoning_model=True, supports_reasoning_effort=True,
+        max_context_tokens=262144,
+    )),
     # --- Google Gemini models (most-specific first) ---
     (("gemini-3-flash", "gemini-3.0-flash"), "gemini-3-flash", _GOOGLE_BASE, dict(
         is_reasoning_model=True, supports_reasoning_effort=True,
@@ -485,6 +498,16 @@ def detect_capabilities(model_name: str) -> Capabilities:
         if "mistral" in underlying or "mixtral" in m:
             return _build_caps(model_name, "openrouter-mistral", _OPENROUTER_BASE, dict(
                 supports_image_input="pixtral" in m,
+            ))
+
+        # Qwen via OpenRouter
+        if "qwen" in underlying or "qwen" in m:
+            return _build_caps(model_name, "openrouter-qwen", _OPENROUTER_BASE, dict(
+                is_reasoning_model=True,
+                supports_reasoning_effort=True,
+                supports_image_input=True,
+                supports_structured_outputs=True,
+                max_context_tokens=131072,
             ))
 
         # Generic OpenRouter fallback

@@ -226,9 +226,16 @@ def create_config_from_cli_args(args: Any, base_input_dir: Path, base_output_dir
     config = UserConfiguration()
     config.auto_selector = AutoSelector(paths_config)
 
-    # Resume mode: default is 'skip'; --force/--overwrite switches to 'overwrite'
+    # Resume mode: CLI flags take precedence; fall back to paths_config.yaml default
+    config_resume_default = paths_config.get("general", {}).get(
+        "resume_mode", "skip"
+    )
     if getattr(args, "force", None):
         config.resume_mode = "overwrite"
+    elif getattr(args, "resume", None):
+        config.resume_mode = "skip"
+    else:
+        config.resume_mode = config_resume_default
 
     # Output format: CLI flag takes precedence; fall back to paths_config.yaml default
     config_default = paths_config.get("general", {}).get("output_format", "txt")

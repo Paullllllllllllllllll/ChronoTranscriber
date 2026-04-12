@@ -90,6 +90,7 @@ Enables processing mixed document collections with different transcription requi
 - **Multi-tier Retry Strategy**: Automatic exponential backoff for API errors (429, 5xx, timeouts) with jitter
 - **Validation Retries**: Automatic retries when the model returns unparseable structured output (capped separately from network retries to avoid runaway loops)
 - **Input-Token Threshold Guard**: Detects and retries API responses where the image payload was silently dropped, preventing cross-contaminated content from reaching the final output. Configurable minimum token threshold (`min_input_tokens`) shares the validation retry budget.
+- **Content-Quality Retries**: Automatic detection of four catastrophic failure modes in the transcribed text — hallucination loops (a substring repeated many times), truncation (suspiciously short output on content-bearing pages), system-prompt bleed (JSON schema fragments prepended to the content), and excessive line repetition (map-label loops). Failed pages are retried against the validation budget. All thresholds are configurable in `concurrency_config.yaml` under `retry.content_quality`.
 - **Transcription-aware Retries**: Optional retries for `no_transcribable_text` or `transcription_not_possible`
 - **Daily Token Budget**: Configurable per-day token limits with automatic midnight reset
 - **Comprehensive Logging**: Detailed logs for troubleshooting and observability
@@ -642,38 +643,47 @@ postprocessing:
 ```yaml
 concurrency:
   transcription:
-    concurrency_limit: 1500
+    concurrency_limit: 20
     delay_between_tasks: 0.05
     service_tier: default  # Options: auto, default, flex, priority
     batch_chunk_size: 50
 
     retry:
-      attempts: 10
+      attempts: 5
       validation_attempts: 3
       min_input_tokens: 500
-      wait_min_seconds: 1
-      wait_max_seconds: 30
-      jitter_max_seconds: 0.5
 
-      transcription_failures:
-        no_transcribable_text_retries: 0
-        transcription_not_possible_retries: 3
-        wait_min_seconds: 1
-        wait_max_seconds: 30
-        jitter_max_seconds: 0.5
-
-  image_processing:
-    concurrency_limit: 24
-    delay_between_tasks: 0.0005
+      # Content-quality validators (detect hallucination, truncation,
+      # schema bleed, map-label loops; retried against validation budget).
+      content_quality:
+        enabled: true
+        max_repeated_substring_length: 30
+        max_repeated_substring_count: 15
+        min_alphanum_in_substring: 15
+        max_single_char_repeat: 75
+        min_transcription_length: 50
+        bleed_check_chars: 200
+        system_prompt_bleed_patterns:
+          - '"type": "object"'
+          - '"additionalProperties"'
+          - '"transcription_not_possible"'
+        max_line_repeat_count: 18
+        min_line_length_for_repeat: 10
 ```
 
 **Key Parameters**:
 - `concurrency_limit`: Maximum concurrent tasks
 - `service_tier`: OpenAI service tier (synchronous only; automatically omitted for batch)
 - `retry.attempts`: Maximum network-level retry attempts with exponential backoff
-- `retry.validation_attempts`: Maximum retries for validation errors (unparseable structured output, missing schema fields) and input-token threshold violations. Applies to all providers including custom endpoints in structured mode. Shared budget prevents runaway loops. Default: 3.
+- `retry.validation_attempts`: Maximum retries for validation errors (unparseable structured output, missing schema fields), input-token threshold violations, **and content-quality failures**. Applies to all providers including custom endpoints in structured mode. Shared budget prevents runaway loops. Default: 3.
 - `retry.min_input_tokens`: Minimum expected input tokens for image requests. Responses below this threshold are treated as cross-contaminated (image payload silently dropped by the API) and retried. Set to 0 to disable. Default: 500.
-- `transcription_failures`: Optional retries for specific transcription outcomes
+- `retry.content_quality.enabled`: Master toggle for the four content-quality validators (hallucination loop, truncation, system-prompt bleed, excessive line repetition). Default: `true`.
+- `retry.content_quality.max_repeated_substring_length` / `max_repeated_substring_count`: A substring of at least `length` characters repeated at least `count` times triggers a hallucination-loop retry. Defaults: 30 / 15.
+- `retry.content_quality.min_alphanum_in_substring`: Minimum alphanumeric characters a repeated substring must contain before it counts as a loop. Filters whitespace, punctuation, and short-word padding so legitimate table alignment and boilerplate (e.g. `", AE VISA"`) do not trigger false positives. Default: 15.
+- `retry.content_quality.max_single_char_repeat`: Longest allowed run of the same character (e.g. `"MMMM…"` beyond 75 chars is flagged). Default: 75.
+- `retry.content_quality.min_transcription_length`: Content-bearing transcriptions shorter than this are retried as truncation failures. Set to 0 to disable. Default: 50.
+- `retry.content_quality.bleed_check_chars` / `system_prompt_bleed_patterns`: The first N characters of the transcription are scanned for any of the listed patterns; a hit indicates a schema / system prompt bleed and triggers a retry. Default window: 200 chars.
+- `retry.content_quality.max_line_repeat_count` / `min_line_length_for_repeat`: Catches map-label loops where a single non-trivial line appears many times (e.g. a street name repeated 20+ times). Defaults: 18 / 10.
 
 ### Additional Context Guidance
 

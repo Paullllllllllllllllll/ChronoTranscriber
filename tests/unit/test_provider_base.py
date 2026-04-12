@@ -549,7 +549,15 @@ class TestProcessLLMResponse:
         from modules.llm.providers.base import OPENAI_TOKEN_MAPPING
 
         provider = self._make_provider()
-        parsed_data = {"transcription": "Structured text", "no_transcribable_text": False}
+        # Use text >= 50 chars to pass content-quality truncation check
+        long_text = (
+            "Structured transcription text that is long enough to pass the "
+            "content quality validator truncation threshold."
+        )
+        parsed_data = {
+            "transcription": long_text,
+            "no_transcribable_text": False,
+        }
         raw_msg = MagicMock()
         raw_msg.response_metadata = {}
         response = {"raw": raw_msg, "parsed": parsed_data}
@@ -560,7 +568,7 @@ class TestProcessLLMResponse:
             )
 
         assert result.parsed_output == parsed_data
-        assert "Structured text" in result.content or result.content != ""
+        assert long_text in result.content or result.content != ""
 
     @pytest.mark.unit
     def test_plain_dict_response_serialized(self):
@@ -569,14 +577,20 @@ class TestProcessLLMResponse:
         from modules.llm.providers.base import OPENAI_TOKEN_MAPPING
 
         provider = self._make_provider()
-        response = {"transcription": "dict content"}
+        # Use text >= 50 chars to pass content-quality truncation check
+        response = {
+            "transcription": (
+                "dict-based transcription content that is long enough "
+                "for the content quality validator to pass."
+            )
+        }
 
         with patch("modules.infra.token_tracker.get_token_tracker"):
             result = asyncio.run(
                 provider._process_llm_response(response, OPENAI_TOKEN_MAPPING)
             )
 
-        assert "dict content" in result.content
+        assert "dict-based transcription content" in result.content
 
     @pytest.mark.unit
     def test_anthropic_token_mapping(self):

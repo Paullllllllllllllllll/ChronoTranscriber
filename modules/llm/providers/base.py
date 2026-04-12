@@ -529,7 +529,42 @@ class BaseProvider(ABC):
             result.no_transcribable_text = parsed_output.get("no_transcribable_text", False)
             result.transcription_not_possible = parsed_output.get("transcription_not_possible", False)
 
+        # Content quality validation (catches hallucination loops, truncation,
+        # system-prompt bleed, and excessive line repetition).
+        # Raises ContentQualityError → retried by _ainvoke_with_retry.
+        if (
+            result.parsed_output
+            and not result.no_transcribable_text
+            and not result.transcription_not_possible
+        ):
+            cq_config = self._get_content_quality_config()
+            if cq_config.get("enabled", True):
+                from modules.processing.content_validators import validate_content_quality
+
+                validate_content_quality(
+                    transcription_text=result.parsed_output.get("transcription"),
+                    no_transcribable_text=result.no_transcribable_text,
+                    transcription_not_possible=result.transcription_not_possible,
+                    config=cq_config,
+                )
+
         return result
+
+    def _get_content_quality_config(self) -> Dict[str, Any]:
+        """Load content quality validator config from concurrency_config.yaml."""
+        try:
+            conc_cfg = get_config_service().get_concurrency_config() or {}
+            trans_cfg = (
+                (conc_cfg.get("concurrency", {}) or {}).get("transcription", {})
+                or {}
+            )
+            retry_cfg = trans_cfg.get("retry", {}) or {}
+            return retry_cfg.get("content_quality", {}) or {}
+        except (KeyError, AttributeError, TypeError) as e:
+            logger.debug(
+                "Could not load content_quality config, using defaults: %s", e
+            )
+            return {}
 
     def _build_disabled_params(self) -> Dict[str, Any] | None:
         """Build disabled_params dict based on model capabilities.
@@ -672,6 +707,8 @@ class BaseProvider(ABC):
         import tenacity
         from pydantic import ValidationError
 
+        from modules.processing.content_quality_error import ContentQualityError
+
         max_attempts = load_max_retries()
         max_validation_attempts = load_max_validation_retries()
         min_input_tokens = load_min_input_tokens() if expect_image_tokens else 0
@@ -680,7 +717,7 @@ class BaseProvider(ABC):
         def _should_retry(exc: BaseException) -> bool:
             if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException)):
                 return True
-            if isinstance(exc, (ValidationError, InputTokensBelowThresholdError)):
+            if isinstance(exc, (ValidationError, InputTokensBelowThresholdError, ContentQualityError)):
                 nonlocal validation_attempt_count
                 validation_attempt_count += 1
                 if validation_attempt_count >= max_validation_attempts:
@@ -693,6 +730,15 @@ class BaseProvider(ABC):
                         max_validation_attempts,
                         exc.actual,
                         exc.threshold,
+                    )
+                elif isinstance(exc, ContentQualityError):
+                    logger.warning(
+                        "Content quality check failed on attempt %d/%d "
+                        "(%s): %s — retrying",
+                        validation_attempt_count,
+                        max_validation_attempts,
+                        exc.failure_type,
+                        exc.detail[:200],
                     )
                 else:
                     logger.warning(

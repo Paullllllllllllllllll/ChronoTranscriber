@@ -1,0 +1,28 @@
+/.windsurf/
+/.claude/
+
+# Live smoke-test artifacts (pdfs_in/verify_v5, pdfs_out/verify_v5_*, etc.)
+/pdfs_in/
+/pdfs_out/
+staging/output/
+.chronotranscriber_token_state.json
+.coverage
+
+# Large test data files (exceed GitHub 100 MB limit)
+eval/test_data/input/bibliography/*.pdf
+
+# Timestamped evaluation run artifacts
+eval/reports/eval_results_*.json
+eval/reports/eval_results_*.csv
+eval/reports/eval_results_*.md
+eval/reports/eval_chart_*.png
+
+# User-specific configuration (runtime values vary per machine)
+/config/
+
+# IDE and cache
+.idea/
+__pycache__/
+logs/
+
+/eval/transcription_eval.ipynb

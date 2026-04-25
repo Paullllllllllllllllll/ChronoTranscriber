@@ -1,0 +1,31 @@
+\begin{table}
+\caption{Pure Transcription Accuracy (CER/WER) by Model and Document Category. All structural markup (page number tags, Markdown headings, bold/italic, footnote markers, image descriptions) stripped from both reference and hypothesis before comparison.}
+\label{tab:cer_wer_by_category}
+\begin{tabular}{llllll}
+\toprule
+Model & Category & CER (%) & WER (%) & Ref. Characters & Ref. Words \\
+\midrule
+claude_haiku_4.5_medium & address_books & 7.88 & 35.48 & 99,393 & 12,656 \\
+claude_haiku_4.5_medium & bibliography & 6.95 & 12.58 & 64,541 & 11,265 \\
+claude_haiku_4.5_medium & military_records & 34.65 & 63.82 & 2,892 & 398 \\
+claude_sonnet_4.5_medium & address_books & 5.28 & 20.27 & 99,393 & 12,656 \\
+claude_sonnet_4.5_medium & bibliography & 6.53 & 12.38 & 64,541 & 11,265 \\
+claude_sonnet_4.5_medium & military_records & 26.35 & 37.19 & 2,892 & 398 \\
+gemini_3.0_flash & address_books & 6.44 & 20.20 & 99,393 & 12,656 \\
+gemini_3.0_flash & bibliography & 6.30 & 10.58 & 64,541 & 11,265 \\
+gemini_3.0_flash & military_records & 38.11 & 50.00 & 2,892 & 398 \\
+gemini_3.0_pro_medium & address_books & 1.91 & 16.06 & 99,393 & 12,656 \\
+gemini_3.0_pro_medium & bibliography & 6.49 & 12.30 & 64,541 & 11,265 \\
+gemini_3.0_pro_medium & military_records & 86.20 & 102.76 & 2,892 & 398 \\
+gpt_5.2_medium & address_books & 5.47 & 28.99 & 99,393 & 12,656 \\
+gpt_5.2_medium & bibliography & 5.93 & 8.38 & 64,541 & 11,265 \\
+gpt_5.2_medium & military_records & 24.79 & 31.91 & 2,892 & 398 \\
+gpt_5_mini_medium & address_books & 5.70 & 33.61 & 99,393 & 12,656 \\
+gpt_5_mini_medium & bibliography & 41.46 & 45.51 & 64,541 & 11,265 \\
+gpt_5_mini_medium & military_records & 24.27 & 40.70 & 2,892 & 398 \\
+tesseract & address_books & 87.89 & 145.17 & 99,393 & 12,656 \\
+tesseract & bibliography & 9.43 & 18.71 & 64,541 & 11,265 \\
+tesseract & military_records & 71.54 & 137.69 & 2,892 & 398 \\
+\bottomrule
+\end{tabular}
+\end{table}

@@ -1,0 +1,65 @@
+# check_batches.py
+"""
+CLI script to check whether batch jobs have finished successfully and
+download and process completed batches.
+
+Supports two modes:
+1. Interactive mode: Runs with diagnostics and default behavior (interactive_mode: true)
+2. CLI mode: Command-line arguments for automation (interactive_mode: false)
+"""
+
+from __future__ import annotations
+
+import sys
+from argparse import ArgumentParser, Namespace
+from pathlib import Path
+
+_project_root = Path(__file__).resolve().parents[1]
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
+from modules.core.cli_args import create_check_batches_parser, resolve_path, validate_input_path
+from modules.transcribe.dual_mode import DualModeScript
+from modules.batch.check import run_batch_finalization
+
+
+class CheckBatchesScript(DualModeScript):
+    """Script to check batch job status and download completed results."""
+    
+    def __init__(self) -> None:
+        super().__init__("check_batches")
+    
+    def create_argument_parser(self) -> ArgumentParser:
+        """Create argument parser for CLI mode."""
+        return create_check_batches_parser()
+    
+    def run_interactive(self) -> None:
+        """Check batches in interactive mode with diagnostics enabled."""
+        run_batch_finalization(run_diagnostics=True)
+    
+    def run_cli(self, args: Namespace) -> None:
+        """Check batches in CLI mode with command-line arguments."""
+        run_diagnostics = not args.no_diagnostics
+        custom_directory = None
+        config_default = self.paths_config.get("general", {}).get("output_format", "txt")
+        output_format = getattr(args, "output_format", None) or config_default
+
+        # If directory specified, validate and use it
+        if args.directory:
+            custom_directory = resolve_path(args.directory, Path.cwd())
+            validate_input_path(custom_directory)
+
+        run_batch_finalization(
+            run_diagnostics=run_diagnostics,
+            custom_directory=custom_directory,
+            output_format=output_format,
+        )
+
+
+def main() -> None:
+    """Main entry point."""
+    CheckBatchesScript().execute()
+
+
+if __name__ == "__main__":
+    main()

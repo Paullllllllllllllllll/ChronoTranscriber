@@ -1,0 +1,36 @@
+"""Centralized constants used across the application.
+
+Defines supported image formats, batch statuses, and other shared constants.
+"""
+
+from __future__ import annotations
+
+# Supported image extensions and their MIME types for data URLs
+# This is the single source of truth for image format support
+SUPPORTED_IMAGE_FORMATS = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".tiff": "image/tiff",
+    ".tif": "image/tiff",
+    ".bmp": "image/bmp",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".jp2": "image/jp2",
+    ".j2k": "image/jp2",
+    ".pbm": "image/x-portable-bitmap",
+    ".pgm": "image/x-portable-graymap",
+    ".ppm": "image/x-portable-pixmap",
+}
+
+# Convenience set of supported extensions (derived from SUPPORTED_IMAGE_FORMATS)
+SUPPORTED_IMAGE_EXTENSIONS = set(SUPPORTED_IMAGE_FORMATS.keys())
+
+# Supported MOBI/Kindle ebook extensions
+SUPPORTED_MOBI_EXTENSIONS = {".mobi", ".azw", ".azw3", ".kfx"}
+
+# OpenAI Batch API terminal statuses (states that indicate batch completion)
+TERMINAL_BATCH_STATUSES = {"completed", "expired", "cancelled", "failed"}
+
+# Document category labels used in paths_config.yaml
+DOCUMENT_CATEGORIES = ("PDFs", "Images", "EPUBs", "MOBIs", "Auto")

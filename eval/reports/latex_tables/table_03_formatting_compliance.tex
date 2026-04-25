@@ -1,0 +1,31 @@
+\begin{table}
+\caption{Formatting Compliance by Model and Document Category. Page Tag Recall: pages where model produced a \texttt{<page\_number>} tag relative to ground truth pages with such tags. Heading Recall: analogous for Markdown headings. Bold/Italic Ratio: model bold+italic element count relative to ground truth.}
+\label{tab:formatting_compliance}
+\begin{tabular}{lllllrrr}
+\toprule
+Model & Category & Page Tag Recall (%) & Heading Recall (%) & Bold/Italic Ratio (%) & GT Page Tags & GT Headings & GT Bold/Italic \\
+\midrule
+claude_haiku_4.5_medium & address_books & 38.7 & 46.7 & 22.8 & 31 & 30 & 342 \\
+claude_haiku_4.5_medium & bibliography & 76.7 & 11.4 & 31.0 & 30 & 35 & 58 \\
+claude_haiku_4.5_medium & military_records & 0.0 & 66.7 & 5500.0 & 1 & 3 & 1 \\
+claude_sonnet_4.5_medium & address_books & 32.3 & 3.3 & 28.9 & 31 & 30 & 342 \\
+claude_sonnet_4.5_medium & bibliography & 90.0 & 17.1 & 51.7 & 30 & 35 & 58 \\
+claude_sonnet_4.5_medium & military_records & 100.0 & 66.7 & 2100.0 & 1 & 3 & 1 \\
+gemini_3.0_flash & address_books & 93.5 & 3.3 & 74.6 & 31 & 30 & 342 \\
+gemini_3.0_flash & bibliography & 100.0 & 17.1 & 113.8 & 30 & 35 & 58 \\
+gemini_3.0_flash & military_records & 300.0 & 66.7 & 3400.0 & 1 & 3 & 1 \\
+gemini_3.0_pro_medium & address_books & 96.8 & 13.3 & 95.3 & 31 & 30 & 342 \\
+gemini_3.0_pro_medium & bibliography & 93.3 & 5.7 & 63.8 & 30 & 35 & 58 \\
+gemini_3.0_pro_medium & military_records & 0.0 & 100.0 & 200.0 & 1 & 3 & 1 \\
+gpt_5.2_medium & address_books & 3.2 & 0.0 & 0.6 & 31 & 30 & 342 \\
+gpt_5.2_medium & bibliography & 100.0 & 2.9 & 5.2 & 30 & 35 & 58 \\
+gpt_5.2_medium & military_records & 100.0 & 66.7 & 0.0 & 1 & 3 & 1 \\
+gpt_5_mini_medium & address_books & 22.6 & 20.0 & 0.3 & 31 & 30 & 342 \\
+gpt_5_mini_medium & bibliography & 60.0 & 0.0 & 24.1 & 30 & 35 & 58 \\
+gpt_5_mini_medium & military_records & 100.0 & 100.0 & 0.0 & 1 & 3 & 1 \\
+tesseract & address_books & 0.0 & 0.0 & 5.3 & 31 & 30 & 342 \\
+tesseract & bibliography & 0.0 & 0.0 & 3.4 & 30 & 35 & 58 \\
+tesseract & military_records & 0.0 & 0.0 & 100.0 & 1 & 3 & 1 \\
+\bottomrule
+\end{tabular}
+\end{table}

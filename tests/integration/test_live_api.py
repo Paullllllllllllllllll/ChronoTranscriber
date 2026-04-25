@@ -46,10 +46,9 @@ from modules.config.service import ConfigService, get_config_service  # noqa: E4
 from modules.documents.page_range import parse_page_range  # noqa: E402
 from modules.transcribe.user_config import UserConfiguration  # noqa: E402
 import modules.config.config_loader as _cl_mod  # noqa: E402
-STAGING_DIR = PROJECT_ROOT / "staging"
-STAGING_PDF_DIR = STAGING_DIR / "pdfs"
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+STAGING_PDF_DIR = FIXTURES_DIR / "pdfs"
 STAGING_PDF = STAGING_PDF_DIR / "Antonio Franco.pdf"
-STAGING_IMAGES_DIR = STAGING_DIR / "images"
 CONFIG_DIR = PROJECT_ROOT / "config"
 SCHEMAS_DIR = PROJECT_ROOT / "schemas"
 

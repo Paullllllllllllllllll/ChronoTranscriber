@@ -314,20 +314,26 @@ class TestNormalizePathsConfig:
         assert Path(result["general"]["logs_dir"]).is_absolute()
 
     @pytest.mark.unit
-    def test_normalizes_file_paths_sections(self) -> None:
+    def test_normalizes_file_paths_sections(self, tmp_path: Path) -> None:
         """Test normalization of file_paths sections."""
         from modules.config.config_loader import ConfigLoader
-        
+
         loader = ConfigLoader()
         config = {
             "file_paths": {
-                "PDFs": {"input": "./pdfs_in", "output": "./pdfs_out"},
-                "Images": {"input": "./images_in", "output": "./images_out"},
+                "PDFs": {
+                    "input": str(tmp_path / "pdfs_in"),
+                    "output": str(tmp_path / "pdfs_out"),
+                },
+                "Images": {
+                    "input": str(tmp_path / "images_in"),
+                    "output": str(tmp_path / "images_out"),
+                },
             }
         }
-        
+
         result = loader._normalize_paths_config(config)
-        
+
         # All paths should be absolute
         assert Path(result["file_paths"]["PDFs"]["input"]).is_absolute()
         assert Path(result["file_paths"]["PDFs"]["output"]).is_absolute()

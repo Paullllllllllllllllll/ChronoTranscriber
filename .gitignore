@@ -4,10 +4,20 @@
 .mypy_cache/
 .pytest_cache/
 
-# Live smoke-test artifacts (pdfs_in/verify_v5, pdfs_out/verify_v5_*, etc.)
+# Transient I/O directories (created by manual runs and live tests)
 /pdfs_in/
 /pdfs_out/
-staging/output/
+/images_in/
+/images_out/
+/epubs_in/
+/epubs_out/
+/mobis_in/
+/mobis_out/
+/auto_in/
+/auto_out/
+
+# Local staging workspace
+/staging/
 .chronotranscriber_token_state.json
 .coverage
 

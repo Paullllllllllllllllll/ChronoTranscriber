@@ -1,0 +1,111 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "chronotranscriber"
+version = "1.0.1"
+description = "LLM-assisted document transcription tool for researchers and archivists"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.13"
+authors = [
+    { name = "Paul Goetz", email = "goetz@soziologie.uzh.ch" },
+]
+keywords = ["transcription", "ocr", "llm", "digital-humanities"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Text Processing :: General",
+]
+
+dependencies = [
+    # LLM integration (LangChain abstraction layer)
+    "langchain-core>=1.2",
+    "langchain-openai>=1.1",
+    "langchain-anthropic>=1.4",
+    "langchain-google-genai>=4.2",
+
+    # Direct SDK usage (batch API backends)
+    "openai>=2.31",
+    "anthropic>=0.94",
+    "google-genai>=1.73",
+
+    # Document processing
+    "PyMuPDF>=1.27",
+    "EbookLib>=0.20",
+    "mobi>=0.4.1",
+    "lxml>=6.0",
+    "pytesseract>=0.3.13",
+
+    # Image processing
+    "pillow>=12.1",
+    "opencv-python>=4.13",
+    "deskew>=1.5",
+    "scikit-image>=0.26",
+    "numpy>=2.4",
+
+    # Configuration and validation
+    "pydantic>=2.13",
+    "PyYAML>=6.0",
+
+    # Async file I/O
+    "aiofiles>=25.1",
+
+    # Utilities
+    "colorama>=0.4.6",
+    "tenacity>=9.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0",
+    "pytest-asyncio>=1.3",
+    "pytest-cov>=7.0",
+    "mypy>=1.20",
+    "types-aiofiles",
+    "types-PyYAML",
+    "coverage>=7.13",
+]
+eval = [
+    "pandas>=3.0",
+    "matplotlib>=3.10",
+    "jupyter>=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Paullllllllllllllllll/ChronoTranscriber"
+Repository = "https://github.com/Paullllllllllllllllll/ChronoTranscriber"
+Issues = "https://github.com/Paullllllllllllllllll/ChronoTranscriber/issues"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "unit: Unit tests (fast, no external dependencies)",
+    "integration: Integration tests (may require external services)",
+    "slow: Slow tests (skip with -m 'not slow')",
+    "api: Tests requiring API keys",
+    "windows: Windows-specific tests",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.13"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+strict_optional = true
+show_error_codes = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["modules", "main"]

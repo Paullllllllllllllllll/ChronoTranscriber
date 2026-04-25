@@ -1,5 +1,8 @@
 /.windsurf/
 /.claude/
+.venv/
+.mypy_cache/
+.pytest_cache/
 
 # Live smoke-test artifacts (pdfs_in/verify_v5, pdfs_out/verify_v5_*, etc.)
 /pdfs_in/

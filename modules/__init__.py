@@ -9,4 +9,4 @@ Provides core functionality for document transcription, including:
 - Infrastructure utilities
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"

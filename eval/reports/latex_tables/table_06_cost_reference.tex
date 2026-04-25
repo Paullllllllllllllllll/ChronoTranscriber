@@ -1,0 +1,18 @@
+\begin{table}
+\caption{API cost reference for all transcription models (February 2026). Per-page costs computed from actual token usage recorded in the JSONL output files. Output token counts for models run at medium reasoning budget include reasoning/thinking tokens billed at the standard output rate. Tesseract OCR is open-source and incurs no API cost. Transkribus costs are credit-based (0.5 credits per printed page at \texteuro{}0.06 per credit; Metagrapho API applies a further 50\% credit reduction).}
+\label{tab:cost_reference}
+\begin{tabular}{llllllll}
+\toprule
+Model & Provider & Input ($/M tok) & Output ($/M tok) & Avg Input Tok/Page & Avg Output Tok/Page & $/page (standard) & $/page (batch 50%) \\
+\midrule
+GPT-5.2 & OpenAI & 1.75 & 14.00 & 2989 & 2316 & 0.03765 & 0.01883 \\
+GPT-5 Mini & OpenAI & 0.25 & 2.00 & 2550 & 3047 & 0.00673 & 0.00337 \\
+Gemini 3 Pro Preview & Google & 2.00 & 12.00 & 2173 & 7076 & 0.08926 & 0.04463 \\
+Gemini 3 Flash Preview & Google & 0.50 & 3.00 & 2173 & 6348 & 0.02013 & 0.01007 \\
+Claude Sonnet 4.5 & Anthropic & 3.00 & 15.00 & 3541 & 1840 & 0.03822 & 0.01911 \\
+Claude Haiku 4.5 & Anthropic & 1.00 & 5.00 & 3541 & 2315 & 0.01511 & 0.00756 \\
+Tesseract OCR & Open-source & — & — & — & — & 0 (free) & 0 (free) \\
+Transkribus (printed) & Transkribus & N/A (credit-based) & N/A (credit-based) & — & — & 0.0330 & 0.0165 (Metagrapho API) \\
+\bottomrule
+\end{tabular}
+\end{table}

@@ -1,0 +1,1468 @@
+"""Unit tests for modules/llm/providers/base.py.
+
+Tests base provider abstraction and common utilities.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import pytest
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+
+from modules.llm.providers.base import (
+    InputTokensBelowThresholdError,
+    ProviderCapabilities,
+    TranscriptionResult,
+    BaseProvider,
+)
+from modules.config.capabilities import Capabilities
+
+
+class TestProviderCapabilities:
+    """Tests for ProviderCapabilities dataclass."""
+    
+    @pytest.mark.unit
+    def test_default_values(self) -> None:
+        """Test default capability values."""
+        caps = Capabilities(
+            model="test-model",
+            family="test",
+        )
+        
+        assert caps.supports_image_input is False
+        assert caps.supports_structured_outputs is True
+        assert caps.is_reasoning_model is False
+        assert caps.supports_sampler_controls is True
+    
+    @pytest.mark.unit
+    def test_vision_capabilities(self) -> None:
+        """Test vision-related capabilities."""
+        caps = Capabilities(
+            model="gpt-4o",
+            family="gpt-4o",
+            provider="openai",
+            supports_image_input=True,
+            supports_image_detail=True,
+            default_image_detail="high",
+        )
+        
+        assert caps.supports_image_input is True
+        assert caps.supports_image_detail is True
+        assert caps.default_image_detail == "high"
+    
+    @pytest.mark.unit
+    def test_reasoning_model_capabilities(self) -> None:
+        """Test reasoning model capabilities."""
+        caps = Capabilities(
+            model="o1",
+            family="o1",
+            provider="openai",
+            is_reasoning_model=True,
+            supports_reasoning_effort=True,
+            supports_sampler_controls=False,
+            supports_top_p=False,
+        )
+        
+        assert caps.is_reasoning_model is True
+        assert caps.supports_reasoning_effort is True
+        assert caps.supports_sampler_controls is False
+    
+    @pytest.mark.unit
+    def test_frozen_dataclass(self) -> None:
+        """Test that capabilities are immutable."""
+        caps = Capabilities(
+            model="test-model",
+            family="test",
+        )
+        
+        with pytest.raises(AttributeError):
+            caps.model = "modified"
+    
+    @pytest.mark.unit
+    def test_token_limits(self) -> None:
+        """Test token limit attributes."""
+        caps = Capabilities(
+            model="test-model",
+            family="test",
+            max_context_tokens=200000,
+            max_output_tokens=8192,
+        )
+        
+        assert caps.max_context_tokens == 200000
+        assert caps.max_output_tokens == 8192
+
+
+class TestTranscriptionResult:
+    """Tests for TranscriptionResult dataclass."""
+    
+    @pytest.mark.unit
+    def test_basic_result(self) -> None:
+        """Test basic transcription result."""
+        result = TranscriptionResult(content="Transcribed text here")
+        
+        assert result.content == "Transcribed text here"
+        assert result.error is None
+        assert result.no_transcribable_text is False
+        assert result.transcription_not_possible is False
+    
+    @pytest.mark.unit
+    def test_json_content_parsing(self) -> None:
+        """Test automatic parsing of JSON content."""
+        json_content = json.dumps({
+            "transcription": "Parsed text",
+            "no_transcribable_text": True,
+            "transcription_not_possible": False,
+        })
+        
+        result = TranscriptionResult(content=json_content)
+        
+        assert result.parsed_output is not None
+        assert result.no_transcribable_text is True
+        assert result.transcription_not_possible is False
+    
+    @pytest.mark.unit
+    def test_non_json_content(self) -> None:
+        """Test handling of non-JSON content."""
+        result = TranscriptionResult(content="Plain text transcription")
+        
+        assert result.parsed_output is None
+        assert result.no_transcribable_text is False
+    
+    @pytest.mark.unit
+    def test_token_usage(self) -> None:
+        """Test token usage tracking."""
+        result = TranscriptionResult(
+            content="Text",
+            input_tokens=100,
+            output_tokens=50,
+            total_tokens=150,
+        )
+        
+        assert result.input_tokens == 100
+        assert result.output_tokens == 50
+        assert result.total_tokens == 150
+    
+    @pytest.mark.unit
+    def test_error_result(self) -> None:
+        """Test error in result."""
+        result = TranscriptionResult(
+            content="",
+            error="API rate limit exceeded",
+        )
+        
+        assert result.error == "API rate limit exceeded"
+    
+    @pytest.mark.unit
+    def test_raw_response_stored(self) -> None:
+        """Test raw response storage."""
+        raw = {"id": "resp_123", "model": "gpt-4o"}
+        result = TranscriptionResult(content="Text", raw_response=raw)
+        
+        assert result.raw_response == raw
+    
+    @pytest.mark.unit
+    def test_transcription_not_possible_flag(self) -> None:
+        """Test transcription_not_possible flag parsing."""
+        json_content = json.dumps({
+            "transcription": "",
+            "no_transcribable_text": False,
+            "transcription_not_possible": True,
+        })
+        
+        result = TranscriptionResult(content=json_content)
+        
+        assert result.transcription_not_possible is True
+    
+    @pytest.mark.unit
+    def test_malformed_json_handled(self) -> None:
+        """Test that malformed JSON doesn't crash."""
+        result = TranscriptionResult(content="{invalid json")
+        
+        assert result.parsed_output is None
+        assert result.no_transcribable_text is False
+    
+    @pytest.mark.unit
+    def test_json_with_extra_whitespace(self) -> None:
+        """Test JSON parsing with leading/trailing whitespace."""
+        json_content = "  \n" + json.dumps({
+            "transcription": "Text",
+            "no_transcribable_text": False,
+            "transcription_not_possible": False,
+        }) + "  \n"
+        
+        result = TranscriptionResult(content=json_content)
+
+        assert result.parsed_output is not None
+
+    @pytest.mark.unit
+    def test_code_fenced_json_parsed(self) -> None:
+        """Test __post_init__ handles code-fenced JSON content."""
+        content = (
+            '```json\n'
+            + json.dumps({
+                "transcription": "test",
+                "no_transcribable_text": True,
+                "transcription_not_possible": False,
+            })
+            + '\n```'
+        )
+        result = TranscriptionResult(content=content)
+        assert result.parsed_output is not None
+        assert result.no_transcribable_text is True
+        assert result.transcription_not_possible is False
+
+    @pytest.mark.unit
+    def test_preamble_wrapped_json_parsed(self) -> None:
+        """Test __post_init__ handles JSON with conversational preamble."""
+        content = (
+            "Here is the JSON:\n"
+            + json.dumps({
+                "transcription": "test",
+                "no_transcribable_text": False,
+                "transcription_not_possible": True,
+            })
+        )
+        result = TranscriptionResult(content=content)
+        assert result.parsed_output is not None
+        assert result.transcription_not_possible is True
+
+
+class TestBaseProviderStatics:
+    """Tests for BaseProvider static methods."""
+    
+    @pytest.mark.unit
+    def test_encode_image_to_base64(self, temp_dir: Path) -> None:
+        """Test image encoding to base64."""
+        # Create a simple test image file
+        image_path = temp_dir / "test.png"
+        image_data = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+        image_path.write_bytes(image_data)
+        
+        b64_data, mime_type = BaseProvider.encode_image_to_base64(image_path)
+        
+        assert mime_type == "image/png"
+        assert b64_data == base64.b64encode(image_data).decode("utf-8")
+    
+    @pytest.mark.unit
+    def test_encode_jpeg_image(self, temp_dir: Path) -> None:
+        """Test JPEG image encoding."""
+        image_path = temp_dir / "test.jpg"
+        image_data = b"\xff\xd8\xff" + b"\x00" * 100
+        image_path.write_bytes(image_data)
+        
+        b64_data, mime_type = BaseProvider.encode_image_to_base64(image_path)
+        
+        assert mime_type == "image/jpeg"
+    
+    @pytest.mark.unit
+    def test_unsupported_format_raises(self, temp_dir: Path) -> None:
+        """Test that unsupported format raises ValueError."""
+        image_path = temp_dir / "test.xyz"
+        image_path.write_bytes(b"data")
+        
+        with pytest.raises(ValueError, match="Unsupported image format"):
+            BaseProvider.encode_image_to_base64(image_path)
+    
+    @pytest.mark.unit
+    def test_create_data_url(self) -> None:
+        """Test data URL creation."""
+        result = BaseProvider.create_data_url("abc123", "image/png")
+        
+        assert result == "data:image/png;base64,abc123"
+    
+    @pytest.mark.unit
+    def test_create_data_url_jpeg(self) -> None:
+        """Test data URL for JPEG."""
+        result = BaseProvider.create_data_url("xyz789", "image/jpeg")
+        
+        assert result == "data:image/jpeg;base64,xyz789"
+
+
+class TestBaseProviderInit:
+    """Tests for BaseProvider initialization."""
+    
+    @pytest.mark.unit
+    def test_cannot_instantiate_abstract(self) -> None:
+        """Test that BaseProvider cannot be instantiated directly."""
+        with pytest.raises(TypeError, match="abstract"):
+            BaseProvider(api_key="key", model="model")
+    
+    @pytest.mark.unit
+    def test_concrete_implementation_attributes(self) -> None:
+        """Test that concrete implementation has correct attributes."""
+        # Create a minimal concrete implementation for testing
+        class ConcreteProvider(BaseProvider):
+            @property
+            def provider_name(self):
+                return "test"
+            
+            def get_capabilities(self):
+                return Capabilities(
+                    model=self.model,
+                    family="test",
+                )
+            
+            async def transcribe_image(self, *args, **kwargs):
+                pass
+            
+            async def transcribe_image_from_base64(self, *args, **kwargs):
+                pass
+            
+            async def close(self):
+                pass
+        
+        provider = ConcreteProvider(
+            api_key="test-key",
+            model="test-model",
+            temperature=0.5,
+            max_tokens=2048,
+            timeout=30.0,
+        )
+        
+        assert provider.api_key == "test-key"
+        assert provider.model == "test-model"
+        assert provider.temperature == 0.5
+        assert provider.max_tokens == 2048
+        assert provider.timeout == 30.0
+
+
+class TestProviderCapabilitiesEdgeCases:
+    """Edge case tests for ProviderCapabilities."""
+    
+    @pytest.mark.unit
+    def test_google_media_resolution(self) -> None:
+        """Test Google-specific media resolution settings."""
+        caps = Capabilities(
+            model="gemini-pro",
+            family="gemini",
+            provider="google",
+            supports_media_resolution=True,
+            default_media_resolution="high",
+        )
+        
+        assert caps.supports_media_resolution is True
+        assert caps.default_media_resolution == "high"
+    
+    @pytest.mark.unit
+    def test_structured_output_capability(self) -> None:
+        """Test structured output capability."""
+        caps = Capabilities(
+            model="gpt-4o",
+            family="gpt-4o",
+            provider="openai",
+            supports_structured_outputs=True,
+            supports_json_mode=True,
+        )
+        
+        assert caps.supports_structured_outputs is True
+        assert caps.supports_json_mode is True
+
+
+class TestLoadMaxRetries:
+    """Tests for load_max_retries() config loader."""
+
+    @pytest.mark.unit
+    def test_reads_from_concurrency_config(self) -> None:
+        """load_max_retries reads attempts from concurrency.transcription.retry."""
+        from modules.llm.providers.base import load_max_retries
+
+        cfg = {"concurrency": {"transcription": {"retry": {"attempts": 7}}}}
+        with patch("modules.llm.providers.base.get_config_service") as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = cfg
+            result = load_max_retries()
+
+        assert result == 7
+
+    @pytest.mark.unit
+    def test_defaults_to_5_when_missing(self) -> None:
+        """load_max_retries returns 5 when config key is absent."""
+        from modules.llm.providers.base import load_max_retries
+
+        with patch("modules.llm.providers.base.get_config_service") as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = {}
+            result = load_max_retries()
+
+        assert result == 5
+
+    @pytest.mark.unit
+    def test_returns_5_on_exception(self) -> None:
+        """load_max_retries returns 5 when config service raises an exception."""
+        from modules.llm.providers.base import load_max_retries
+
+        with patch("modules.llm.providers.base.get_config_service",
+                   side_effect=AttributeError("config unavailable")):
+            result = load_max_retries()
+
+        assert result == 5
+
+    @pytest.mark.unit
+    def test_minimum_is_1(self) -> None:
+        """load_max_retries returns at least 1 even when configured as 0."""
+        from modules.llm.providers.base import load_max_retries
+
+        cfg = {"concurrency": {"transcription": {"retry": {"attempts": 0}}}}
+        with patch("modules.llm.providers.base.get_config_service") as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = cfg
+            result = load_max_retries()
+
+        assert result >= 1
+
+
+class TestBuildDisabledParams:
+    """Tests for BaseProvider._build_disabled_params()."""
+
+    def _make_provider(self, caps):
+        """Create a minimal concrete provider with given capabilities."""
+        class _ConcreteProvider(BaseProvider):
+            @property
+            def provider_name(self):
+                return "test"
+            def get_capabilities(self):
+                return caps
+            async def transcribe_image_from_base64(self, *a, **kw):
+                pass
+            async def close(self):
+                pass
+
+        p = _ConcreteProvider.__new__(_ConcreteProvider)
+        p._capabilities = caps
+        return p
+
+    @pytest.mark.unit
+    def test_returns_none_when_all_supported(self) -> None:
+        """Returns None when all sampler params are supported."""
+        caps = Capabilities(
+            model="gpt-4o",
+            family="gpt-4o",
+            provider="openai",
+            supports_sampler_controls=True,
+            supports_top_p=True,
+            supports_frequency_penalty=True,
+            supports_presence_penalty=True,
+        )
+        provider = self._make_provider(caps)
+        assert provider._build_disabled_params() is None
+
+    @pytest.mark.unit
+    def test_disables_temperature_when_not_supported(self) -> None:
+        """Adds temperature=None when supports_sampler_controls is False."""
+        caps = Capabilities(
+            model="o3",
+            family="o3",
+            provider="openai",
+            supports_sampler_controls=False,
+            supports_top_p=False,
+            supports_frequency_penalty=False,
+            supports_presence_penalty=False,
+        )
+        provider = self._make_provider(caps)
+        result = provider._build_disabled_params()
+        assert result is not None
+        assert "temperature" in result
+
+    @pytest.mark.unit
+    def test_only_unsupported_params_disabled(self) -> None:
+        """Only params with supports_X=False appear in disabled dict."""
+        caps = Capabilities(
+            model="claude-sonnet",
+            family="claude",
+            provider="anthropic",
+            supports_sampler_controls=True,
+            supports_top_p=False,
+            supports_frequency_penalty=False,
+            supports_presence_penalty=False,
+        )
+        provider = self._make_provider(caps)
+        result = provider._build_disabled_params()
+        assert result is not None
+        assert "temperature" not in result
+        assert "top_p" in result
+        assert "frequency_penalty" in result
+
+    @pytest.mark.unit
+    def test_returns_none_when_capabilities_not_set(self) -> None:
+        """Returns None when provider has no _capabilities attribute."""
+        class _BareProvider(BaseProvider):
+            @property
+            def provider_name(self):
+                return "bare"
+            def get_capabilities(self):
+                return None
+            async def transcribe_image_from_base64(self, *a, **kw):
+                pass
+            async def close(self):
+                pass
+
+        p = _BareProvider.__new__(_BareProvider)
+        # Deliberately don't set _capabilities
+        assert p._build_disabled_params() is None
+
+
+class TestProcessLLMResponse:
+    """Tests for BaseProvider._process_llm_response()."""
+
+    def _make_provider(self):
+        """Create a minimal concrete provider for testing _process_llm_response."""
+        class _ConcreteProvider(BaseProvider):
+            @property
+            def provider_name(self):
+                return "test"
+            def get_capabilities(self):
+                return Capabilities(model="m", family="test")
+            async def transcribe_image_from_base64(self, *a, **kw):
+                pass
+            async def close(self):
+                pass
+
+        p = _ConcreteProvider.__new__(_ConcreteProvider)
+        return p
+
+    @pytest.mark.unit
+    def test_plain_ai_message_response(self) -> None:
+        """Plain AIMessage with string content is handled correctly."""
+        import asyncio
+        from modules.llm.providers.base import OPENAI_TOKEN_MAPPING
+
+        provider = self._make_provider()
+        mock_msg = MagicMock()
+        mock_msg.content = "Hello transcribed text"
+        mock_msg.response_metadata = {
+            "token_usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        }
+
+        with patch("modules.infra.token_budget.get_token_tracker"):
+            result = asyncio.run(
+                provider._process_llm_response(mock_msg, OPENAI_TOKEN_MAPPING)
+            )
+
+        assert result.content == "Hello transcribed text"
+        assert result.input_tokens == 10
+        assert result.output_tokens == 5
+        assert result.total_tokens == 15
+
+    @pytest.mark.unit
+    def test_structured_output_dict_response(self) -> None:
+        """with_structured_output(include_raw=True) dict response is parsed correctly."""
+        import asyncio
+        from modules.llm.providers.base import OPENAI_TOKEN_MAPPING
+
+        provider = self._make_provider()
+        # Use text >= 50 chars to pass content-quality truncation check
+        long_text = (
+            "Structured transcription text that is long enough to pass the "
+            "content quality validator truncation threshold."
+        )
+        parsed_data = {
+            "transcription": long_text,
+            "no_transcribable_text": False,
+        }
+        raw_msg = MagicMock()
+        raw_msg.response_metadata = {}
+        response = {"raw": raw_msg, "parsed": parsed_data}
+
+        with patch("modules.infra.token_budget.get_token_tracker"):
+            result = asyncio.run(
+                provider._process_llm_response(response, OPENAI_TOKEN_MAPPING)
+            )
+
+        assert result.parsed_output == parsed_data
+        assert long_text in result.content or result.content != ""
+
+    @pytest.mark.unit
+    def test_plain_dict_response_serialized(self) -> None:
+        """A plain dict response is JSON-serialized."""
+        import asyncio
+        from modules.llm.providers.base import OPENAI_TOKEN_MAPPING
+
+        provider = self._make_provider()
+        # Use text >= 50 chars to pass content-quality truncation check
+        response = {
+            "transcription": (
+                "dict-based transcription content that is long enough "
+                "for the content quality validator to pass."
+            )
+        }
+
+        with patch("modules.infra.token_budget.get_token_tracker"):
+            result = asyncio.run(
+                provider._process_llm_response(response, OPENAI_TOKEN_MAPPING)
+            )
+
+        assert "dict-based transcription content" in result.content
+
+    @pytest.mark.unit
+    def test_anthropic_token_mapping(self) -> None:
+        """Anthropic token mapping (different key names) extracts tokens correctly."""
+        import asyncio
+        from modules.llm.providers.base import ANTHROPIC_TOKEN_MAPPING
+
+        provider = self._make_provider()
+        mock_msg = MagicMock()
+        mock_msg.content = "anthropic text"
+        mock_msg.response_metadata = {
+            "usage": {"input_tokens": 20, "output_tokens": 8}
+        }
+
+        with patch("modules.infra.token_budget.get_token_tracker"):
+            result = asyncio.run(
+                provider._process_llm_response(mock_msg, ANTHROPIC_TOKEN_MAPPING)
+            )
+
+        assert result.input_tokens == 20
+        assert result.output_tokens == 8
+        assert result.total_tokens == 28  # computed from in+out
+
+    @pytest.mark.unit
+    def test_zero_tokens_no_tracker_call(self) -> None:
+        """Token tracker is not called when total_tokens is 0."""
+        import asyncio
+        from modules.llm.providers.base import OPENAI_TOKEN_MAPPING
+
+        provider = self._make_provider()
+        mock_msg = MagicMock()
+        mock_msg.content = "text"
+        mock_msg.response_metadata = {}  # no usage key
+        mock_msg.usage_metadata = None   # no fallback either
+
+        with patch("modules.infra.token_budget.get_token_tracker") as mock_tracker:
+            asyncio.run(
+                provider._process_llm_response(mock_msg, OPENAI_TOKEN_MAPPING)
+            )
+
+        mock_tracker.assert_not_called()
+
+    @pytest.mark.unit
+    def test_usage_metadata_fallback_when_response_metadata_empty(self) -> None:
+        """usage_metadata fallback fires when response_metadata has no token_usage.
+
+        Regression test for LangChain 1.x / Responses API: token usage is stored
+        in AIMessage.usage_metadata (a TypedDict, i.e. plain dict), not
+        response_metadata['token_usage'].
+        """
+        import asyncio
+        from modules.llm.providers.base import OPENAI_TOKEN_MAPPING
+
+        provider = self._make_provider()
+        mock_msg = MagicMock()
+        mock_msg.content = "fallback text"
+        mock_msg.response_metadata = {}  # no token_usage key
+
+        # Use a real dict to match UsageMetadata TypedDict behaviour
+        mock_msg.usage_metadata = {
+            "input_tokens": 200,
+            "output_tokens": 80,
+            "total_tokens": 280,
+        }
+
+        with patch("modules.infra.token_budget.get_token_tracker"):
+            result = asyncio.run(
+                provider._process_llm_response(mock_msg, OPENAI_TOKEN_MAPPING)
+            )
+
+        assert result.input_tokens == 200
+        assert result.output_tokens == 80
+        assert result.total_tokens == 280
+
+    @pytest.mark.unit
+    def test_usage_metadata_fallback_responses_api_shape(self) -> None:
+        """Responses API response_metadata shape yields tokens via usage_metadata.
+
+        When LangChain routes through the Responses API (e.g. due to text.verbosity
+        or reasoning parameters), response_metadata contains id/model/object/service_tier
+        but no token_usage.  Token counts must be read from AIMessage.usage_metadata
+        which is a TypedDict (plain dict).
+        """
+        import asyncio
+        from modules.llm.providers.base import OPENAI_TOKEN_MAPPING
+
+        provider = self._make_provider()
+        mock_msg = MagicMock()
+        mock_msg.content = "transcribed page"
+        mock_msg.response_metadata = {
+            "id": "resp_abc123",
+            "object": "response",
+            "model": "gpt-5-mini-2025-08-07",
+            "service_tier": "flex",
+            "status": "completed",
+            "model_provider": "openai",
+            "model_name": "gpt-5-mini-2025-08-07",
+        }
+
+        # Use a real dict to match UsageMetadata TypedDict behaviour
+        mock_msg.usage_metadata = {
+            "input_tokens": 1500,
+            "output_tokens": 350,
+            "total_tokens": 1850,
+        }
+
+        with patch("modules.infra.token_budget.get_token_tracker") as mock_tracker:
+            result = asyncio.run(
+                provider._process_llm_response(mock_msg, OPENAI_TOKEN_MAPPING)
+            )
+
+        assert result.input_tokens == 1500
+        assert result.output_tokens == 350
+        assert result.total_tokens == 1850
+        mock_tracker.return_value.add_tokens.assert_called_once_with(1850)
+
+    @pytest.mark.unit
+    def test_response_metadata_takes_priority_over_usage_metadata(self) -> None:
+        """response_metadata token_usage takes priority; usage_metadata is not read.
+
+        When response_metadata already contains token_usage with non-zero totals,
+        the usage_metadata fallback must not overwrite those values.
+        """
+        import asyncio
+        from modules.llm.providers.base import OPENAI_TOKEN_MAPPING
+
+        provider = self._make_provider()
+        mock_msg = MagicMock()
+        mock_msg.content = "some text"
+        mock_msg.response_metadata = {
+            "token_usage": {"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70}
+        }
+
+        # Use a real dict to match UsageMetadata TypedDict behaviour
+        mock_msg.usage_metadata = {
+            "input_tokens": 999,
+            "output_tokens": 999,
+            "total_tokens": 1998,
+        }
+
+        with patch("modules.infra.token_budget.get_token_tracker"):
+            result = asyncio.run(
+                provider._process_llm_response(mock_msg, OPENAI_TOKEN_MAPPING)
+            )
+
+        assert result.input_tokens == 50
+        assert result.output_tokens == 20
+        assert result.total_tokens == 70
+
+    @pytest.mark.unit
+    def test_usage_metadata_fallback_non_dict_object(self) -> None:
+        """Defensive fallback: usage_metadata as object (not dict) still works.
+
+        Covers the getattr branch for non-dict usage_metadata implementations.
+        """
+        import asyncio
+        from modules.llm.providers.base import OPENAI_TOKEN_MAPPING
+
+        provider = self._make_provider()
+        mock_msg = MagicMock()
+        mock_msg.content = "object-style text"
+        mock_msg.response_metadata = {}  # no token_usage key
+
+        # Use MagicMock (object-attribute style) for the defensive branch
+        usage_meta = MagicMock()
+        usage_meta.input_tokens = 400
+        usage_meta.output_tokens = 100
+        usage_meta.total_tokens = 500
+        mock_msg.usage_metadata = usage_meta
+
+        with patch("modules.infra.token_budget.get_token_tracker"):
+            result = asyncio.run(
+                provider._process_llm_response(mock_msg, OPENAI_TOKEN_MAPPING)
+            )
+
+        assert result.input_tokens == 400
+        assert result.output_tokens == 100
+        assert result.total_tokens == 500
+
+
+class TestAInvokeWithRetry:
+    """Tests for BaseProvider._ainvoke_with_retry() retry logic."""
+
+    def _make_provider(self):
+        """Create a minimal concrete provider for testing _ainvoke_with_retry."""
+        class _ConcreteProvider(BaseProvider):
+            @property
+            def provider_name(self):
+                return "test"
+
+            def get_capabilities(self):
+                return Capabilities(model="m", family="test")
+
+            async def transcribe_image_from_base64(self, *a, **kw):
+                pass
+
+            async def close(self):
+                pass
+
+        return _ConcreteProvider.__new__(_ConcreteProvider)
+
+    @pytest.mark.unit
+    def test_retries_on_connect_error(self) -> None:
+        """Retries on httpx.ConnectError and returns the result on eventual success."""
+        import asyncio
+        import httpx
+        import tenacity
+        from unittest.mock import AsyncMock
+
+        provider = self._make_provider()
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=[
+            httpx.ConnectError("connection refused"),
+            httpx.ConnectError("connection refused"),
+            "success_response",
+        ])
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=5):
+                with patch(
+                    "tenacity.wait_exponential_jitter",
+                    return_value=tenacity.wait_none(),
+                ):
+                    return await provider._ainvoke_with_retry(mock_llm, ["msg"])
+
+        result = asyncio.run(_run())
+        assert result == "success_response"
+        assert mock_llm.ainvoke.call_count == 3
+
+    @pytest.mark.unit
+    def test_reraises_after_exhausting_attempts(self) -> None:
+        """Raises httpx.ConnectError after all retry attempts are exhausted."""
+        import asyncio
+        import httpx
+        import tenacity
+        from unittest.mock import AsyncMock
+
+        provider = self._make_provider()
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(
+            side_effect=httpx.ConnectError("always fails")
+        )
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=2):
+                with patch(
+                    "tenacity.wait_exponential_jitter",
+                    return_value=tenacity.wait_none(),
+                ):
+                    return await provider._ainvoke_with_retry(mock_llm, ["msg"])
+
+        with pytest.raises(httpx.ConnectError):
+            asyncio.run(_run())
+        assert mock_llm.ainvoke.call_count == 2
+
+    @pytest.mark.unit
+    def test_does_not_retry_non_transient_error(self) -> None:
+        """Non-transient errors (e.g. ValueError) propagate immediately without retry."""
+        import asyncio
+        import tenacity
+        from unittest.mock import AsyncMock
+
+        provider = self._make_provider()
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=ValueError("bad value"))
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=5):
+                with patch(
+                    "tenacity.wait_exponential_jitter",
+                    return_value=tenacity.wait_none(),
+                ):
+                    return await provider._ainvoke_with_retry(mock_llm, ["msg"])
+
+        with pytest.raises(ValueError, match="bad value"):
+            asyncio.run(_run())
+        assert mock_llm.ainvoke.call_count == 1
+
+    @pytest.mark.unit
+    def test_retries_on_validation_error(self) -> None:
+        """Retries on pydantic.ValidationError and returns result on success."""
+        import asyncio
+        import tenacity
+        from unittest.mock import AsyncMock
+        from pydantic import ValidationError
+
+        provider = self._make_provider()
+        mock_llm = MagicMock()
+
+        val_err = ValidationError.from_exception_data(
+            title="TranscriptionOutput",
+            line_errors=[{
+                "type": "json_invalid",
+                "loc": (),
+                "msg": "Invalid JSON",
+                "input": "short_answer_detection|no",
+                "ctx": {"error": "expected value at line 1 column 1"},
+            }],
+        )
+
+        mock_llm.ainvoke = AsyncMock(side_effect=[
+            val_err,
+            "success_response",
+        ])
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=5):
+                with patch(
+                    "modules.llm.providers.base.load_max_validation_retries",
+                    return_value=3,
+                ):
+                    with patch(
+                        "tenacity.wait_exponential_jitter",
+                        return_value=tenacity.wait_none(),
+                    ):
+                        return await provider._ainvoke_with_retry(
+                            mock_llm, ["msg"]
+                        )
+
+        result = asyncio.run(_run())
+        assert result == "success_response"
+        assert mock_llm.ainvoke.call_count == 2
+
+    @pytest.mark.unit
+    def test_validation_retries_exhausted_separately(self) -> None:
+        """ValidationError retries are capped at validation_attempts, not attempts."""
+        import asyncio
+        import tenacity
+        from unittest.mock import AsyncMock
+        from pydantic import ValidationError
+
+        provider = self._make_provider()
+
+        val_err = ValidationError.from_exception_data(
+            title="TranscriptionOutput",
+            line_errors=[{
+                "type": "json_invalid",
+                "loc": (),
+                "msg": "Invalid JSON",
+                "input": "analysis",
+                "ctx": {"error": "expected value at line 1 column 1"},
+            }],
+        )
+
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=val_err)
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=10):
+                with patch(
+                    "modules.llm.providers.base.load_max_validation_retries",
+                    return_value=3,
+                ):
+                    with patch(
+                        "tenacity.wait_exponential_jitter",
+                        return_value=tenacity.wait_none(),
+                    ):
+                        return await provider._ainvoke_with_retry(
+                            mock_llm, ["msg"]
+                        )
+
+        with pytest.raises(ValidationError):
+            asyncio.run(_run())
+        # 1 initial + 2 retries = 3 total (capped at validation_attempts)
+        assert mock_llm.ainvoke.call_count == 3
+
+    @pytest.mark.unit
+    def test_retries_on_silent_parsing_failure(self) -> None:
+        """Retries when with_structured_output returns parsing_error in result dict."""
+        import asyncio
+        import tenacity
+        from unittest.mock import AsyncMock
+        from pydantic import ValidationError
+
+        provider = self._make_provider()
+
+        parsing_error = ValidationError.from_exception_data(
+            title="TranscriptionOutput",
+            line_errors=[{
+                "type": "json_invalid",
+                "loc": (),
+                "msg": "Invalid JSON",
+                "input": "junk",
+                "ctx": {"error": "expected value at line 1 column 1"},
+            }],
+        )
+
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=[
+            {
+                "raw": MagicMock(content="junk text"),
+                "parsed": None,
+                "parsing_error": parsing_error,
+            },
+            {
+                "raw": MagicMock(content="good"),
+                "parsed": {"transcription": "good text"},
+                "parsing_error": None,
+            },
+        ])
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=5):
+                with patch(
+                    "modules.llm.providers.base.load_max_validation_retries",
+                    return_value=3,
+                ):
+                    with patch(
+                        "tenacity.wait_exponential_jitter",
+                        return_value=tenacity.wait_none(),
+                    ):
+                        return await provider._ainvoke_with_retry(
+                            mock_llm, ["msg"]
+                        )
+
+        result = asyncio.run(_run())
+        assert result["parsed"] == {"transcription": "good text"}
+        assert mock_llm.ainvoke.call_count == 2
+
+
+class TestLoadMaxValidationRetries:
+    """Tests for load_max_validation_retries() config loader."""
+
+    @pytest.mark.unit
+    def test_reads_from_concurrency_config(self) -> None:
+        """Reads validation_attempts from concurrency.transcription.retry."""
+        from modules.llm.providers.base import load_max_validation_retries
+
+        cfg = {
+            "concurrency": {
+                "transcription": {
+                    "retry": {"validation_attempts": 5}
+                }
+            }
+        }
+        with patch("modules.llm.providers.base.get_config_service") as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = cfg
+            result = load_max_validation_retries()
+
+        assert result == 5
+
+    @pytest.mark.unit
+    def test_defaults_to_3_when_missing(self) -> None:
+        """Returns 3 when validation_attempts key is absent."""
+        from modules.llm.providers.base import load_max_validation_retries
+
+        with patch("modules.llm.providers.base.get_config_service") as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = {}
+            result = load_max_validation_retries()
+
+        assert result == 3
+
+    @pytest.mark.unit
+    def test_returns_3_on_exception(self) -> None:
+        """Returns 3 when config service raises an exception."""
+        from modules.llm.providers.base import load_max_validation_retries
+
+        with patch(
+            "modules.llm.providers.base.get_config_service",
+            side_effect=AttributeError("config unavailable"),
+        ):
+            result = load_max_validation_retries()
+
+        assert result == 3
+
+
+class TestLoadMinInputTokens:
+    """Tests for load_min_input_tokens() config loader."""
+
+    @pytest.mark.unit
+    def test_reads_from_concurrency_config(self) -> None:
+        """Reads min_input_tokens from concurrency.transcription.retry."""
+        from modules.llm.providers.base import load_min_input_tokens
+
+        cfg = {
+            "concurrency": {
+                "transcription": {
+                    "retry": {"min_input_tokens": 750}
+                }
+            }
+        }
+        with patch("modules.llm.providers.base.get_config_service") as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = cfg
+            result = load_min_input_tokens()
+
+        assert result == 750
+
+    @pytest.mark.unit
+    def test_defaults_to_500_when_missing(self) -> None:
+        """Returns 500 when min_input_tokens key is absent."""
+        from modules.llm.providers.base import load_min_input_tokens
+
+        with patch("modules.llm.providers.base.get_config_service") as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = {}
+            result = load_min_input_tokens()
+
+        assert result == 500
+
+    @pytest.mark.unit
+    def test_returns_500_on_exception(self) -> None:
+        """Returns 500 when config service raises an exception."""
+        from modules.llm.providers.base import load_min_input_tokens
+
+        with patch(
+            "modules.llm.providers.base.get_config_service",
+            side_effect=AttributeError("config unavailable"),
+        ):
+            result = load_min_input_tokens()
+
+        assert result == 500
+
+    @pytest.mark.unit
+    def test_disabled_with_zero(self) -> None:
+        """Returns 0 when configured as 0 (disabled)."""
+        from modules.llm.providers.base import load_min_input_tokens
+
+        cfg = {
+            "concurrency": {
+                "transcription": {
+                    "retry": {"min_input_tokens": 0}
+                }
+            }
+        }
+        with patch("modules.llm.providers.base.get_config_service") as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = cfg
+            result = load_min_input_tokens()
+
+        assert result == 0
+
+
+class TestExtractInputTokens:
+    """Tests for BaseProvider._extract_input_tokens() static helper."""
+
+    @pytest.mark.unit
+    def test_structured_output_dict_with_usage_metadata(self) -> None:
+        """Extracts input_tokens from structured-output dict via usage_metadata."""
+        raw_msg = MagicMock()
+        raw_msg.usage_metadata = {"input_tokens": 1500, "output_tokens": 300, "total_tokens": 1800}
+        result = {"raw": raw_msg, "parsed": {"transcription": "text"}}
+
+        assert BaseProvider._extract_input_tokens(result) == 1500
+
+    @pytest.mark.unit
+    def test_plain_ai_message_with_usage_metadata(self) -> None:
+        """Extracts input_tokens from plain AIMessage via usage_metadata."""
+        msg = MagicMock()
+        msg.usage_metadata = {"input_tokens": 800, "output_tokens": 200, "total_tokens": 1000}
+
+        assert BaseProvider._extract_input_tokens(msg) == 800
+
+    @pytest.mark.unit
+    def test_fallback_to_response_metadata(self) -> None:
+        """Falls back to response_metadata.token_usage.prompt_tokens."""
+        msg = MagicMock()
+        msg.usage_metadata = None
+        msg.response_metadata = {
+            "token_usage": {"prompt_tokens": 600, "completion_tokens": 100, "total_tokens": 700}
+        }
+
+        assert BaseProvider._extract_input_tokens(msg) == 600
+
+    @pytest.mark.unit
+    def test_returns_zero_when_no_metadata(self) -> None:
+        """Returns 0 when neither usage_metadata nor response_metadata is available."""
+        msg = MagicMock(spec=[])  # no attributes at all
+
+        assert BaseProvider._extract_input_tokens(msg) == 0
+
+    @pytest.mark.unit
+    def test_returns_zero_for_plain_string(self) -> None:
+        """Returns 0 for non-message result types."""
+        assert BaseProvider._extract_input_tokens("just a string") == 0
+
+
+class TestInputTokenThresholdRetry:
+    """Tests for input-token threshold guard in _ainvoke_with_retry."""
+
+    def _make_provider(self):
+        """Create a minimal concrete provider."""
+        class _ConcreteProvider(BaseProvider):
+            @property
+            def provider_name(self):
+                return "test"
+            def get_capabilities(self):
+                return Capabilities(model="m", family="test")
+            async def transcribe_image_from_base64(self, *a, **kw):
+                pass
+            async def close(self):
+                pass
+
+        return _ConcreteProvider.__new__(_ConcreteProvider)
+
+    def _make_response(self, input_tokens):
+        """Create a mock structured-output response with given input_tokens."""
+        raw_msg = MagicMock()
+        raw_msg.usage_metadata = {
+            "input_tokens": input_tokens,
+            "output_tokens": 100,
+            "total_tokens": input_tokens + 100,
+        }
+        return {
+            "raw": raw_msg,
+            "parsed": {"transcription": "some text"},
+            "parsing_error": None,
+        }
+
+    @pytest.mark.unit
+    def test_retries_on_low_input_tokens(self) -> None:
+        """Retries when input_tokens < threshold and expect_image_tokens=True."""
+        import asyncio
+        import tenacity
+        from unittest.mock import AsyncMock
+
+        provider = self._make_provider()
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=[
+            self._make_response(234),   # contaminated
+            self._make_response(1500),  # good
+        ])
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=5):
+                with patch("modules.llm.providers.base.load_max_validation_retries", return_value=3):
+                    with patch("modules.llm.providers.base.load_min_input_tokens", return_value=500):
+                        with patch("tenacity.wait_exponential_jitter", return_value=tenacity.wait_none()):
+                            return await provider._ainvoke_with_retry(
+                                mock_llm, ["msg"], expect_image_tokens=True,
+                            )
+
+        result = asyncio.run(_run())
+        assert result["raw"].usage_metadata["input_tokens"] == 1500
+        assert mock_llm.ainvoke.call_count == 2
+
+    @pytest.mark.unit
+    def test_no_check_when_expect_image_tokens_false(self) -> None:
+        """234 input_tokens passes through when expect_image_tokens=False."""
+        import asyncio
+        import tenacity
+        from unittest.mock import AsyncMock
+
+        provider = self._make_provider()
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(return_value=self._make_response(234))
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=5):
+                with patch("modules.llm.providers.base.load_max_validation_retries", return_value=3):
+                    with patch("tenacity.wait_exponential_jitter", return_value=tenacity.wait_none()):
+                        return await provider._ainvoke_with_retry(
+                            mock_llm, ["msg"], expect_image_tokens=False,
+                        )
+
+        result = asyncio.run(_run())
+        assert result["raw"].usage_metadata["input_tokens"] == 234
+        assert mock_llm.ainvoke.call_count == 1
+
+    @pytest.mark.unit
+    def test_no_check_when_extraction_returns_zero(self) -> None:
+        """Response passes through when token extraction returns 0."""
+        import asyncio
+        import tenacity
+        from unittest.mock import AsyncMock
+
+        provider = self._make_provider()
+        # Response with no usage metadata at all
+        response = {"raw": MagicMock(spec=[]), "parsed": {"t": "x"}, "parsing_error": None}
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(return_value=response)
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=5):
+                with patch("modules.llm.providers.base.load_max_validation_retries", return_value=3):
+                    with patch("modules.llm.providers.base.load_min_input_tokens", return_value=500):
+                        with patch("tenacity.wait_exponential_jitter", return_value=tenacity.wait_none()):
+                            return await provider._ainvoke_with_retry(
+                                mock_llm, ["msg"], expect_image_tokens=True,
+                            )
+
+        result = asyncio.run(_run())
+        assert mock_llm.ainvoke.call_count == 1
+
+    @pytest.mark.unit
+    def test_exhausts_validation_attempts_then_raises(self) -> None:
+        """Raises InputTokensBelowThresholdError after exhausting validation_attempts."""
+        import asyncio
+        import tenacity
+        from unittest.mock import AsyncMock
+
+        provider = self._make_provider()
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(return_value=self._make_response(234))
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=10):
+                with patch("modules.llm.providers.base.load_max_validation_retries", return_value=3):
+                    with patch("modules.llm.providers.base.load_min_input_tokens", return_value=500):
+                        with patch("tenacity.wait_exponential_jitter", return_value=tenacity.wait_none()):
+                            return await provider._ainvoke_with_retry(
+                                mock_llm, ["msg"], expect_image_tokens=True,
+                            )
+
+        with pytest.raises(InputTokensBelowThresholdError) as exc_info:
+            asyncio.run(_run())
+        assert exc_info.value.actual == 234
+        assert exc_info.value.threshold == 500
+        # 1 initial + 2 retries = 3 total (capped at validation_attempts)
+        assert mock_llm.ainvoke.call_count == 3
+
+    @pytest.mark.unit
+    def test_tracks_tokens_on_validation_error_retry(self) -> None:
+        """Tokens from discarded parsing-failure retries are tracked."""
+        import asyncio
+        import tenacity
+        from unittest.mock import AsyncMock
+        from pydantic import ValidationError
+
+        provider = self._make_provider()
+        bad_response = self._make_response(800)
+        bad_response["parsed"] = None
+        bad_response["parsing_error"] = ValidationError.from_exception_data(
+            title="TestModel",
+            line_errors=[
+                {
+                    "type": "missing",
+                    "loc": ("field",),
+                    "msg": "Field required",
+                    "input": {},
+                }
+            ],
+        )
+        good_response = self._make_response(1500)
+
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=[bad_response, good_response])
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=5):
+                with patch("modules.llm.providers.base.load_max_validation_retries", return_value=3):
+                    with patch("modules.llm.providers.base.load_min_input_tokens", return_value=0):
+                        with patch("tenacity.wait_exponential_jitter", return_value=tenacity.wait_none()):
+                            with patch("modules.infra.token_budget.get_token_tracker") as mock_tracker_fn:
+                                mock_tracker = MagicMock()
+                                mock_tracker_fn.return_value = mock_tracker
+                                result = await provider._ainvoke_with_retry(
+                                    mock_llm, ["msg"], expect_image_tokens=False,
+                                )
+                                return result, mock_tracker
+
+        result, mock_tracker = asyncio.run(_run())
+        assert result["raw"].usage_metadata["input_tokens"] == 1500
+        assert mock_llm.ainvoke.call_count == 2
+        # The discarded first attempt's total_tokens (800 + 100 = 900) was tracked
+        mock_tracker.add_tokens.assert_called_once_with(900)
+
+    @pytest.mark.unit
+    def test_tracks_tokens_on_input_below_threshold_retry(self) -> None:
+        """Tokens from discarded input-below-threshold retries are tracked."""
+        import asyncio
+        import tenacity
+        from unittest.mock import AsyncMock
+
+        provider = self._make_provider()
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=[
+            self._make_response(234),   # below threshold -> discarded
+            self._make_response(1500),  # good
+        ])
+
+        async def _run():
+            with patch("modules.llm.providers.base.load_max_retries", return_value=5):
+                with patch("modules.llm.providers.base.load_max_validation_retries", return_value=3):
+                    with patch("modules.llm.providers.base.load_min_input_tokens", return_value=500):
+                        with patch("tenacity.wait_exponential_jitter", return_value=tenacity.wait_none()):
+                            with patch("modules.infra.token_budget.get_token_tracker") as mock_tracker_fn:
+                                mock_tracker = MagicMock()
+                                mock_tracker_fn.return_value = mock_tracker
+                                result = await provider._ainvoke_with_retry(
+                                    mock_llm, ["msg"], expect_image_tokens=True,
+                                )
+                                return result, mock_tracker
+
+        result, mock_tracker = asyncio.run(_run())
+        assert result["raw"].usage_metadata["input_tokens"] == 1500
+        assert mock_llm.ainvoke.call_count == 2
+        # The discarded first attempt's total_tokens (234 + 100 = 334) was tracked
+        mock_tracker.add_tokens.assert_called_once_with(334)
+
+
+class TestExtractTotalTokens:
+    """Tests for _extract_total_tokens static method."""
+
+    def _make_provider(self):
+        """Create a minimal concrete provider."""
+        class _ConcreteProvider(BaseProvider):
+            @property
+            def provider_name(self):
+                return "test"
+            def get_capabilities(self):
+                return Capabilities(model="m", family="test")
+            async def transcribe_image_from_base64(self, *a, **kw):
+                pass
+            async def close(self):
+                pass
+
+        return _ConcreteProvider.__new__(_ConcreteProvider)
+
+    @pytest.mark.unit
+    def test_from_structured_output_dict(self) -> None:
+        """Extracts total_tokens from a dict with 'raw' key."""
+        raw_msg = MagicMock()
+        raw_msg.usage_metadata = {
+            "input_tokens": 500,
+            "output_tokens": 200,
+            "total_tokens": 700,
+        }
+        result = {"raw": raw_msg, "parsed": {}, "parsing_error": None}
+        assert self._make_provider()._extract_total_tokens(result) == 700
+
+    @pytest.mark.unit
+    def test_from_plain_ai_message(self) -> None:
+        """Extracts total_tokens from a plain AIMessage-like object."""
+        msg = MagicMock()
+        msg.usage_metadata = {
+            "input_tokens": 300,
+            "output_tokens": 100,
+            "total_tokens": 400,
+        }
+        assert self._make_provider()._extract_total_tokens(msg) == 400
+
+    @pytest.mark.unit
+    def test_computes_from_sum_when_total_zero(self) -> None:
+        """Falls back to input + output when total_tokens is 0."""
+        raw_msg = MagicMock()
+        raw_msg.usage_metadata = {
+            "input_tokens": 800,
+            "output_tokens": 150,
+            "total_tokens": 0,
+        }
+        result = {"raw": raw_msg, "parsed": {}, "parsing_error": None}
+        assert self._make_provider()._extract_total_tokens(result) == 950
+
+    @pytest.mark.unit
+    def test_returns_zero_when_no_metadata(self) -> None:
+        """Returns 0 when no usage_metadata is present."""
+        raw_msg = MagicMock(spec=[])  # no usage_metadata attr
+        result = {"raw": raw_msg, "parsed": {}, "parsing_error": None}
+        assert self._make_provider()._extract_total_tokens(result) == 0
+
+
+class TestBaseProviderAsyncContextManager:
+    """Tests for BaseProvider async context manager (__aenter__, __aexit__)."""
+
+    @pytest.mark.unit
+    def test_async_context_manager_returns_self(self) -> None:
+        """__aenter__ returns the provider instance."""
+        import asyncio
+
+        class _ConcreteProvider(BaseProvider):
+            @property
+            def provider_name(self):
+                return "test"
+            def get_capabilities(self):
+                return Capabilities(model="m", family="test")
+            async def transcribe_image_from_base64(self, *a, **kw):
+                pass
+            async def close(self):
+                pass
+
+        provider = _ConcreteProvider(api_key="k", model="m")
+
+        async def _check():
+            async with provider as p:
+                assert p is provider
+
+        asyncio.run(_check())

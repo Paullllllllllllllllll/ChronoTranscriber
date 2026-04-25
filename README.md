@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.0.0
+# ChronoTranscriber v1.0.1
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -135,7 +135,8 @@ Three operating modes are available, controlled by
 - **FFmpeg** (optional) -- required for JPEG2000 bilevel codestreams
 - At least one API key (see provider table above)
 
-All Python dependencies are listed in `requirements.txt`.
+All Python dependencies are declared in `pyproject.toml` and locked
+in `uv.lock`.
 
 ## Installation
 
@@ -143,16 +144,17 @@ All Python dependencies are listed in `requirements.txt`.
 git clone https://github.com/Paullllllllllllllllll/ChronoTranscriber.git
 cd ChronoTranscriber
 
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# Linux/macOS
-source .venv/bin/activate
+# Install uv if not already available
+pip install uv
 
-pip install -r requirements.txt
+# Runtime dependencies only
+uv sync
 
-# For development and tests
-pip install -r requirements-dev.txt
+# Include development and test tools
+uv sync --extra dev
+
+# Include evaluation notebook dependencies
+uv sync --extra eval
 ```
 
 **Install Tesseract** (optional, for local OCR):
@@ -516,8 +518,8 @@ Use CLI mode (`interactive_mode: false`). All scripts return proper
 exit codes suitable for shell scripting and CI/CD.
 
 **I'm experiencing issues not covered here.**
-Check logs in the configured `logs_dir`, validate configuration
-files, and review `requirements.txt` for version mismatches. For
+Check logs in the configured `logs_dir` and validate configuration
+files. For
 persistent issues, open a
 [GitHub issue](https://github.com/Paullllllllllllllllll/ChronoTranscriber/issues)
 with error details and relevant config sections.
@@ -538,13 +540,13 @@ Test with both Tesseract and at least one AI backend.
 Install dev dependencies:
 
 ```bash
-pip install -r requirements-dev.txt
+uv sync --extra dev
 ```
 
 Run the test suite:
 
 ```bash
-python -m pytest -v
+uv run python -m pytest -v
 ```
 
 The suite contains 1,200+ tests (unit and integration) covering all

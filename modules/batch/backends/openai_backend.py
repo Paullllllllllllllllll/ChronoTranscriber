@@ -7,12 +7,10 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any
 
-from modules.config.constants import SUPPORTED_IMAGE_FORMATS
-from modules.config.service import get_config_service
-from modules.infra.logger import setup_logger
 from modules.batch.backends.base import (
     BatchBackend,
     BatchHandle,
@@ -22,6 +20,9 @@ from modules.batch.backends.base import (
     BatchStatusInfo,
 )
 from modules.config.capabilities import detect_capabilities
+from modules.config.constants import SUPPORTED_IMAGE_FORMATS
+from modules.config.service import get_config_service
+from modules.infra.logger import setup_logger
 from modules.llm.prompt_utils import prepare_prompt_with_context
 from modules.llm.structured_outputs import build_structured_text_format
 
@@ -45,26 +46,26 @@ def _encode_image_to_data_url(image_path: Path) -> str:
 
 def _build_responses_body(
     *,
-    model_config: Dict[str, Any],
+    model_config: dict[str, Any],
     system_prompt: str,
     image_url: str,
-    transcription_schema: Optional[Dict[str, Any]] = None,
-    llm_detail: Optional[str] = None,
-) -> Dict[str, Any]:
+    transcription_schema: dict[str, Any] | None = None,
+    llm_detail: str | None = None,
+) -> dict[str, Any]:
     """Construct a Responses API request body for vision transcription."""
     tm = model_config or {}
     model_name: str = tm.get("name", "gpt-5.4-mini")
     caps = detect_capabilities(model_name)
 
     # Normalize detail
-    detail_norm: Optional[str] = None
+    detail_norm: str | None = None
     if isinstance(llm_detail, str):
         d = llm_detail.lower().strip()
         if d in ("low", "high"):
             detail_norm = d
 
     # Base body
-    body: Dict[str, Any] = {
+    body: dict[str, Any] = {
         "model": model_name,
         "input": [
             {
@@ -118,7 +119,9 @@ def _build_responses_body(
 
     # Structured outputs
     if transcription_schema and caps.supports_structured_outputs:
-        fmt = build_structured_text_format(transcription_schema, "TranscriptionSchema", True)
+        fmt = build_structured_text_format(
+            transcription_schema, "TranscriptionSchema", True
+        )
         if fmt is not None:
             body.setdefault("text", {})
             body["text"]["format"] = fmt
@@ -154,6 +157,7 @@ class OpenAIBatchBackend(BatchBackend):
         """Lazy initialization of OpenAI client."""
         if self._client is None:
             from openai import OpenAI
+
             self._client = OpenAI()
         return self._client
 
@@ -171,13 +175,13 @@ class OpenAIBatchBackend(BatchBackend):
 
     def submit_batch(
         self,
-        requests: List[BatchRequest],
-        model_config: Dict[str, Any],
+        requests: list[BatchRequest],
+        model_config: dict[str, Any],
         *,
         system_prompt: str,
-        schema: Optional[Dict[str, Any]] = None,
-        schema_path: Optional[Path] = None,
-        additional_context: Optional[str] = None,
+        schema: dict[str, Any] | None = None,
+        schema_path: Path | None = None,
+        additional_context: str | None = None,
     ) -> BatchHandle:
         """Submit a batch to OpenAI's Batch API."""
         client = self._get_client()
@@ -201,7 +205,11 @@ class OpenAIBatchBackend(BatchBackend):
 
         # Get image detail setting
         try:
-            image_cfg = get_config_service().get_image_processing_config().get("api_image_processing", {})
+            image_cfg = (
+                get_config_service()
+                .get_image_processing_config()
+                .get("api_image_processing", {})
+            )
             raw_detail = str(image_cfg.get("llm_detail", "high")).lower().strip()
             llm_detail = raw_detail if raw_detail in ("low", "high") else None
         except (KeyError, AttributeError, TypeError):
@@ -237,11 +245,9 @@ class OpenAIBatchBackend(BatchBackend):
 
         # Write to temp file
         import tempfile
+
         with tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".jsonl",
-            delete=False,
-            encoding="utf-8"
+            mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
         ) as f:
             for line in jsonl_lines:
                 f.write(line + "\n")
@@ -320,7 +326,8 @@ class OpenAIBatchBackend(BatchBackend):
             completed_requests=completed,
             failed_requests=failed,
             pending_requests=total - completed - failed,
-            results_available=status == BatchStatus.COMPLETED and output_file_id is not None,
+            results_available=status == BatchStatus.COMPLETED
+            and output_file_id is not None,
             output_file_id=output_file_id,
         )
 
@@ -389,8 +396,13 @@ class OpenAIBatchBackend(BatchBackend):
                     for item in output if isinstance(output, list) else []:
                         if isinstance(item, dict) and item.get("type") == "message":
                             content_list = item.get("content", [])
-                            for c in content_list if isinstance(content_list, list) else []:
-                                if isinstance(c, dict) and c.get("type") == "output_text":
+                            for c in (
+                                content_list if isinstance(content_list, list) else []
+                            ):
+                                if (
+                                    isinstance(c, dict)
+                                    and c.get("type") == "output_text"
+                                ):
                                     result_item.content = c.get("text", "")
                                     break
 

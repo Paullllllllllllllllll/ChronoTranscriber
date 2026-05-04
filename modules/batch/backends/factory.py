@@ -5,10 +5,8 @@ Provides a unified way to get the appropriate batch backend for a given provider
 
 from __future__ import annotations
 
-from typing import Optional
-
-from modules.infra.logger import setup_logger
 from modules.batch.backends.base import BatchBackend
+from modules.infra.logger import setup_logger
 
 logger = setup_logger(__name__)
 
@@ -16,7 +14,7 @@ logger = setup_logger(__name__)
 _backends: dict[str, BatchBackend] = {}
 
 
-def get_batch_backend(provider: Optional[str] = None) -> BatchBackend:
+def get_batch_backend(provider: str | None = None) -> BatchBackend:
     """Get the batch backend for a given provider.
 
     Args:
@@ -34,6 +32,7 @@ def get_batch_backend(provider: Optional[str] = None) -> BatchBackend:
         # Try to detect from config
         try:
             from modules.config.service import get_config_service
+
             mc = get_config_service().get_model_config()
             tm = mc.get("transcription_model", {})
             provider = tm.get("provider")
@@ -56,14 +55,17 @@ def get_batch_backend(provider: Optional[str] = None) -> BatchBackend:
     backend: BatchBackend
     if provider == "openai":
         from modules.batch.backends.openai_backend import OpenAIBatchBackend
+
         backend = OpenAIBatchBackend()
 
     elif provider == "anthropic":
         from modules.batch.backends.anthropic_backend import AnthropicBatchBackend
+
         backend = AnthropicBatchBackend()
 
     elif provider == "google":
         from modules.batch.backends.google_backend import GoogleBatchBackend
+
         backend = GoogleBatchBackend()
 
     elif provider == "openrouter":

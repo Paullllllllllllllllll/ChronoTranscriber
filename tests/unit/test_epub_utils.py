@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -73,7 +72,9 @@ def test_prepare_output_folder_creates_folder_and_returns_paths(temp_dir: Path) 
 
 
 @pytest.mark.unit
-def test_extract_text_uses_metadata_and_collects_sections(monkeypatch: pytest.MonkeyPatch, temp_dir: Path) -> None:
+def test_extract_text_uses_metadata_and_collects_sections(
+    monkeypatch: pytest.MonkeyPatch, temp_dir: Path
+) -> None:
     epub_path = temp_dir / "test.epub"
     epub_path.write_bytes(b"not a real epub")
 

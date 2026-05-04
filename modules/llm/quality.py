@@ -22,8 +22,7 @@ from __future__ import annotations
 import logging
 import re
 from collections import Counter
-from typing import Any, Dict, Optional
-
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +38,7 @@ class ContentQualityError(Exception):
     def __init__(self, failure_type: str, detail: str) -> None:
         self.failure_type = failure_type
         self.detail = detail
-        super().__init__(
-            f"Content quality check failed ({failure_type}): {detail}"
-        )
+        super().__init__(f"Content quality check failed ({failure_type}): {detail}")
 
 
 # ── Defaults (used when config keys are missing) ────────────────────────────
@@ -116,9 +113,7 @@ def _is_meaningful_substring(s: str, min_alphanum: int) -> bool:
     return alphanum_count >= min_alphanum
 
 
-def detect_hallucination_loop(
-    text: str, config: Dict[str, Any]
-) -> Optional[str]:
+def detect_hallucination_loop(text: str, config: dict[str, Any]) -> str | None:
     """Detect long repeated substrings or single-character runs."""
     if not text:
         return None
@@ -137,26 +132,20 @@ def detect_hallucination_loop(
         )
 
     min_len = int(
-        config.get(
-            "max_repeated_substring_length", _DEFAULT_MAX_REPEATED_SUBSTR_LEN
-        )
+        config.get("max_repeated_substring_length", _DEFAULT_MAX_REPEATED_SUBSTR_LEN)
     )
     max_count = int(
-        config.get(
-            "max_repeated_substring_count", _DEFAULT_MAX_REPEATED_SUBSTR_COUNT
-        )
+        config.get("max_repeated_substring_count", _DEFAULT_MAX_REPEATED_SUBSTR_COUNT)
     )
     min_alphanum = int(
-        config.get(
-            "min_alphanum_in_substring", _DEFAULT_MIN_ALPHANUM_IN_SUBSTR
-        )
+        config.get("min_alphanum_in_substring", _DEFAULT_MIN_ALPHANUM_IN_SUBSTR)
     )
     if len(text) < min_len * max_count:
         return None
 
     upper = min(80, len(text) // max_count)
     for window in range(min_len, upper + 1, 4):
-        seen: Dict[str, int] = {}
+        seen: dict[str, int] = {}
         for i in range(len(text) - window + 1):
             chunk = text[i : i + window]
             if not _is_meaningful_substring(chunk, min_alphanum):
@@ -176,20 +165,16 @@ def detect_truncation(
     text: str,
     no_transcribable_text: bool,
     transcription_not_possible: bool,
-    config: Dict[str, Any],
-) -> Optional[str]:
+    config: dict[str, Any],
+) -> str | None:
     """Detect abnormally short transcription for content-bearing pages."""
     if no_transcribable_text or transcription_not_possible:
         return None
     if text is None:
-        return (
-            "Transcription text is None but flags indicate content expected"
-        )
+        return "Transcription text is None but flags indicate content expected"
 
     min_length = int(
-        config.get(
-            "min_transcription_length", _DEFAULT_MIN_TRANSCRIPTION_LENGTH
-        )
+        config.get("min_transcription_length", _DEFAULT_MIN_TRANSCRIPTION_LENGTH)
     )
     actual = len(text.strip())
     if actual < min_length:
@@ -200,9 +185,7 @@ def detect_truncation(
     return None
 
 
-def detect_system_prompt_bleed(
-    text: str, config: Dict[str, Any]
-) -> Optional[str]:
+def detect_system_prompt_bleed(text: str, config: dict[str, Any]) -> str | None:
     """Detect system prompt or schema fragments in transcription output."""
     if not text:
         return None
@@ -211,9 +194,7 @@ def detect_system_prompt_bleed(
         "system_prompt_bleed_patterns",
         _DEFAULT_SYSTEM_PROMPT_BLEED_PATTERNS,
     )
-    check_chars = int(
-        config.get("bleed_check_chars", _DEFAULT_BLEED_CHECK_CHARS)
-    )
+    check_chars = int(config.get("bleed_check_chars", _DEFAULT_BLEED_CHECK_CHARS))
     prefix = text[:check_chars]
 
     for pat in patterns:
@@ -225,9 +206,7 @@ def detect_system_prompt_bleed(
     return None
 
 
-def detect_excessive_line_repetition(
-    text: str, config: Dict[str, Any]
-) -> Optional[str]:
+def detect_excessive_line_repetition(text: str, config: dict[str, Any]) -> str | None:
     """Detect map-label loops where a single line repeats many times."""
     if not text:
         return None
@@ -244,23 +223,18 @@ def detect_excessive_line_repetition(
 
     lines = text.splitlines()
     counts: Counter[str] = Counter(
-        line.strip()
-        for line in lines
-        if len(line.strip()) > min_line_len
+        line.strip() for line in lines if len(line.strip()) > min_line_len
     )
     for line_text, count in counts.most_common(3):
         if count >= max_repeat:
             preview = line_text[:60].replace("\n", "\\n")
-            return (
-                f"Line repeated {count} times (threshold: {max_repeat}): "
-                f"'{preview}'"
-            )
+            return f"Line repeated {count} times (threshold: {max_repeat}): '{preview}'"
     return None
 
 
 def detect_invalid_transcription_markers(
-    text: str, config: Dict[str, Any]
-) -> Optional[str]:
+    text: str, config: dict[str, Any]
+) -> str | None:
     """Detect invalid-transcription markers left by Qwen when the model
     gives up on an icon or abandons specific tags.
 
@@ -310,9 +284,7 @@ def detect_invalid_transcription_markers(
             )
 
     max_ratio = float(
-        marker_cfg.get(
-            "max_question_mark_ratio", _DEFAULT_MAX_QUESTION_MARK_RATIO
-        )
+        marker_cfg.get("max_question_mark_ratio", _DEFAULT_MAX_QUESTION_MARK_RATIO)
     )
     q_count = text.count("?")
     if q_count >= 10 and len(text) > 0:
@@ -327,10 +299,10 @@ def detect_invalid_transcription_markers(
 
 
 def validate_content_quality(
-    transcription_text: Optional[str],
+    transcription_text: str | None,
     no_transcribable_text: bool,
     transcription_not_possible: bool,
-    config: Dict[str, Any],
+    config: dict[str, Any],
 ) -> None:
     """Run all content quality validators; raise on first failure."""
     if not config.get("enabled", True):

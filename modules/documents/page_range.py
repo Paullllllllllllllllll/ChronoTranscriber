@@ -15,7 +15,6 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +32,16 @@ class PageRange:
     *inclusive*.
     """
 
-    first_n: Optional[int] = None
-    last_n: Optional[int] = None
-    spans: Tuple[Tuple[int, int], ...] = field(default_factory=tuple)
+    first_n: int | None = None
+    last_n: int | None = None
+    spans: tuple[tuple[int, int], ...] = field(default_factory=tuple)
     raw: str = ""
 
     # ------------------------------------------------------------------
     # Public helpers
     # ------------------------------------------------------------------
 
-    def resolve(self, total: int) -> List[int]:
+    def resolve(self, total: int) -> list[int]:
         """Return sorted, deduplicated 0-based page indices for *total* pages.
 
         If the range exceeds *total*, it is silently clamped.  An empty
@@ -144,7 +143,7 @@ def parse_page_range(spec: str) -> PageRange:
     return PageRange(spans=tuple(spans), raw=raw)
 
 
-def _parse_segment(seg: str) -> Tuple[int, int]:
+def _parse_segment(seg: str) -> tuple[int, int]:
     """Parse a single segment like ``3``, ``3-7``, ``3-``, or ``-7``."""
     if "-" not in seg:
         # Single page number
@@ -195,7 +194,7 @@ def _parse_segment(seg: str) -> Tuple[int, int]:
     return (start - 1, end - 1)
 
 
-def _merge_spans(spans: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+def _merge_spans(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
     """Sort and merge overlapping/adjacent spans."""
     if not spans:
         return []

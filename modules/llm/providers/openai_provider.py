@@ -15,36 +15,33 @@ LangChain handles:
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import Any
 
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel
+from langchain_openai import ChatOpenAI
 
+from modules.config.capabilities import Capabilities, detect_capabilities
+from modules.infra.logger import setup_logger
 from modules.llm.providers.base import (
-    BaseProvider,
     OPENAI_TOKEN_MAPPING,
+    BaseProvider,
     TranscriptionResult,
     load_max_retries,
 )
-from modules.infra.logger import setup_logger
-from modules.config.capabilities import Capabilities, detect_capabilities
 
 logger = setup_logger(__name__)
 
 
 class OpenAIProvider(BaseProvider):
     """OpenAI LLM provider using LangChain.
-    
+
     LangChain handles:
     - Automatic retry with exponential backoff (via max_retries)
     - Token usage tracking (via response_metadata)
     - Structured output parsing (via with_structured_output)
     - Parameter filtering for unsupported models (via disabled_params)
     """
-    
+
     def __init__(
         self,
         api_key: str,
@@ -52,13 +49,13 @@ class OpenAIProvider(BaseProvider):
         *,
         temperature: float = 0.0,
         max_tokens: int = 4096,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
         top_p: float = 1.0,
         frequency_penalty: float = 0.0,
         presence_penalty: float = 0.0,
-        service_tier: Optional[str] = None,
-        reasoning_config: Optional[Dict[str, Any]] = None,
-        text_config: Optional[Dict[str, Any]] = None,
+        service_tier: str | None = None,
+        reasoning_config: dict[str, Any] | None = None,
+        text_config: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(
@@ -69,26 +66,27 @@ class OpenAIProvider(BaseProvider):
             timeout=timeout,
             **kwargs,
         )
-        
+
         self.top_p = top_p
         self.frequency_penalty = frequency_penalty
         self.presence_penalty = presence_penalty
         self.service_tier = service_tier
         self.reasoning_config = reasoning_config
         self.text_config = text_config
-        
+
         self._capabilities = detect_capabilities(model)
         max_retries = load_max_retries()
-        
+
         # Build disabled_params for models that don't support certain features
         # LangChain will automatically filter these out before sending to API
         disabled_params = self._build_disabled_params()
-        
+
         # Initialize LangChain ChatOpenAI with Responses API
         # LangChain handles:
         # - Retry logic with exponential backoff (max_retries)
         # - Parameter filtering for unsupported models (disabled_params)
-        # - Converting max_completion_tokens to correct API parameter for reasoning models
+        # - Converting max_completion_tokens to correct API parameter for
+        #   reasoning models
         # - Responses API routing (use_responses_api=True)
         llm_kwargs = {
             "api_key": api_key,
@@ -98,13 +96,15 @@ class OpenAIProvider(BaseProvider):
             "disabled_params": disabled_params,
             "use_responses_api": True,
         }
-        
-        # Pass service_tier to LangChain (OpenAI API supports auto/default/flex/priority)
+
+        # Pass service_tier to LangChain
+        # (OpenAI API supports auto/default/flex/priority)
         if service_tier:
             llm_kwargs["service_tier"] = service_tier
             logger.info(f"Using service_tier={service_tier} for model {model}")
-        
-        # For reasoning models (GPT-5, o-series), use max_completion_tokens instead of max_tokens
+
+        # For reasoning models (GPT-5, o-series), use max_completion_tokens
+        # instead of max_tokens
         # and skip sampler parameters which are not supported
         caps = self._capabilities
         if caps.is_reasoning_model:
@@ -118,13 +118,15 @@ class OpenAIProvider(BaseProvider):
             llm_kwargs["top_p"] = None
             llm_kwargs["frequency_penalty"] = None
             llm_kwargs["presence_penalty"] = None
-            logger.info(f"Using max_completion_tokens={max_tokens} for reasoning model {model}")
+            logger.info(
+                f"Using max_completion_tokens={max_tokens} for reasoning model {model}"
+            )
 
             # Apply reasoning controls via Responses API reasoning dict
             if caps.supports_reasoning_effort and reasoning_config:
                 llm_kwargs["reasoning"] = reasoning_config
                 logger.info(f"Using reasoning={reasoning_config} for model {model}")
-            
+
             # Apply text verbosity via Responses API verbosity parameter
             if text_config:
                 verbosity = text_config.get("verbosity")
@@ -148,25 +150,29 @@ class OpenAIProvider(BaseProvider):
                 llm_kwargs["frequency_penalty"] = frequency_penalty
             if caps.supports_presence_penalty:
                 llm_kwargs["presence_penalty"] = presence_penalty
-        
+
         # Prompt cache retention (OpenAI automatic caching extension)
         if self._caching_enabled:
             openai_cfg = self._caching_config.get("openai", {})
-            retention = openai_cfg.get("prompt_cache_retention") if isinstance(openai_cfg, dict) else None
+            retention = (
+                openai_cfg.get("prompt_cache_retention")
+                if isinstance(openai_cfg, dict)
+                else None
+            )
             if retention:
                 model_kwargs = llm_kwargs.setdefault("model_kwargs", {})
                 assert isinstance(model_kwargs, dict)
                 model_kwargs["prompt_cache_retention"] = retention
 
         self._llm = ChatOpenAI(**llm_kwargs)  # type: ignore[arg-type]
-    
+
     @property
     def provider_name(self) -> str:
         return "openai"
-    
+
     def get_capabilities(self) -> Capabilities:
         return self._capabilities
-    
+
     async def transcribe_image_from_base64(
         self,
         image_base64: str,
@@ -174,24 +180,24 @@ class OpenAIProvider(BaseProvider):
         *,
         system_prompt: str,
         user_instruction: str = "Please transcribe the text from this image.",
-        json_schema: Optional[Dict[str, Any]] = None,
-        image_detail: Optional[str] = None,
-        media_resolution: Optional[str] = None,
+        json_schema: dict[str, Any] | None = None,
+        image_detail: str | None = None,
+        media_resolution: str | None = None,
     ) -> TranscriptionResult:
         """Transcribe text from a base64-encoded image using LangChain.
-        
+
         Note: OpenAI uses image_detail parameter, not media_resolution.
         The media_resolution parameter is accepted for API compatibility but ignored.
         """
         caps = self._capabilities
-        
+
         if not caps.supports_image_input:
             return TranscriptionResult(
                 content="",
                 error=f"Model {self.model} does not support vision/image inputs.",
                 transcription_not_possible=True,
             )
-        
+
         # Normalize image detail
         detail = image_detail
         if detail:
@@ -203,35 +209,38 @@ class OpenAIProvider(BaseProvider):
                 detail = None
         if detail is None:
             detail = caps.default_image_detail if caps.supports_image_detail else None
-        
+
         # Build data URL
         data_url = self.create_data_url(image_base64, mime_type)
-        
+
         # Build message content with image
-        image_content: Dict[str, Any] = {
+        image_content: dict[str, Any] = {
             "type": "image_url",
             "image_url": {"url": data_url},
         }
         if detail and caps.supports_image_detail:
             image_content["image_url"]["detail"] = detail
-        
+
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=[
-                {"type": "text", "text": user_instruction},
-                image_content,
-            ]),
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": user_instruction},
+                    image_content,
+                ]
+            ),
         ]
-        
+
         # Use LangChain's structured output if schema provided and supported
         llm_to_use = self._llm
         use_pydantic = False
-        
+
         if json_schema and caps.supports_structured_outputs:
             # Try to use Pydantic model for better validation
             # Use include_raw=True to get token usage from the underlying AIMessage
             try:
                 from modules.llm.schemas import TranscriptionOutput
+
                 llm_to_use = self._llm.with_structured_output(  # type: ignore[assignment]
                     TranscriptionOutput,
                     include_raw=True,
@@ -249,24 +258,26 @@ class OpenAIProvider(BaseProvider):
                     strict=True,
                     include_raw=True,
                 )
-        
+
         # Invoke LLM - LangChain handles retries internally
         return await self._invoke_llm(llm_to_use, messages, use_pydantic)
-    
+
     async def _invoke_llm(
         self,
         llm: Any,
-        messages: List[Any],
+        messages: list[Any],
         use_pydantic: bool = False,
     ) -> TranscriptionResult:
         """Invoke the LLM and process the response.
-        
+
         LangChain handles retry logic with exponential backoff internally.
         Response parsing and token tracking are handled by the shared
         BaseProvider._process_llm_response() method.
         """
         try:
-            response = await self._ainvoke_with_retry(llm, messages, expect_image_tokens=True)
+            response = await self._ainvoke_with_retry(
+                llm, messages, expect_image_tokens=True
+            )
             return await self._process_llm_response(response, OPENAI_TOKEN_MAPPING)
         except Exception as e:
             logger.error(f"Error invoking OpenAI: {e}")
@@ -274,7 +285,7 @@ class OpenAIProvider(BaseProvider):
                 content="",
                 error=str(e),
             )
-    
+
     async def close(self) -> None:
         """Clean up resources - LangChain handles session cleanup internally."""
         pass

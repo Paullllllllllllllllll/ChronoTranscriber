@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
@@ -10,10 +9,10 @@ import pytest
 
 from modules.infra.progress import ProgressState, ProgressTracker
 
-
 # ---------------------------------------------------------------------------
 # ProgressState
 # ---------------------------------------------------------------------------
+
 
 class TestProgressStateInit:
     def test_sets_total(self) -> None:
@@ -112,6 +111,7 @@ class TestProgressStateFormatSummary:
 # ---------------------------------------------------------------------------
 # ProgressTracker
 # ---------------------------------------------------------------------------
+
 
 class TestProgressTracker:
     @pytest.mark.asyncio

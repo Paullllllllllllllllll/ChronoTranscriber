@@ -7,8 +7,7 @@ and session-level cache accumulation across all affected modules.
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -80,8 +79,8 @@ class TestCacheTokenExtraction:
     def _make_ai_message(
         self,
         content: str = "text",
-        response_metadata: Optional[Dict[str, Any]] = None,
-        usage_metadata: Optional[Dict[str, Any]] = None,
+        response_metadata: dict[str, Any] | None = None,
+        usage_metadata: dict[str, Any] | None = None,
     ) -> MagicMock:
         msg = MagicMock()
         msg.content = content
@@ -96,9 +95,13 @@ class TestCacheTokenExtraction:
 
         provider = MagicMock(spec=BaseProvider)
         provider._normalize_list_content = BaseProvider._normalize_list_content
-        provider._extract_content = lambda resp: BaseProvider._extract_content(provider, resp)
+        provider._extract_content = lambda resp: BaseProvider._extract_content(
+            provider, resp
+        )
         provider._extract_token_usage = BaseProvider._extract_token_usage
-        provider._track_token_usage = lambda *a: BaseProvider._track_token_usage(provider, *a)
+        provider._track_token_usage = lambda *a: BaseProvider._track_token_usage(
+            provider, *a
+        )
         return provider
 
     @pytest.mark.unit
@@ -123,7 +126,9 @@ class TestCacheTokenExtraction:
 
         # Use a concrete subclass to call _process_llm_response
         provider = self._make_provider_mock()
-        result = await BaseProvider._process_llm_response(provider, msg, ANTHROPIC_TOKEN_MAPPING)
+        result = await BaseProvider._process_llm_response(
+            provider, msg, ANTHROPIC_TOKEN_MAPPING
+        )
 
         assert result.cached_input_tokens == 800
         assert result.cache_creation_tokens == 0
@@ -150,7 +155,9 @@ class TestCacheTokenExtraction:
         )
 
         provider = self._make_provider_mock()
-        result = await BaseProvider._process_llm_response(provider, msg, ANTHROPIC_TOKEN_MAPPING)
+        result = await BaseProvider._process_llm_response(
+            provider, msg, ANTHROPIC_TOKEN_MAPPING
+        )
 
         assert result.cache_creation_tokens == 1200
         assert result.cache_hit is True  # creation counts as a cache event
@@ -176,7 +183,9 @@ class TestCacheTokenExtraction:
         )
 
         provider = self._make_provider_mock()
-        result = await BaseProvider._process_llm_response(provider, msg, OPENAI_TOKEN_MAPPING)
+        result = await BaseProvider._process_llm_response(
+            provider, msg, OPENAI_TOKEN_MAPPING
+        )
 
         assert result.cached_input_tokens == 1500
         assert result.cache_hit is True
@@ -201,7 +210,9 @@ class TestCacheTokenExtraction:
         )
 
         provider = self._make_provider_mock()
-        result = await BaseProvider._process_llm_response(provider, msg, OPENAI_TOKEN_MAPPING)
+        result = await BaseProvider._process_llm_response(
+            provider, msg, OPENAI_TOKEN_MAPPING
+        )
 
         assert result.cached_input_tokens == 0
         assert result.cache_creation_tokens == 0
@@ -230,7 +241,9 @@ class TestCacheTokenExtraction:
         )
 
         provider = self._make_provider_mock()
-        result = await BaseProvider._process_llm_response(provider, msg, OPENAI_TOKEN_MAPPING)
+        result = await BaseProvider._process_llm_response(
+            provider, msg, OPENAI_TOKEN_MAPPING
+        )
 
         assert result.cached_input_tokens == 1800
         assert result.cache_hit is True
@@ -272,7 +285,9 @@ class TestPromptCachingConfig:
     @pytest.mark.unit
     def test_convenience_function(self) -> None:
         with patch("modules.config.service.get_config_service") as mock_cs:
-            mock_cs.return_value.get_prompt_caching_config.return_value = {"enabled": True}
+            mock_cs.return_value.get_prompt_caching_config.return_value = {
+                "enabled": True
+            }
             from modules.config.service import get_prompt_caching_config
 
             result = get_prompt_caching_config()
@@ -287,24 +302,29 @@ class TestPromptCachingConfig:
 class TestAnthropicProviderCacheControl:
     """Anthropic provider adds cache_control to SystemMessage when enabled."""
 
-    def _make_provider(self, caching_cfg: Dict[str, Any]) -> Any:
+    def _make_provider(self, caching_cfg: dict[str, Any]) -> Any:
         """Create an AnthropicProvider with mocked dependencies."""
         from modules.llm.providers.anthropic_provider import AnthropicProvider
 
-        with patch("modules.llm.providers.anthropic_provider.ChatAnthropic"):
-            with patch("modules.llm.providers.anthropic_provider.load_max_retries", return_value=3):
-                with patch("modules.llm.providers.base.get_config_service") as mock_cs:
-                    mock_cs.return_value.get_prompt_caching_config.return_value = caching_cfg
-                    provider = AnthropicProvider(
-                        api_key="sk-ant-test",
-                        model="claude-3-5-sonnet-20241022",
-                    )
+        with (
+            patch("modules.llm.providers.anthropic_provider.ChatAnthropic"),
+            patch(
+                "modules.llm.providers.anthropic_provider.load_max_retries",
+                return_value=3,
+            ),
+            patch("modules.llm.providers.base.get_config_service") as mock_cs,
+        ):
+            mock_cs.return_value.get_prompt_caching_config.return_value = caching_cfg
+            provider = AnthropicProvider(
+                api_key="sk-ant-test",
+                model="claude-3-5-sonnet-20241022",
+            )
         return provider
 
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_cache_control_added_when_enabled(self) -> None:
-        """SystemMessage uses content-block form with cache_control when caching enabled."""
+        """SystemMessage uses content-block form with cache_control when enabled."""
         provider = self._make_provider({"enabled": True, "anthropic": {"ttl": "5m"}})
 
         captured_messages = []
@@ -313,7 +333,9 @@ class TestAnthropicProviderCacheControl:
             captured_messages.extend(messages)
             msg = MagicMock()
             msg.content = "transcribed"
-            msg.response_metadata = {"usage": {"input_tokens": 100, "output_tokens": 50}}
+            msg.response_metadata = {
+                "usage": {"input_tokens": 100, "output_tokens": 50}
+            }
             msg.usage_metadata = None
             return msg
 
@@ -342,7 +364,9 @@ class TestAnthropicProviderCacheControl:
             captured_messages.extend(messages)
             msg = MagicMock()
             msg.content = "transcribed"
-            msg.response_metadata = {"usage": {"input_tokens": 100, "output_tokens": 50}}
+            msg.response_metadata = {
+                "usage": {"input_tokens": 100, "output_tokens": 50}
+            }
             msg.usage_metadata = None
             return msg
 
@@ -369,7 +393,9 @@ class TestAnthropicProviderCacheControl:
             captured_messages.extend(messages)
             msg = MagicMock()
             msg.content = "transcribed"
-            msg.response_metadata = {"usage": {"input_tokens": 100, "output_tokens": 50}}
+            msg.response_metadata = {
+                "usage": {"input_tokens": 100, "output_tokens": 50}
+            }
             msg.usage_metadata = None
             return msg
 
@@ -397,22 +423,26 @@ class TestOpenAIProviderCacheRetention:
     def test_retention_passed_to_chat_openai(self) -> None:
         from modules.llm.providers.openai_provider import OpenAIProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch(
-            "modules.llm.providers.openai_provider.ChatOpenAI",
-            side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+        with (
+            patch(
+                "modules.llm.providers.openai_provider.ChatOpenAI",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
+            ),
+            patch("modules.llm.providers.base.get_config_service") as mock_cs,
         ):
-            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
-                with patch("modules.llm.providers.base.get_config_service") as mock_cs:
-                    mock_cs.return_value.get_prompt_caching_config.return_value = {
-                        "enabled": True,
-                        "openai": {"prompt_cache_retention": "24h"},
-                    }
-                    OpenAIProvider(
-                        api_key="sk-test",
-                        model="gpt-4o",
-                    )
+            mock_cs.return_value.get_prompt_caching_config.return_value = {
+                "enabled": True,
+                "openai": {"prompt_cache_retention": "24h"},
+            }
+            OpenAIProvider(
+                api_key="sk-test",
+                model="gpt-4o",
+            )
 
         assert captured.get("model_kwargs", {}).get("prompt_cache_retention") == "24h"
 
@@ -420,22 +450,26 @@ class TestOpenAIProviderCacheRetention:
     def test_no_retention_when_null(self) -> None:
         from modules.llm.providers.openai_provider import OpenAIProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch(
-            "modules.llm.providers.openai_provider.ChatOpenAI",
-            side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+        with (
+            patch(
+                "modules.llm.providers.openai_provider.ChatOpenAI",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
+            ),
+            patch("modules.llm.providers.base.get_config_service") as mock_cs,
         ):
-            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
-                with patch("modules.llm.providers.base.get_config_service") as mock_cs:
-                    mock_cs.return_value.get_prompt_caching_config.return_value = {
-                        "enabled": True,
-                        "openai": {"prompt_cache_retention": None},
-                    }
-                    OpenAIProvider(
-                        api_key="sk-test",
-                        model="gpt-4o",
-                    )
+            mock_cs.return_value.get_prompt_caching_config.return_value = {
+                "enabled": True,
+                "openai": {"prompt_cache_retention": None},
+            }
+            OpenAIProvider(
+                api_key="sk-test",
+                model="gpt-4o",
+            )
 
         assert "prompt_cache_retention" not in captured
 
@@ -443,21 +477,25 @@ class TestOpenAIProviderCacheRetention:
     def test_no_retention_when_disabled(self) -> None:
         from modules.llm.providers.openai_provider import OpenAIProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch(
-            "modules.llm.providers.openai_provider.ChatOpenAI",
-            side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+        with (
+            patch(
+                "modules.llm.providers.openai_provider.ChatOpenAI",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
+            ),
+            patch("modules.llm.providers.base.get_config_service") as mock_cs,
         ):
-            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
-                with patch("modules.llm.providers.base.get_config_service") as mock_cs:
-                    mock_cs.return_value.get_prompt_caching_config.return_value = {
-                        "enabled": False,
-                    }
-                    OpenAIProvider(
-                        api_key="sk-test",
-                        model="gpt-4o",
-                    )
+            mock_cs.return_value.get_prompt_caching_config.return_value = {
+                "enabled": False,
+            }
+            OpenAIProvider(
+                api_key="sk-test",
+                model="gpt-4o",
+            )
 
         assert "prompt_cache_retention" not in captured
 
@@ -473,21 +511,26 @@ class TestOpenRouterProviderCacheControl:
     def _make_provider(
         self,
         model: str,
-        caching_cfg: Dict[str, Any],
+        caching_cfg: dict[str, Any],
     ) -> Any:
         from modules.llm.providers.openrouter_provider import OpenRouterProvider
 
-        with patch(
-            "modules.llm.providers.openrouter_provider.ChatOpenAI",
-            return_value=MagicMock(),
+        with (
+            patch(
+                "modules.llm.providers.openrouter_provider.ChatOpenAI",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.openrouter_provider.load_max_retries",
+                return_value=3,
+            ),
+            patch("modules.llm.providers.base.get_config_service") as mock_cs,
         ):
-            with patch("modules.llm.providers.openrouter_provider.load_max_retries", return_value=3):
-                with patch("modules.llm.providers.base.get_config_service") as mock_cs:
-                    mock_cs.return_value.get_prompt_caching_config.return_value = caching_cfg
-                    provider = OpenRouterProvider(
-                        api_key="sk-or-test",
-                        model=model,
-                    )
+            mock_cs.return_value.get_prompt_caching_config.return_value = caching_cfg
+            provider = OpenRouterProvider(
+                api_key="sk-or-test",
+                model=model,
+            )
         return provider
 
     @pytest.mark.unit
@@ -505,7 +548,13 @@ class TestOpenRouterProviderCacheControl:
             captured_messages.extend(messages)
             msg = MagicMock()
             msg.content = "transcribed"
-            msg.response_metadata = {"token_usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}}
+            msg.response_metadata = {
+                "token_usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 50,
+                    "total_tokens": 150,
+                }
+            }
             msg.usage_metadata = None
             return msg
 
@@ -536,7 +585,13 @@ class TestOpenRouterProviderCacheControl:
             captured_messages.extend(messages)
             msg = MagicMock()
             msg.content = "transcribed"
-            msg.response_metadata = {"token_usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}}
+            msg.response_metadata = {
+                "token_usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 50,
+                    "total_tokens": 150,
+                }
+            }
             msg.usage_metadata = None
             return msg
 
@@ -566,7 +621,13 @@ class TestOpenRouterProviderCacheControl:
             captured_messages.extend(messages)
             msg = MagicMock()
             msg.content = "transcribed"
-            msg.response_metadata = {"token_usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}}
+            msg.response_metadata = {
+                "token_usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 50,
+                    "total_tokens": 150,
+                }
+            }
             msg.usage_metadata = None
             return msg
 
@@ -728,7 +789,9 @@ class TestAnthropicBatchBackendCacheControl:
         )
 
         caching_cfg = {"enabled": True, "anthropic": {"ttl": "5m"}}
-        with patch("modules.batch.backends.anthropic_backend.get_config_service") as mock_cs:
+        with patch(
+            "modules.batch.backends.anthropic_backend.get_config_service"
+        ) as mock_cs:
             mock_cs.return_value.get_prompt_caching_config.return_value = caching_cfg
             backend.submit_batch(
                 [req],
@@ -737,7 +800,9 @@ class TestAnthropicBatchBackendCacheControl:
             )
 
         call_kwargs = mock_client.messages.batches.create.call_args
-        batch_requests = call_kwargs.kwargs.get("requests") or call_kwargs[1].get("requests")
+        batch_requests = call_kwargs.kwargs.get("requests") or call_kwargs[1].get(
+            "requests"
+        )
         system_param = batch_requests[0]["params"]["system"]
 
         # Should be a list with cache_control
@@ -763,8 +828,12 @@ class TestAnthropicBatchBackendCacheControl:
             mime_type="image/png",
         )
 
-        with patch("modules.batch.backends.anthropic_backend.get_config_service") as mock_cs:
-            mock_cs.return_value.get_prompt_caching_config.return_value = {"enabled": False}
+        with patch(
+            "modules.batch.backends.anthropic_backend.get_config_service"
+        ) as mock_cs:
+            mock_cs.return_value.get_prompt_caching_config.return_value = {
+                "enabled": False
+            }
             backend.submit_batch(
                 [req],
                 {"name": "claude-3-5-sonnet-20241022", "max_tokens": 4096},
@@ -772,7 +841,9 @@ class TestAnthropicBatchBackendCacheControl:
             )
 
         call_kwargs = mock_client.messages.batches.create.call_args
-        batch_requests = call_kwargs.kwargs.get("requests") or call_kwargs[1].get("requests")
+        batch_requests = call_kwargs.kwargs.get("requests") or call_kwargs[1].get(
+            "requests"
+        )
         system_param = batch_requests[0]["params"]["system"]
 
         assert isinstance(system_param, str)
@@ -791,27 +862,29 @@ class TestOpenAIBatchBackendCacheExtraction:
         from modules.batch.backends.openai_backend import OpenAIBatchBackend
 
         # Build a mock batch result line
-        result_line = json.dumps({
-            "custom_id": "req-1",
-            "response": {
-                "status_code": 200,
-                "body": {
-                    "output": [
-                        {
-                            "type": "message",
-                            "content": [
-                                {"type": "output_text", "text": "hello"},
-                            ],
-                        }
-                    ],
-                    "usage": {
-                        "input_tokens": 2000,
-                        "output_tokens": 300,
-                        "prompt_tokens_details": {"cached_tokens": 1500},
+        result_line = json.dumps(
+            {
+                "custom_id": "req-1",
+                "response": {
+                    "status_code": 200,
+                    "body": {
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [
+                                    {"type": "output_text", "text": "hello"},
+                                ],
+                            }
+                        ],
+                        "usage": {
+                            "input_tokens": 2000,
+                            "output_tokens": 300,
+                            "prompt_tokens_details": {"cached_tokens": 1500},
+                        },
                     },
                 },
-            },
-        })
+            }
+        )
 
         mock_client = MagicMock()
         mock_batch = MagicMock()

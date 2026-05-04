@@ -9,42 +9,46 @@ This module provides a high-level transcription interface that:
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any
 
 from modules.config.config_loader import PROJECT_ROOT
 from modules.config.service import get_config_service
 from modules.infra.logger import setup_logger
+from modules.llm.prompt_utils import (
+    inject_additional_context,
+    render_prompt_with_schema,
+)
 from modules.llm.providers import BaseProvider, get_provider
 from modules.llm.providers.base import TranscriptionResult
-from modules.llm.prompt_utils import render_prompt_with_schema, inject_additional_context
 
 logger = setup_logger(__name__)
 
 
 class LangChainTranscriber:
     """High-level transcriber using LangChain providers.
-    
+
     Drop-in replacement for OpenAITranscriber that supports multiple providers.
     """
-    
+
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        model: Optional[str] = None,
-        provider: Optional[str] = None,
+        api_key: str | None = None,
+        model: str | None = None,
+        provider: str | None = None,
         *,
-        schema_path: Optional[Path] = None,
-        system_prompt_path: Optional[Path] = None,
-        additional_context_path: Optional[Path] = None,
+        schema_path: Path | None = None,
+        system_prompt_path: Path | None = None,
+        additional_context_path: Path | None = None,
         use_hierarchical_context: bool = True,
-        max_output_tokens: Optional[int] = None,
-        reasoning_config: Optional[Dict[str, Any]] = None,
-        text_config: Optional[Dict[str, Any]] = None,
+        max_output_tokens: int | None = None,
+        reasoning_config: dict[str, Any] | None = None,
+        text_config: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the transcriber.
-        
+
         Args:
             api_key: Optional API key (uses environment variable if not provided)
             model: Model name (uses config if not provided)
@@ -53,18 +57,19 @@ class LangChainTranscriber:
             schema_path: Path to JSON schema file
             system_prompt_path: Path to system prompt file
             additional_context_path: Path to additional context file
-            use_hierarchical_context: Whether to use file/folder-specific context resolution
+            use_hierarchical_context: Whether to use file/folder-specific
+                context resolution
             max_output_tokens: Optional runtime override for max output tokens
             reasoning_config: Optional runtime override for reasoning settings
             text_config: Optional runtime override for text settings (verbosity)
         """
         self.use_hierarchical_context = use_hierarchical_context
         config_service = get_config_service()
-        
+
         # Load model config
         mc = config_service.get_model_config()
         tm = mc.get("transcription_model", {})
-        
+
         self.model = model or tm.get("name", "gpt-4o")
         self.provider_name = provider or tm.get("provider")
 
@@ -93,7 +98,11 @@ class LangChainTranscriber:
                 else (
                     Path(override_prompt)
                     if override_prompt
-                    else (PROJECT_ROOT / "system_prompt" / "transcription_prompt_plain.txt")
+                    else (
+                        PROJECT_ROOT
+                        / "system_prompt"
+                        / "transcription_prompt_plain.txt"
+                    )
                 )
             )
             # Schema not used in plain-text mode
@@ -108,7 +117,11 @@ class LangChainTranscriber:
                 else (
                     Path(override_prompt)
                     if override_prompt
-                    else (PROJECT_ROOT / "system_prompt" / "transcription_prompt_schema.txt")
+                    else (
+                        PROJECT_ROOT
+                        / "system_prompt"
+                        / "transcription_prompt_schema.txt"
+                    )
                 )
             )
             self.schema_path = (
@@ -117,7 +130,9 @@ class LangChainTranscriber:
                 else (
                     Path(override_schema)
                     if override_schema
-                    else (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json")
+                    else (
+                        PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json"
+                    )
                 )
             )
 
@@ -147,72 +162,87 @@ class LangChainTranscriber:
 
         # Render system prompt with schema (but NOT yet with context)
         if self.full_schema_obj is not None:
-            self._base_prompt = render_prompt_with_schema(raw_prompt, self.full_schema_obj)
+            self._base_prompt = render_prompt_with_schema(
+                raw_prompt, self.full_schema_obj
+            )
         else:
             # Plain-text mode: no schema injection
             self._base_prompt = raw_prompt
-        
+
         # Inject additional context - use explicit path or hierarchical resolution
         additional_context = None
-        if additional_context_path is not None and Path(additional_context_path).exists():
+        if (
+            additional_context_path is not None
+            and Path(additional_context_path).exists()
+        ):
             try:
-                additional_context = Path(additional_context_path).read_text(encoding="utf-8").strip()
+                additional_context = (
+                    Path(additional_context_path).read_text(encoding="utf-8").strip()
+                )
             except Exception as e:
                 logger.warning(f"Failed to load additional context: {e}")
         elif self.use_hierarchical_context:
             # Use hierarchical context resolution (general fallback only at init)
-            from modules.config.context import _resolve_context, _SUFFIX
+            from modules.config.context import _SUFFIX, _resolve_context
+
             context_content, context_path = _resolve_context(_SUFFIX)
             if context_content:
                 additional_context = context_content
                 logger.debug(f"Using general context from: {context_path}")
-        
+
         # Inject context into prompt (or remove section if empty)
         self.system_prompt_text = inject_additional_context(
             self._base_prompt, additional_context or ""
         )
-        
+
         # Load image processing config for detail level
         ipc = config_service.get_image_processing_config()
-        
+
         # Load OpenAI-specific image_detail parameter
-        openai_cfg = ipc.get("api_image_processing", {}) if isinstance(ipc, dict) else {}
+        openai_cfg = (
+            ipc.get("api_image_processing", {}) if isinstance(ipc, dict) else {}
+        )
         raw_detail = str(openai_cfg.get("llm_detail", "high")).lower().strip()
-        
+
         if raw_detail in ("low", "high", "original"):
             self.image_detail = raw_detail
         elif raw_detail == "auto":
             self.image_detail = "auto"
         else:
             self.image_detail = "auto"
-        
+
         # Load Google-specific media_resolution parameter
-        google_cfg = ipc.get("google_image_processing", {}) if isinstance(ipc, dict) else {}
+        google_cfg = (
+            ipc.get("google_image_processing", {}) if isinstance(ipc, dict) else {}
+        )
         raw_resolution = str(google_cfg.get("media_resolution", "high")).lower().strip()
-        
+
         if raw_resolution in ("low", "medium", "high", "ultra_high"):
             self.media_resolution = raw_resolution
         elif raw_resolution == "auto":
             self.media_resolution = "auto"
         else:
             self.media_resolution = "high"
-        
+
         # Load max_output_tokens from runtime override or model config
         max_tokens = int(
             max_output_tokens
             or tm.get("max_output_tokens")
             or tm.get("max_tokens", 20480)
         )
-        
+
         # Load optional sampler parameters
         temperature = float(tm.get("temperature", 0.0))
         top_p = tm.get("top_p")
         frequency_penalty = tm.get("frequency_penalty")
         presence_penalty = tm.get("presence_penalty")
-        reasoning_cfg = reasoning_config if reasoning_config is not None else tm.get("reasoning")
+        reasoning_cfg = (
+            reasoning_config if reasoning_config is not None else tm.get("reasoning")
+        )
         text_cfg = text_config if text_config is not None else tm.get("text")
-        
-        # Load service_tier and request_timeout from concurrency config (synchronous mode)
+
+        # Load service_tier and request_timeout from concurrency config
+        # (synchronous mode)
         try:
             cc = config_service.get_concurrency_config()
             trans_cfg = (cc.get("concurrency", {}) or {}).get("transcription", {}) or {}
@@ -221,9 +251,9 @@ class LangChainTranscriber:
         except Exception:
             service_tier = None
             request_timeout = None
-        
+
         # Build kwargs for optional parameters
-        provider_kwargs: Dict[str, Any] = {}
+        provider_kwargs: dict[str, Any] = {}
         if service_tier:
             provider_kwargs["service_tier"] = service_tier
         if top_p is not None:
@@ -236,7 +266,7 @@ class LangChainTranscriber:
             provider_kwargs["reasoning_config"] = reasoning_cfg
         if text_cfg:
             provider_kwargs["text_config"] = text_cfg
-        
+
         # Create provider instance with full config
         self._provider = get_provider(
             provider=self.provider_name,
@@ -247,7 +277,7 @@ class LangChainTranscriber:
             timeout=float(request_timeout) if request_timeout is not None else None,
             **provider_kwargs,
         )
-        
+
         # Session-level cache accumulators for run summary
         self._total_cached_tokens: int = 0
         self._total_input_tokens: int = 0
@@ -255,11 +285,12 @@ class LangChainTranscriber:
         self._total_request_count: int = 0
 
         logger.info(
-            f"LangChainTranscriber initialized: provider={self._provider.provider_name}, "
+            f"LangChainTranscriber initialized: "
+            f"provider={self._provider.provider_name}, "
             f"model={self.model}, max_tokens={max_tokens}"
         )
-    
-    def update_context(self, context_content: Optional[str]) -> None:
+
+    def update_context(self, context_content: str | None) -> None:
         """Re-inject context into the system prompt.
 
         Call this before processing each item when per-file context
@@ -279,13 +310,13 @@ class LangChainTranscriber:
     def provider(self) -> BaseProvider:
         """Get the underlying provider instance."""
         return self._provider
-    
-    async def transcribe_image(self, image_path: Path) -> Dict[str, Any]:
+
+    async def transcribe_image(self, image_path: Path) -> dict[str, Any]:
         """Transcribe an image file.
-        
+
         Args:
             image_path: Path to the image file
-        
+
         Returns:
             Dictionary containing transcription response data
             (compatible with existing workflow expectations)
@@ -298,21 +329,21 @@ class LangChainTranscriber:
             image_detail=self.image_detail,
             media_resolution=self.media_resolution,
         )
-        
+
         # Convert TranscriptionResult to dict format expected by existing code
         return self._result_to_dict(result)
-    
+
     async def transcribe_image_from_base64(
         self,
         image_base64: str,
         mime_type: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Transcribe from base64-encoded image data.
-        
+
         Args:
             image_base64: Base64-encoded image data
             mime_type: MIME type of the image
-        
+
         Returns:
             Dictionary containing transcription response data
         """
@@ -325,10 +356,10 @@ class LangChainTranscriber:
             image_detail=self.image_detail,
             media_resolution=self.media_resolution,
         )
-        
+
         return self._result_to_dict(result)
-    
-    def _result_to_dict(self, result: TranscriptionResult) -> Dict[str, Any]:
+
+    def _result_to_dict(self, result: TranscriptionResult) -> dict[str, Any]:
         """Convert TranscriptionResult to dict format for backward compatibility."""
         # Accumulate session-level cache stats
         self._total_request_count += 1
@@ -338,7 +369,7 @@ class LangChainTranscriber:
             self._cache_request_count += 1
 
         # Build response in format expected by existing workflow code
-        usage_dict: Dict[str, Any] = {
+        usage_dict: dict[str, Any] = {
             "input_tokens": result.input_tokens,
             "output_tokens": result.output_tokens,
             "total_tokens": result.total_tokens,
@@ -348,7 +379,7 @@ class LangChainTranscriber:
         if result.cache_creation_tokens > 0:
             usage_dict["cache_creation_tokens"] = result.cache_creation_tokens
 
-        response: Dict[str, Any] = {
+        response: dict[str, Any] = {
             "output_text": result.content,
             "usage": usage_dict,
         }
@@ -366,7 +397,7 @@ class LangChainTranscriber:
             response["error"] = result.error
 
         return response
-    
+
     async def close(self) -> None:
         """Clean up resources and log aggregate cache statistics."""
         if self._total_request_count > 0 and self._total_cached_tokens > 0:
@@ -389,22 +420,22 @@ class LangChainTranscriber:
 
 @asynccontextmanager
 async def open_transcriber(
-    api_key: Optional[str] = None,
-    model: Optional[str] = None,
-    provider: Optional[str] = None,
+    api_key: str | None = None,
+    model: str | None = None,
+    provider: str | None = None,
     *,
-    schema_path: Optional[Path] = None,
-    system_prompt_path: Optional[Path] = None,
-    additional_context_path: Optional[Path] = None,
+    schema_path: Path | None = None,
+    system_prompt_path: Path | None = None,
+    additional_context_path: Path | None = None,
     use_hierarchical_context: bool = True,
-    max_output_tokens: Optional[int] = None,
-    reasoning_config: Optional[Dict[str, Any]] = None,
-    text_config: Optional[Dict[str, Any]] = None,
-) -> AsyncGenerator[LangChainTranscriber, None]:
+    max_output_tokens: int | None = None,
+    reasoning_config: dict[str, Any] | None = None,
+    text_config: dict[str, Any] | None = None,
+) -> AsyncGenerator[LangChainTranscriber]:
     """Context manager for LangChainTranscriber with automatic cleanup.
-    
+
     Drop-in replacement for the old open_transcriber context manager.
-    
+
     Args:
         api_key: Optional API key
         model: Model name
@@ -416,7 +447,7 @@ async def open_transcriber(
         max_output_tokens: Optional runtime override for max output tokens
         reasoning_config: Optional runtime override for reasoning settings
         text_config: Optional runtime override for text settings (verbosity)
-    
+
     Yields:
         LangChainTranscriber instance with managed lifecycle
     """
@@ -441,15 +472,15 @@ async def open_transcriber(
 async def transcribe_image_with_llm(
     image_path: Path,
     transcriber: LangChainTranscriber,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Convenience helper for transcribing a single image.
-    
+
     Drop-in replacement for transcribe_image_with_openai.
-    
+
     Args:
         image_path: Path to the image file
         transcriber: Initialized LangChainTranscriber instance
-    
+
     Returns:
         Dictionary containing transcription response data
     """

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 
 def _unwrap_schema(
-    schema_obj: Dict[str, Any],
+    schema_obj: dict[str, Any],
     default_name: str = "TranscriptionSchema",
     default_strict: bool = True,
-) -> Tuple[str, Dict[str, Any], bool]:
+) -> tuple[str, dict[str, Any], bool]:
     """
     Normalize a provided schema object into (name, schema, strict).
 
@@ -33,10 +33,10 @@ def _unwrap_schema(
 
 
 def build_structured_text_format(
-    schema_obj: Dict[str, Any],
+    schema_obj: dict[str, Any],
     default_name: str = "TranscriptionSchema",
     default_strict: bool = True,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """
     Build the Responses API `text.format` object for Structured Outputs.
 

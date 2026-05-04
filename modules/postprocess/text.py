@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from modules.infra.logger import setup_logger
 
@@ -50,10 +50,10 @@ def normalize_unicode_text(text: str) -> str:
     - Drop soft hyphens, zero-width spaces and BOMs.
     - Remove all remaining control/format/surrogate/unassigned chars
       except newline and tab.
-    
+
     Args:
         text: Input text to normalize.
-        
+
     Returns:
         Normalized text with spurious characters removed.
     """
@@ -66,8 +66,8 @@ def normalize_unicode_text(text: str) -> str:
 
     # Explicitly drop some frequent layout artifacts
     drop_chars = {
-        "\u00AD",  # SOFT HYPHEN - invisible hyphenation hint
-        "\u200B",  # ZERO WIDTH SPACE - invisible separator
+        "\u00ad",  # SOFT HYPHEN - invisible hyphenation hint
+        "\u200b",  # ZERO WIDTH SPACE - invisible separator
         "\ufeff",  # BOM - byte order mark
     }
     for ch in drop_chars:
@@ -81,11 +81,12 @@ def normalize_unicode_text(text: str) -> str:
             out_chars.append(ch)
             continue
         cat = unicodedata.category(ch)
-        # Skip all other control/format/surrogate/unassigned chars (category starts with 'C')
+        # Skip all other control/format/surrogate/unassigned chars
+        # (category starts with 'C')
         if cat.startswith("C"):
             continue
         out_chars.append(ch)
-    
+
     return "".join(out_chars)
 
 
@@ -99,10 +100,10 @@ def fix_hyphenation(text: str) -> str:
     To avoid damaging genuine hyphenated compounds such as "Jean-Baptiste",
     merging is restricted to cases where both sides look like lower-case
     word fragments.
-    
+
     Args:
         text: Input text with potential line-break hyphenations.
-        
+
     Returns:
         Text with hyphenated line breaks merged where appropriate.
     """
@@ -138,13 +139,13 @@ def normalize_spacing(
     - Internal runs of spaces between non-space characters are capped
       at two (to keep some room for tables and leader dots).
     - Runs of blank lines are limited.
-    
+
     Args:
         text: Input text to normalize.
         collapse_internal: If True, collapse runs of 3+ internal spaces to 2.
         max_blank_lines: Maximum number of consecutive blank lines to keep.
         tab_size: Number of spaces to expand each tab into.
-        
+
     Returns:
         Text with normalized whitespace.
     """
@@ -187,10 +188,10 @@ def should_wrap_line(line: str) -> bool:
     - Image annotations (![Image: ...] or legacy [Image: ...])
     - Markdown-style table rows (| ... |)
     - Lines with failure placeholders ([transcription error], etc.)
-    
+
     Args:
         line: Line to check.
-        
+
     Returns:
         True if the line should be wrapped, False if it should be left alone.
     """
@@ -207,7 +208,8 @@ def should_wrap_line(line: str) -> bool:
     if stripped.startswith("<page_number>"):
         return False
 
-    # Image description blocks from the OCR pipeline (Markdown format ![...] and legacy [...])
+    # Image description blocks from the OCR pipeline
+    # (Markdown format ![...] and legacy [...])
     if stripped.startswith("!["):
         return False
     if stripped.startswith("[") and "Image:" in stripped and stripped.endswith("]"):
@@ -228,7 +230,7 @@ def should_wrap_line(line: str) -> bool:
 
     # Image name headers (e.g., "page_001.jpg: [transcription...]")
     if ":" in stripped and stripped.index(":") < 50:
-        after_colon = stripped[stripped.index(":") + 1:].strip()
+        after_colon = stripped[stripped.index(":") + 1 :].strip()
         if after_colon.startswith("[") and after_colon.endswith("]"):
             return False
 
@@ -247,10 +249,10 @@ def compute_auto_wrap_width(text: str) -> int:
 
     Only blocks with at least three non-empty lines are considered,
     to avoid headings and isolated lines distorting the estimate.
-    
+
     Args:
         text: Input text to analyze.
-        
+
     Returns:
         Computed wrap width (minimum 20, default 80 if no valid blocks).
     """
@@ -291,11 +293,11 @@ def wrap_long_lines(text: str, width: int) -> str:
 
     Wrapping is performed after whitespace normalization so that the
     line lengths reflect the final spacing.
-    
+
     Args:
         text: Input text to wrap.
         width: Target line width in characters.
-        
+
     Returns:
         Text with long lines wrapped.
     """
@@ -344,7 +346,7 @@ def postprocess_text(
     max_blank_lines: int = 2,
     tab_size: int = 4,
     wrap_lines: bool = False,
-    wrap_width: Optional[int] = None,
+    wrap_width: int | None = None,
     auto_wrap: bool = False,
 ) -> str:
     """
@@ -363,7 +365,7 @@ def postprocess_text(
             is True and auto_wrap is False, a default of 80 is used.
         auto_wrap: If True and wrap_lines is True, compute wrap_width
             automatically from text blocks.
-            
+
     Returns:
         Post-processed text.
     """
@@ -395,14 +397,14 @@ def postprocess_text(
 
 def postprocess_transcription(
     text: str,
-    config: Optional[Dict[str, Any]] = None,
+    config: dict[str, Any] | None = None,
 ) -> str:
     """
     Apply post-processing to transcription text using configuration settings.
-    
+
     This is the main entry point for the post-processing pipeline, designed
     to be called from the transcription workflow.
-    
+
     Args:
         text: Transcription text to process.
         config: Post-processing configuration dictionary. If None, uses defaults.
@@ -415,17 +417,17 @@ def postprocess_transcription(
             - wrap_lines: bool
             - auto_wrap: bool
             - wrap_width: int or None
-            
+
     Returns:
         Post-processed text, or original text if processing is disabled.
     """
     if config is None:
         config = {}
-    
+
     # Check if post-processing is enabled (default True when called directly)
     if not config.get("enabled", True):
         return text
-    
+
     # Extract settings with defaults
     merge_hyphenation = config.get("merge_hyphenation", False)
     collapse_internal_spaces = config.get("collapse_internal_spaces", True)
@@ -434,14 +436,14 @@ def postprocess_transcription(
     wrap_lines = config.get("wrap_lines", False)
     auto_wrap = config.get("auto_wrap", False)
     wrap_width = config.get("wrap_width")
-    
+
     # Convert wrap_width to int or None
     if wrap_width is not None:
         try:
             wrap_width = int(wrap_width)
         except (ValueError, TypeError):
             wrap_width = None
-    
+
     return postprocess_text(
         text,
         merge_hyphenation=merge_hyphenation,
@@ -456,39 +458,39 @@ def postprocess_transcription(
 
 def postprocess_file(
     input_path: Path,
-    output_path: Optional[Path] = None,
-    config: Optional[Dict[str, Any]] = None,
+    output_path: Path | None = None,
+    config: dict[str, Any] | None = None,
     in_place: bool = False,
 ) -> Path:
     """
     Post-process a transcription file.
-    
+
     Args:
         input_path: Path to the input file.
         output_path: Path to write output. If None and not in_place, returns
             processed text without writing.
         config: Post-processing configuration dictionary.
         in_place: If True, overwrite the input file.
-        
+
     Returns:
         Path to the output file (input_path if in_place, output_path otherwise).
-        
+
     Raises:
         FileNotFoundError: If input file doesn't exist.
         ValueError: If neither output_path nor in_place is specified.
     """
     if not input_path.exists():
         raise FileNotFoundError(f"Input file not found: {input_path}")
-    
+
     if output_path is None and not in_place:
         raise ValueError("Either output_path or in_place=True must be specified")
-    
+
     # Read input
     text = input_path.read_text(encoding="utf-8", errors="replace")
-    
+
     # Process
     processed = postprocess_transcription(text, config)
-    
+
     # Write output
     target_path = input_path if in_place else output_path
     if target_path is None:

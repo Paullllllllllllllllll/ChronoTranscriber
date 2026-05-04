@@ -99,11 +99,13 @@ class TestOpenTranscriberFromConfigForwarding:
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_forwards_runtime_model_settings_to_open_transcriber(self) -> None:
-        """Synchronous transcriber init receives model/runtime overrides from model_config."""
+        """Transcriber init receives model/runtime overrides from model_config."""
         from main.unified_transcriber import _open_transcriber_from_config
 
         user_config = UserConfiguration()
-        user_config.selected_schema_path = Path("schemas/markdown_transcription_schema.json")
+        user_config.selected_schema_path = Path(
+            "schemas/markdown_transcription_schema.json"
+        )
         user_config.additional_context_path = None
 
         model_config = {
@@ -116,7 +118,9 @@ class TestOpenTranscriberFromConfigForwarding:
             }
         }
 
-        with patch("main.unified_transcriber.open_transcriber", return_value="ctx") as mock_open:
+        with patch(
+            "main.unified_transcriber.open_transcriber", return_value="ctx"
+        ) as mock_open:
             result = await _open_transcriber_from_config(user_config, model_config)
 
         assert result == "ctx"

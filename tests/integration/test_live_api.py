@@ -16,7 +16,6 @@ inspection with:
 
 from __future__ import annotations
 
-import asyncio
 import os
 import shutil
 import subprocess
@@ -24,7 +23,6 @@ import sys
 import textwrap
 import time
 from pathlib import Path
-from typing import Any
 
 import pytest
 import yaml
@@ -41,20 +39,23 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 # Import project modules at module level (order matters for circular deps).
+import modules.config.config_loader as _cl_mod  # noqa: E402
 from main.unified_transcriber import process_documents  # noqa: E402
 from modules.config.service import ConfigService, get_config_service  # noqa: E402
 from modules.documents.page_range import parse_page_range  # noqa: E402
 from modules.transcribe.user_config import UserConfiguration  # noqa: E402
-import modules.config.config_loader as _cl_mod  # noqa: E402
+
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 STAGING_PDF_DIR = FIXTURES_DIR / "pdfs"
 STAGING_PDF = STAGING_PDF_DIR / "Antonio Franco.pdf"
 CONFIG_DIR = PROJECT_ROOT / "config"
 SCHEMAS_DIR = PROJECT_ROOT / "schemas"
 
-KEEP_OUTPUTS = os.environ.get(
-    "CHRONO_KEEP_TEST_OUTPUTS", ""
-).lower() in ("1", "true", "yes")
+KEEP_OUTPUTS = os.environ.get("CHRONO_KEEP_TEST_OUTPUTS", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 PROVIDERS = {
     "openai": {
@@ -114,9 +115,7 @@ def _require_custom_endpoint() -> None:
 
         resp = httpx.head(CUSTOM_ENDPOINT_URL, timeout=5)
         if resp.status_code >= 500:
-            pytest.skip(
-                f"Custom endpoint unreachable (HTTP {resp.status_code})"
-            )
+            pytest.skip(f"Custom endpoint unreachable (HTTP {resp.status_code})")
     except Exception as exc:
         pytest.skip(f"Custom endpoint unreachable: {exc}")
 
@@ -241,8 +240,7 @@ def _run_cli(
     env["CHRONO_CONFIG_DIR"] = str(config_dir)
     env["PYTHONPATH"] = str(PROJECT_ROOT)
     return subprocess.run(
-        [sys.executable, str(PROJECT_ROOT / "main" / "unified_transcriber.py")]
-        + args,
+        [sys.executable, str(PROJECT_ROOT / "main" / "unified_transcriber.py")] + args,
         cwd=str(PROJECT_ROOT),
         env=env,
         capture_output=True,
@@ -261,9 +259,7 @@ def _assert_output_valid(
         f"Contents: {list(output_dir.rglob('*'))}"
     )
     output_file = files[0]
-    assert output_file.stat().st_size > 0, (
-        f"Output file {output_file} is empty"
-    )
+    assert output_file.stat().st_size > 0, f"Output file {output_file} is empty"
     content = output_file.read_text(encoding="utf-8")
     all_lines = [ln.strip() for ln in content.splitlines() if ln.strip()]
     assert len(all_lines) > 0, "Output file contains only whitespace"
@@ -272,14 +268,8 @@ def _assert_output_valid(
         "[Transcription not possible]",
         "[No transcribable text]",
     ]
-    non_error = [
-        ln
-        for ln in all_lines
-        if not any(m in ln for m in error_markers)
-    ]
-    assert len(non_error) > 0, (
-        f"All {len(all_lines)} output lines are error markers"
-    )
+    non_error = [ln for ln in all_lines if not any(m in ln for m in error_markers)]
+    assert len(non_error) > 0, f"All {len(all_lines)} output lines are error markers"
     return output_file
 
 
@@ -309,25 +299,35 @@ def output_dir(tmp_path: Path) -> Path:
 
 @pytest.mark.api
 class TestCLIMode:
-
     def test_01_openai_cli_pdf(self, tmp_path: Path, output_dir: Path) -> None:
         p = PROVIDERS["openai"]
         _require_key(p["env_var"], "OpenAI")
         config_dir = _make_temp_config_dir(
-            tmp_path, "openai", p["model"], output_dir,
+            tmp_path,
+            "openai",
+            p["model"],
+            output_dir,
             reasoning_effort=p["reasoning_effort"],
             temperature=p["temperature"],
         )
         result = _run_cli(
             [
-                "--input", str(STAGING_PDF_DIR),
-                "--output", str(output_dir),
-                "--type", "pdfs",
-                "--method", "gpt",
-                "--model", p["model"],
-                "--provider", "openai",
-                "--reasoning-effort", "low",
-                "--pages", "first:1",
+                "--input",
+                str(STAGING_PDF_DIR),
+                "--output",
+                str(output_dir),
+                "--type",
+                "pdfs",
+                "--method",
+                "gpt",
+                "--model",
+                p["model"],
+                "--provider",
+                "openai",
+                "--reasoning-effort",
+                "low",
+                "--pages",
+                "first:1",
                 "--force",
             ],
             config_dir,
@@ -343,20 +343,31 @@ class TestCLIMode:
         p = PROVIDERS["anthropic"]
         _require_key(p["env_var"], "Anthropic")
         config_dir = _make_temp_config_dir(
-            tmp_path, "anthropic", p["model"], output_dir,
+            tmp_path,
+            "anthropic",
+            p["model"],
+            output_dir,
             reasoning_effort=p["reasoning_effort"],
             temperature=p["temperature"],
         )
         result = _run_cli(
             [
-                "--input", str(STAGING_PDF_DIR),
-                "--output", str(output_dir),
-                "--type", "pdfs",
-                "--method", "gpt",
-                "--model", p["model"],
-                "--provider", "anthropic",
-                "--reasoning-effort", "low",
-                "--pages", "first:1",
+                "--input",
+                str(STAGING_PDF_DIR),
+                "--output",
+                str(output_dir),
+                "--type",
+                "pdfs",
+                "--method",
+                "gpt",
+                "--model",
+                p["model"],
+                "--provider",
+                "anthropic",
+                "--reasoning-effort",
+                "low",
+                "--pages",
+                "first:1",
                 "--force",
             ],
             config_dir,
@@ -372,18 +383,28 @@ class TestCLIMode:
         p = PROVIDERS["google"]
         _require_key(p["env_var"], "Google")
         config_dir = _make_temp_config_dir(
-            tmp_path, "google", p["model"], output_dir,
+            tmp_path,
+            "google",
+            p["model"],
+            output_dir,
             temperature=p["temperature"],
         )
         result = _run_cli(
             [
-                "--input", str(STAGING_PDF_DIR),
-                "--output", str(output_dir),
-                "--type", "pdfs",
-                "--method", "gpt",
-                "--model", p["model"],
-                "--provider", "google",
-                "--pages", "first:1",
+                "--input",
+                str(STAGING_PDF_DIR),
+                "--output",
+                str(output_dir),
+                "--type",
+                "pdfs",
+                "--method",
+                "gpt",
+                "--model",
+                p["model"],
+                "--provider",
+                "google",
+                "--pages",
+                "first:1",
                 "--force",
             ],
             config_dir,
@@ -399,16 +420,24 @@ class TestCLIMode:
         _require_custom_endpoint()
         p = PROVIDERS["custom"]
         config_dir = _make_temp_config_dir(
-            tmp_path, "custom", p["model"], output_dir,
+            tmp_path,
+            "custom",
+            p["model"],
+            output_dir,
             temperature=p["temperature"],
         )
         result = _run_cli(
             [
-                "--input", str(STAGING_PDF_DIR),
-                "--output", str(output_dir),
-                "--type", "pdfs",
-                "--method", "gpt",
-                "--pages", "first:1",
+                "--input",
+                str(STAGING_PDF_DIR),
+                "--output",
+                str(output_dir),
+                "--type",
+                "pdfs",
+                "--method",
+                "gpt",
+                "--pages",
+                "first:1",
                 "--force",
             ],
             config_dir,
@@ -424,15 +453,23 @@ class TestCLIMode:
         _require_tesseract()
 
         config_dir = _make_temp_config_dir(
-            tmp_path, "openai", "gpt-5-nano", output_dir,
+            tmp_path,
+            "openai",
+            "gpt-5-nano",
+            output_dir,
         )
         result = _run_cli(
             [
-                "--input", str(STAGING_PDF_DIR),
-                "--output", str(output_dir),
-                "--type", "pdfs",
-                "--method", "tesseract",
-                "--pages", "first:1",
+                "--input",
+                str(STAGING_PDF_DIR),
+                "--output",
+                str(output_dir),
+                "--type",
+                "pdfs",
+                "--method",
+                "tesseract",
+                "--pages",
+                "first:1",
                 "--force",
             ],
             config_dir,
@@ -450,22 +487,34 @@ class TestCLIMode:
         p = PROVIDERS["openai"]
         _require_key(p["env_var"], "OpenAI")
         config_dir = _make_temp_config_dir(
-            tmp_path, "openai", p["model"], output_dir,
+            tmp_path,
+            "openai",
+            p["model"],
+            output_dir,
             reasoning_effort=p["reasoning_effort"],
             temperature=p["temperature"],
         )
         result = _run_cli(
             [
-                "--input", str(STAGING_PDF_DIR),
-                "--output", str(output_dir),
-                "--type", "pdfs",
-                "--method", "gpt",
-                "--model", p["model"],
-                "--provider", "openai",
-                "--reasoning-effort", "low",
-                "--pages", "first:1",
+                "--input",
+                str(STAGING_PDF_DIR),
+                "--output",
+                str(output_dir),
+                "--type",
+                "pdfs",
+                "--method",
+                "gpt",
+                "--model",
+                p["model"],
+                "--provider",
+                "openai",
+                "--reasoning-effort",
+                "low",
+                "--pages",
+                "first:1",
                 "--force",
-                "--output-format", "md",
+                "--output-format",
+                "md",
             ],
             config_dir,
         )
@@ -476,31 +525,39 @@ class TestCLIMode:
         )
         _assert_output_valid(output_dir, ext=".md")
 
-    def test_07_resume_skip_behavior(
-        self, tmp_path: Path, output_dir: Path
-    ) -> None:
+    def test_07_resume_skip_behavior(self, tmp_path: Path, output_dir: Path) -> None:
         p = PROVIDERS["openai"]
         _require_key(p["env_var"], "OpenAI")
         config_dir = _make_temp_config_dir(
-            tmp_path, "openai", p["model"], output_dir,
+            tmp_path,
+            "openai",
+            p["model"],
+            output_dir,
             reasoning_effort=p["reasoning_effort"],
             temperature=p["temperature"],
         )
         cli_args = [
-            "--input", str(STAGING_PDF_DIR),
-            "--output", str(output_dir),
-            "--type", "pdfs",
-            "--method", "gpt",
-            "--model", p["model"],
-            "--provider", "openai",
-            "--reasoning-effort", "low",
-            "--pages", "first:1",
+            "--input",
+            str(STAGING_PDF_DIR),
+            "--output",
+            str(output_dir),
+            "--type",
+            "pdfs",
+            "--method",
+            "gpt",
+            "--model",
+            p["model"],
+            "--provider",
+            "openai",
+            "--reasoning-effort",
+            "low",
+            "--pages",
+            "first:1",
             "--force",
         ]
         r1 = _run_cli(cli_args, config_dir)
         assert r1.returncode == 0, (
-            f"First run failed ({r1.returncode}).\n"
-            f"STDERR:\n{r1.stderr[-2000:]}"
+            f"First run failed ({r1.returncode}).\nSTDERR:\n{r1.stderr[-2000:]}"
         )
         out_file = _assert_output_valid(output_dir)
         mtime_after_first = out_file.stat().st_mtime
@@ -510,8 +567,7 @@ class TestCLIMode:
         skip_args = [a for a in cli_args if a != "--force"] + ["--resume"]
         r2 = _run_cli(skip_args, config_dir)
         assert r2.returncode == 0, (
-            f"Second run failed ({r2.returncode}).\n"
-            f"STDERR:\n{r2.stderr[-2000:]}"
+            f"Second run failed ({r2.returncode}).\nSTDERR:\n{r2.stderr[-2000:]}"
         )
         mtime_after_second = out_file.stat().st_mtime
         assert mtime_after_first == mtime_after_second, (
@@ -522,20 +578,31 @@ class TestCLIMode:
         p = PROVIDERS["openai"]
         _require_key(p["env_var"], "OpenAI")
         config_dir = _make_temp_config_dir(
-            tmp_path, "openai", p["model"], output_dir,
+            tmp_path,
+            "openai",
+            p["model"],
+            output_dir,
             reasoning_effort=p["reasoning_effort"],
             temperature=p["temperature"],
         )
         r1 = _run_cli(
             [
-                "--input", str(STAGING_PDF_DIR),
-                "--output", str(output_dir),
-                "--type", "pdfs",
-                "--method", "gpt",
-                "--model", p["model"],
-                "--provider", "openai",
-                "--reasoning-effort", "low",
-                "--pages", "first:1",
+                "--input",
+                str(STAGING_PDF_DIR),
+                "--output",
+                str(output_dir),
+                "--type",
+                "pdfs",
+                "--method",
+                "gpt",
+                "--model",
+                p["model"],
+                "--provider",
+                "openai",
+                "--reasoning-effort",
+                "low",
+                "--pages",
+                "first:1",
                 "--force",
             ],
             config_dir,
@@ -550,9 +617,11 @@ class TestCLIMode:
             [
                 sys.executable,
                 str(PROJECT_ROOT / "main" / "postprocess_transcriptions.py"),
-                "--input", str(out_file),
+                "--input",
+                str(out_file),
                 "--in-place",
-                "--max-blank-lines", "2",
+                "--max-blank-lines",
+                "2",
             ],
             cwd=str(PROJECT_ROOT),
             env=env,
@@ -564,9 +633,7 @@ class TestCLIMode:
             f"Postprocess failed ({pp_result.returncode}).\n"
             f"STDERR:\n{pp_result.stderr[-2000:]}"
         )
-        assert out_file.stat().st_size > 0, (
-            "Output file empty after postprocessing"
-        )
+        assert out_file.stat().st_size > 0, "Output file empty after postprocessing"
 
     def test_09_auto_mode(self, tmp_path: Path, output_dir: Path) -> None:
         p = PROVIDERS["openai"]
@@ -583,7 +650,8 @@ class TestCLIMode:
 
         (config_tmp / "model_config.yaml").write_text(
             _make_model_config_yaml(
-                "openai", p["model"],
+                "openai",
+                p["model"],
                 reasoning_effort=p["reasoning_effort"],
                 temperature=p["temperature"],
             ),
@@ -621,9 +689,7 @@ class TestCLIMode:
                 input: '{staging_in}'
                 output: '{staging_out}'
         """)
-        (config_tmp / "paths_config.yaml").write_text(
-            paths_yaml, encoding="utf-8"
-        )
+        (config_tmp / "paths_config.yaml").write_text(paths_yaml, encoding="utf-8")
         (config_tmp / "concurrency_config.yaml").write_text(
             _make_concurrency_config_yaml(), encoding="utf-8"
         )
@@ -635,7 +701,8 @@ class TestCLIMode:
         result = _run_cli(
             [
                 "--auto",
-                "--pages", "first:1",
+                "--pages",
+                "first:1",
                 "--force",
             ],
             config_tmp,
@@ -647,8 +714,7 @@ class TestCLIMode:
         )
         output_files = list(output_dir.rglob("*.txt"))
         assert len(output_files) > 0, (
-            f"Auto mode produced no output. Dir contents: "
-            f"{list(output_dir.rglob('*'))}"
+            f"Auto mode produced no output. Dir contents: {list(output_dir.rglob('*'))}"
         )
 
 
@@ -659,16 +725,13 @@ class TestCLIMode:
 
 @pytest.mark.api
 class TestProgrammaticMode:
-
     @staticmethod
     def _setup_config_env(config_dir: Path) -> str | None:
         old = os.environ.get("CHRONO_CONFIG_DIR")
         os.environ["CHRONO_CONFIG_DIR"] = str(config_dir)
         _cl_mod.CONFIG_DIR = _cl_mod._compute_config_dir()
         _cl_mod.DEFAULT_CONFIG_PATH = _cl_mod.CONFIG_DIR / "model_config.yaml"
-        _cl_mod.DEFAULT_PATHS_CONFIG_PATH = (
-            _cl_mod.CONFIG_DIR / "paths_config.yaml"
-        )
+        _cl_mod.DEFAULT_PATHS_CONFIG_PATH = _cl_mod.CONFIG_DIR / "paths_config.yaml"
         _cl_mod.DEFAULT_CONCURRENCY_CONFIG_PATH = (
             _cl_mod.CONFIG_DIR / "concurrency_config.yaml"
         )
@@ -686,9 +749,7 @@ class TestProgrammaticMode:
             os.environ["CHRONO_CONFIG_DIR"] = old_val
         _cl_mod.CONFIG_DIR = _cl_mod._compute_config_dir()
         _cl_mod.DEFAULT_CONFIG_PATH = _cl_mod.CONFIG_DIR / "model_config.yaml"
-        _cl_mod.DEFAULT_PATHS_CONFIG_PATH = (
-            _cl_mod.CONFIG_DIR / "paths_config.yaml"
-        )
+        _cl_mod.DEFAULT_PATHS_CONFIG_PATH = _cl_mod.CONFIG_DIR / "paths_config.yaml"
         _cl_mod.DEFAULT_CONCURRENCY_CONFIG_PATH = (
             _cl_mod.CONFIG_DIR / "concurrency_config.yaml"
         )
@@ -705,7 +766,10 @@ class TestProgrammaticMode:
         _require_key(p["env_var"], "OpenAI")
 
         config_dir = _make_temp_config_dir(
-            tmp_path, "openai", p["model"], output_dir,
+            tmp_path,
+            "openai",
+            p["model"],
+            output_dir,
             reasoning_effort=p["reasoning_effort"],
             temperature=p["temperature"],
         )
@@ -725,9 +789,9 @@ class TestProgrammaticMode:
                 ),
             )
             paths_cfg = svc.get_paths_config()
-            paths_cfg.setdefault("file_paths", {}).setdefault(
-                "PDFs", {}
-            )["output"] = str(output_dir)
+            paths_cfg.setdefault("file_paths", {}).setdefault("PDFs", {})["output"] = (
+                str(output_dir)
+            )
 
             await process_documents(
                 user_config,
@@ -749,7 +813,10 @@ class TestProgrammaticMode:
         _require_key(p["env_var"], "Anthropic")
 
         config_dir = _make_temp_config_dir(
-            tmp_path, "anthropic", p["model"], output_dir,
+            tmp_path,
+            "anthropic",
+            p["model"],
+            output_dir,
             reasoning_effort=p["reasoning_effort"],
             temperature=p["temperature"],
         )
@@ -769,9 +836,9 @@ class TestProgrammaticMode:
                 ),
             )
             paths_cfg = svc.get_paths_config()
-            paths_cfg.setdefault("file_paths", {}).setdefault(
-                "PDFs", {}
-            )["output"] = str(output_dir)
+            paths_cfg.setdefault("file_paths", {}).setdefault("PDFs", {})["output"] = (
+                str(output_dir)
+            )
 
             await process_documents(
                 user_config,
@@ -793,7 +860,10 @@ class TestProgrammaticMode:
         _require_key(p["env_var"], "Google")
 
         config_dir = _make_temp_config_dir(
-            tmp_path, "google", p["model"], output_dir,
+            tmp_path,
+            "google",
+            p["model"],
+            output_dir,
             temperature=p["temperature"],
         )
         old = self._setup_config_env(config_dir)
@@ -812,9 +882,9 @@ class TestProgrammaticMode:
                 ),
             )
             paths_cfg = svc.get_paths_config()
-            paths_cfg.setdefault("file_paths", {}).setdefault(
-                "PDFs", {}
-            )["output"] = str(output_dir)
+            paths_cfg.setdefault("file_paths", {}).setdefault("PDFs", {})["output"] = (
+                str(output_dir)
+            )
 
             await process_documents(
                 user_config,
@@ -836,7 +906,10 @@ class TestProgrammaticMode:
         p = PROVIDERS["custom"]
 
         config_dir = _make_temp_config_dir(
-            tmp_path, "custom", p["model"], output_dir,
+            tmp_path,
+            "custom",
+            p["model"],
+            output_dir,
             temperature=p["temperature"],
         )
         old = self._setup_config_env(config_dir)
@@ -851,9 +924,9 @@ class TestProgrammaticMode:
                 output_format="txt",
             )
             paths_cfg = svc.get_paths_config()
-            paths_cfg.setdefault("file_paths", {}).setdefault(
-                "PDFs", {}
-            )["output"] = str(output_dir)
+            paths_cfg.setdefault("file_paths", {}).setdefault("PDFs", {})["output"] = (
+                str(output_dir)
+            )
 
             await process_documents(
                 user_config,
@@ -874,7 +947,10 @@ class TestProgrammaticMode:
         _require_tesseract()
 
         config_dir = _make_temp_config_dir(
-            tmp_path, "openai", "gpt-5-nano", output_dir,
+            tmp_path,
+            "openai",
+            "gpt-5-nano",
+            output_dir,
         )
         old = self._setup_config_env(config_dir)
         try:
@@ -888,9 +964,9 @@ class TestProgrammaticMode:
                 output_format="txt",
             )
             paths_cfg = svc.get_paths_config()
-            paths_cfg.setdefault("file_paths", {}).setdefault(
-                "PDFs", {}
-            )["output"] = str(output_dir)
+            paths_cfg.setdefault("file_paths", {}).setdefault("PDFs", {})["output"] = (
+                str(output_dir)
+            )
 
             await process_documents(
                 user_config,
@@ -969,7 +1045,6 @@ class _InputFeeder:
 
 @pytest.mark.api
 class TestInteractiveMode:
-
     @staticmethod
     def _make_interactive_config_dir(
         base_tmp: Path,
@@ -983,9 +1058,7 @@ class TestInteractiveMode:
         config_tmp = base_tmp / "config"
         config_tmp.mkdir(parents=True, exist_ok=True)
         (config_tmp / "model_config.yaml").write_text(
-            _make_model_config_yaml(
-                provider, model, reasoning_effort, temperature
-            ),
+            _make_model_config_yaml(provider, model, reasoning_effort, temperature),
             encoding="utf-8",
         )
         (config_tmp / "paths_config.yaml").write_text(
@@ -1013,7 +1086,11 @@ class TestInteractiveMode:
         temperature: float = 0.0,
     ) -> None:
         config_dir = self._make_interactive_config_dir(
-            tmp_path, provider, model, STAGING_PDF_DIR, output_dir,
+            tmp_path,
+            provider,
+            model,
+            STAGING_PDF_DIR,
+            output_dir,
             reasoning_effort=reasoning_effort,
             temperature=temperature,
         )
@@ -1022,9 +1099,7 @@ class TestInteractiveMode:
         os.environ["CHRONO_CONFIG_DIR"] = str(config_dir)
         _cl_mod.CONFIG_DIR = _cl_mod._compute_config_dir()
         _cl_mod.DEFAULT_CONFIG_PATH = _cl_mod.CONFIG_DIR / "model_config.yaml"
-        _cl_mod.DEFAULT_PATHS_CONFIG_PATH = (
-            _cl_mod.CONFIG_DIR / "paths_config.yaml"
-        )
+        _cl_mod.DEFAULT_PATHS_CONFIG_PATH = _cl_mod.CONFIG_DIR / "paths_config.yaml"
         _cl_mod.DEFAULT_CONCURRENCY_CONFIG_PATH = (
             _cl_mod.CONFIG_DIR / "concurrency_config.yaml"
         )
@@ -1054,12 +1129,8 @@ class TestInteractiveMode:
             else:
                 os.environ["CHRONO_CONFIG_DIR"] = old
             _cl_mod.CONFIG_DIR = _cl_mod._compute_config_dir()
-            _cl_mod.DEFAULT_CONFIG_PATH = (
-                _cl_mod.CONFIG_DIR / "model_config.yaml"
-            )
-            _cl_mod.DEFAULT_PATHS_CONFIG_PATH = (
-                _cl_mod.CONFIG_DIR / "paths_config.yaml"
-            )
+            _cl_mod.DEFAULT_CONFIG_PATH = _cl_mod.CONFIG_DIR / "model_config.yaml"
+            _cl_mod.DEFAULT_PATHS_CONFIG_PATH = _cl_mod.CONFIG_DIR / "paths_config.yaml"
             _cl_mod.DEFAULT_CONCURRENCY_CONFIG_PATH = (
                 _cl_mod.CONFIG_DIR / "concurrency_config.yaml"
             )
@@ -1079,9 +1150,7 @@ class TestInteractiveMode:
     #   8. range text:       "first:1"
     #   9. resume_mode:      "2" = overwrite
     #  10. summary confirm:  "y"
-    GPT_PDF_RESPONSES = [
-        "3", "3", "2", "1", "1", "1", "2", "first:1", "2", "y"
-    ]
+    GPT_PDF_RESPONSES = ["3", "3", "2", "1", "1", "1", "2", "first:1", "2", "y"]
 
     # Interactive prompt sequence for PDF + Tesseract:
     #   1. processing_type:  "3" = pdfs
@@ -1092,18 +1161,16 @@ class TestInteractiveMode:
     #   6. range text:       "first:1"
     #   7. resume_mode:      "2" = overwrite
     #   8. summary confirm:  "y"
-    TESSERACT_PDF_RESPONSES = [
-        "3", "2", "1", "2", "first:1", "2", "y"
-    ]
+    TESSERACT_PDF_RESPONSES = ["3", "2", "1", "2", "first:1", "2", "y"]
 
-    def test_15_openai_interactive_pdf(
-        self, tmp_path: Path, output_dir: Path
-    ) -> None:
+    def test_15_openai_interactive_pdf(self, tmp_path: Path, output_dir: Path) -> None:
         p = PROVIDERS["openai"]
         _require_key(p["env_var"], "OpenAI")
         self._run_interactive(
-            tmp_path, output_dir,
-            "openai", p["model"],
+            tmp_path,
+            output_dir,
+            "openai",
+            p["model"],
             self.GPT_PDF_RESPONSES,
             reasoning_effort=p["reasoning_effort"],
             temperature=p["temperature"],
@@ -1116,35 +1183,37 @@ class TestInteractiveMode:
         p = PROVIDERS["anthropic"]
         _require_key(p["env_var"], "Anthropic")
         self._run_interactive(
-            tmp_path, output_dir,
-            "anthropic", p["model"],
+            tmp_path,
+            output_dir,
+            "anthropic",
+            p["model"],
             self.GPT_PDF_RESPONSES,
             reasoning_effort=p["reasoning_effort"],
             temperature=p["temperature"],
         )
         _assert_output_valid(output_dir)
 
-    def test_17_google_interactive_pdf(
-        self, tmp_path: Path, output_dir: Path
-    ) -> None:
+    def test_17_google_interactive_pdf(self, tmp_path: Path, output_dir: Path) -> None:
         p = PROVIDERS["google"]
         _require_key(p["env_var"], "Google")
         self._run_interactive(
-            tmp_path, output_dir,
-            "google", p["model"],
+            tmp_path,
+            output_dir,
+            "google",
+            p["model"],
             self.GPT_PDF_RESPONSES,
             temperature=p["temperature"],
         )
         _assert_output_valid(output_dir)
 
-    def test_18_custom_interactive_pdf(
-        self, tmp_path: Path, output_dir: Path
-    ) -> None:
+    def test_18_custom_interactive_pdf(self, tmp_path: Path, output_dir: Path) -> None:
         _require_custom_endpoint()
         p = PROVIDERS["custom"]
         self._run_interactive(
-            tmp_path, output_dir,
-            "custom", p["model"],
+            tmp_path,
+            output_dir,
+            "custom",
+            p["model"],
             self.GPT_PDF_RESPONSES,
             temperature=p["temperature"],
         )
@@ -1156,8 +1225,10 @@ class TestInteractiveMode:
         _require_tesseract()
 
         self._run_interactive(
-            tmp_path, output_dir,
-            "openai", "gpt-5-nano",
+            tmp_path,
+            output_dir,
+            "openai",
+            "gpt-5-nano",
             self.TESSERACT_PDF_RESPONSES,
         )
         _assert_output_valid(output_dir)
@@ -1170,28 +1241,26 @@ class TestInteractiveMode:
 
 def _run_standalone() -> None:
     """Run all tests and print a summary table."""
-    test_cells: list[
-        tuple[str, str, str, str]
-    ] = [
-        ("01", "OpenAI",     "CLI",          "test_01_openai_cli_pdf"),
-        ("02", "Anthropic",  "CLI",          "test_02_anthropic_cli_pdf"),
-        ("03", "Google",     "CLI",          "test_03_google_cli_pdf"),
-        ("04", "Custom",     "CLI",          "test_04_custom_cli_pdf"),
-        ("05", "Tesseract",  "CLI",          "test_05_tesseract_cli_pdf"),
-        ("06", "OpenAI(md)", "CLI",          "test_06_openai_cli_output_format_md"),
-        ("07", "OpenAI",     "CLI(resume)",  "test_07_resume_skip_behavior"),
-        ("08", "OpenAI",     "CLI(postproc)","test_08_postprocess"),
-        ("09", "OpenAI",     "CLI(auto)",    "test_09_auto_mode"),
-        ("10", "OpenAI",     "Programmatic", "test_10_openai_programmatic_pdf"),
-        ("11", "Anthropic",  "Programmatic", "test_11_anthropic_programmatic_pdf"),
-        ("12", "Google",     "Programmatic", "test_12_google_programmatic_pdf"),
-        ("13", "Custom",     "Programmatic", "test_13_custom_programmatic_pdf"),
-        ("14", "Tesseract",  "Programmatic", "test_14_tesseract_programmatic_pdf"),
-        ("15", "OpenAI",     "Interactive",  "test_15_openai_interactive_pdf"),
-        ("16", "Anthropic",  "Interactive",  "test_16_anthropic_interactive_pdf"),
-        ("17", "Google",     "Interactive",  "test_17_google_interactive_pdf"),
-        ("18", "Custom",     "Interactive",  "test_18_custom_interactive_pdf"),
-        ("19", "Tesseract",  "Interactive",  "test_19_tesseract_interactive_pdf"),
+    test_cells: list[tuple[str, str, str, str]] = [
+        ("01", "OpenAI", "CLI", "test_01_openai_cli_pdf"),
+        ("02", "Anthropic", "CLI", "test_02_anthropic_cli_pdf"),
+        ("03", "Google", "CLI", "test_03_google_cli_pdf"),
+        ("04", "Custom", "CLI", "test_04_custom_cli_pdf"),
+        ("05", "Tesseract", "CLI", "test_05_tesseract_cli_pdf"),
+        ("06", "OpenAI(md)", "CLI", "test_06_openai_cli_output_format_md"),
+        ("07", "OpenAI", "CLI(resume)", "test_07_resume_skip_behavior"),
+        ("08", "OpenAI", "CLI(postproc)", "test_08_postprocess"),
+        ("09", "OpenAI", "CLI(auto)", "test_09_auto_mode"),
+        ("10", "OpenAI", "Programmatic", "test_10_openai_programmatic_pdf"),
+        ("11", "Anthropic", "Programmatic", "test_11_anthropic_programmatic_pdf"),
+        ("12", "Google", "Programmatic", "test_12_google_programmatic_pdf"),
+        ("13", "Custom", "Programmatic", "test_13_custom_programmatic_pdf"),
+        ("14", "Tesseract", "Programmatic", "test_14_tesseract_programmatic_pdf"),
+        ("15", "OpenAI", "Interactive", "test_15_openai_interactive_pdf"),
+        ("16", "Anthropic", "Interactive", "test_16_anthropic_interactive_pdf"),
+        ("17", "Google", "Interactive", "test_17_google_interactive_pdf"),
+        ("18", "Custom", "Interactive", "test_18_custom_interactive_pdf"),
+        ("19", "Tesseract", "Interactive", "test_19_tesseract_interactive_pdf"),
     ]
 
     print("\n=== ChronoTranscriber Live API Smoke Test ===\n")
@@ -1205,10 +1274,16 @@ def _run_standalone() -> None:
         try:
             result = subprocess.run(
                 [
-                    sys.executable, "-m", "pytest",
+                    sys.executable,
+                    "-m",
+                    "pytest",
                     str(Path(__file__)),
-                    "-k", test_name,
-                    "-x", "--tb=short", "--no-header", "-q",
+                    "-k",
+                    test_name,
+                    "-x",
+                    "--tb=short",
+                    "--no-header",
+                    "-q",
                 ],
                 cwd=str(PROJECT_ROOT),
                 capture_output=True,
@@ -1230,15 +1305,12 @@ def _run_standalone() -> None:
             elapsed = time.time() - t0
             status = "TIMEOUT"
             fail_count += 1
-        except Exception as exc:
+        except Exception:
             elapsed = time.time() - t0
             status = "ERROR"
             fail_count += 1
 
-        print(
-            f" {num:>2}  {provider:<14} {mode:<16} {status:<8} "
-            f"{elapsed:5.1f}s"
-        )
+        print(f" {num:>2}  {provider:<14} {mode:<16} {status:<8} {elapsed:5.1f}s")
 
     print(f"\nResults: {pass_count} PASS, {skip_count} SKIP, {fail_count} FAIL")
     sys.exit(1 if fail_count > 0 else 0)

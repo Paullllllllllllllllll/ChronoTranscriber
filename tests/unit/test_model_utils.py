@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from modules.config.capabilities.detection import detect_model_type, get_image_config_section_name
+from modules.config.capabilities.detection import (
+    detect_model_type,
+    get_image_config_section_name,
+)
 
 
 @pytest.mark.unit

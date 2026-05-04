@@ -21,17 +21,15 @@ from PIL import Image
 # Priming import to avoid a circular-import chain when this module is the
 # first to touch modules.images.
 import modules.transcribe.dual_mode  # noqa: F401
-
 from modules.images.encoding import encode_image_to_data_url
 from modules.images.pipeline import ImageProcessor
-
 
 # ---------------------------------------------------------------------------
 # encode_image_to_data_url
 # ---------------------------------------------------------------------------
 
-class TestEncodeImageToDataURL:
 
+class TestEncodeImageToDataURL:
     @pytest.mark.unit
     def test_png_round_trip(self, tmp_path: Path) -> None:
         """Round-trip a 1x1 PNG through encode_image_to_data_url."""
@@ -68,6 +66,7 @@ class TestEncodeImageToDataURL:
 # ImageProcessor instance methods: convert_to_grayscale / handle_transparency
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def image_processor(tmp_path: Path) -> ImageProcessor:
     """Build an ImageProcessor instance backed by a tiny PNG file."""
@@ -77,7 +76,6 @@ def image_processor(tmp_path: Path) -> ImageProcessor:
 
 
 class TestConvertToGrayscale:
-
     @pytest.mark.unit
     def test_rgb_becomes_L(self, image_processor: ImageProcessor) -> None:
         rgb = Image.new("RGB", (4, 4), (128, 128, 128))
@@ -107,7 +105,6 @@ class TestConvertToGrayscale:
 
 
 class TestHandleTransparency:
-
     @pytest.mark.unit
     def test_rgba_flattened_to_rgb(self, image_processor: ImageProcessor) -> None:
         rgba = Image.new("RGBA", (4, 4), (255, 0, 0, 128))
@@ -127,8 +124,8 @@ class TestHandleTransparency:
 # ImageProcessor.resize_for_detail
 # ---------------------------------------------------------------------------
 
-class TestResizeForDetail:
 
+class TestResizeForDetail:
     @pytest.mark.unit
     def test_low_detail_shrinks_long_side(self) -> None:
         img = Image.new("RGB", (2000, 500), (0, 0, 0))
@@ -147,9 +144,7 @@ class TestResizeForDetail:
     def test_anthropic_high_caps_long_side(self) -> None:
         img = Image.new("RGB", (3000, 1000), (0, 0, 0))
         cfg = {"high_max_side_px": 1568, "resize_profile": "auto"}
-        out = ImageProcessor.resize_for_detail(
-            img, "high", cfg, model_type="anthropic"
-        )
+        out = ImageProcessor.resize_for_detail(img, "high", cfg, model_type="anthropic")
         # int() truncation may drop the longest side by one pixel; allow a
         # small tolerance so the test is robust to floating-point rounding.
         assert max(out.size) <= 1568
@@ -161,9 +156,7 @@ class TestResizeForDetail:
     def test_openai_high_fits_into_target_box_with_padding(self) -> None:
         img = Image.new("RGB", (3000, 1500), (0, 0, 0))
         cfg = {"high_target_box": [768, 1536], "resize_profile": "auto"}
-        out = ImageProcessor.resize_for_detail(
-            img, "high", cfg, model_type="openai"
-        )
+        out = ImageProcessor.resize_for_detail(img, "high", cfg, model_type="openai")
         # OpenAI branch pads to exactly the target box dimensions
         assert out.size == (768, 1536)
 
@@ -171,9 +164,7 @@ class TestResizeForDetail:
     def test_resize_profile_none_disables_resize(self) -> None:
         img = Image.new("RGB", (3000, 1500), (0, 0, 0))
         cfg = {"resize_profile": "none"}
-        out = ImageProcessor.resize_for_detail(
-            img, "high", cfg, model_type="openai"
-        )
+        out = ImageProcessor.resize_for_detail(img, "high", cfg, model_type="openai")
         assert out.size == (3000, 1500)
 
 
@@ -181,8 +172,8 @@ class TestResizeForDetail:
 # Tesseract helpers: _pil_to_np / _ensure_grayscale / _deskew
 # ---------------------------------------------------------------------------
 
-class TestTesseractHelpers:
 
+class TestTesseractHelpers:
     @pytest.mark.unit
     def test_pil_to_np_rgb_returns_bgr_array(self) -> None:
         img = Image.new("RGB", (4, 3), (10, 20, 30))
@@ -237,8 +228,8 @@ class TestTesseractHelpers:
 # ImageProcessor.prepare_image_folder
 # ---------------------------------------------------------------------------
 
-class TestPrepareImageFolder:
 
+class TestPrepareImageFolder:
     @pytest.mark.unit
     def test_creates_expected_subfolders_and_files(self, tmp_path: Path) -> None:
         source = tmp_path / "source_images"
@@ -246,8 +237,8 @@ class TestPrepareImageFolder:
         out_dir = tmp_path / "image_out"
         out_dir.mkdir()
 
-        parent, preprocessed, temp_jsonl, out_txt = (
-            ImageProcessor.prepare_image_folder(source, out_dir)
+        parent, preprocessed, temp_jsonl, out_txt = ImageProcessor.prepare_image_folder(
+            source, out_dir
         )
 
         assert parent.exists() and parent.is_dir()

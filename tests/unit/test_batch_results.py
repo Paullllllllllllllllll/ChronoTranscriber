@@ -21,13 +21,12 @@ import pytest
 
 import modules.batch.results as batch_results
 
-
 # ---------------------------------------------------------------------------
 # _sort_transcriptions
 # ---------------------------------------------------------------------------
 
-class TestSortTranscriptions:
 
+class TestSortTranscriptions:
     @pytest.mark.unit
     def test_sorts_by_order_info(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -55,9 +54,7 @@ class TestSortTranscriptions:
         ]
         batch_order = {"img_1": 0, "img_2": 1, "img_3": 2}
 
-        batch_results._sort_transcriptions(
-            entries, batch_order, tmp_path / "job.jsonl"
-        )
+        batch_results._sort_transcriptions(entries, batch_order, tmp_path / "job.jsonl")
         assert [e["custom_id"] for e in entries] == ["img_1", "img_2", "img_3"]
 
     @pytest.mark.unit
@@ -88,15 +85,14 @@ class TestSortTranscriptions:
         ]
         # batch_order says y should be first, but x has order_info=0 (tier 0)
         batch_order = {"y": 0, "x": 5}
-        batch_results._sort_transcriptions(
-            entries, batch_order, tmp_path / "job.jsonl"
-        )
+        batch_results._sort_transcriptions(entries, batch_order, tmp_path / "job.jsonl")
         assert [e["custom_id"] for e in entries] == ["x", "y"]
 
 
 # ---------------------------------------------------------------------------
 # _finalize_batch_output
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def silence_ui(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -116,7 +112,6 @@ def silence_ui(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class TestFinalizeBatchOutput:
-
     @pytest.mark.unit
     def test_writes_output_and_keeps_temp_file_by_default(
         self,
@@ -154,7 +149,10 @@ class TestFinalizeBatchOutput:
         writer.assert_called_once()
         call_kwargs = writer.call_args
         passed_pages, passed_path = call_kwargs.args[0], call_kwargs.args[1]
-        assert passed_path == expected_out.parent / f"{'job'}.txt" or passed_path == expected_out
+        assert (
+            passed_path == expected_out.parent / f"{'job'}.txt"
+            or passed_path == expected_out
+        )
         assert [p["text"] for p in passed_pages] == ["Page A", "Page B"]
         assert [p["page_number"] for p in passed_pages] == [1, 2]
         # Temp file should be retained because retain_temporary_jsonl=True

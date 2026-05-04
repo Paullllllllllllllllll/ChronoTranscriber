@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 
 class TestPathConfig:
@@ -41,7 +42,9 @@ class TestPathConfig:
 
     @pytest.mark.unit
     def test_from_paths_config_basic(
-        self, sample_paths_config: dict, tmp_path: Path,
+        self,
+        sample_paths_config: dict,
+        tmp_path: Path,
     ) -> None:
         from modules.infra.paths import PathConfig
 
@@ -60,7 +63,8 @@ class TestPathConfig:
 
     @pytest.mark.unit
     def test_from_paths_config_use_input_as_output(
-        self, sample_paths_config: dict,
+        self,
+        sample_paths_config: dict,
     ) -> None:
         from modules.infra.paths import PathConfig
 
@@ -79,25 +83,32 @@ class TestPathConfig:
 
     @pytest.mark.unit
     def test_base_dirs_for_type(
-        self, sample_paths_config: dict, tmp_path: Path,
+        self,
+        sample_paths_config: dict,
+        tmp_path: Path,
     ) -> None:
         from modules.infra.paths import PathConfig
 
         pc = PathConfig.from_paths_config(sample_paths_config)
         assert pc.base_dirs_for_type("pdfs") == (
-            tmp_path / "pdfs_in", tmp_path / "pdfs_out",
+            tmp_path / "pdfs_in",
+            tmp_path / "pdfs_out",
         )
         assert pc.base_dirs_for_type("images") == (
-            tmp_path / "images_in", tmp_path / "images_out",
+            tmp_path / "images_in",
+            tmp_path / "images_out",
         )
         assert pc.base_dirs_for_type("epubs") == (
-            tmp_path / "epubs_in", tmp_path / "epubs_out",
+            tmp_path / "epubs_in",
+            tmp_path / "epubs_out",
         )
         assert pc.base_dirs_for_type("mobis") == (
-            tmp_path / "mobis_in", tmp_path / "mobis_out",
+            tmp_path / "mobis_in",
+            tmp_path / "mobis_out",
         )
         assert pc.base_dirs_for_type("auto") == (
-            tmp_path / "auto_in", tmp_path / "auto_out",
+            tmp_path / "auto_in",
+            tmp_path / "auto_out",
         )
 
     @pytest.mark.unit
@@ -126,7 +137,9 @@ class TestPathConfig:
         assert (tmp_path / "mobis").is_dir()
 
     @pytest.mark.unit
-    def test_ensure_output_dirs_skips_when_input_as_output(self, tmp_path: Path) -> None:
+    def test_ensure_output_dirs_skips_when_input_as_output(
+        self, tmp_path: Path
+    ) -> None:
         from modules.infra.paths import PathConfig
 
         pc = PathConfig(

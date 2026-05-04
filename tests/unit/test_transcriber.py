@@ -7,15 +7,15 @@ forwarding. Includes CT-3 regression tests for text.verbosity extraction.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 
 def _mock_config_service(
-    model_cfg: Dict[str, Any],
-    concurrency_cfg: Optional[Dict[str, Any]] = None,
+    model_cfg: dict[str, Any],
+    concurrency_cfg: dict[str, Any] | None = None,
 ) -> MagicMock:
     """Build a mock ConfigService with the given model and concurrency config."""
     mock_cs = MagicMock()
@@ -26,15 +26,12 @@ def _mock_config_service(
     return mock_cs
 
 
-from typing import Optional
-
-
 def _make_transcriber(
     tmp_path: Path,
-    model_cfg: Dict[str, Any],
-    concurrency_cfg: Optional[Dict[str, Any]] = None,
-    transcriber_kwargs: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    model_cfg: dict[str, Any],
+    concurrency_cfg: dict[str, Any] | None = None,
+    transcriber_kwargs: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Initialize a LangChainTranscriber with mocked dependencies.
 
     Returns the kwargs captured by the get_provider call so tests can assert
@@ -46,7 +43,7 @@ def _make_transcriber(
     schema_path.write_text('{"type": "object", "properties": {}}', encoding="utf-8")
     prompt_path = PROJECT_ROOT / "system_prompt" / "transcription_prompt_schema.txt"
 
-    captured: Dict[str, Any] = {}
+    captured: dict[str, Any] = {}
 
     def fake_get_provider(**kwargs: Any) -> MagicMock:
         captured.update(kwargs)
@@ -54,15 +51,18 @@ def _make_transcriber(
 
     mock_cs = _mock_config_service(model_cfg, concurrency_cfg)
 
-    with patch("modules.llm.transcriber.get_config_service", return_value=mock_cs):
-        with patch("modules.llm.transcriber.get_provider", side_effect=fake_get_provider):
-            from modules.llm import transcriber as tr
-            tr.LangChainTranscriber(
-                schema_path=schema_path,
-                system_prompt_path=prompt_path,
-                use_hierarchical_context=False,
-                **(transcriber_kwargs or {}),
-            )
+    with (
+        patch("modules.llm.transcriber.get_config_service", return_value=mock_cs),
+        patch("modules.llm.transcriber.get_provider", side_effect=fake_get_provider),
+    ):
+        from modules.llm import transcriber as tr
+
+        tr.LangChainTranscriber(
+            schema_path=schema_path,
+            system_prompt_path=prompt_path,
+            use_hierarchical_context=False,
+            **(transcriber_kwargs or {}),
+        )
 
     return captured
 
@@ -152,11 +152,7 @@ class TestLangChainTranscriberInit:
                 "temperature": 0.0,
             }
         }
-        concurrency_cfg = {
-            "concurrency": {
-                "transcription": {"service_tier": "flex"}
-            }
-        }
+        concurrency_cfg = {"concurrency": {"transcription": {"service_tier": "flex"}}}
         kwargs = _make_transcriber(tmp_path, model_cfg, concurrency_cfg)
         assert kwargs.get("service_tier") == "flex"
 
@@ -178,6 +174,7 @@ class TestLangChainTranscriberInit:
 # =============================================================================
 # CT-3: text.verbosity extraction and forwarding
 # =============================================================================
+
 
 class TestLangChainTranscriberTextVerbosity:
     """CT-3 regression tests: text_cfg extraction and forwarding to get_provider.
@@ -204,7 +201,7 @@ class TestLangChainTranscriberTextVerbosity:
 
     @pytest.mark.unit
     def test_text_config_not_forwarded_when_absent(self, tmp_path: Path) -> None:
-        """text_config is NOT added to get_provider kwargs when model config has no text key."""
+        """text_config is NOT added to get_provider kwargs when text key is absent."""
         model_cfg = {
             "transcription_model": {
                 "provider": "openai",

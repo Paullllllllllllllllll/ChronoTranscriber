@@ -15,28 +15,26 @@ LangChain handles:
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
 
+from modules.config.capabilities import Capabilities, detect_capabilities
+from modules.infra.logger import setup_logger
 from modules.llm.providers.base import (
-    BaseProvider,
     GOOGLE_TOKEN_MAPPING,
+    BaseProvider,
     TranscriptionResult,
     load_max_retries,
 )
-from modules.infra.logger import setup_logger
-from modules.config.capabilities import Capabilities, detect_capabilities
 
 logger = setup_logger(__name__)
 
 
 class GoogleProvider(BaseProvider):
     """Google Gemini LLM provider using LangChain."""
-    
+
     def __init__(
         self,
         api_key: str,
@@ -47,7 +45,7 @@ class GoogleProvider(BaseProvider):
         timeout: float | None = None,
         top_p: float = 1.0,
         top_k: int | None = None,
-        reasoning_config: Dict[str, Any] | None = None,
+        reasoning_config: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         caps = detect_capabilities(model)
@@ -61,26 +59,28 @@ class GoogleProvider(BaseProvider):
             timeout=timeout,
             **kwargs,
         )
-        
+
         self.top_p = top_p
         self.top_k = top_k
         self.reasoning_config = reasoning_config
-        
+
         self._capabilities = caps
         max_retries = load_max_retries()
-        
+
         # Build LLM kwargs
-        llm_kwargs: Dict[str, Any] = {
+        llm_kwargs: dict[str, Any] = {
             "google_api_key": api_key,
             "model": model,
-            "temperature": temperature if self._capabilities.supports_sampler_controls else None,
+            "temperature": temperature
+            if self._capabilities.supports_sampler_controls
+            else None,
             "max_tokens": effective_max_tokens,
             "timeout": timeout,
             "max_retries": max_retries,
             "top_p": top_p if self._capabilities.supports_top_p else None,
             "top_k": top_k,
         }
-        
+
         # Apply thinking mode for Gemini 2.5+ models that support it
         # Maps reasoning_config.effort to Google's thinking_level parameter
         # Gemini 3+: minimal, low, medium, high
@@ -94,19 +94,20 @@ class GoogleProvider(BaseProvider):
                     "medium": "medium",
                     "high": "high",
                 }
-                llm_kwargs["thinking_level"] = effort_to_level.get(
-                    effort, "medium"
+                llm_kwargs["thinking_level"] = effort_to_level.get(effort, "medium")
+                logger.info(
+                    f"Using thinking_level={llm_kwargs['thinking_level']}"
+                    f" for model {model}"
                 )
-                logger.info(f"Using thinking_level={llm_kwargs['thinking_level']} for model {model}")
-        
+
         # Initialize LangChain ChatGoogleGenerativeAI
         # LangChain handles retry logic with exponential backoff internally
         self._llm = ChatGoogleGenerativeAI(**llm_kwargs)
-    
+
     @property
     def provider_name(self) -> str:
         return "google"
-    
+
     def get_capabilities(self) -> Capabilities:
         return self._capabilities
 
@@ -127,20 +128,20 @@ class GoogleProvider(BaseProvider):
         *,
         system_prompt: str,
         user_instruction: str = "Please transcribe the text from this image.",
-        json_schema: Dict[str, Any] | None = None,
+        json_schema: dict[str, Any] | None = None,
         image_detail: str | None = None,
         media_resolution: str | None = None,
     ) -> TranscriptionResult:
         """Transcribe text from a base64-encoded image using LangChain."""
         caps = self._capabilities
-        
+
         if not caps.supports_image_input:
             return TranscriptionResult(
                 content="",
                 error=f"Model {self.model} does not support vision/image inputs.",
                 transcription_not_possible=True,
             )
-        
+
         # Normalize media_resolution parameter
         resolution = media_resolution
         if resolution:
@@ -148,8 +149,12 @@ class GoogleProvider(BaseProvider):
             if resolution not in ("low", "medium", "high", "ultra_high", "auto"):
                 resolution = None
         if resolution is None:
-            resolution = caps.default_media_resolution if caps.supports_media_resolution else None
-        
+            resolution = (
+                caps.default_media_resolution
+                if caps.supports_media_resolution
+                else None
+            )
+
         # Map to Google's MediaResolution enum values
         resolution_map = {
             "low": "MEDIA_RESOLUTION_LOW",
@@ -158,27 +163,30 @@ class GoogleProvider(BaseProvider):
             "ultra_high": "MEDIA_RESOLUTION_ULTRA_HIGH",
             "auto": "MEDIA_RESOLUTION_UNSPECIFIED",
         }
-        media_resolution_enum = resolution_map.get(resolution) if resolution else None
-        
+        resolution_map.get(resolution) if resolution else None
+
         # Build data URL for Gemini
         data_url = self.create_data_url(image_base64, mime_type)
-        
+
         # Gemini uses standard image_url format
         # Note: LangChain's ChatGoogleGenerativeAI may not directly support per-part
-        # media_resolution in image_url. We'll set it globally via generation config instead.
+        # media_resolution in image_url. We'll set it globally via generation
+        # config instead.
         image_content = {
             "type": "image_url",
             "image_url": data_url,
         }
-        
+
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=[
-                {"type": "text", "text": user_instruction},
-                image_content,
-            ]),
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": user_instruction},
+                    image_content,
+                ]
+            ),
         ]
-        
+
         # Use structured output if schema provided
         # Use include_raw=True to get token usage from the underlying AIMessage
         llm_to_use = self._llm
@@ -188,36 +196,38 @@ class GoogleProvider(BaseProvider):
                 actual_schema = json_schema["schema"]
             else:
                 actual_schema = json_schema
-            
+
             llm_to_use = self._llm.with_structured_output(  # type: ignore[assignment]
                 actual_schema,
                 method="json_schema",
                 include_raw=True,
             )
-        
+
         # media_resolution: LangChain's ChatGoogleGenerativeAI does not
         # expose per-request media_resolution; the parameter is validated
         # above for logging purposes only.
-        invoke_kwargs: Dict[str, Any] = {}
-        
+        invoke_kwargs: dict[str, Any] = {}
+
         # Invoke LLM - LangChain handles retries internally
         return await self._invoke_llm(llm_to_use, messages, invoke_kwargs)
-    
+
     async def _invoke_llm(
         self,
         llm: Any,
-        messages: List[Any],
-        invoke_kwargs: Dict[str, Any] | None = None,
+        messages: list[Any],
+        invoke_kwargs: dict[str, Any] | None = None,
     ) -> TranscriptionResult:
         """Invoke the LLM and process the response.
-        
+
         LangChain handles retry logic internally.
         Response parsing and token tracking are handled by the shared
         BaseProvider._process_llm_response() method.
         """
         try:
             kwargs = invoke_kwargs or {}
-            response = await self._ainvoke_with_retry(llm, messages, expect_image_tokens=True, **kwargs)
+            response = await self._ainvoke_with_retry(
+                llm, messages, expect_image_tokens=True, **kwargs
+            )
             return await self._process_llm_response(response, GOOGLE_TOKEN_MAPPING)
         except Exception as e:
             logger.error(f"Error invoking Google Gemini: {e}")
@@ -225,7 +235,7 @@ class GoogleProvider(BaseProvider):
                 content="",
                 error=str(e),
             )
-    
+
     async def close(self) -> None:
         """Clean up resources."""
         pass

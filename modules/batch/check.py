@@ -22,36 +22,41 @@ Multi-provider support:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from openai import OpenAI, OpenAIError
 
-from modules.config.service import get_config_service
-from modules.infra.logger import setup_logger
-from modules.batch.mapping import extract_custom_id_mapping
 from modules.batch.backends.factory import supports_batch
-from modules.llm.openai_sdk_utils import list_all_batches
-from modules.ui import print_error, print_info, print_success, print_warning
-from modules.ui.batch_display import (
-    display_batch_processing_progress,
-    display_batch_summary,
+from modules.batch.mapping import extract_custom_id_mapping
+
+# Re-export results submodule functions for backward compatibility
+from modules.batch.results import (  # noqa: F401
+    _download_and_parse_openai_results,
+    _finalize_batch_output,
+    _process_non_openai_batch,
+    _sort_transcriptions,
 )
 
 # Re-export status submodule functions for backward compatibility
 from modules.batch.status import (  # noqa: F401
-    load_config,
+    _check_openai_batch_status,
     _parse_temp_file_metadata,
     _recover_batch_ids,
-    _check_openai_batch_status,
     diagnose_api_issues,
+    load_config,
 )
-
-# Re-export results submodule functions for backward compatibility
-from modules.batch.results import (  # noqa: F401
-    _process_non_openai_batch,
-    _download_and_parse_openai_results,
-    _sort_transcriptions,
-    _finalize_batch_output,
+from modules.config.service import get_config_service
+from modules.infra.logger import setup_logger
+from modules.llm.openai_sdk_utils import list_all_batches
+from modules.ui import (  # noqa: F401
+    print_error,
+    print_info,
+    print_success,
+    print_warning,
+)
+from modules.ui.batch_display import (
+    display_batch_processing_progress,
+    display_batch_summary,
 )
 
 logger = setup_logger(__name__)
@@ -59,9 +64,9 @@ logger = setup_logger(__name__)
 
 def process_all_batches(
     root_folder: Path,
-    processing_settings: Dict[str, Any],
+    processing_settings: dict[str, Any],
     client: OpenAI,
-    postprocessing_config: Optional[Dict[str, Any]] = None,
+    postprocessing_config: dict[str, Any] | None = None,
     output_format: str = "txt",
 ) -> None:
     """Finalize all completed batch jobs for a given root folder.
@@ -82,7 +87,7 @@ def process_all_batches(
     print_info("Retrieving list of submitted batches from OpenAI...")
     try:
         batches = list_all_batches(client)
-        batch_dict: Dict[str, Dict[str, Any]] = {
+        batch_dict: dict[str, dict[str, Any]] = {
             str(b.get("id")): b for b in batches if isinstance(b, dict) and b.get("id")
         }
     except (OpenAIError, OSError, ValueError, TypeError) as e:
@@ -99,9 +104,9 @@ def process_all_batches(
 
         # --- 1. Parse temp file metadata ---
         meta = _parse_temp_file_metadata(temp_file)
-        batch_ids: Set[str] = meta["batch_ids"]
+        batch_ids: set[str] = meta["batch_ids"]
         batch_provider: str = meta["batch_provider"]
-        batch_tracking_records: List[Dict[str, Any]] = meta["batch_tracking_records"]
+        batch_tracking_records: list[dict[str, Any]] = meta["batch_tracking_records"]
         has_batch_session: bool = meta["has_batch_session"]
         has_batch_request: bool = meta["has_batch_request"]
         has_batch_metadata: bool = meta["has_batch_metadata"]
@@ -119,30 +124,32 @@ def process_all_batches(
         if not is_batched_file:
             if has_batch_session and not batch_ids:
                 print_warning(
-                    f"{temp_file.name} has a batch_session marker but no batch IDs; skipping. "
-                    f"Use 'main/repair_transcriptions.py' if needed."
+                    f"{temp_file.name} has a batch_session marker but no batch IDs;"
+                    f" skipping. Use 'main/repair_transcriptions.py' if needed."
                 )
             elif batch_ids:
+                n = len(batch_ids)
                 print_warning(
-                    f"{temp_file.name} contains {len(batch_ids)} batch_tracking entries but no "
-                    f"batch_session marker; skipping as non-batched."
+                    f"{temp_file.name} contains {n} batch_tracking entries but no"
+                    f" batch_session marker; skipping as non-batched."
                 )
             elif has_batch_metadata or has_batch_request:
                 print_info(
-                    f"{temp_file.name} has batch-like metadata but no batch_session marker; "
-                    f"treating as non-batched and skipping."
+                    f"{temp_file.name} has batch-like metadata but no"
+                    f" batch_session marker; treating as non-batched and skipping."
                 )
             else:
                 print_info(
-                    f"{temp_file.name} has no batch markers; treating as non-batched and skipping."
+                    f"{temp_file.name} has no batch markers;"
+                    f" treating as non-batched and skipping."
                 )
             continue
 
         if not batch_ids:
             print_warning(
-                f"No batch IDs found in {temp_file.name}. This file appears to be batched but "
-                f"missing tracking entries. Use 'main/repair_transcriptions.py' if you need to "
-                f"reconstruct outputs."
+                f"No batch IDs found in {temp_file.name}. This file appears to be"
+                f" batched but missing tracking entries. Use"
+                f" 'main/repair_transcriptions.py' if you need to reconstruct outputs."
             )
             continue
 
@@ -175,7 +182,8 @@ def process_all_batches(
         if not all_completed:
             if failed_count > 0:
                 print_warning(
-                    f"{failed_count} batches have failed. Check the OpenAI dashboard for details."
+                    f"{failed_count} batches have failed."
+                    f" Check the OpenAI dashboard for details."
                 )
             continue
 
@@ -195,7 +203,8 @@ def process_all_batches(
         can_write_output = True
         if not all_completed:
             print_warning(
-                f"Failed to process all batches for {temp_file.name}. Skipping output writing."
+                f"Failed to process all batches for {temp_file.name}."
+                f" Skipping output writing."
             )
             can_write_output = False
 
@@ -259,7 +268,10 @@ def run_batch_finalization(
 
     for directory in scan_dirs:
         process_all_batches(
-            directory, processing_settings, client, postprocessing_config,
+            directory,
+            processing_settings,
+            client,
+            postprocessing_config,
             output_format=output_format,
         )
     print_info("Batch results processing complete across all directories.")

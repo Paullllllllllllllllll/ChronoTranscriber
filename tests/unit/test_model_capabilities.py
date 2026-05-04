@@ -6,13 +6,12 @@ Tests model capability detection and feature support.
 from __future__ import annotations
 
 import pytest
-from unittest.mock import patch
 
 from modules.config.capabilities import (
     Capabilities,
+    CapabilityError,
     detect_capabilities,
     ensure_image_support,
-    CapabilityError,
 )
 
 

@@ -19,7 +19,9 @@ def test_format_page_image_includes_page_when_present() -> None:
 
 
 @pytest.mark.unit
-def test_display_batch_processing_progress_completed(monkeypatch: pytest.MonkeyPatch, temp_dir: Path) -> None:
+def test_display_batch_processing_progress_completed(
+    monkeypatch: pytest.MonkeyPatch, temp_dir: Path
+) -> None:
     monkeypatch.setattr(bd, "ui_print", MagicMock())
     monkeypatch.setattr(bd, "print_success", MagicMock())
     monkeypatch.setattr(bd, "print_warning", MagicMock())
@@ -39,7 +41,9 @@ def test_display_batch_processing_progress_completed(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.unit
-def test_print_transcription_item_error_includes_details(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_print_transcription_item_error_includes_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(bd, "print_error", MagicMock())
 
     bd.print_transcription_item_error(
@@ -58,7 +62,9 @@ def test_print_transcription_item_error_includes_details(monkeypatch: pytest.Mon
 
 
 @pytest.mark.unit
-def test_display_page_error_summary_formats_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_display_page_error_summary_formats_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(bd, "print_warning", MagicMock())
     monkeypatch.setattr(bd, "ui_print", MagicMock())
 
@@ -67,7 +73,11 @@ def test_display_page_error_summary_formats_entries(monkeypatch: pytest.MonkeyPa
             {
                 "custom_id": "req-1",
                 "image_info": {"image_name": "img.png", "page_number": 2},
-                "error_details": {"status_code": 500, "code": "server", "message": "fail"},
+                "error_details": {
+                    "status_code": 500,
+                    "code": "server",
+                    "message": "fail",
+                },
             }
         ]
     )
@@ -78,7 +88,9 @@ def test_display_page_error_summary_formats_entries(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.unit
-def test_display_batch_summary_groups_by_status(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_display_batch_summary_groups_by_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(bd, "ui_print", MagicMock())
     monkeypatch.setattr(bd, "print_info", MagicMock())
     monkeypatch.setattr(bd, "print_separator", MagicMock())

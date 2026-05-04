@@ -6,16 +6,17 @@ EPUBs, MOBIs) and both resume modes (skip, overwrite).
 
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
 
-from modules.transcribe.resume import ResumeChecker, ResumeResult, ProcessingState
-from modules.infra.paths import create_safe_directory_name, create_safe_filename
+import pytest
 
+from modules.infra.paths import create_safe_directory_name, create_safe_filename
+from modules.transcribe.resume import ProcessingState, ResumeChecker, ResumeResult
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_paths_config(output_dir: Path) -> dict:
     """Build a minimal paths_config pointing all outputs at *output_dir*."""
@@ -42,7 +43,9 @@ def _create_output_txt(output_dir: Path, stem: str, content: str = "text") -> Pa
     return txt_path
 
 
-def _create_output_jsonl(output_dir: Path, stem: str, content: str = '{"x":1}\n') -> Path:
+def _create_output_jsonl(
+    output_dir: Path, stem: str, content: str = '{"x":1}\n'
+) -> Path:
     """Create the deterministic output folder + .jsonl file for *stem*."""
     safe_dir = create_safe_directory_name(stem)
     parent = output_dir / safe_dir
@@ -56,6 +59,7 @@ def _create_output_jsonl(output_dir: Path, stem: str, content: str = '{"x":1}\n'
 # ===========================================================================
 # ResumeChecker — skip mode
 # ===========================================================================
+
 
 class TestResumeCheckerSkipMode:
     """Tests for ResumeChecker with resume_mode='skip'."""
@@ -190,7 +194,9 @@ class TestResumeCheckerSkipMode:
         assert result.state == ProcessingState.NONE
 
     @pytest.mark.unit
-    def test_image_folder_complete_output_returns_complete(self, temp_dir: Path) -> None:
+    def test_image_folder_complete_output_returns_complete(
+        self, temp_dir: Path
+    ) -> None:
         out = temp_dir / "out"
         out.mkdir()
         folder = temp_dir / "input" / "scan_pages"
@@ -228,6 +234,7 @@ class TestResumeCheckerSkipMode:
 # ===========================================================================
 # ResumeChecker — overwrite mode
 # ===========================================================================
+
 
 class TestResumeCheckerOverwriteMode:
     """Tests for ResumeChecker with resume_mode='overwrite'."""
@@ -270,6 +277,7 @@ class TestResumeCheckerOverwriteMode:
 # ResumeChecker.filter_items
 # ===========================================================================
 
+
 class TestFilterItems:
     """Tests for filter_items method."""
 
@@ -289,9 +297,7 @@ class TestFilterItems:
         new_pdf.write_bytes(b"%PDF")
 
         checker = ResumeChecker("skip", _make_paths_config(out))
-        to_process, skipped = checker.filter_items(
-            [processed_pdf, new_pdf], "pdfs"
-        )
+        to_process, skipped = checker.filter_items([processed_pdf, new_pdf], "pdfs")
 
         assert len(to_process) == 1
         assert to_process[0] == new_pdf
@@ -347,6 +353,7 @@ class TestFilterItems:
 # Input-as-output mode
 # ===========================================================================
 
+
 class TestInputAsOutput:
     """Tests for use_input_as_output=True behavior."""
 
@@ -395,12 +402,14 @@ class TestInputAsOutput:
 # CLI argument parsing for --resume / --force
 # ===========================================================================
 
+
 class TestCLIResumeArgs:
     """Tests for --resume and --force/--overwrite CLI flags."""
 
     @pytest.mark.unit
     def test_resume_flag(self) -> None:
         from modules.core.cli_args import create_transcriber_parser
+
         parser = create_transcriber_parser()
         args = parser.parse_args(["--auto", "--resume"])
         assert args.resume is True
@@ -409,6 +418,7 @@ class TestCLIResumeArgs:
     @pytest.mark.unit
     def test_force_flag(self) -> None:
         from modules.core.cli_args import create_transcriber_parser
+
         parser = create_transcriber_parser()
         args = parser.parse_args(["--auto", "--force"])
         assert args.force is True
@@ -417,6 +427,7 @@ class TestCLIResumeArgs:
     @pytest.mark.unit
     def test_overwrite_alias(self) -> None:
         from modules.core.cli_args import create_transcriber_parser
+
         parser = create_transcriber_parser()
         args = parser.parse_args(["--auto", "--overwrite"])
         assert args.force is True
@@ -424,6 +435,7 @@ class TestCLIResumeArgs:
     @pytest.mark.unit
     def test_resume_and_force_mutually_exclusive(self) -> None:
         from modules.core.cli_args import create_transcriber_parser
+
         parser = create_transcriber_parser()
         with pytest.raises(SystemExit):
             parser.parse_args(["--auto", "--resume", "--force"])
@@ -431,6 +443,7 @@ class TestCLIResumeArgs:
     @pytest.mark.unit
     def test_default_neither_set(self) -> None:
         from modules.core.cli_args import create_transcriber_parser
+
         parser = create_transcriber_parser()
         args = parser.parse_args(["--auto"])
         assert args.resume is None
@@ -441,18 +454,21 @@ class TestCLIResumeArgs:
 # UserConfiguration resume_mode field
 # ===========================================================================
 
+
 class TestUserConfigResumeMode:
     """Tests for the resume_mode field on UserConfiguration."""
 
     @pytest.mark.unit
     def test_default_resume_mode(self) -> None:
         from modules.transcribe.user_config import UserConfiguration
+
         config = UserConfiguration()
         assert config.resume_mode == "skip"
 
     @pytest.mark.unit
     def test_custom_resume_mode(self) -> None:
         from modules.transcribe.user_config import UserConfiguration
+
         config = UserConfiguration(resume_mode="overwrite")
         assert config.resume_mode == "overwrite"
 
@@ -460,6 +476,7 @@ class TestUserConfigResumeMode:
 # ===========================================================================
 # ResumeResult / ProcessingState
 # ===========================================================================
+
 
 class TestResumeResultDataclass:
     """Basic tests for the ResumeResult dataclass."""
@@ -487,6 +504,7 @@ class TestResumeResultDataclass:
 # _check_output_exists generic method
 # ===========================================================================
 
+
 class TestCheckOutputExists:
     """Tests for ResumeChecker._check_output_exists generic method."""
 
@@ -499,7 +517,9 @@ class TestCheckOutputExists:
             output_format="txt",
         )
         result = checker._check_output_exists(
-            tmp_path / "test.pdf", "test", tmp_path,
+            tmp_path / "test.pdf",
+            "test",
+            tmp_path,
         )
         assert result.state == ProcessingState.NONE
 

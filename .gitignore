@@ -1,5 +1,6 @@
 /.windsurf/
 /.claude/
+CLAUDE.md
 .venv/
 .mypy_cache/
 .pytest_cache/

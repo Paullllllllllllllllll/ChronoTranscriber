@@ -10,7 +10,11 @@ def test_unwrap_schema_wrapper_dict_returns_name_schema_strict() -> None:
     name, schema, strict = _unwrap_schema(
         {
             "name": "MySchema",
-            "schema": {"type": "object", "properties": {}, "additionalProperties": False},
+            "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
             "strict": False,
         }
     )

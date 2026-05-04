@@ -5,7 +5,8 @@ centralized configuration service.
 
 Submodules:
 - config_loader: YAML configuration loading (ConfigLoader, PROJECT_ROOT, CONFIG_DIR)
-- constants: Application constants (SUPPORTED_IMAGE_FORMATS, SUPPORTED_IMAGE_EXTENSIONS, TERMINAL_BATCH_STATUSES)
+- constants: Application constants (SUPPORTED_IMAGE_FORMATS, SUPPORTED_IMAGE_EXTENSIONS,
+  TERMINAL_BATCH_STATUSES)
 - service: Configuration service singleton (ConfigService, get_config_service, etc.)
 
 Note: Use direct imports from submodules:

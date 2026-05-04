@@ -6,34 +6,40 @@ Tests UI prompt utilities including styled output and input validation.
 from __future__ import annotations
 
 import pytest
-from unittest.mock import patch, MagicMock
-from io import StringIO
 
 from modules.ui.prompts import (
-    PromptStyle,
-    ui_print,
-    print_header,
-    print_separator,
-    print_info,
-    print_success,
-    print_warning,
-    print_error,
     NavigationAction,
     PromptResult,
+    PromptStyle,
+    print_error,
+    print_header,
+    print_info,
+    print_separator,
+    print_success,
+    print_warning,
+    ui_print,
 )
 
 
 class TestPromptStyle:
     """Tests for PromptStyle class."""
-    
+
     @pytest.mark.unit
     def test_all_styles_exist(self) -> None:
         """Test that all expected styles exist."""
         # Core styles available in PromptStyle
         expected = [
-            "HEADER", "HIGHLIGHT", "INFO", "SUCCESS",
-            "WARNING", "ERROR", "DIM", "PROMPT", "DOUBLE_LINE",
-            "SINGLE_LINE", "LIGHT_LINE",
+            "HEADER",
+            "HIGHLIGHT",
+            "INFO",
+            "SUCCESS",
+            "WARNING",
+            "ERROR",
+            "DIM",
+            "PROMPT",
+            "DOUBLE_LINE",
+            "SINGLE_LINE",
+            "LIGHT_LINE",
         ]
         for style_name in expected:
             assert hasattr(PromptStyle, style_name)
@@ -41,14 +47,14 @@ class TestPromptStyle:
 
 class TestUiPrint:
     """Tests for ui_print function."""
-    
+
     @pytest.mark.unit
     def test_basic_output(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test basic output without style."""
         ui_print("Test message")
         captured = capsys.readouterr()
         assert "Test message" in captured.out
-    
+
     @pytest.mark.unit
     def test_handles_unicode_error(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test graceful handling of unicode encoding errors."""
@@ -56,7 +62,7 @@ class TestUiPrint:
         ui_print("Normal text")
         captured = capsys.readouterr()
         assert "Normal" in captured.out
-    
+
     @pytest.mark.unit
     def test_empty_message(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test printing empty message."""
@@ -68,7 +74,7 @@ class TestUiPrint:
 
 class TestPrintHeader:
     """Tests for print_header function."""
-    
+
     @pytest.mark.unit
     def test_header_with_subtitle(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test header with subtitle."""
@@ -76,7 +82,7 @@ class TestPrintHeader:
         captured = capsys.readouterr()
         assert "Main Title" in captured.out
         assert "Subtitle text" in captured.out
-    
+
     @pytest.mark.unit
     def test_header_without_subtitle(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test header without subtitle."""
@@ -87,7 +93,7 @@ class TestPrintHeader:
 
 class TestPrintSeparator:
     """Tests for print_separator function."""
-    
+
     @pytest.mark.unit
     def test_default_separator(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test default separator."""
@@ -95,7 +101,7 @@ class TestPrintSeparator:
         captured = capsys.readouterr()
         # Should print something (a line of some kind)
         assert len(captured.out.strip()) > 0
-    
+
     @pytest.mark.unit
     def test_custom_width(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test separator with custom width."""
@@ -109,7 +115,7 @@ class TestPrintSeparator:
 
 class TestPrintInfo:
     """Tests for print_info function."""
-    
+
     @pytest.mark.unit
     def test_info_with_title(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test info message with title."""
@@ -117,7 +123,7 @@ class TestPrintInfo:
         captured = capsys.readouterr()
         assert "CATEGORY" in captured.out
         assert "Info message" in captured.out
-    
+
     @pytest.mark.unit
     def test_info_without_title(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test info message without title."""
@@ -128,7 +134,7 @@ class TestPrintInfo:
 
 class TestPrintSuccess:
     """Tests for print_success function."""
-    
+
     @pytest.mark.unit
     def test_success_message(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test success message output."""
@@ -139,7 +145,7 @@ class TestPrintSuccess:
 
 class TestPrintWarning:
     """Tests for print_warning function."""
-    
+
     @pytest.mark.unit
     def test_warning_message(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test warning message output."""
@@ -150,7 +156,7 @@ class TestPrintWarning:
 
 class TestPrintError:
     """Tests for print_error function."""
-    
+
     @pytest.mark.unit
     def test_error_message(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test error message output."""
@@ -161,7 +167,7 @@ class TestPrintError:
 
 class TestNavigationAction:
     """Tests for NavigationAction enum."""
-    
+
     @pytest.mark.unit
     def test_action_values(self) -> None:
         """Test NavigationAction enum values."""
@@ -172,24 +178,23 @@ class TestNavigationAction:
 
 class TestPromptResult:
     """Tests for PromptResult dataclass."""
-    
+
     @pytest.mark.unit
     def test_back_result(self) -> None:
         """Test PromptResult for back action."""
         result = PromptResult(action=NavigationAction.BACK)
         assert result.action == NavigationAction.BACK
         assert result.value is None
-    
+
     @pytest.mark.unit
     def test_quit_result(self) -> None:
         """Test PromptResult for quit action."""
         result = PromptResult(action=NavigationAction.QUIT)
         assert result.action == NavigationAction.QUIT
-    
+
     @pytest.mark.unit
     def test_continue_with_value(self) -> None:
         """Test PromptResult with value."""
         result = PromptResult(action=NavigationAction.CONTINUE, value="selected_option")
         assert result.action == NavigationAction.CONTINUE
         assert result.value == "selected_option"
-

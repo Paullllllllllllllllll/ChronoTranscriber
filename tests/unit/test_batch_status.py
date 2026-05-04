@@ -19,13 +19,12 @@ import pytest
 
 import modules.batch.status as batch_status
 
-
 # ---------------------------------------------------------------------------
 # load_config
 # ---------------------------------------------------------------------------
 
-class TestLoadConfig:
 
+class TestLoadConfig:
     @pytest.mark.unit
     def test_returns_three_tuple(self, monkeypatch: pytest.MonkeyPatch) -> None:
         service = MagicMock()
@@ -80,13 +79,15 @@ class TestLoadConfig:
 # _parse_temp_file_metadata
 # ---------------------------------------------------------------------------
 
-class TestParseTempFileMetadata:
 
+class TestParseTempFileMetadata:
     @pytest.mark.unit
     def test_batch_session_record_is_parsed(self, tmp_path: Path) -> None:
         """Only the batch_session record contributes status/provider info."""
         lines = [
-            json.dumps({"batch_session": {"status": "in_progress", "provider": "openai"}}),
+            json.dumps(
+                {"batch_session": {"status": "in_progress", "provider": "openai"}}
+            ),
             json.dumps({"image_metadata": {"custom_id": "req-1"}}),
             json.dumps({"image_metadata": {"custom_id": "req-2"}}),
         ]
@@ -105,12 +106,8 @@ class TestParseTempFileMetadata:
         self, tmp_path: Path
     ) -> None:
         lines = [
-            json.dumps(
-                {"batch_tracking": {"batch_id": "bid_1", "provider": "google"}}
-            ),
-            json.dumps(
-                {"batch_tracking": {"batch_id": "bid_2", "provider": "google"}}
-            ),
+            json.dumps({"batch_tracking": {"batch_id": "bid_1", "provider": "google"}}),
+            json.dumps({"batch_tracking": {"batch_id": "bid_2", "provider": "google"}}),
             json.dumps({"batch_request": {"model": "gemini"}}),
         ]
         jsonl = tmp_path / "track.jsonl"
@@ -155,8 +152,8 @@ class TestParseTempFileMetadata:
 # _recover_batch_ids
 # ---------------------------------------------------------------------------
 
-class TestRecoverBatchIds:
 
+class TestRecoverBatchIds:
     @pytest.mark.unit
     def test_returns_existing_ids_when_nonempty(self, tmp_path: Path) -> None:
         """If batch_ids is already non-empty, recovery is a no-op."""
@@ -218,8 +215,8 @@ class TestRecoverBatchIds:
 # diagnose_api_issues
 # ---------------------------------------------------------------------------
 
-class TestDiagnoseAPIIssues:
 
+class TestDiagnoseAPIIssues:
     @pytest.mark.unit
     def test_runs_without_raising_when_no_key(
         self, monkeypatch: pytest.MonkeyPatch
@@ -246,9 +243,7 @@ class TestDiagnoseAPIIssues:
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
         client = MagicMock()
-        client.models.list.return_value = MagicMock(
-            data=[MagicMock(), MagicMock()]
-        )
+        client.models.list.return_value = MagicMock(data=[MagicMock(), MagicMock()])
         client.batches.list.return_value = MagicMock()
         monkeypatch.setattr(batch_status, "OpenAI", lambda: client)
         monkeypatch.setattr(batch_status, "print_info", MagicMock())

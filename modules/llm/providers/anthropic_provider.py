@@ -15,39 +15,38 @@ LangChain handles:
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from modules.config.capabilities import Capabilities, detect_capabilities
+from modules.infra.logger import setup_logger
 from modules.llm.providers.base import (
     ANTHROPIC_TOKEN_MAPPING,
     BaseProvider,
     TranscriptionResult,
     load_max_retries,
 )
-from modules.infra.logger import setup_logger
-from modules.config.capabilities import Capabilities, detect_capabilities
 
 logger = setup_logger(__name__)
 
 
-def _transform_schema_for_anthropic(schema: Dict[str, Any]) -> Dict[str, Any]:
+def _transform_schema_for_anthropic(schema: dict[str, Any]) -> dict[str, Any]:
     """Transform JSON schema to be Anthropic-compatible.
-    
+
     Anthropic's SDK doesn't support union types like ["string", "null"].
     This function converts them to simple types.
     Also adds required 'title' and 'description' keys for LangChain compatibility.
     """
     import copy
+
     result = copy.deepcopy(schema)
-    
-    def transform_type(obj: Dict[str, Any]) -> None:
+
+    def transform_type(obj: dict[str, Any]) -> None:
         if not isinstance(obj, dict):
             return
-            
+
         # Handle union types like ["string", "null"]
         if "type" in obj and isinstance(obj["type"], list):
             # Filter out "null" and keep the first non-null type
@@ -56,36 +55,36 @@ def _transform_schema_for_anthropic(schema: Dict[str, Any]) -> Dict[str, Any]:
                 obj["type"] = non_null_types[0]
             else:
                 obj["type"] = "string"  # fallback
-        
+
         # Recursively handle properties
         if "properties" in obj and isinstance(obj["properties"], dict):
             for prop in obj["properties"].values():
                 transform_type(prop)
-        
+
         # Handle items in arrays
         if "items" in obj and isinstance(obj["items"], dict):
             transform_type(obj["items"])
-        
+
         # Handle anyOf/oneOf/allOf
         for key in ("anyOf", "oneOf", "allOf"):
             if key in obj and isinstance(obj[key], list):
                 for item in obj[key]:
                     transform_type(item)
-    
+
     transform_type(result)
-    
+
     # Add required top-level keys for LangChain/Anthropic compatibility
     if "title" not in result:
         result["title"] = "TranscriptionSchema"
     if "description" not in result:
         result["description"] = "Schema for document transcription output"
-    
+
     return result
 
 
 class AnthropicProvider(BaseProvider):
     """Anthropic (Claude) LLM provider using LangChain."""
-    
+
     def __init__(
         self,
         api_key: str,
@@ -93,10 +92,10 @@ class AnthropicProvider(BaseProvider):
         *,
         temperature: float = 0.0,
         max_tokens: int = 4096,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
         top_p: float = 1.0,
-        top_k: Optional[int] = None,
-        reasoning_config: Optional[Dict[str, Any]] = None,
+        top_k: int | None = None,
+        reasoning_config: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         caps = detect_capabilities(model)
@@ -110,23 +109,23 @@ class AnthropicProvider(BaseProvider):
             timeout=timeout,
             **kwargs,
         )
-        
+
         self.top_p = top_p
         self.top_k = top_k
         self.reasoning_config = reasoning_config
-        
+
         self._capabilities = caps
         max_retries = load_max_retries()
-        
+
         # Build LangChain model kwargs
-        model_kwargs: Dict[str, Any] = {}
+        model_kwargs: dict[str, Any] = {}
         if self._capabilities.supports_sampler_controls:
             model_kwargs["temperature"] = temperature
         if self._capabilities.supports_top_p:
             model_kwargs["top_p"] = top_p
         if top_k is not None:
             model_kwargs["top_k"] = top_k
-        
+
         # Apply thinking for Claude models that support it.
         # Opus 4.7: adaptive only (budget_tokens returns 400).
         # Opus 4.6 / Sonnet 4.6: adaptive recommended, enabled deprecated.
@@ -142,9 +141,7 @@ class AnthropicProvider(BaseProvider):
             )
             if family in _ADAPTIVE_FAMILIES:
                 model_kwargs["thinking"] = {"type": "adaptive"}
-                logger.info(
-                    f"Using adaptive thinking for model {model}"
-                )
+                logger.info(f"Using adaptive thinking for model {model}")
             else:
                 effort_to_budget = {
                     "low": 1024,
@@ -157,10 +154,9 @@ class AnthropicProvider(BaseProvider):
                     "budget_tokens": budget,
                 }
                 logger.info(
-                    f"Using extended thinking (budget={budget}) "
-                    f"for model {model}"
+                    f"Using extended thinking (budget={budget}) for model {model}"
                 )
-        
+
         # Initialize LangChain ChatAnthropic
         # LangChain handles retry logic with exponential backoff internally
         self._llm = ChatAnthropic(  # type: ignore[call-arg]
@@ -171,17 +167,17 @@ class AnthropicProvider(BaseProvider):
             max_retries=max_retries,
             **model_kwargs,
         )
-    
+
     @property
     def provider_name(self) -> str:
         return "anthropic"
-    
+
     def get_capabilities(self) -> Capabilities:
         return self._capabilities
 
     def _normalize_list_content(self, content_list: list) -> str:
         """Anthropic can return content as a list of text blocks."""
-        text_parts: List[str] = []
+        text_parts: list[str] = []
         for item in content_list:
             if isinstance(item, dict):
                 t = item.get("text")
@@ -198,24 +194,24 @@ class AnthropicProvider(BaseProvider):
         *,
         system_prompt: str,
         user_instruction: str = "Please transcribe the text from this image.",
-        json_schema: Optional[Dict[str, Any]] = None,
-        image_detail: Optional[str] = None,
-        media_resolution: Optional[str] = None,
+        json_schema: dict[str, Any] | None = None,
+        image_detail: str | None = None,
+        media_resolution: str | None = None,
     ) -> TranscriptionResult:
         """Transcribe text from a base64-encoded image using LangChain.
-        
+
         Note: Anthropic doesn't use image_detail or media_resolution parameters.
         These parameters are accepted for API compatibility but ignored.
         """
         caps = self._capabilities
-        
+
         if not caps.supports_image_input:
             return TranscriptionResult(
                 content="",
                 error=f"Model {self.model} does not support vision/image inputs.",
                 transcription_not_possible=True,
             )
-        
+
         # Anthropic uses a different image format
         # See: https://docs.anthropic.com/claude/docs/vision
         image_content = {
@@ -226,38 +222,48 @@ class AnthropicProvider(BaseProvider):
                 "data": image_base64,
             },
         }
-        
+
         # Build system message — with cache_control when prompt caching is enabled
         if self._caching_enabled:
             anthropic_cfg = self._caching_config.get("anthropic", {})
-            ttl = anthropic_cfg.get("ttl", "5m") if isinstance(anthropic_cfg, dict) else "5m"
-            cache_control: Dict[str, Any] = {"type": "ephemeral"}
+            ttl = (
+                anthropic_cfg.get("ttl", "5m")
+                if isinstance(anthropic_cfg, dict)
+                else "5m"
+            )
+            cache_control: dict[str, Any] = {"type": "ephemeral"}
             if ttl == "1h":
                 cache_control["ttl"] = "1h"
-            system_message = SystemMessage(content=[
-                {
-                    "type": "text",
-                    "text": system_prompt,
-                    "cache_control": cache_control,
-                }
-            ])
+            system_message = SystemMessage(
+                content=[
+                    {
+                        "type": "text",
+                        "text": system_prompt,
+                        "cache_control": cache_control,
+                    }
+                ]
+            )
         else:
             system_message = SystemMessage(content=system_prompt)
 
         messages = [
             system_message,
-            HumanMessage(content=[
-                {"type": "text", "text": user_instruction},
-                image_content,
-            ]),
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": user_instruction},
+                    image_content,
+                ]
+            ),
         ]
 
         # Native structured outputs (no function calling)
         # We require json_schema mode so the model returns a validated JSON object.
         if json_schema and not caps.supports_structured_outputs:
             raise ValueError(
-                f"Selected Anthropic model '{self.model}' does not support native structured outputs. "
-                f"Choose a Claude model that supports structured outputs (e.g. claude-sonnet-4-5-* or claude-opus-4-1-*)."
+                f"Selected Anthropic model '{self.model}' does not support"
+                f" native structured outputs. "
+                f"Choose a Claude model that supports structured outputs"
+                f" (e.g. claude-sonnet-4-5-* or claude-opus-4-1-*)."
             )
 
         # Use include_raw=True to get token usage from the underlying AIMessage
@@ -277,23 +283,25 @@ class AnthropicProvider(BaseProvider):
                 method="json_schema",
                 include_raw=True,
             )
-        
+
         # Invoke LLM - LangChain handles retries internally
         return await self._invoke_llm(llm_to_use, messages)
-    
+
     async def _invoke_llm(
         self,
         llm: Any,
-        messages: List[Any],
+        messages: list[Any],
     ) -> TranscriptionResult:
         """Invoke the LLM and process the response.
-        
+
         LangChain handles retry logic internally.
         Response parsing and token tracking are handled by the shared
         BaseProvider._process_llm_response() method.
         """
         try:
-            response = await self._ainvoke_with_retry(llm, messages, expect_image_tokens=True)
+            response = await self._ainvoke_with_retry(
+                llm, messages, expect_image_tokens=True
+            )
             return await self._process_llm_response(response, ANTHROPIC_TOKEN_MAPPING)
         except Exception as e:
             logger.error(f"Error invoking Anthropic: {e}")
@@ -301,7 +309,7 @@ class AnthropicProvider(BaseProvider):
                 content="",
                 error=str(e),
             )
-    
+
     async def close(self) -> None:
         """Clean up resources."""
         pass

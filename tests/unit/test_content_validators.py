@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from modules.llm.quality import ContentQualityError
 from modules.llm.quality import (
+    ContentQualityError,
     detect_excessive_line_repetition,
     detect_hallucination_loop,
     detect_invalid_transcription_markers,
@@ -52,10 +52,7 @@ SYSTEM_PROMPT_BLEED = (
     '"additionalProperties": false}\n\nLYON 69000\n**Paul Bocuse** ⭐⭐⭐'
 )
 
-MAP_LABEL_LOOP = (
-    "R. de la Republique\n" * 25
-    + "Pl. Bellecour\n" * 25
-)
+MAP_LABEL_LOOP = "R. de la Republique\n" * 25 + "Pl. Bellecour\n" * 25
 
 DEFAULT_CONFIG = {
     "enabled": True,
@@ -133,6 +130,7 @@ QUESTION_MARK_CLUSTER = (
 
 # ── detect_hallucination_loop ────────────────────────────────────────────────
 
+
 class TestDetectHallucinationLoop:
     def test_clean_text_passes(self) -> None:
         assert detect_hallucination_loop(CLEAN_TRANSCRIPTION, DEFAULT_CONFIG) is None
@@ -176,11 +174,12 @@ class TestDetectHallucinationLoop:
 
 # ── detect_truncation ────────────────────────────────────────────────────────
 
+
 class TestDetectTruncation:
     def test_clean_text_passes(self) -> None:
-        assert detect_truncation(
-            CLEAN_TRANSCRIPTION, False, False, DEFAULT_CONFIG
-        ) is None
+        assert (
+            detect_truncation(CLEAN_TRANSCRIPTION, False, False, DEFAULT_CONFIG) is None
+        )
 
     def test_short_text_detected(self) -> None:
         result = detect_truncation(SHORT_TRUNCATION, False, False, DEFAULT_CONFIG)
@@ -210,6 +209,7 @@ class TestDetectTruncation:
 
 # ── detect_system_prompt_bleed ───────────────────────────────────────────────
 
+
 class TestDetectSystemPromptBleed:
     def test_clean_text_passes(self) -> None:
         assert detect_system_prompt_bleed(CLEAN_TRANSCRIPTION, DEFAULT_CONFIG) is None
@@ -229,11 +229,13 @@ class TestDetectSystemPromptBleed:
 
 # ── detect_excessive_line_repetition ─────────────────────────────────────────
 
+
 class TestDetectExcessiveLineRepetition:
     def test_clean_text_passes(self) -> None:
-        assert detect_excessive_line_repetition(
-            CLEAN_TRANSCRIPTION, DEFAULT_CONFIG
-        ) is None
+        assert (
+            detect_excessive_line_repetition(CLEAN_TRANSCRIPTION, DEFAULT_CONFIG)
+            is None
+        )
 
     def test_map_label_loop_detected(self) -> None:
         result = detect_excessive_line_repetition(MAP_LABEL_LOOP, DEFAULT_CONFIG)
@@ -254,11 +256,13 @@ class TestDetectExcessiveLineRepetition:
 
 # ── detect_invalid_transcription_markers ────────────────────────────────────
 
+
 class TestDetectInvalidTranscriptionMarkers:
     def test_clean_text_passes(self) -> None:
-        assert detect_invalid_transcription_markers(
-            CLEAN_TRANSCRIPTION, DEFAULT_CONFIG
-        ) is None
+        assert (
+            detect_invalid_transcription_markers(CLEAN_TRANSCRIPTION, DEFAULT_CONFIG)
+            is None
+        )
 
     def test_icon_description_literal_detected(self) -> None:
         result = detect_invalid_transcription_markers(
@@ -304,9 +308,9 @@ class TestDetectInvalidTranscriptionMarkers:
 
     def test_disabled_config_skips(self) -> None:
         config = {**DEFAULT_CONFIG, "invalid_markers": {"enabled": False}}
-        assert detect_invalid_transcription_markers(
-            ICON_DESCRIPTION_DRIFT, config
-        ) is None
+        assert (
+            detect_invalid_transcription_markers(ICON_DESCRIPTION_DRIFT, config) is None
+        )
 
     def test_empty_text_passes(self) -> None:
         assert detect_invalid_transcription_markers("", DEFAULT_CONFIG) is None
@@ -316,38 +320,32 @@ class TestDetectInvalidTranscriptionMarkers:
 
     def test_michelin_boilerplate_passes(self) -> None:
         """Realistic Michelin entries must not trigger false positives."""
-        assert detect_invalid_transcription_markers(
-            MICHELIN_BOILERPLATE, DEFAULT_CONFIG
-        ) is None
+        assert (
+            detect_invalid_transcription_markers(MICHELIN_BOILERPLATE, DEFAULT_CONFIG)
+            is None
+        )
 
 
 # ── validate_content_quality (orchestrator) ──────────────────────────────────
 
+
 class TestValidateContentQuality:
     def test_clean_text_passes(self) -> None:
-        validate_content_quality(
-            CLEAN_TRANSCRIPTION, False, False, DEFAULT_CONFIG
-        )
+        validate_content_quality(CLEAN_TRANSCRIPTION, False, False, DEFAULT_CONFIG)
 
     def test_hallucination_raises(self) -> None:
         with pytest.raises(ContentQualityError) as exc_info:
-            validate_content_quality(
-                HALLUCINATION_LOOP, False, False, DEFAULT_CONFIG
-            )
+            validate_content_quality(HALLUCINATION_LOOP, False, False, DEFAULT_CONFIG)
         assert exc_info.value.failure_type == "hallucination_loop"
 
     def test_truncation_raises(self) -> None:
         with pytest.raises(ContentQualityError) as exc_info:
-            validate_content_quality(
-                SHORT_TRUNCATION, False, False, DEFAULT_CONFIG
-            )
+            validate_content_quality(SHORT_TRUNCATION, False, False, DEFAULT_CONFIG)
         assert exc_info.value.failure_type == "truncation"
 
     def test_bleed_raises(self) -> None:
         with pytest.raises(ContentQualityError) as exc_info:
-            validate_content_quality(
-                SYSTEM_PROMPT_BLEED, False, False, DEFAULT_CONFIG
-            )
+            validate_content_quality(SYSTEM_PROMPT_BLEED, False, False, DEFAULT_CONFIG)
         assert exc_info.value.failure_type == "system_prompt_bleed"
 
     def test_line_repetition_raises(self) -> None:

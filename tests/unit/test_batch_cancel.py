@@ -14,7 +14,7 @@ that:
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -23,13 +23,12 @@ import modules.batch.cancel as cancel_mod
 from modules.batch.backends import BatchHandle
 from modules.batch.cancel import cancel_batch_by_id
 
-
 # ---------------------------------------------------------------------------
 # Basic success / failure propagation
 # ---------------------------------------------------------------------------
 
-class TestCancelBatchByIdReturnPropagation:
 
+class TestCancelBatchByIdReturnPropagation:
     @pytest.mark.unit
     def test_returns_true_when_backend_cancels(
         self, monkeypatch: pytest.MonkeyPatch
@@ -62,8 +61,8 @@ class TestCancelBatchByIdReturnPropagation:
 # BatchHandle construction
 # ---------------------------------------------------------------------------
 
-class TestCancelBatchByIdHandleConstruction:
 
+class TestCancelBatchByIdHandleConstruction:
     @pytest.mark.unit
     def test_default_metadata_is_empty_dict(
         self, monkeypatch: pytest.MonkeyPatch
@@ -83,16 +82,14 @@ class TestCancelBatchByIdHandleConstruction:
         assert passed_handle.metadata == {}
 
     @pytest.mark.unit
-    def test_metadata_is_passed_through(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_metadata_is_passed_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
         backend = MagicMock()
         backend.cancel = MagicMock(return_value=True)
         monkeypatch.setattr(
             cancel_mod, "get_batch_backend", MagicMock(return_value=backend)
         )
 
-        meta: Dict[str, Any] = {"submitted_at": "2026-01-01", "job": "xyz"}
+        meta: dict[str, Any] = {"submitted_at": "2026-01-01", "job": "xyz"}
         cancel_batch_by_id("anthropic", "msgbatch_123", metadata=meta)
 
         (passed_handle,), _kwargs = backend.cancel.call_args
@@ -118,8 +115,8 @@ class TestCancelBatchByIdHandleConstruction:
 # Provider-agnostic behaviour
 # ---------------------------------------------------------------------------
 
-class TestCancelBatchByIdProviderAgnostic:
 
+class TestCancelBatchByIdProviderAgnostic:
     @pytest.mark.unit
     @pytest.mark.parametrize(
         "provider,batch_id",

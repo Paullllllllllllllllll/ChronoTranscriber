@@ -8,13 +8,13 @@ image_processing key access from display_processing_summary().
 from __future__ import annotations
 
 import inspect
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 
 
 class TestDisplayProcessingSummaryConcurrencyConfig:
-    """CT-4 regression tests: concurrency config key access in display_processing_summary.
+    """CT-4 regression: concurrency config key access in display_processing_summary.
 
     Before the fix, display_processing_summary() read
     concurrency_config.get("image_processing", {}), a key that does not exist
@@ -24,7 +24,7 @@ class TestDisplayProcessingSummaryConcurrencyConfig:
 
     @pytest.mark.unit
     def test_image_processing_key_not_accessed_in_source(self) -> None:
-        """Concurrency helper must not read 'image_processing' from concurrency_config."""
+        """Helper must not read 'image_processing' from concurrency_config."""
         from modules.ui import workflows as wf_module
 
         source = inspect.getsource(wf_module.WorkflowUI._build_concurrency_config_lines)
@@ -39,15 +39,17 @@ class TestDisplayProcessingSummaryConcurrencyConfig:
         from modules.ui import workflows as wf_module
 
         source = inspect.getsource(wf_module.WorkflowUI._build_concurrency_config_lines)
-        assert 'concurrency_config.get("concurrency", {}).get("transcription"' in source, (
+        assert (
+            'concurrency_config.get("concurrency", {}).get("transcription"' in source
+        ), (
             "_build_concurrency_config_lines is not reading from the correct "
             "concurrency.transcription path"
         )
 
     @pytest.mark.unit
     def test_correct_concurrency_config_path_resolution(self) -> None:
-        """The concurrency.transcription.* path resolves the correct configured values."""
-        concurrency_cfg: Dict[str, Any] = {
+        """The concurrency.transcription.* path resolves the correct config values."""
+        concurrency_cfg: dict[str, Any] = {
             "concurrency": {
                 "transcription": {
                     "concurrency_limit": 1500,
@@ -58,11 +60,7 @@ class TestDisplayProcessingSummaryConcurrencyConfig:
             "daily_token_limit": {"enabled": True, "daily_tokens": 25_000_000},
         }
 
-        trans_cfg = (
-            concurrency_cfg
-            .get("concurrency", {})
-            .get("transcription", {})
-        )
+        trans_cfg = concurrency_cfg.get("concurrency", {}).get("transcription", {})
         assert trans_cfg.get("concurrency_limit", 5) == 1500
         assert trans_cfg.get("service_tier", "default") == "flex"
         assert trans_cfg.get("retry", {}).get("attempts", 5) == 10
@@ -70,13 +68,9 @@ class TestDisplayProcessingSummaryConcurrencyConfig:
     @pytest.mark.unit
     def test_empty_concurrency_config_returns_defaults(self) -> None:
         """When concurrency_config is empty, defaults are applied correctly."""
-        concurrency_cfg: Dict[str, Any] = {}
+        concurrency_cfg: dict[str, Any] = {}
 
-        trans_cfg = (
-            concurrency_cfg
-            .get("concurrency", {})
-            .get("transcription", {})
-        )
+        trans_cfg = concurrency_cfg.get("concurrency", {}).get("transcription", {})
         assert trans_cfg.get("concurrency_limit", 5) == 5
         assert trans_cfg.get("service_tier", "default") == "default"
         assert trans_cfg.get("retry", {}).get("attempts", 5) == 5
@@ -87,7 +81,7 @@ class TestWorkflowUIOptions:
 
     @pytest.mark.unit
     def test_get_processing_type_options_returns_list(self) -> None:
-        """get_processing_type_options returns a non-empty list of (value, label) tuples."""
+        """get_processing_type_options returns a non-empty list of (value, label)."""
         from modules.ui.workflows import WorkflowUI
 
         options = WorkflowUI.get_processing_type_options()

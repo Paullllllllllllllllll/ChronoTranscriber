@@ -2,27 +2,28 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from modules.transcribe.pipeline import (
-    transcribe_single_image,
     _build_jsonl_record,
-    write_output_from_jsonl,
     run_transcription_pipeline,
+    transcribe_single_image,
+    write_output_from_jsonl,
 )
-
 
 # ---------------------------------------------------------------------------
 # transcribe_single_image
 # ---------------------------------------------------------------------------
 
+
 class TestTranscribeSingleImage:
     @pytest.mark.asyncio
-    async def test_gpt_method_without_transcriber_returns_error(self, tmp_path: Path) -> None:
+    async def test_gpt_method_without_transcriber_returns_error(
+        self, tmp_path: Path
+    ) -> None:
         img = tmp_path / "test.png"
         img.write_bytes(b"")
         result = await transcribe_single_image(
@@ -65,7 +66,9 @@ class TestTranscribeSingleImage:
     @pytest.mark.asyncio
     @patch("modules.transcribe.pipeline.transcribe_image_with_llm")
     @patch("modules.transcribe.pipeline.extract_transcribed_text")
-    async def test_gpt_method_success(self, mock_extract, mock_llm, tmp_path: Path) -> None:
+    async def test_gpt_method_success(
+        self, mock_extract, mock_llm, tmp_path: Path
+    ) -> None:
         mock_llm.return_value = {"content": "some text"}
         mock_extract.return_value = "Extracted text"
 
@@ -86,7 +89,9 @@ class TestTranscribeSingleImage:
     @pytest.mark.asyncio
     @patch("modules.transcribe.pipeline.transcribe_image_with_llm")
     @patch("modules.transcribe.pipeline.extract_transcribed_text")
-    async def test_gpt_extraction_error_returns_error_marker(self, mock_extract, mock_llm, tmp_path: Path) -> None:
+    async def test_gpt_extraction_error_returns_error_marker(
+        self, mock_extract, mock_llm, tmp_path: Path
+    ) -> None:
         mock_llm.return_value = {"content": "raw"}
         mock_extract.side_effect = ValueError("parse error")
 
@@ -104,7 +109,9 @@ class TestTranscribeSingleImage:
 
     @pytest.mark.asyncio
     @patch("modules.transcribe.pipeline.perform_ocr")
-    async def test_exception_during_ocr_returns_error(self, mock_ocr, tmp_path: Path) -> None:
+    async def test_exception_during_ocr_returns_error(
+        self, mock_ocr, tmp_path: Path
+    ) -> None:
         mock_ocr.side_effect = RuntimeError("OCR crash")
 
         img = tmp_path / "page.png"
@@ -122,6 +129,7 @@ class TestTranscribeSingleImage:
 # ---------------------------------------------------------------------------
 # _build_jsonl_record
 # ---------------------------------------------------------------------------
+
 
 class TestBuildJsonlRecord:
     def test_returns_none_for_none_tuple(self) -> None:
@@ -153,7 +161,10 @@ class TestBuildJsonlRecord:
     def test_includes_basic_fields(self) -> None:
         result = _build_jsonl_record(
             ("/path/to/img.png", "img.png", "Some text", None, 3),
-            "source.pdf", "tesseract", False, None,
+            "source.pdf",
+            "tesseract",
+            False,
+            None,
         )
         assert result["pre_processed_image"] == "/path/to/img.png"
         assert result["image_name"] == "img.png"
@@ -181,7 +192,10 @@ class TestBuildJsonlRecord:
         raw_resp = {"output": "data"}
         result = _build_jsonl_record(
             ("/path", "img.png", "text", raw_resp, 0),
-            "source.pdf", "gpt", False, mock_transcriber,
+            "source.pdf",
+            "gpt",
+            False,
+            mock_transcriber,
         )
         assert "request_context" in result
         assert result["request_context"]["model"] == "gpt-4o"
@@ -190,7 +204,10 @@ class TestBuildJsonlRecord:
     def test_tesseract_no_request_context(self) -> None:
         result = _build_jsonl_record(
             ("/path", "img.png", "text", None, 0),
-            "source.pdf", "tesseract", False, None,
+            "source.pdf",
+            "tesseract",
+            False,
+            None,
         )
         assert "request_context" not in result
         assert "raw_response" not in result
@@ -200,11 +217,14 @@ class TestBuildJsonlRecord:
 # write_output_from_jsonl
 # ---------------------------------------------------------------------------
 
+
 class TestWriteOutputFromJsonl:
     @patch("modules.postprocess.writer.postprocess_transcription")
     @patch("modules.transcribe.pipeline.read_jsonl_records")
     @patch("modules.transcribe.pipeline.extract_transcription_records")
-    def test_writes_output_file(self, mock_extract, mock_read, mock_pp, tmp_path: Path) -> None:
+    def test_writes_output_file(
+        self, mock_extract, mock_read, mock_pp, tmp_path: Path
+    ) -> None:
         mock_read.return_value = [{"dummy": "record"}]
         mock_extract.return_value = [
             {"image_name": "p1.png", "text_chunk": "Page 1 text", "order_index": 0},
@@ -222,7 +242,9 @@ class TestWriteOutputFromJsonl:
 
     @patch("modules.transcribe.pipeline.read_jsonl_records")
     @patch("modules.transcribe.pipeline.extract_transcription_records")
-    def test_returns_false_when_no_records(self, mock_extract, mock_read, tmp_path: Path) -> None:
+    def test_returns_false_when_no_records(
+        self, mock_extract, mock_read, tmp_path: Path
+    ) -> None:
         mock_read.return_value = []
         mock_extract.return_value = []
 
@@ -249,11 +271,14 @@ class TestWriteOutputFromJsonl:
 # run_transcription_pipeline
 # ---------------------------------------------------------------------------
 
+
 class TestRunTranscriptionPipeline:
     @pytest.mark.asyncio
     @patch("modules.transcribe.pipeline.write_output_from_jsonl")
     @patch("modules.transcribe.pipeline.get_processed_image_names")
-    async def test_all_images_already_processed_skips(self, mock_processed, mock_write, tmp_path: Path) -> None:
+    async def test_all_images_already_processed_skips(
+        self, mock_processed, mock_write, tmp_path: Path
+    ) -> None:
         mock_processed.return_value = {"page1.png", "page2.png"}
         mock_write.return_value = True
 
@@ -288,15 +313,16 @@ class TestRunTranscriptionPipeline:
         img.write_bytes(b"")
         output_path = tmp_path / "output.txt"
 
-        with patch(
-            "modules.transcribe.pipeline.run_concurrent_transcription_tasks",
-            new_callable=AsyncMock,
-            return_value=[
-                (str(img), "page.png", "text", None, 0)
-            ],
-        ), patch(
-            "modules.postprocess.writer.postprocess_transcription",
-            return_value="final text",
+        with (
+            patch(
+                "modules.transcribe.pipeline.run_concurrent_transcription_tasks",
+                new_callable=AsyncMock,
+                return_value=[(str(img), "page.png", "text", None, 0)],
+            ),
+            patch(
+                "modules.postprocess.writer.postprocess_transcription",
+                return_value="final text",
+            ),
         ):
             await run_transcription_pipeline(
                 image_files=[img],

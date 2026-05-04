@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.0.1
+# ChronoTranscriber v1.1.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical

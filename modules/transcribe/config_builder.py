@@ -49,9 +49,7 @@ def _resolve_schema(args_schema: str | None, config: UserConfiguration) -> None:
         config.selected_schema_path = default_schema
 
 
-def _resolve_context(
-    args_context: str | None, config: UserConfiguration
-) -> None:
+def _resolve_context(args_context: str | None, config: UserConfiguration) -> None:
     """Resolve and set additional context path from CLI ``--context``."""
     if args_context:
         context_path = resolve_path(args_context, PROJECT_ROOT)
@@ -113,10 +111,7 @@ def _resolve_model_config_from_cli(
 
         effective_provider = str(tm.get("provider", "")).lower()
         effective_model = str(tm.get("name", "")).lower()
-        if not (
-            effective_provider == "openai"
-            and effective_model.startswith("gpt-5")
-        ):
+        if not (effective_provider == "openai" and effective_model.startswith("gpt-5")):
             print_warning(
                 "--model-verbosity is currently effective only for "
                 "OpenAI GPT-5 models (gpt-5, gpt-5-mini, gpt-5.1, "
@@ -135,8 +130,7 @@ def _collect_files_for_type(
     if processing_type == "images":
         if not input_path.is_dir():
             raise ValueError(
-                f"For image processing, input must be a directory: "
-                f"{input_path}"
+                f"For image processing, input must be a directory: {input_path}"
             )
         if args.files:
             return [input_path / f for f in args.files]
@@ -178,9 +172,7 @@ def create_config_from_cli_args(
     config.auto_selector = AutoSelector(paths_config)
 
     # Resume mode: CLI flags take precedence; fall back to paths_config
-    config_resume_default = paths_config.get("general", {}).get(
-        "resume_mode", "skip"
-    )
+    config_resume_default = paths_config.get("general", {}).get("resume_mode", "skip")
     if getattr(args, "force", None):
         config.resume_mode = "overwrite"
     elif getattr(args, "resume", None):
@@ -189,12 +181,8 @@ def create_config_from_cli_args(
         config.resume_mode = config_resume_default
 
     # Output format: CLI flag takes precedence; fall back to paths_config
-    config_default = paths_config.get("general", {}).get(
-        "output_format", "txt"
-    )
-    config.output_format = (
-        getattr(args, "output_format", None) or config_default
-    )
+    config_default = paths_config.get("general", {}).get("output_format", "txt")
+    config.output_format = getattr(args, "output_format", None) or config_default
 
     # Parse page range if provided
     if getattr(args, "pages", None):
@@ -225,8 +213,7 @@ def create_config_from_cli_args(
 
         if not decisions:
             raise ValueError(
-                f"No processable files found in auto mode input directory: "
-                f"{auto_input}"
+                f"No processable files found in auto mode input directory: {auto_input}"
             )
 
         # Apply resume filtering to exclude already-completed items
@@ -277,27 +264,15 @@ def create_config_from_cli_args(
 
     # Validate non-auto mode has required arguments
     if not args.type or not args.method:
-        raise ValueError(
-            "--type and --method are required unless using --auto mode"
-        )
+        raise ValueError("--type and --method are required unless using --auto mode")
 
     config.processing_type = args.type
     config.transcription_method = args.method
 
-    if (
-        config.processing_type == "epubs"
-        and config.transcription_method != "native"
-    ):
-        raise ValueError(
-            "EPUB processing only supports the 'native' method."
-        )
-    if (
-        config.processing_type == "mobis"
-        and config.transcription_method != "native"
-    ):
-        raise ValueError(
-            "MOBI processing only supports the 'native' method."
-        )
+    if config.processing_type == "epubs" and config.transcription_method != "native":
+        raise ValueError("EPUB processing only supports the 'native' method.")
+    if config.processing_type == "mobis" and config.transcription_method != "native":
+        raise ValueError("MOBI processing only supports the 'native' method.")
 
     if args.method == "gpt":
         config.use_batch_processing = args.batch

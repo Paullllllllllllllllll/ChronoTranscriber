@@ -7,144 +7,169 @@ prompting utilities for a consistent and navigable user experience.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
-from modules.ui.prompts import (
-    NavigationAction,
-    PromptResult,
-    prompt_select,
-    prompt_yes_no,
-    prompt_text,
-    prompt_multiselect,
-    print_header,
-    print_separator,
-    print_info,
-    print_success,
-    print_warning,
-    print_error,
-    ui_print,
-    PromptStyle,
-)
-from modules.transcribe.user_config import UserConfiguration
+from modules.config.config_loader import PROJECT_ROOT
 from modules.infra.logger import setup_logger
 from modules.llm.schema_utils import list_schema_options
-from modules.config.config_loader import PROJECT_ROOT
+from modules.transcribe.user_config import UserConfiguration
+from modules.ui.prompts import (
+    NavigationAction,
+    PromptStyle,
+    print_error,
+    print_header,
+    print_info,
+    print_separator,
+    print_success,
+    print_warning,
+    prompt_multiselect,
+    prompt_select,
+    prompt_text,
+    prompt_yes_no,
+    ui_print,
+)
 
 logger = setup_logger(__name__)
 
 
 class WorkflowUI:
     """Enhanced workflow UI with navigation support."""
-    
+
     @staticmethod
     def display_welcome() -> None:
         """Display welcome banner."""
-        print_header(
-            "CHRONO TRANSCRIBER",
-            "Historical Document Digitization Tool"
+        print_header("CHRONO TRANSCRIBER", "Historical Document Digitization Tool")
+        ui_print(
+            "  Transform historical documents into searchable text using",
+            PromptStyle.INFO,
         )
-        ui_print("  Transform historical documents into searchable text using", PromptStyle.INFO)
-        ui_print("  state-of-the-art transcription methods tailored to your needs.\n", PromptStyle.INFO)
-    
+        ui_print(
+            "  state-of-the-art transcription methods tailored to your needs.\n",
+            PromptStyle.INFO,
+        )
+
     @staticmethod
-    def get_processing_type_options() -> List[Tuple[str, str]]:
+    def get_processing_type_options() -> list[tuple[str, str]]:
         """Get processing type options."""
         return [
             ("auto", "Auto Mode — Automatically detect and process mixed file types"),
-            ("images", "Image Folders — Process collections of images organized in folders"),
+            (
+                "images",
+                "Image Folders — Process collections of images organized in folders",
+            ),
             ("pdfs", "PDF Documents — Process PDF files or scanned documents"),
             ("epubs", "EPUB Documents — Extract text directly from EPUB ebooks"),
         ]
-    
+
     @staticmethod
-    def get_method_options(processing_type: str) -> List[Tuple[str, str]]:
+    def get_method_options(processing_type: str) -> list[tuple[str, str]]:
         """Get transcription method options based on processing type."""
         if processing_type == "pdfs":
             return [
-                ("native", "Native PDF Extraction — Fast extraction from searchable PDFs"),
+                (
+                    "native",
+                    "Native PDF Extraction — Fast extraction from searchable PDFs",
+                ),
                 ("tesseract", "Tesseract OCR — Open-source OCR for printed text"),
-                ("gpt", "GPT Transcription — AI-powered transcription for complex documents"),
+                (
+                    "gpt",
+                    "GPT Transcription — AI-powered transcription"
+                    " for complex documents",
+                ),
             ]
         if processing_type == "epubs":
             return [
-                ("native", "Native EPUB Extraction — Extract XHTML text from EPUB chapters"),
+                (
+                    "native",
+                    "Native EPUB Extraction — Extract XHTML text from EPUB chapters",
+                ),
             ]
         return [
             ("tesseract", "Tesseract OCR — Open-source OCR for printed text"),
-            ("gpt", "GPT Transcription — AI-powered transcription for handwriting & complex layouts"),
+            (
+                "gpt",
+                "GPT Transcription — AI-powered transcription"
+                " for handwriting & complex layouts",
+            ),
         ]
-    
+
     @staticmethod
-    def get_batch_options() -> List[Tuple[str, str]]:
+    def get_batch_options() -> list[tuple[str, str]]:
         """Get batch processing options."""
         return [
-            ("yes", "Batch Processing — Asynchronous processing for large jobs (lower cost)"),
+            (
+                "yes",
+                "Batch Processing — Asynchronous processing"
+                " for large jobs (lower cost)",
+            ),
             ("no", "Synchronous Processing — Immediate results for smaller jobs"),
         ]
-    
+
     @staticmethod
     def configure_processing_type(config: UserConfiguration) -> bool:
         """Configure processing type with navigation.
-        
+
         Args:
             config: UserConfiguration object
-        
+
         Returns:
             True if configured successfully, False if user wants to go back/quit
         """
         result = prompt_select(
             "What type of documents would you like to process?",
             WorkflowUI.get_processing_type_options(),
-            allow_back=False
+            allow_back=False,
         )
-        
+
         if result.action == NavigationAction.CONTINUE:
             config.processing_type = result.value
             logger.info(f"User selected processing type: {result.value}")
             return True
-        
+
         return False
-    
+
     @staticmethod
     def configure_transcription_method(config: UserConfiguration) -> bool:
         """Configure transcription method with navigation.
-        
+
         Returns:
             True if configured successfully, False if user wants to go back
         """
+        proc_type = config.processing_type
         result = prompt_select(
-            f"Which transcription method would you like to use for {config.processing_type}?",
+            f"Which transcription method would you like to use for {proc_type}?",
             WorkflowUI.get_method_options(config.processing_type or "pdfs"),
-            allow_back=True
+            allow_back=True,
         )
-        
+
         if result.action == NavigationAction.CONTINUE:
             config.transcription_method = result.value
             logger.info(f"User selected transcription method: {result.value}")
             return True
         elif result.action == NavigationAction.BACK:
             return False
-        
+
         return False
-    
+
     @staticmethod
     def configure_batch_processing(config: UserConfiguration) -> bool:
         """Configure batch processing with navigation.
-        
+
         Returns:
             True if configured successfully, False if user wants to go back
         """
         if config.transcription_method != "gpt":
             return True
-        
+
         # Check API key based on configured provider
         import os
+
         from modules.config.service import get_config_service
-        
+
         config_service = get_config_service()
         model_config = config_service.get_model_config()
         provider = model_config.get("transcription_model", {}).get("provider", "openai")
-        
+
         # Map provider to environment variable
         provider_env_vars = {
             "openai": "OPENAI_API_KEY",
@@ -152,56 +177,58 @@ class WorkflowUI:
             "google": "GOOGLE_API_KEY",
             "openrouter": "OPENROUTER_API_KEY",
         }
-        
+
         env_var = provider_env_vars.get(provider, "OPENAI_API_KEY")
         api_key = os.getenv(env_var)
-        
+
         if not api_key:
-            raise ValueError(f"{env_var} environment variable is required for {provider.upper()} transcription.")
-        
+            raise ValueError(
+                f"{env_var} environment variable is required for"
+                f" {provider.upper()} transcription."
+            )
+
         # Ask about batch processing
         result = prompt_select(
             "Would you like to use batch processing for GPT transcription?",
             WorkflowUI.get_batch_options(),
-            allow_back=True
+            allow_back=True,
         )
-        
+
         if result.action == NavigationAction.BACK:
             return False
-        
-        config.use_batch_processing = (result.value == "yes")
+
+        config.use_batch_processing = result.value == "yes"
         logger.info(f"User selected batch processing: {config.use_batch_processing}")
-        
+
         # Configure schema
         if not WorkflowUI.configure_schema_selection(config):
             return False
-        
+
         # Configure additional context
-        if not WorkflowUI.configure_additional_context(config):
-            return False
-        
-        return True
-    
+        return WorkflowUI.configure_additional_context(config)
+
     @staticmethod
     def configure_schema_selection(config: UserConfiguration) -> bool:
         """Configure schema selection with navigation.
-        
+
         Returns:
             True if configured successfully, False if user wants to go back
         """
         if config.transcription_method != "gpt":
             return True
-        
+
         options = list_schema_options()
-        
+
         if not options:
             # Fallback to default
-            default_schema = (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json").resolve()
+            default_schema = (
+                PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json"
+            ).resolve()
             config.selected_schema_name = "markdown_transcription_schema"
             config.selected_schema_path = default_schema
             print_info(f"Using default schema: {default_schema.name}")
             return True
-        
+
         if len(options) == 1:
             # Only one option
             only_name, only_path = options[0]
@@ -209,75 +236,83 @@ class WorkflowUI:
             config.selected_schema_path = only_path
             print_info(f"Using schema: {only_name} ({only_path.name})")
             return True
-        
+
         # Multiple options - let user choose
-        value_to_path: Dict[str, Path] = {name: path for name, path in options}
-        choices: List[Tuple[str, str]] = [
+        value_to_path: dict[str, Path] = {name: path for name, path in options}
+        choices: list[tuple[str, str]] = [
             (name, f"{name} — {path.name}") for name, path in options
         ]
-        
+
         result = prompt_select(
             "Which transcription schema would you like to use?",
             choices,
-            allow_back=True
+            allow_back=True,
         )
-        
+
         if result.action == NavigationAction.CONTINUE:
             config.selected_schema_name = result.value
             config.selected_schema_path = value_to_path[result.value]
             logger.info(f"User selected schema: {result.value}")
             return True
-        
+
         return False
-    
+
     @staticmethod
     def configure_additional_context(config: UserConfiguration) -> bool:
         """Configure additional context with navigation.
-        
+
         Context resolution follows a hierarchy (most specific wins):
         1. File-specific: {input_stem}_transcr_context.txt next to input file
         2. Folder-specific: {parent_folder}_transcr_context.txt next to parent folder
         3. General fallback: context/transcr_context.txt in project root
-        
+
         The user can choose to:
         - Use hierarchical resolution (auto-detect file/folder-specific context)
         - Use the global additional_context.txt (overrides hierarchy)
         - Use no context at all
-        
+
         Returns:
             True if configured successfully, False if user wants to go back
         """
         if config.transcription_method != "gpt":
             return True
-        
+
         context_file = PROJECT_ROOT / "additional_context" / "additional_context.txt"
         global_context_exists = context_file.exists()
-        
+
         # Build options based on available context sources
         options = [
-            ("hierarchical", "Auto — Use file/folder-specific context if available (recommended)"),
+            (
+                "hierarchical",
+                "Auto — Use file/folder-specific context if available (recommended)",
+            ),
         ]
         if global_context_exists:
             options.append(
-                ("global", f"Global — Use {context_file.name} for all files (overrides file-specific)")
+                (
+                    "global",
+                    f"Global — Use {context_file.name} for all files"
+                    " (overrides file-specific)",
+                )
             )
-        options.append(
-            ("none", "None — Proceed without any additional context")
-        )
-        
+        options.append(("none", "None — Proceed without any additional context"))
+
         result = prompt_select(
-            "How should additional context be resolved?",
-            options,
-            allow_back=True
+            "How should additional context be resolved?", options, allow_back=True
         )
-        
+
         if result.action == NavigationAction.BACK:
             return False
-        
+
         if result.value == "hierarchical":
-            config.additional_context_path = None  # Triggers hierarchical resolution at runtime
+            config.additional_context_path = (
+                None  # Triggers hierarchical resolution at runtime
+            )
             config.use_hierarchical_context = True
-            print_info("Using hierarchical context resolution (file > folder > general fallback).")
+            print_info(
+                "Using hierarchical context resolution"
+                " (file > folder > general fallback)."
+            )
         elif result.value == "global":
             config.additional_context_path = context_file
             config.use_hierarchical_context = False
@@ -286,49 +321,56 @@ class WorkflowUI:
             config.additional_context_path = None
             config.use_hierarchical_context = False
             print_info("Proceeding without additional context.")
-        
-        logger.info(f"Additional context mode: {result.value}, path: {config.additional_context_path}")
+
+        logger.info(
+            "Additional context mode: %s, path: %s",
+            result.value,
+            config.additional_context_path,
+        )
         return True
-    
+
     @staticmethod
     def configure_auto_mode_schema(config: UserConfiguration) -> bool:
         """Configure schema and context for auto mode when GPT files are detected.
-        
+
         This method checks if any GPT transcription will occur in auto mode
         and prompts for schema selection if so.
-        
+
         Args:
             config: UserConfiguration object with auto_decisions populated
-        
+
         Returns:
             True if configured successfully, False if user wants to go back
         """
         # Check if any decisions will use GPT
         decisions = config.auto_decisions or []
         gpt_decisions = [d for d in decisions if d.method == "gpt"]
-        
+
         if not gpt_decisions:
             # No GPT processing, skip schema selection
             return True
-        
-        print_header("GPT TRANSCRIPTION SETTINGS", f"{len(gpt_decisions)} file(s) will use GPT transcription")
-        
+
+        print_header(
+            "GPT TRANSCRIPTION SETTINGS",
+            f"{len(gpt_decisions)} file(s) will use GPT transcription",
+        )
+
         # configure_schema_selection and configure_additional_context gate on
         # config.transcription_method == "gpt".  In auto mode the field is
         # None, so temporarily set it so the prompts actually appear.
         prev_method = config.transcription_method
         config.transcription_method = "gpt"
-        
+
         # Configure schema
         if not WorkflowUI.configure_schema_selection(config):
             config.transcription_method = prev_method
             return False
-        
+
         # Configure additional context
         if not WorkflowUI.configure_additional_context(config):
             config.transcription_method = prev_method
             return False
-        
+
         config.transcription_method = prev_method
         return True
 
@@ -399,8 +441,15 @@ class WorkflowUI:
         result = prompt_select(
             "How should existing output files be handled?",
             [
-                ("skip", "Skip — Resume processing, skip files with existing output (default)"),
-                ("overwrite", "Overwrite — Reprocess all files, overwriting existing output"),
+                (
+                    "skip",
+                    "Skip — Resume processing, skip files with existing"
+                    " output (default)",
+                ),
+                (
+                    "overwrite",
+                    "Overwrite — Reprocess all files, overwriting existing output",
+                ),
             ],
             allow_back=True,
         )
@@ -420,35 +469,44 @@ class WorkflowUI:
     def select_items_for_processing(
         config: UserConfiguration,
         base_dir: Path,
-        paths_config: Optional[Dict[str, Any]] = None,
+        paths_config: dict[str, Any] | None = None,
     ) -> bool:
         """Select items for processing based on configuration.
-        
+
         Returns:
             True if items selected successfully, False if user wants to go back
         """
         # Handle auto mode separately
         if config.processing_type == "auto":
             return WorkflowUI._configure_auto_mode(config, base_dir, paths_config)
-        
+
         print_header(
             f"DOCUMENT SELECTION — {(config.processing_type or 'UNKNOWN').upper()}",
-            "Choose which items to process"
+            "Choose which items to process",
         )
-        
+
         # Display current configuration
         ui_print("  Current Settings:", PromptStyle.HIGHLIGHT)
         print_separator(PromptStyle.LIGHT_LINE, 80)
-        ui_print(f"    • Document type: {(config.processing_type or 'unknown').capitalize()}", PromptStyle.INFO)
-        ui_print(f"    • Transcription method: {(config.transcription_method or 'unknown').capitalize()}", PromptStyle.INFO)
+        doc_type = (config.processing_type or "unknown").capitalize()
+        ui_print(f"    • Document type: {doc_type}", PromptStyle.INFO)
+        trans_method = (config.transcription_method or "unknown").capitalize()
+        ui_print(
+            f"    • Transcription method: {trans_method}",
+            PromptStyle.INFO,
+        )
         if config.transcription_method == "gpt":
-            mode = "Batch (asynchronous)" if config.use_batch_processing else "Synchronous"
+            mode = (
+                "Batch (asynchronous)" if config.use_batch_processing else "Synchronous"
+            )
             ui_print(f"    • Processing mode: {mode}", PromptStyle.INFO)
             if config.selected_schema_name:
-                ui_print(f"    • Schema: {config.selected_schema_name}", PromptStyle.INFO)
+                ui_print(
+                    f"    • Schema: {config.selected_schema_name}", PromptStyle.INFO
+                )
         print_separator(PromptStyle.LIGHT_LINE, 80)
         ui_print("")
-        
+
         if config.processing_type == "images":
             return WorkflowUI._select_image_folders(config, base_dir)
         if config.processing_type == "pdfs":
@@ -464,7 +522,7 @@ class WorkflowUI:
                 ("all", "Process all EPUBs (including subfolders)"),
                 ("specific", "Select specific EPUB files"),
             ],
-            allow_back=True
+            allow_back=True,
         )
 
         if result.action == NavigationAction.BACK:
@@ -491,7 +549,7 @@ class WorkflowUI:
             f"Select EPUB files to process ({len(epub_files)} available):",
             file_items,
             allow_all=True,
-            allow_back=True
+            allow_back=True,
         )
 
         if selection_result.action == NavigationAction.BACK:
@@ -506,82 +564,82 @@ class WorkflowUI:
         config.process_all = len(selected_paths) == len(epub_files)
         print_success(f"Selected {len(selected_paths)} EPUB file(s) for processing.")
         return True
-    
+
     @staticmethod
     def _select_image_folders(config: UserConfiguration, image_dir: Path) -> bool:
         """Select image folders for processing."""
         from modules.images.pipeline import SUPPORTED_IMAGE_EXTENSIONS
-        
+
         subfolders = [f for f in image_dir.iterdir() if f.is_dir()]
         direct_images = [
-            f for f in image_dir.iterdir() 
+            f
+            for f in image_dir.iterdir()
             if f.is_file() and f.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
         ]
-        
+
         if not subfolders and not direct_images:
             print_error(f"No image folders or images found in {image_dir}")
             print_info("Please add image folders and try again.")
             return False
-        
+
         if not subfolders and direct_images:
-            print_info(f"Found {len(direct_images)} images directly in the input directory.")
+            print_info(
+                f"Found {len(direct_images)} images directly in the input directory."
+            )
             result = prompt_select(
                 "How would you like to proceed?",
                 [
                     ("process", "Process these images directly"),
-                    ("cancel", "Cancel — organize images into subfolders first")
+                    ("cancel", "Cancel — organize images into subfolders first"),
                 ],
-                allow_back=True
+                allow_back=True,
             )
-            
+
             if result.action == NavigationAction.BACK:
                 return False
-            
+
             if result.value == "process":
                 config.selected_items = [image_dir]
                 return True
             else:
                 print_info("Please organize your images into subfolders and try again.")
                 return False
-        
+
         # Select folders
         print_info(f"Found {len(subfolders)} image folder(s) in the input directory.")
-        
+
         result = prompt_select(
             "Would you like to process all folders or select specific ones?",
-            [
-                ("specific", "Select specific folders"),
-                ("all", "Process all folders")
-            ],
-            allow_back=True
+            [("specific", "Select specific folders"), ("all", "Process all folders")],
+            allow_back=True,
         )
-        
+
         if result.action == NavigationAction.BACK:
             return False
-        
+
         if result.value == "all":
             config.selected_items = subfolders
             config.process_all = True
             print_success(f"Selected all {len(subfolders)} folders for processing.")
             return True
-        
+
         # Multi-select folders
         folder_items = [(str(f), f.name) for f in subfolders]
         selection_result = prompt_multiselect(
             f"Select image folders to process ({len(subfolders)} available):",
             folder_items,
             allow_all=True,
-            allow_back=True
+            allow_back=True,
         )
-        
+
         if selection_result.action == NavigationAction.BACK:
             return False
-        
+
         selected_paths = [Path(p) for p in selection_result.value]
         config.selected_items = selected_paths
         print_success(f"Selected {len(selected_paths)} folder(s) for processing.")
         return True
-    
+
     @staticmethod
     def _select_pdf_files(config: UserConfiguration, pdf_dir: Path) -> bool:
         """Select PDF files for processing."""
@@ -590,14 +648,14 @@ class WorkflowUI:
             [
                 ("all", "Process all PDFs (including subfolders)"),
                 ("subfolders", "Process PDFs from specific subfolders"),
-                ("specific", "Select specific PDF files")
+                ("specific", "Select specific PDF files"),
             ],
-            allow_back=True
+            allow_back=True,
         )
-        
+
         if result.action == NavigationAction.BACK:
             return False
-        
+
         if result.value == "all":
             all_pdfs = list(pdf_dir.rglob("*.pdf"))
             if not all_pdfs:
@@ -607,82 +665,87 @@ class WorkflowUI:
             config.process_all = True
             print_success(f"Selected all {len(all_pdfs)} PDF(s) for processing.")
             return True
-        
+
         if result.value == "subfolders":
             subfolders = [d for d in pdf_dir.iterdir() if d.is_dir()]
             if not subfolders:
                 print_error(f"No subfolders found in {pdf_dir}")
                 return False
-            
+
             folder_items = [(str(f), f.name) for f in subfolders]
             selection_result = prompt_multiselect(
                 f"Select subfolders containing PDFs ({len(subfolders)} available):",
                 folder_items,
                 allow_all=True,
-                allow_back=True
+                allow_back=True,
             )
-            
+
             if selection_result.action == NavigationAction.BACK:
                 return False
-            
+
             selected_folders = [Path(p) for p in selection_result.value]
-            pdf_files: List[Path] = []
+            pdf_files: list[Path] = []
             for folder in selected_folders:
                 folder_pdfs = list(folder.glob("*.pdf"))
                 if not folder_pdfs:
                     print_warning(f"No PDFs found in {folder.name}")
                 else:
                     pdf_files.extend(folder_pdfs)
-            
+
             if not pdf_files:
                 print_error("No PDF files found in selected folders.")
                 return False
-            
+
             config.selected_items = pdf_files
-            print_success(f"Selected {len(pdf_files)} PDF(s) from {len(selected_folders)} folder(s).")
+            print_success(
+                f"Selected {len(pdf_files)} PDF(s) from"
+                f" {len(selected_folders)} folder(s)."
+            )
             return True
-        
+
         # Specific PDFs
         all_pdfs = list(pdf_dir.glob("*.pdf"))
         if not all_pdfs:
             print_error(f"No PDF files found in {pdf_dir}")
             return False
-        
+
         pdf_items = [(str(f), f.name) for f in all_pdfs]
         selection_result = prompt_multiselect(
             f"Select PDF files to process ({len(all_pdfs)} available):",
             pdf_items,
             allow_all=True,
-            allow_back=True
+            allow_back=True,
         )
-        
+
         if selection_result.action == NavigationAction.BACK:
             return False
-        
+
         selected_pdfs = [Path(p) for p in selection_result.value]
         config.selected_items = selected_pdfs
         print_success(f"Selected {len(selected_pdfs)} PDF(s) for processing.")
         return True
-    
+
     @staticmethod
     def _configure_auto_mode(
         config: UserConfiguration,
         base_dir: Path,
-        paths_config: Optional[Dict[str, Any]] = None,
+        paths_config: dict[str, Any] | None = None,
     ) -> bool:
         """Configure auto mode processing.
-        
+
         Args:
             config: UserConfiguration object
             base_dir: Base directory to scan (from Auto paths config)
-        
+
         Returns:
             True if configured successfully, False if user wants to go back
         """
-        from modules.documents.auto_selector import AutoSelector
         from modules.config.service import get_config_service
+        from modules.documents.auto_selector import AutoSelector
 
-        print_header("AUTO MODE CONFIGURATION", "Automatic file detection and method selection")
+        print_header(
+            "AUTO MODE CONFIGURATION", "Automatic file detection and method selection"
+        )
 
         selector = config.auto_selector
         if selector is None:
@@ -690,7 +753,7 @@ class WorkflowUI:
                 paths_config = get_config_service().get_paths_config()
             selector = AutoSelector(paths_config or {})
             config.auto_selector = selector
-        
+
         # Scan directory and create decisions
         print_info(f"Scanning directory: {base_dir}")
         decisions = selector.create_decisions(base_dir)
@@ -702,8 +765,8 @@ class WorkflowUI:
 
         # Apply resume filtering to exclude already-completed items
         if config.resume_mode == "skip":
-            from modules.transcribe.resume import ResumeChecker, ProcessingState
             from modules.infra.paths import PathConfig
+            from modules.transcribe.resume import ProcessingState, ResumeChecker
 
             pc = PathConfig.from_paths_config(paths_config or {})
             checker = ResumeChecker(
@@ -717,8 +780,10 @@ class WorkflowUI:
             )
             total_before = len(decisions)
             decisions = [
-                d for d in decisions
-                if checker.should_skip(d.file_path, "auto").state != ProcessingState.COMPLETE
+                d
+                for d in decisions
+                if checker.should_skip(d.file_path, "auto").state
+                != ProcessingState.COMPLETE
             ]
             skipped_count = total_before - len(decisions)
             if skipped_count:
@@ -729,33 +794,33 @@ class WorkflowUI:
             if not decisions:
                 print_info("All files already processed. Nothing to do.")
                 return False
-        
+
         # Display decision summary
         selector.print_decision_summary(decisions)
-        
+
         # Confirm with user
         result = prompt_yes_no(
             f"Proceed with processing {len(decisions)} file(s) using auto mode?",
             default=True,
-            allow_back=True
+            allow_back=True,
         )
-        
+
         if result.action == NavigationAction.BACK:
             return False
-        
+
         if result.action == NavigationAction.CONTINUE and result.value:
             # Store decisions and output directory
             config.auto_decisions = decisions
             config.selected_items = [base_dir]  # Will be used as output dir
             return True
-        
+
         return False
-    
+
     @staticmethod
     def _build_processing_config_lines(
         config: UserConfiguration,
         is_auto: bool,
-        decisions: List[Any],
+        decisions: list[Any],
         has_gpt: bool,
     ) -> None:
         """Display the 'Processing Configuration' section.
@@ -767,42 +832,63 @@ class WorkflowUI:
         print_separator(PromptStyle.LIGHT_LINE, 80)
 
         if is_auto:
-            ui_print(f"    • Document type: Auto (mixed)", PromptStyle.INFO)
+            ui_print("    • Document type: Auto (mixed)", PromptStyle.INFO)
             # Show method breakdown
             from collections import Counter
+
             method_counts = Counter(d.method for d in decisions)
             for method, count in sorted(method_counts.items(), key=lambda x: -x[1]):
                 ui_print(f"    • {method.upper()}: {count} file(s)", PromptStyle.INFO)
-            ui_print(f"    • Processing mode: Synchronous", PromptStyle.INFO)
+            ui_print("    • Processing mode: Synchronous", PromptStyle.INFO)
         else:
-            ui_print(f"    • Document type: {(config.processing_type or 'unknown').capitalize()}", PromptStyle.INFO)
-            ui_print(f"    • Transcription method: {(config.transcription_method or 'unknown').upper()}", PromptStyle.INFO)
+            doc_type = (config.processing_type or "unknown").capitalize()
+            ui_print(f"    • Document type: {doc_type}", PromptStyle.INFO)
+            trans_method = (config.transcription_method or "unknown").upper()
+            ui_print(
+                f"    • Transcription method: {trans_method}",
+                PromptStyle.INFO,
+            )
             if config.transcription_method == "gpt":
-                mode = "Batch (asynchronous)" if config.use_batch_processing else "Synchronous"
+                mode = (
+                    "Batch (asynchronous)"
+                    if config.use_batch_processing
+                    else "Synchronous"
+                )
                 ui_print(f"    • Processing mode: {mode}", PromptStyle.INFO)
 
         # Schema and context (shown when GPT is involved)
         if has_gpt:
             if config.selected_schema_name:
-                ui_print(f"    • Schema: {config.selected_schema_name}", PromptStyle.INFO)
+                ui_print(
+                    f"    • Schema: {config.selected_schema_name}", PromptStyle.INFO
+                )
             # Display context resolution mode accurately
             if config.additional_context_path:
-                ui_print(f"    • Additional context: Global ({config.additional_context_path.name})", PromptStyle.INFO)
-            elif getattr(config, 'use_hierarchical_context', False):
-                ui_print(f"    • Additional context: Hierarchical (file/folder-specific)", PromptStyle.INFO)
+                ctx_name = config.additional_context_path.name
+                ui_print(
+                    f"    • Additional context: Global ({ctx_name})",
+                    PromptStyle.INFO,
+                )
+            elif getattr(config, "use_hierarchical_context", False):
+                ui_print(
+                    "    • Additional context: Hierarchical (file/folder-specific)",
+                    PromptStyle.INFO,
+                )
             else:
-                ui_print(f"    • Additional context: None", PromptStyle.DIM)
+                ui_print("    • Additional context: None", PromptStyle.DIM)
 
         # Show page range if configured
         if config.page_range is not None:
-            ui_print(f"    • Page range: {config.page_range.describe()}", PromptStyle.INFO)
+            ui_print(
+                f"    • Page range: {config.page_range.describe()}", PromptStyle.INFO
+            )
 
         print_separator(PromptStyle.LIGHT_LINE, 80)
 
     @staticmethod
     def _build_model_config_lines(
-        model_config: Dict[str, Any],
-        concurrency_config: Dict[str, Any],
+        model_config: dict[str, Any],
+        concurrency_config: dict[str, Any],
     ) -> None:
         """Display the 'Model Configuration' section.
 
@@ -841,7 +927,7 @@ class WorkflowUI:
 
     @staticmethod
     def _build_concurrency_config_lines(
-        concurrency_config: Dict[str, Any],
+        concurrency_config: dict[str, Any],
     ) -> None:
         """Display the 'Concurrency Configuration' section.
 
@@ -855,7 +941,10 @@ class WorkflowUI:
         trans_cfg = concurrency_config.get("concurrency", {}).get("transcription", {})
         trans_concurrency = trans_cfg.get("concurrency_limit", 5)
         trans_service_tier = trans_cfg.get("service_tier", "default")
-        ui_print(f"    • Transcription API: {trans_concurrency} concurrent requests", PromptStyle.INFO)
+        ui_print(
+            f"    • Transcription API: {trans_concurrency} concurrent requests",
+            PromptStyle.INFO,
+        )
         ui_print(f"      - Service tier: {trans_service_tier}", PromptStyle.DIM)
 
         # Request timeout
@@ -879,25 +968,27 @@ class WorkflowUI:
     @staticmethod
     def _build_output_location_lines(
         config: UserConfiguration,
-        paths_config: Dict[str, Any],
+        paths_config: dict[str, Any],
         is_auto: bool,
     ) -> None:
         """Display the 'Output Location' section."""
         ui_print("\n  Output Location:", PromptStyle.HIGHLIGHT)
         print_separator(PromptStyle.LIGHT_LINE, 80)
-        use_input_as_output = paths_config.get('general', {}).get('input_paths_is_output_path', False)
+        use_input_as_output = paths_config.get("general", {}).get(
+            "input_paths_is_output_path", False
+        )
         if use_input_as_output:
             ui_print("    • Output: Same directory as input files", PromptStyle.INFO)
         else:
-            file_paths = paths_config.get('file_paths', {})
+            file_paths = paths_config.get("file_paths", {})
             if is_auto:
-                output_dir = file_paths.get('Auto', {}).get('output', 'auto_out')
+                output_dir = file_paths.get("Auto", {}).get("output", "auto_out")
             elif config.processing_type == "images":
-                output_dir = file_paths.get('Images', {}).get('output', 'images_out')
+                output_dir = file_paths.get("Images", {}).get("output", "images_out")
             elif config.processing_type == "pdfs":
-                output_dir = file_paths.get('PDFs', {}).get('output', 'pdfs_out')
+                output_dir = file_paths.get("PDFs", {}).get("output", "pdfs_out")
             elif config.processing_type == "epubs":
-                output_dir = file_paths.get('EPUBs', {}).get('output', 'epubs_out')
+                output_dir = file_paths.get("EPUBs", {}).get("output", "epubs_out")
             else:
                 output_dir = "configured output directory"
             ui_print(f"    • Output directory: {output_dir}", PromptStyle.INFO)
@@ -906,10 +997,10 @@ class WorkflowUI:
     @staticmethod
     def _build_resume_info_lines(
         config: UserConfiguration,
-        paths_config: Dict[str, Any],
-        selected_file_paths: List[Path],
+        paths_config: dict[str, Any],
+        selected_file_paths: list[Path],
         is_auto: bool,
-    ) -> Tuple[bool, bool]:
+    ) -> tuple[bool, bool]:
         """Display the 'Resume Information' section.
 
         Handles the special case where all items are already processed
@@ -920,8 +1011,11 @@ class WorkflowUI:
             *should_return* is ``True`` the caller must return
             *return_value* immediately.
         """
-        from modules.transcribe.resume import ResumeChecker, ProcessingState
-        use_input_as_output = paths_config.get('general', {}).get('input_paths_is_output_path', False)
+        from modules.transcribe.resume import ResumeChecker
+
+        use_input_as_output = paths_config.get("general", {}).get(
+            "input_paths_is_output_path", False
+        )
         resume_checker = ResumeChecker(
             resume_mode=config.resume_mode,
             paths_config=paths_config,
@@ -941,13 +1035,17 @@ class WorkflowUI:
         ui_print(f"    • Resume mode: {config.resume_mode}", PromptStyle.INFO)
         if skipped and config.resume_mode == "skip":
             ui_print(
-                f"    • {len(skipped)} of {total_count} item(s) already have output and will be skipped",
+                f"    • {len(skipped)} of {total_count} item(s) already"
+                " have output and will be skipped",
                 PromptStyle.WARNING,
             )
             new_count = total_count - len(skipped)
             ui_print(f"    • {new_count} item(s) will be processed", PromptStyle.INFO)
         elif config.resume_mode == "overwrite":
-            ui_print(f"    • All {total_count} item(s) will be (re)processed", PromptStyle.INFO)
+            ui_print(
+                f"    • All {total_count} item(s) will be (re)processed",
+                PromptStyle.INFO,
+            )
         else:
             ui_print(f"    • {total_count} item(s) will be processed", PromptStyle.INFO)
         print_separator(PromptStyle.LIGHT_LINE, 80)
@@ -976,6 +1074,7 @@ class WorkflowUI:
         """
         # Load configs for display
         from modules.config.service import get_config_service
+
         config_service = get_config_service()
         model_config = config_service.get_model_config()
         paths_config = config_service.get_paths_config()
@@ -994,9 +1093,9 @@ class WorkflowUI:
 
         # === Item count ===
         if is_auto:
-            ui_print(f"  Ready to process ", PromptStyle.INFO, end="")
+            ui_print("  Ready to process ", PromptStyle.INFO, end="")
             ui_print(f"{len(decisions)}", PromptStyle.HIGHLIGHT, end="")
-            ui_print(f" file(s) in auto mode\n", PromptStyle.INFO)
+            ui_print(" file(s) in auto mode\n", PromptStyle.INFO)
         else:
             if config.processing_type == "images":
                 item_type = "image folder(s)"
@@ -1006,8 +1105,10 @@ class WorkflowUI:
                 item_type = "EPUB file(s)"
             else:
                 item_type = "file(s)"
-            ui_print(f"  Ready to process ", PromptStyle.INFO, end="")
-            ui_print(f"{len(config.selected_items or [])}", PromptStyle.HIGHLIGHT, end="")
+            ui_print("  Ready to process ", PromptStyle.INFO, end="")
+            ui_print(
+                f"{len(config.selected_items or [])}", PromptStyle.HIGHLIGHT, end=""
+            )
             ui_print(f" {item_type}\n", PromptStyle.INFO)
 
         # === Processing Configuration ===
@@ -1049,16 +1150,14 @@ class WorkflowUI:
         ui_print("")
 
         result = prompt_yes_no(
-            "Proceed with processing?",
-            default=True,
-            allow_back=True
+            "Proceed with processing?", default=True, allow_back=True
         )
 
         if result.action == NavigationAction.CONTINUE:
             return bool(result.value)
 
         return False
-    
+
     @staticmethod
     def display_completion_summary(
         config: UserConfiguration,
@@ -1067,7 +1166,7 @@ class WorkflowUI:
         duration_seconds: float = 0.0,
     ) -> None:
         """Display detailed completion summary.
-        
+
         Args:
             config: User configuration object
             processed_count: Number of successfully processed items
@@ -1075,17 +1174,18 @@ class WorkflowUI:
             duration_seconds: Total processing duration in seconds
         """
         from modules.config.service import get_config_service
+
         config_service = get_config_service()
         paths_config = config_service.get_paths_config()
-        
+
         print_header("PROCESSING COMPLETE", "")
-        
+
         total_count = processed_count + failed_count
-        
+
         # === Results Section ===
         ui_print("  Results:", PromptStyle.HIGHLIGHT)
         print_separator(PromptStyle.LIGHT_LINE, 80)
-        
+
         if config.use_batch_processing and config.transcription_method == "gpt":
             print_success("Batch processing jobs have been submitted!")
             ui_print(f"    • Jobs submitted: {total_count}", PromptStyle.INFO)
@@ -1093,12 +1193,17 @@ class WorkflowUI:
             if failed_count == 0 and processed_count > 0:
                 print_success(f"All {processed_count} item(s) processed successfully!")
             elif processed_count > 0:
-                ui_print(f"    • Processed: {processed_count}/{total_count} item(s)", PromptStyle.INFO)
+                ui_print(
+                    f"    • Processed: {processed_count}/{total_count} item(s)",
+                    PromptStyle.INFO,
+                )
                 if failed_count > 0:
-                    ui_print(f"    • Failed: {failed_count} item(s)", PromptStyle.WARNING)
+                    ui_print(
+                        f"    • Failed: {failed_count} item(s)", PromptStyle.WARNING
+                    )
             else:
                 ui_print("    • No items were processed.", PromptStyle.WARNING)
-        
+
         # Duration
         if duration_seconds > 0:
             if duration_seconds >= 3600:
@@ -1108,30 +1213,34 @@ class WorkflowUI:
                 minutes = duration_seconds / 60
                 ui_print(f"    • Duration: {minutes:.1f} minutes", PromptStyle.INFO)
             else:
-                ui_print(f"    • Duration: {duration_seconds:.1f} seconds", PromptStyle.INFO)
-        
+                ui_print(
+                    f"    • Duration: {duration_seconds:.1f} seconds", PromptStyle.INFO
+                )
+
         print_separator(PromptStyle.LIGHT_LINE, 80)
-        
+
         # === Output Location ===
         ui_print("\n  Output:", PromptStyle.HIGHLIGHT)
         print_separator(PromptStyle.LIGHT_LINE, 80)
-        use_input_as_output = paths_config.get('general', {}).get('input_paths_is_output_path', False)
+        use_input_as_output = paths_config.get("general", {}).get(
+            "input_paths_is_output_path", False
+        )
         if use_input_as_output:
             ui_print("    • Location: Same directory as input files", PromptStyle.INFO)
         else:
-            file_paths = paths_config.get('file_paths', {})
+            file_paths = paths_config.get("file_paths", {})
             if config.processing_type == "images":
-                output_dir = file_paths.get('Images', {}).get('output', 'images_out')
+                output_dir = file_paths.get("Images", {}).get("output", "images_out")
             elif config.processing_type == "pdfs":
-                output_dir = file_paths.get('PDFs', {}).get('output', 'pdfs_out')
+                output_dir = file_paths.get("PDFs", {}).get("output", "pdfs_out")
             elif config.processing_type == "epubs":
-                output_dir = file_paths.get('EPUBs', {}).get('output', 'epubs_out')
+                output_dir = file_paths.get("EPUBs", {}).get("output", "epubs_out")
             else:
                 output_dir = "configured output directory"
             ui_print(f"    • Location: {output_dir}", PromptStyle.INFO)
         ui_print("    • Transcriptions: .txt files", PromptStyle.INFO)
         print_separator(PromptStyle.LIGHT_LINE, 80)
-        
+
         # === Next Steps (for batch mode) ===
         if config.use_batch_processing and config.transcription_method == "gpt":
             ui_print("\n  Next steps:", PromptStyle.HIGHLIGHT)
@@ -1141,5 +1250,5 @@ class WorkflowUI:
             ui_print("    • Cancel pending batches: ", PromptStyle.DIM, end="")
             ui_print("python main/cancel_batches.py", PromptStyle.INFO)
             print_separator(PromptStyle.LIGHT_LINE, 80)
-        
+
         ui_print("\n  Thank you for using ChronoTranscriber!\n", PromptStyle.HIGHLIGHT)

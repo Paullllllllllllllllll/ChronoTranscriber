@@ -8,12 +8,10 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any
 
-from modules.config.constants import SUPPORTED_IMAGE_FORMATS
-from modules.config.service import get_config_service
-from modules.infra.logger import setup_logger
 from modules.batch.backends.base import (
     BatchBackend,
     BatchHandle,
@@ -22,6 +20,9 @@ from modules.batch.backends.base import (
     BatchStatus,
     BatchStatusInfo,
 )
+from modules.config.constants import SUPPORTED_IMAGE_FORMATS
+from modules.config.service import get_config_service
+from modules.infra.logger import setup_logger
 from modules.llm.prompt_utils import prepare_prompt_with_context
 
 logger = setup_logger(__name__)
@@ -52,6 +53,7 @@ class AnthropicBatchBackend(BatchBackend):
         """Lazy initialization of Anthropic client."""
         if self._client is None:
             import anthropic
+
             self._client = anthropic.Anthropic()
         return self._client
 
@@ -69,13 +71,13 @@ class AnthropicBatchBackend(BatchBackend):
 
     def submit_batch(
         self,
-        requests: List[BatchRequest],
-        model_config: Dict[str, Any],
+        requests: list[BatchRequest],
+        model_config: dict[str, Any],
         *,
         system_prompt: str,
-        schema: Optional[Dict[str, Any]] = None,
-        schema_path: Optional[Path] = None,
-        additional_context: Optional[str] = None,
+        schema: dict[str, Any] | None = None,
+        schema_path: Path | None = None,
+        additional_context: str | None = None,
     ) -> BatchHandle:
         """Submit a batch to Anthropic's Message Batches API."""
         client = self._get_client()
@@ -107,7 +109,11 @@ class AnthropicBatchBackend(BatchBackend):
 
         if caching_enabled:
             anthropic_cfg = caching_cfg.get("anthropic", {})
-            ttl = anthropic_cfg.get("ttl", "5m") if isinstance(anthropic_cfg, dict) else "5m"
+            ttl = (
+                anthropic_cfg.get("ttl", "5m")
+                if isinstance(anthropic_cfg, dict)
+                else "5m"
+            )
             cache_control: dict = {"type": "ephemeral"}
             if ttl == "1h":
                 cache_control["ttl"] = "1h"
@@ -143,7 +149,7 @@ class AnthropicBatchBackend(BatchBackend):
             ]
 
             # Build params for Messages API
-            params: Dict[str, Any] = {
+            params: dict[str, Any] = {
                 "model": model_name,
                 "max_tokens": max_tokens,
                 "system": system_param,
@@ -157,17 +163,23 @@ class AnthropicBatchBackend(BatchBackend):
             if temperature is not None:
                 # Check if model supports temperature (non-reasoning models)
                 model_lower = model_name.lower()
-                is_reasoning = any(x in model_lower for x in ["opus-4", "sonnet-4-5", "haiku-4-5"])
+                is_reasoning = any(
+                    x in model_lower for x in ["opus-4", "sonnet-4-5", "haiku-4-5"]
+                )
                 if not is_reasoning:
                     params["temperature"] = float(temperature)
 
-            batch_requests.append({
-                "custom_id": req.custom_id,
-                "params": params,
-            })
+            batch_requests.append(
+                {
+                    "custom_id": req.custom_id,
+                    "params": params,
+                }
+            )
 
         # Submit batch
-        logger.info("Submitting batch with %d requests to Anthropic...", len(batch_requests))
+        logger.info(
+            "Submitting batch with %d requests to Anthropic...", len(batch_requests)
+        )
         batch_response = client.messages.batches.create(requests=batch_requests)
         batch_id = batch_response.id
         logger.info("Batch submitted; batch id: %s", batch_id)
@@ -280,13 +292,15 @@ class AnthropicBatchBackend(BatchBackend):
                         usage = getattr(message, "usage", None)
                         if usage:
                             result_item.input_tokens = getattr(usage, "input_tokens", 0)
-                            result_item.output_tokens = getattr(usage, "output_tokens", 0)
-                            result_item.cached_input_tokens = getattr(
-                                usage, "cache_read_input_tokens", 0
-                            ) or 0
-                            result_item.cache_creation_tokens = getattr(
-                                usage, "cache_creation_input_tokens", 0
-                            ) or 0
+                            result_item.output_tokens = getattr(
+                                usage, "output_tokens", 0
+                            )
+                            result_item.cached_input_tokens = (
+                                getattr(usage, "cache_read_input_tokens", 0) or 0
+                            )
+                            result_item.cache_creation_tokens = (
+                                getattr(usage, "cache_creation_input_tokens", 0) or 0
+                            )
                     else:
                         result_item.success = True
                         result_item.content = ""

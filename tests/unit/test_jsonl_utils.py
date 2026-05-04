@@ -11,12 +11,11 @@ from pathlib import Path
 import pytest
 
 from modules.batch.jsonl import (
+    extract_batch_ids,
+    extract_image_metadata,
+    is_batch_jsonl,
     read_jsonl_records,
     write_jsonl_record,
-    extract_image_metadata,
-    extract_batch_ids,
-    is_batch_jsonl,
-    ImageMetadata,
 )
 
 
@@ -183,7 +182,13 @@ class TestIsBatchJsonl:
         jsonl_path = temp_dir / "test.jsonl"
         records = [
             {"batch_session": {"status": "submitted"}},
-            {"image_metadata": {"image_name": "page1.png", "order_index": 0, "custom_id": "req-1"}},
+            {
+                "image_metadata": {
+                    "image_name": "page1.png",
+                    "order_index": 0,
+                    "custom_id": "req-1",
+                }
+            },
             {"batch_tracking": {"batch_id": "batch_123"}},
         ]
         with open(jsonl_path, "w", encoding="utf-8") as f:

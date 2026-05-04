@@ -11,15 +11,19 @@ import modules.batch.status as batch_status
 
 
 @pytest.mark.unit
-def test_process_all_batches_skips_non_batched_jsonl(monkeypatch: pytest.MonkeyPatch, temp_dir: Path) -> None:
-    # Ensure the batch package __init__ is imported (coverage for modules/operations/batch/__init__.py)
+def test_process_all_batches_skips_non_batched_jsonl(
+    monkeypatch: pytest.MonkeyPatch, temp_dir: Path
+) -> None:
+    # Import batch __init__ to ensure coverage for modules/batch/__init__.py
     import modules.batch as _batch_pkg  # noqa: F401
 
     root = temp_dir / "root"
     root.mkdir()
 
     # A JSONL with no batch markers should be treated as non-batched and skipped.
-    (root / "not_batched.jsonl").write_text(json.dumps({"hello": "world"}) + "\n", encoding="utf-8")
+    (root / "not_batched.jsonl").write_text(
+        json.dumps({"hello": "world"}) + "\n", encoding="utf-8"
+    )
 
     monkeypatch.setattr(batch_check, "print_info", MagicMock())
     monkeypatch.setattr(batch_check, "print_warning", MagicMock())
@@ -45,7 +49,9 @@ def test_process_all_batches_skips_non_batched_jsonl(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.unit
-def test_process_all_batches_routes_non_openai_provider(monkeypatch: pytest.MonkeyPatch, temp_dir: Path) -> None:
+def test_process_all_batches_routes_non_openai_provider(
+    monkeypatch: pytest.MonkeyPatch, temp_dir: Path
+) -> None:
     root = temp_dir / "root"
     root.mkdir()
 
@@ -54,7 +60,9 @@ def test_process_all_batches_routes_non_openai_provider(monkeypatch: pytest.Monk
         {"batch_session": {"status": "completed", "provider": "anthropic"}},
         {"batch_tracking": {"batch_id": "batch_123", "provider": "anthropic"}},
     ]
-    (root / "job.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8")
+    (root / "job.jsonl").write_text(
+        "\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8"
+    )
 
     monkeypatch.setattr(batch_check, "print_info", MagicMock())
     monkeypatch.setattr(batch_check, "print_warning", MagicMock())
@@ -89,7 +97,7 @@ class TestStatusSubmodule:
 
     @pytest.mark.unit
     def test_load_config_returns_tuple(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """load_config returns (scan_dirs, processing_settings, postprocessing_config)."""
+        """load_config returns (scan_dirs, proc_settings, postprocessing_config)."""
         mock_service = MagicMock()
         mock_service.get_paths_config.return_value = {
             "general": {"retain_temporary_jsonl": True},
@@ -113,7 +121,7 @@ class TestStatusSubmodule:
     def test_load_config_passes_paths_config_to_collector(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """load_config forwards the full paths_config dict to collect_scan_directories."""
+        """load_config forwards the full paths_config to collect_scan_directories."""
         paths_cfg = {
             "general": {"retain_temporary_jsonl": False},
             "file_paths": {"input": "/some/path"},
@@ -154,9 +162,11 @@ class TestStatusSubmodule:
 
     @pytest.mark.unit
     def test_parse_temp_file_metadata_with_tracking(self, temp_dir: Path) -> None:
-        """_parse_temp_file_metadata extracts batch_ids and provider from tracking records."""
+        """_parse_temp_file_metadata extracts batch_ids and provider from tracking."""
         lines = [
-            json.dumps({"batch_session": {"status": "completed", "provider": "google"}}),
+            json.dumps(
+                {"batch_session": {"status": "completed", "provider": "google"}}
+            ),
             json.dumps({"batch_tracking": {"batch_id": "bid_1", "provider": "google"}}),
             json.dumps({"batch_tracking": {"batch_id": "bid_2", "provider": "google"}}),
             json.dumps({"image_metadata": {"custom_id": "req-1"}}),
@@ -176,7 +186,9 @@ class TestStatusSubmodule:
         assert "completed" in meta["batch_session_statuses"]
 
     @pytest.mark.unit
-    def test_parse_temp_file_metadata_skips_malformed_json(self, temp_dir: Path) -> None:
+    def test_parse_temp_file_metadata_skips_malformed_json(
+        self, temp_dir: Path
+    ) -> None:
         """_parse_temp_file_metadata silently skips lines that are not valid JSON."""
         lines = [
             "not valid json at all",

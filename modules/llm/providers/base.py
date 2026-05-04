@@ -10,11 +10,11 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any
 
+from modules.config.capabilities import Capabilities
 from modules.config.service import get_config_service
 from modules.infra.logger import setup_logger
-from modules.config.capabilities import Capabilities
 
 logger = setup_logger(__name__)
 
@@ -43,7 +43,9 @@ def load_max_retries() -> int:
     """
     try:
         conc_cfg = get_config_service().get_concurrency_config() or {}
-        trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get("transcription", {}) or {}
+        trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get(
+            "transcription", {}
+        ) or {}
         retry_cfg = trans_cfg.get("retry", {}) or {}
         attempts = int(retry_cfg.get("attempts", 5))
         return max(1, attempts)
@@ -62,12 +64,16 @@ def load_max_validation_retries() -> int:
     """
     try:
         conc_cfg = get_config_service().get_concurrency_config() or {}
-        trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get("transcription", {}) or {}
+        trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get(
+            "transcription", {}
+        ) or {}
         retry_cfg = trans_cfg.get("retry", {}) or {}
         attempts = int(retry_cfg.get("validation_attempts", 3))
         return max(1, attempts)
     except (KeyError, AttributeError, TypeError, ValueError) as e:
-        logger.debug("Could not load max_validation_retries from config, using default: %s", e)
+        logger.debug(
+            "Could not load max_validation_retries from config, using default: %s", e
+        )
         return 3
 
 
@@ -80,22 +86,27 @@ def load_min_input_tokens() -> int:
     """
     try:
         conc_cfg = get_config_service().get_concurrency_config() or {}
-        trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get("transcription", {}) or {}
+        trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get(
+            "transcription", {}
+        ) or {}
         retry_cfg = trans_cfg.get("retry", {}) or {}
         value = int(retry_cfg.get("min_input_tokens", 500))
         return max(0, value)
     except (KeyError, AttributeError, TypeError, ValueError) as e:
-        logger.debug("Could not load min_input_tokens from config, using default: %s", e)
+        logger.debug(
+            "Could not load min_input_tokens from config, using default: %s", e
+        )
         return 500
 
 
 @dataclass(frozen=True)
 class TokenUsageMapping:
     """Maps provider-specific token usage keys in LangChain response_metadata.
-    
+
     Each provider stores token counts under different key paths. This mapping
     allows _process_llm_response() to extract them generically.
     """
+
     usage_key: str = "token_usage"
     input_key: str = "prompt_tokens"
     output_key: str = "completion_tokens"
@@ -127,14 +138,14 @@ ProviderCapabilities = Capabilities
 @dataclass
 class TranscriptionResult:
     """Result of a transcription operation."""
-    
+
     # Core result
     content: str
-    raw_response: Dict[str, Any] = field(default_factory=dict)
-    
+    raw_response: dict[str, Any] = field(default_factory=dict)
+
     # Parsed structured output (if schema was provided)
-    parsed_output: Dict[str, Any] | None = None
-    
+    parsed_output: dict[str, Any] | None = None
+
     # Token usage
     input_tokens: int = 0
     output_tokens: int = 0
@@ -144,36 +155,41 @@ class TranscriptionResult:
     cached_input_tokens: int = 0
     cache_creation_tokens: int = 0
     cache_hit: bool = False
-    
+
     # Transcription status flags (from schema response)
     no_transcribable_text: bool = False
     transcription_not_possible: bool = False
-    
+
     # Error information
     error: str | None = None
-    
+
     def __post_init__(self) -> None:
         """Parse transcription status flags from content if available."""
         if self.content and not self.parsed_output:
             try:
                 from modules.llm.response_parsing import _normalize_llm_text
+
                 normalized = _normalize_llm_text(self.content)
                 if normalized.lstrip().startswith("{"):
                     parsed = json.loads(normalized)
                     if isinstance(parsed, dict):
                         self.parsed_output = parsed
-                        self.no_transcribable_text = parsed.get("no_transcribable_text", False)
-                        self.transcription_not_possible = parsed.get("transcription_not_possible", False)
+                        self.no_transcribable_text = parsed.get(
+                            "no_transcribable_text", False
+                        )
+                        self.transcription_not_possible = parsed.get(
+                            "transcription_not_possible", False
+                        )
             except (json.JSONDecodeError, ImportError):
                 pass
 
 
 class BaseProvider(ABC):
     """Abstract base class for all LLM providers.
-    
+
     All providers must implement these methods to work with the transcription pipeline.
     """
-    
+
     def __init__(
         self,
         api_key: str,
@@ -185,7 +201,7 @@ class BaseProvider(ABC):
         **kwargs: Any,
     ) -> None:
         """Initialize the provider.
-        
+
         Args:
             api_key: API key for the provider
             model: Model name/identifier
@@ -208,8 +224,8 @@ class BaseProvider(ABC):
             logger.debug("Could not load prompt caching config, disabling: %s", e)
             caching_cfg = {"enabled": False}
         self._caching_enabled: bool = bool(caching_cfg.get("enabled", False))
-        self._caching_config: Dict[str, Any] = caching_cfg
-    
+        self._caching_config: dict[str, Any] = caching_cfg
+
     @property
     @abstractmethod
     def provider_name(self) -> str:
@@ -229,30 +245,31 @@ class BaseProvider(ABC):
     def get_capabilities(self) -> ProviderCapabilities:
         """Return the capabilities of this provider/model combination."""
         pass
-    
+
     async def transcribe_image(
         self,
         image_path: Path,
         *,
         system_prompt: str,
         user_instruction: str = "Please transcribe the text from this image.",
-        json_schema: Dict[str, Any] | None = None,
+        json_schema: dict[str, Any] | None = None,
         image_detail: str | None = None,
         media_resolution: str | None = None,
     ) -> TranscriptionResult:
         """Transcribe text from an image file.
-        
+
         Encodes the image to base64 and delegates to transcribe_image_from_base64.
         Subclasses typically only need to override transcribe_image_from_base64.
-        
+
         Args:
             image_path: Path to the image file
             system_prompt: System prompt for the model
             user_instruction: User instruction text
             json_schema: Optional JSON schema for structured output
             image_detail: Image detail level for OpenAI ("low", "high", "auto")
-            media_resolution: Media resolution for Google ("low", "medium", "high", "ultra_high", "auto")
-        
+            media_resolution: Media resolution for Google
+                ("low", "medium", "high", "ultra_high", "auto")
+
         Returns:
             TranscriptionResult with the transcription and metadata
         """
@@ -266,7 +283,7 @@ class BaseProvider(ABC):
             image_detail=image_detail,
             media_resolution=media_resolution,
         )
-    
+
     @abstractmethod
     async def transcribe_image_from_base64(
         self,
@@ -275,12 +292,12 @@ class BaseProvider(ABC):
         *,
         system_prompt: str,
         user_instruction: str = "Please transcribe the text from this image.",
-        json_schema: Dict[str, Any] | None = None,
+        json_schema: dict[str, Any] | None = None,
         image_detail: str | None = None,
         media_resolution: str | None = None,
     ) -> TranscriptionResult:
         """Transcribe text from a base64-encoded image.
-        
+
         Args:
             image_base64: Base64-encoded image data
             mime_type: MIME type of the image (e.g., "image/jpeg")
@@ -288,27 +305,28 @@ class BaseProvider(ABC):
             user_instruction: User instruction text
             json_schema: Optional JSON schema for structured output
             image_detail: Image detail level for OpenAI ("low", "high", "auto")
-            media_resolution: Media resolution for Google ("low", "medium", "high", "ultra_high", "auto")
-        
+            media_resolution: Media resolution for Google
+                ("low", "medium", "high", "ultra_high", "auto")
+
         Returns:
             TranscriptionResult with the transcription and metadata
         """
         pass
-    
+
     @abstractmethod
     async def close(self) -> None:
         """Clean up resources (e.g., HTTP sessions)."""
         pass
-    
+
     def _normalize_list_content(self, content_list: list[Any]) -> str:
         """Normalize list-type content from LLM response to a string.
-        
+
         Override in subclasses for provider-specific list content handling.
         Default behavior: convert to string representation.
-        
+
         Args:
             content_list: List content from the LLM response.
-            
+
         Returns:
             Normalized string content.
         """
@@ -327,7 +345,8 @@ class BaseProvider(ABC):
         raw_message = None
 
         if isinstance(response, dict) and "raw" in response and "parsed" in response:
-            # with_structured_output(include_raw=True) → {"raw": AIMessage, "parsed": ...}
+            # with_structured_output(include_raw=True)
+            # → {"raw": AIMessage, "parsed": ...}
             raw_message = response.get("raw")
             parsed_data = response.get("parsed")
 
@@ -390,7 +409,13 @@ class BaseProvider(ABC):
         cache_creation_tokens = 0
 
         if raw_message is None:
-            return input_tokens, output_tokens, total_tokens, cached_input_tokens, cache_creation_tokens
+            return (
+                input_tokens,
+                output_tokens,
+                total_tokens,
+                cached_input_tokens,
+                cache_creation_tokens,
+            )
 
         # Extract token usage from response_metadata
         if hasattr(raw_message, "response_metadata"):
@@ -406,7 +431,8 @@ class BaseProvider(ABC):
                         total_tokens = input_tokens + output_tokens
 
                     # Extract cache tokens from provider-specific usage dicts:
-                    # Anthropic: usage.cache_read_input_tokens / cache_creation_input_tokens
+                    # Anthropic: usage.cache_read_input_tokens /
+                    # cache_creation_input_tokens
                     cached_input_tokens = int(
                         usage.get("cache_read_input_tokens", 0) or 0
                     )
@@ -436,7 +462,8 @@ class BaseProvider(ABC):
                     output_tokens = int(usage_meta.get("output_tokens", 0) or 0)
                     total_tokens = int(usage_meta.get("total_tokens", 0) or 0)
                 else:
-                    # Defensive: support object-attribute style (e.g. MagicMock in tests)
+                    # Defensive: support object-attribute style
+                    # (e.g. MagicMock in tests)
                     input_tokens = int(getattr(usage_meta, "input_tokens", 0) or 0)
                     output_tokens = int(getattr(usage_meta, "output_tokens", 0) or 0)
                     total_tokens = int(getattr(usage_meta, "total_tokens", 0) or 0)
@@ -447,14 +474,18 @@ class BaseProvider(ABC):
                 if cached_input_tokens == 0 and isinstance(usage_meta, dict):
                     details = usage_meta.get("input_token_details")
                     if isinstance(details, dict):
-                        cached_input_tokens = int(
-                            details.get("cache_read", 0) or 0
-                        )
+                        cached_input_tokens = int(details.get("cache_read", 0) or 0)
                         cache_creation_tokens = int(
                             details.get("cache_creation", 0) or 0
                         )
 
-        return input_tokens, output_tokens, total_tokens, cached_input_tokens, cache_creation_tokens
+        return (
+            input_tokens,
+            output_tokens,
+            total_tokens,
+            cached_input_tokens,
+            cache_creation_tokens,
+        )
 
     def _track_token_usage(
         self,
@@ -466,6 +497,7 @@ class BaseProvider(ABC):
         if total_tokens > 0:
             try:
                 from modules.infra.token_budget import get_token_tracker
+
                 token_tracker = get_token_tracker()
                 token_tracker.add_tokens(total_tokens)
                 cache_msg = ""
@@ -501,13 +533,17 @@ class BaseProvider(ABC):
         """
         content, parsed_output, raw_message = self._extract_content(response)
 
-        input_tokens, output_tokens, total_tokens, cached_input_tokens, cache_creation_tokens = (
-            self._extract_token_usage(raw_message, token_mapping)
-        )
+        (
+            input_tokens,
+            output_tokens,
+            total_tokens,
+            cached_input_tokens,
+            cache_creation_tokens,
+        ) = self._extract_token_usage(raw_message, token_mapping)
 
         self._track_token_usage(total_tokens, cached_input_tokens, input_tokens)
 
-        raw_response: Dict[str, Any] = {}
+        raw_response: dict[str, Any] = {}
         if raw_message and hasattr(raw_message, "response_metadata"):
             metadata = raw_message.response_metadata
             if isinstance(metadata, dict):
@@ -526,8 +562,12 @@ class BaseProvider(ABC):
 
         if parsed_output and isinstance(parsed_output, dict):
             result.parsed_output = parsed_output
-            result.no_transcribable_text = parsed_output.get("no_transcribable_text", False)
-            result.transcription_not_possible = parsed_output.get("transcription_not_possible", False)
+            result.no_transcribable_text = parsed_output.get(
+                "no_transcribable_text", False
+            )
+            result.transcription_not_possible = parsed_output.get(
+                "transcription_not_possible", False
+            )
 
         # Content quality validation (catches hallucination loops, truncation,
         # system-prompt bleed, and excessive line repetition).
@@ -550,35 +590,32 @@ class BaseProvider(ABC):
 
         return result
 
-    def _get_content_quality_config(self) -> Dict[str, Any]:
+    def _get_content_quality_config(self) -> dict[str, Any]:
         """Load content quality validator config from concurrency_config.yaml."""
         try:
             conc_cfg = get_config_service().get_concurrency_config() or {}
-            trans_cfg = (
-                (conc_cfg.get("concurrency", {}) or {}).get("transcription", {})
-                or {}
-            )
+            trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get(
+                "transcription", {}
+            ) or {}
             retry_cfg = trans_cfg.get("retry", {}) or {}
             return retry_cfg.get("content_quality", {}) or {}
         except (KeyError, AttributeError, TypeError) as e:
-            logger.debug(
-                "Could not load content_quality config, using defaults: %s", e
-            )
+            logger.debug("Could not load content_quality config, using defaults: %s", e)
             return {}
 
-    def _build_disabled_params(self) -> Dict[str, Any] | None:
+    def _build_disabled_params(self) -> dict[str, Any] | None:
         """Build disabled_params dict based on model capabilities.
-        
+
         LangChain's disabled_params feature automatically filters out
         unsupported parameters before sending to the API.
-        
+
         Subclasses that set self._capabilities can use this directly.
         Returns None if no params need disabling.
         """
         caps = getattr(self, "_capabilities", None)
         if caps is None:
             return None
-        disabled: Dict[str, Any] = {}
+        disabled: dict[str, Any] = {}
         if not getattr(caps, "supports_sampler_controls", True):
             # Master flag: disable ALL sampler controls (reasoning models)
             disabled["temperature"] = None
@@ -675,7 +712,7 @@ class BaseProvider(ABC):
     async def _ainvoke_with_retry(
         self,
         llm: Any,
-        messages: List[Any],
+        messages: list[Any],
         *,
         expect_image_tokens: bool = False,
         **invoke_kwargs: Any,
@@ -737,7 +774,10 @@ class BaseProvider(ABC):
                     str(exc)[:200],
                 )
                 return True
-            if isinstance(exc, (ValidationError, InputTokensBelowThresholdError, ContentQualityError)):
+            if isinstance(
+                exc,
+                (ValidationError, InputTokensBelowThresholdError, ContentQualityError),
+            ):
                 validation_attempt_count += 1
                 if validation_attempt_count >= max_validation_attempts:
                     return False
@@ -781,10 +821,7 @@ class BaseProvider(ABC):
                 result = await llm.ainvoke(messages, **invoke_kwargs)
                 # Detect silent parsing failures from
                 # with_structured_output(include_raw=True).
-                if (
-                    isinstance(result, dict)
-                    and result.get("parsing_error") is not None
-                ):
+                if isinstance(result, dict) and result.get("parsing_error") is not None:
                     logger.warning(
                         "Structured output parsing failed silently, "
                         "re-raising for retry: %s",
@@ -794,8 +831,7 @@ class BaseProvider(ABC):
                     if discarded_tokens > 0:
                         self._track_token_usage(discarded_tokens, 0, 0)
                         logger.debug(
-                            "Tracked %d tokens from discarded retry "
-                            "(parsing failure)",
+                            "Tracked %d tokens from discarded retry (parsing failure)",
                             discarded_tokens,
                         )
                     raise result["parsing_error"]
@@ -811,15 +847,13 @@ class BaseProvider(ABC):
                                 "(input below threshold)",
                                 discarded_tokens,
                             )
-                        raise InputTokensBelowThresholdError(
-                            actual, min_input_tokens
-                        )
+                        raise InputTokensBelowThresholdError(actual, min_input_tokens)
                 return result
 
-    async def __aenter__(self) -> "BaseProvider":
+    async def __aenter__(self) -> BaseProvider:
         """Async context manager entry."""
         return self
-    
+
     async def __aexit__(
         self,
         exc_type: type[BaseException] | None,
@@ -829,7 +863,7 @@ class BaseProvider(ABC):
         """Async context manager exit."""
         await self.close()
         return False
-    
+
     @staticmethod
     def encode_image_to_base64(image_path: Path) -> tuple[str, str]:
         """Encode an image file to base64.
@@ -837,16 +871,17 @@ class BaseProvider(ABC):
         Delegates to modules.images.encoding for the shared implementation.
         """
         from modules.images.encoding import encode_image_to_base64 as _encode
+
         return _encode(image_path)
-    
+
     @staticmethod
     def create_data_url(base64_data: str, mime_type: str) -> str:
         """Create a data URL from base64 data.
-        
+
         Args:
             base64_data: Base64-encoded image data
             mime_type: MIME type of the image
-        
+
         Returns:
             Data URL string
         """

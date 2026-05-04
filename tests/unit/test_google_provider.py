@@ -6,7 +6,7 @@ parameter translation for Google Gemini models.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -141,13 +141,17 @@ class TestGoogleProviderInit:
         """provider_name property returns 'google'."""
         from modules.llm.providers.google_provider import GoogleProvider
 
-        with patch("modules.llm.providers.google_provider.ChatGoogleGenerativeAI"):
-            with patch("modules.llm.providers.google_provider.load_max_retries",
-                       return_value=3):
-                provider = GoogleProvider(
-                    api_key="AIza-test",
-                    model="gemini-1.5-pro",
-                )
+        with (
+            patch("modules.llm.providers.google_provider.ChatGoogleGenerativeAI"),
+            patch(
+                "modules.llm.providers.google_provider.load_max_retries",
+                return_value=3,
+            ),
+        ):
+            provider = GoogleProvider(
+                api_key="AIza-test",
+                model="gemini-1.5-pro",
+            )
 
         assert provider.provider_name == "google"
 
@@ -156,14 +160,18 @@ class TestGoogleProviderInit:
         """reasoning_config is stored when provided."""
         from modules.llm.providers.google_provider import GoogleProvider
 
-        with patch("modules.llm.providers.google_provider.ChatGoogleGenerativeAI"):
-            with patch("modules.llm.providers.google_provider.load_max_retries",
-                       return_value=3):
-                provider = GoogleProvider(
-                    api_key="AIza-test",
-                    model="gemini-2.5-pro",
-                    reasoning_config={"effort": "high"},
-                )
+        with (
+            patch("modules.llm.providers.google_provider.ChatGoogleGenerativeAI"),
+            patch(
+                "modules.llm.providers.google_provider.load_max_retries",
+                return_value=3,
+            ),
+        ):
+            provider = GoogleProvider(
+                api_key="AIza-test",
+                model="gemini-2.5-pro",
+                reasoning_config={"effort": "high"},
+            )
 
         assert provider.reasoning_config == {"effort": "high"}
 
@@ -172,17 +180,22 @@ class TestGoogleProviderInit:
         """effort='medium' maps to thinking_level='high'."""
         from modules.llm.providers.google_provider import GoogleProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.google_provider.load_max_retries",
-                       return_value=3):
-                GoogleProvider(
-                    api_key="AIza-test",
-                    model="gemini-2.5-pro",
-                    reasoning_config={"effort": "medium"},
-                )
+        with (
+            patch(
+                "modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.google_provider.load_max_retries", return_value=3
+            ),
+        ):
+            GoogleProvider(
+                api_key="AIza-test",
+                model="gemini-2.5-pro",
+                reasoning_config={"effort": "medium"},
+            )
 
         assert captured.get("thinking_level") == "medium"
 
@@ -191,17 +204,22 @@ class TestGoogleProviderInit:
         """effort='high' maps to thinking_level='high'."""
         from modules.llm.providers.google_provider import GoogleProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.google_provider.load_max_retries",
-                       return_value=3):
-                GoogleProvider(
-                    api_key="AIza-test",
-                    model="gemini-2.5-pro",
-                    reasoning_config={"effort": "high"},
-                )
+        with (
+            patch(
+                "modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.google_provider.load_max_retries", return_value=3
+            ),
+        ):
+            GoogleProvider(
+                api_key="AIza-test",
+                model="gemini-2.5-pro",
+                reasoning_config={"effort": "high"},
+            )
 
         assert captured.get("thinking_level") == "high"
 
@@ -210,17 +228,22 @@ class TestGoogleProviderInit:
         """effort='low' maps to thinking_level='low'."""
         from modules.llm.providers.google_provider import GoogleProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.google_provider.load_max_retries",
-                       return_value=3):
-                GoogleProvider(
-                    api_key="AIza-test",
-                    model="gemini-2.5-pro",
-                    reasoning_config={"effort": "low"},
-                )
+        with (
+            patch(
+                "modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.google_provider.load_max_retries", return_value=3
+            ),
+        ):
+            GoogleProvider(
+                api_key="AIza-test",
+                model="gemini-2.5-pro",
+                reasoning_config={"effort": "low"},
+            )
 
         assert captured.get("thinking_level") == "low"
 
@@ -229,17 +252,22 @@ class TestGoogleProviderInit:
         """No thinking_level for non-reasoning models (e.g. Gemini 1.5 Pro)."""
         from modules.llm.providers.google_provider import GoogleProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.google_provider.load_max_retries",
-                       return_value=3):
-                GoogleProvider(
-                    api_key="AIza-test",
-                    model="gemini-1.5-pro",
-                    reasoning_config={"effort": "high"},
-                )
+        with (
+            patch(
+                "modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.google_provider.load_max_retries", return_value=3
+            ),
+        ):
+            GoogleProvider(
+                api_key="AIza-test",
+                model="gemini-1.5-pro",
+                reasoning_config={"effort": "high"},
+            )
 
         assert "thinking_level" not in captured
 
@@ -248,16 +276,21 @@ class TestGoogleProviderInit:
         """No thinking_level when reasoning_config is None."""
         from modules.llm.providers.google_provider import GoogleProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.google_provider.load_max_retries",
-                       return_value=3):
-                GoogleProvider(
-                    api_key="AIza-test",
-                    model="gemini-2.5-pro",
-                )
+        with (
+            patch(
+                "modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.google_provider.load_max_retries", return_value=3
+            ),
+        ):
+            GoogleProvider(
+                api_key="AIza-test",
+                model="gemini-2.5-pro",
+            )
 
         assert "thinking_level" not in captured
 
@@ -266,33 +299,42 @@ class TestGoogleProviderInit:
         """max_tokens is capped at model's max_output_tokens."""
         from modules.llm.providers.google_provider import GoogleProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.google_provider.load_max_retries",
-                       return_value=3):
-                GoogleProvider(
-                    api_key="AIza-test",
-                    model="gemini-1.5-flash",  # max 8192
-                    max_tokens=100000,
-                )
+        with (
+            patch(
+                "modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.google_provider.load_max_retries", return_value=3
+            ),
+        ):
+            GoogleProvider(
+                api_key="AIza-test",
+                model="gemini-1.5-flash",  # max 8192
+                max_tokens=100000,
+            )
 
         assert captured.get("max_tokens") <= 8192
 
     @pytest.mark.unit
     def test_get_capabilities_returns_provider_capabilities(self) -> None:
         """get_capabilities() returns a ProviderCapabilities instance."""
-        from modules.llm.providers.google_provider import GoogleProvider
         from modules.config.capabilities import Capabilities
+        from modules.llm.providers.google_provider import GoogleProvider
 
-        with patch("modules.llm.providers.google_provider.ChatGoogleGenerativeAI"):
-            with patch("modules.llm.providers.google_provider.load_max_retries",
-                       return_value=3):
-                provider = GoogleProvider(
-                    api_key="AIza-test",
-                    model="gemini-1.5-pro",
-                )
+        with (
+            patch("modules.llm.providers.google_provider.ChatGoogleGenerativeAI"),
+            patch(
+                "modules.llm.providers.google_provider.load_max_retries",
+                return_value=3,
+            ),
+        ):
+            provider = GoogleProvider(
+                api_key="AIza-test",
+                model="gemini-1.5-pro",
+            )
 
         caps = provider.get_capabilities()
         assert isinstance(caps, Capabilities)

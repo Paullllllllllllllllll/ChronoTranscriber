@@ -13,26 +13,23 @@ the tests never need a real MOBI binary on disk.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List
 
 import pytest
 
 # Priming import to avoid a circular-import chain when this module is the
 # first to touch modules.documents.
 import modules.transcribe.dual_mode  # noqa: F401
-
 from modules.config.constants import SUPPORTED_MOBI_EXTENSIONS
 from modules.documents import mobi as mobi_mod
 from modules.documents.epub import EPUBTextExtraction
 from modules.documents.mobi import MOBIProcessor, MOBITextExtraction
 
-
 # ---------------------------------------------------------------------------
 # MOBITextExtraction dataclass
 # ---------------------------------------------------------------------------
 
-class TestMOBITextExtraction:
 
+class TestMOBITextExtraction:
     @pytest.mark.unit
     def test_construction_and_field_access(self) -> None:
         ext = MOBITextExtraction(
@@ -78,8 +75,8 @@ class TestMOBITextExtraction:
 # Suffix-based recognition (via SUPPORTED_MOBI_EXTENSIONS constant)
 # ---------------------------------------------------------------------------
 
-class TestMOBIExtensionRecognition:
 
+class TestMOBIExtensionRecognition:
     @pytest.mark.unit
     @pytest.mark.parametrize(
         "suffix",
@@ -101,15 +98,15 @@ class TestMOBIExtensionRecognition:
 # MOBIProcessor.extract_text -- routes through EPUBProcessor
 # ---------------------------------------------------------------------------
 
-class TestMOBIProcessorExtractText:
 
+class TestMOBIProcessorExtractText:
     @pytest.mark.unit
     def test_routes_epub_output_to_epub_processor(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """When mobi.extract yields an .epub, extract_text delegates to EPUBProcessor."""
+        """When mobi.extract yields .epub, extract_text delegates to EPUBProcessor."""
         mobi_path = tmp_path / "book.mobi"
         mobi_path.write_bytes(b"fake mobi bytes")
 
@@ -206,8 +203,8 @@ class TestMOBIProcessorExtractText:
 # MOBIProcessor.prepare_output_folder
 # ---------------------------------------------------------------------------
 
-class TestMOBIProcessorPrepareOutputFolder:
 
+class TestMOBIProcessorPrepareOutputFolder:
     @pytest.mark.unit
     def test_creates_parent_and_returns_txt_path(self, tmp_path: Path) -> None:
         mobi_path = tmp_path / "Some Book.mobi"
@@ -229,8 +226,8 @@ class TestMOBIProcessorPrepareOutputFolder:
 # Module-level helper: _normalize_text
 # ---------------------------------------------------------------------------
 
-class TestNormalizeText:
 
+class TestNormalizeText:
     @pytest.mark.unit
     def test_collapses_blank_lines(self) -> None:
         raw = "\n  A  \n\n\n  B\n\n\n\nC  \n\n"

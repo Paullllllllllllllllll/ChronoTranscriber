@@ -10,23 +10,22 @@ import asyncio
 import datetime
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import aiofiles
 
-from modules.infra.logger import setup_logger
-from modules.llm import transcribe_image_with_llm
-from modules.infra.concurrency import run_concurrent_transcription_tasks
-from modules.llm.response_parsing import extract_transcribed_text
-from modules.postprocess.text import postprocess_transcription
-from modules.postprocess.writer import write_transcription_output
 from modules.batch.jsonl import (
+    extract_transcription_records,
     get_processed_image_names,
     read_jsonl_records,
-    extract_transcription_records,
 )
 from modules.images.tesseract_runtime import perform_ocr
-from modules.ui import print_info, print_warning, print_error, print_success
+from modules.infra.concurrency import run_concurrent_transcription_tasks
+from modules.infra.logger import setup_logger
+from modules.llm import transcribe_image_with_llm
+from modules.llm.response_parsing import extract_transcribed_text
+from modules.postprocess.writer import write_transcription_output
+from modules.ui import print_error, print_info, print_success, print_warning
 
 logger = setup_logger(__name__)
 
@@ -37,7 +36,7 @@ async def transcribe_single_image(
     method: str,
     tesseract_config: str = "--oem 3 --psm 6",
     order_index: int = 0,
-) -> Tuple[str, str, str | None, Dict[str, Any] | None, int]:
+) -> tuple[str, str, str | None, dict[str, Any] | None, int]:
     """Transcribe a single image file using either GPT or Tesseract OCR.
 
     Returns:
@@ -49,40 +48,54 @@ async def transcribe_single_image(
         if method == "gpt":
             if not transcriber:
                 logger.error("No transcriber instance provided for GPT usage.")
-                return (str(img_path), image_name,
-                        f"[transcription error: {image_name}]", None, order_index)
+                return (
+                    str(img_path),
+                    image_name,
+                    f"[transcription error: {image_name}]",
+                    None,
+                    order_index,
+                )
             result = await transcribe_image_with_llm(img_path, transcriber)
             logger.debug(f"LLM response for {img_path.name}: {result}")
             try:
                 final_text = extract_transcribed_text(result, image_name)
             except Exception as e:
                 logger.error(
-                    f"Error extracting transcription for {img_path.name}: {e}. Marking as transcription error.")
+                    "Error extracting transcription for %s: %s."
+                    " Marking as transcription error.",
+                    img_path.name,
+                    e,
+                )
                 final_text = f"[transcription error: {image_name}]"
             return (str(img_path), image_name, final_text, result, order_index)
         elif method == "tesseract":
             final_text = perform_ocr(img_path, tesseract_config)
         else:
-            logger.error(f"Unknown transcription method '{method}' for image {img_path.name}")
+            logger.error(
+                f"Unknown transcription method '{method}' for image {img_path.name}"
+            )
             final_text = None
         return (str(img_path), image_name, final_text, None, order_index)
     except Exception as e:
-        logger.exception(f"Error transcribing {img_path.name} with method '{method}': {e}")
+        logger.exception(
+            f"Error transcribing {img_path.name} with method '{method}': {e}"
+        )
         return (
-            str(img_path), image_name,
+            str(img_path),
+            image_name,
             f"[transcription error: {image_name}]",
             None,
-            order_index
+            order_index,
         )
 
 
 def _build_jsonl_record(
-    result_tuple: Tuple[str, str, str | None, Dict[str, Any] | None, int],
+    result_tuple: tuple[str, str, str | None, dict[str, Any] | None, int],
     source_name: str,
     method: str,
     is_folder: bool,
     transcriber: Any | None,
-) -> Dict[str, Any] | None:
+) -> dict[str, Any] | None:
     """Build a JSONL record dict from a transcription result tuple.
 
     Returns None if the result should be skipped (no text).
@@ -95,7 +108,7 @@ def _build_jsonl_record(
 
     # Build base record — only the source key differs between PDF and folder
     source_key = "folder_name" if is_folder else "file_name"
-    record: Dict[str, Any] = {
+    record: dict[str, Any] = {
         source_key: source_name,
         "pre_processed_image": img_path_str,
         "image_name": image_name,
@@ -134,15 +147,15 @@ def _build_jsonl_record(
 
 
 async def run_transcription_pipeline(
-    image_files: List[Path],
+    image_files: list[Path],
     method: str,
     transcriber: Any | None,
     temp_jsonl_path: Path,
     output_txt_path: Path,
     source_name: str,
-    concurrency_config: Dict[str, Any],
-    image_processing_config: Dict[str, Any],
-    postprocessing_config: Dict[str, Any],
+    concurrency_config: dict[str, Any],
+    image_processing_config: dict[str, Any],
+    postprocessing_config: dict[str, Any],
     is_folder: bool = False,
     resume_mode: str = "skip",
     output_format: str = "txt",
@@ -179,26 +192,36 @@ async def run_transcription_pipeline(
         already_processed = get_processed_image_names(temp_jsonl_path)
         if already_processed:
             original_count = len(image_files)
-            image_files = [img for img in image_files if img.name not in already_processed]
+            image_files = [
+                img for img in image_files if img.name not in already_processed
+            ]
             skipped_count = original_count - len(image_files)
             if skipped_count > 0:
-                print_info(f"Skipping {skipped_count} already-processed images (found in JSONL)")
-                logger.info(f"Skipped {skipped_count} images already in {temp_jsonl_path.name}")
+                print_info(
+                    f"Skipping {skipped_count} already-processed"
+                    f" images (found in JSONL)"
+                )
+                logger.info(
+                    f"Skipped {skipped_count} images already in {temp_jsonl_path.name}"
+                )
 
     if not image_files:
-        print_info("All images already processed. Regenerating output file from JSONL...")
+        print_info(
+            "All images already processed. Regenerating output file from JSONL..."
+        )
         write_output_from_jsonl(
-            temp_jsonl_path, output_txt_path, postprocessing_config,
+            temp_jsonl_path,
+            output_txt_path,
+            postprocessing_config,
             output_format=output_format,
         )
         return
 
     # Build args list for concurrent dispatch
     tesseract_cfg = (
-        image_processing_config
-        .get('tesseract_image_processing', {})
-        .get('ocr', {})
-        .get('tesseract_config', "--oem 3 --psm 6")
+        image_processing_config.get("tesseract_image_processing", {})
+        .get("ocr", {})
+        .get("tesseract_config", "--oem 3 --psm 6")
     )
     all_image_names = {img.name: idx for idx, img in enumerate(image_files)}
     args_list = [
@@ -212,13 +235,16 @@ async def run_transcription_pipeline(
         for img in image_files
     ]
 
-    transcription_conf = concurrency_config.get("concurrency", {}).get("transcription", {})
+    transcription_conf = concurrency_config.get("concurrency", {}).get(
+        "transcription", {}
+    )
     concurrency_limit = transcription_conf.get("concurrency_limit", 20)
     delay_between_tasks = transcription_conf.get("delay_between_tasks", 0)
 
     # Streaming JSONL writes as results arrive
     write_lock = asyncio.Lock()
-    async with aiofiles.open(temp_jsonl_path, 'a', encoding='utf-8') as jfile:
+    async with aiofiles.open(temp_jsonl_path, "a", encoding="utf-8") as jfile:
+
         async def on_result_write(result_tuple: Any) -> None:
             record = _build_jsonl_record(
                 result_tuple, source_name, method, is_folder, transcriber
@@ -240,7 +266,8 @@ async def run_transcription_pipeline(
             )
         except Exception as e:
             logger.exception(
-                f"Error running concurrent transcription tasks for {source_name}: {e}")
+                f"Error running concurrent transcription tasks for {source_name}: {e}"
+            )
             print_error(f"Concurrency error for {source_name}.")
             return
 
@@ -249,14 +276,16 @@ async def run_transcription_pipeline(
         ordered = sorted(
             [r for r in results if r and r[2] is not None], key=lambda r: r[4]
         )
-        pages: List[Dict[str, Any]] = []
-        for (_p, image_name, text_chunk, _raw, order_index) in ordered:
+        pages: list[dict[str, Any]] = []
+        for _p, image_name, text_chunk, _raw, order_index in ordered:
             page_number = int(order_index) + 1 if isinstance(order_index, int) else None
-            pages.append({
-                "text": text_chunk,
-                "page_number": page_number,
-                "image_name": image_name,
-            })
+            pages.append(
+                {
+                    "text": text_chunk,
+                    "page_number": page_number,
+                    "image_name": image_name,
+                }
+            )
         write_transcription_output(
             pages,
             output_txt_path,
@@ -266,14 +295,15 @@ async def run_transcription_pipeline(
         )
     except Exception as e:
         logger.exception(
-            f"Error writing combined transcription output for {source_name}: {e}")
+            f"Error writing combined transcription output for {source_name}: {e}"
+        )
         print_error(f"Failed to write combined output for {source_name}.")
 
 
 def write_output_from_jsonl(
     jsonl_path: Path,
     output_path: Path,
-    postprocessing_config: Dict[str, Any],
+    postprocessing_config: dict[str, Any],
     output_format: str = "txt",
 ) -> bool:
     """Write combined output text from JSONL transcription records.
@@ -297,17 +327,19 @@ def write_output_from_jsonl(
 
         ordered = sorted(transcriptions, key=lambda r: r.get("order_index", 0))
 
-        pages: List[Dict[str, Any]] = []
+        pages: list[dict[str, Any]] = []
         for record in ordered:
             image_name = record.get("image_name", "")
             text_chunk = record.get("text_chunk", "")
             order_index = record.get("order_index", 0)
             page_number = int(order_index) + 1 if isinstance(order_index, int) else None
-            pages.append({
-                "text": text_chunk,
-                "page_number": page_number,
-                "image_name": image_name,
-            })
+            pages.append(
+                {
+                    "text": text_chunk,
+                    "page_number": page_number,
+                    "image_name": image_name,
+                }
+            )
 
         actual_path = write_transcription_output(
             pages,

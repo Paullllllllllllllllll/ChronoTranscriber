@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-
-from modules.infra.multiprocessing_utils import wrapper, run_multiprocessing_tasks
+from modules.infra.multiprocessing_utils import run_multiprocessing_tasks, wrapper
 
 
 # Module-level functions are picklable (required by multiprocessing)
@@ -26,6 +24,7 @@ def _maybe_fail(x):
 # wrapper
 # ---------------------------------------------------------------------------
 
+
 class TestWrapper:
     def test_successful_call(self) -> None:
         assert wrapper(_double, (3,)) == 6
@@ -36,12 +35,14 @@ class TestWrapper:
     def test_empty_args(self) -> None:
         def no_args():
             return 42
+
         assert wrapper(no_args, ()) == 42
 
 
 # ---------------------------------------------------------------------------
 # run_multiprocessing_tasks
 # ---------------------------------------------------------------------------
+
 
 class TestRunMultiprocessingTasks:
     def test_basic_execution(self) -> None:

@@ -10,20 +10,20 @@ used by each processor's ``prepare_output_folder`` method.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
-from modules.infra.paths import create_safe_directory_name, create_safe_filename
 from modules.infra.logger import setup_logger
+from modules.infra.paths import create_safe_directory_name, create_safe_filename
 
 logger = setup_logger(__name__)
 
 
 class ProcessingState(Enum):
     """Represents the processing state of an input item."""
+
     COMPLETE = "complete"
     PARTIAL = "partial"
     NONE = "none"
@@ -32,6 +32,7 @@ class ProcessingState(Enum):
 @dataclass
 class ResumeResult:
     """Result of a resume check for a single item."""
+
     item: Path
     state: ProcessingState
     output_path: Path | None = None
@@ -58,7 +59,7 @@ class ResumeChecker:
     def __init__(
         self,
         resume_mode: str,
-        paths_config: Dict[str, Any],
+        paths_config: dict[str, Any],
         *,
         use_input_as_output: bool = False,
         pdf_output_dir: Path | None = None,
@@ -74,10 +75,18 @@ class ResumeChecker:
         self._output_ext = f".{output_format}" if output_format != "txt" else ".txt"
 
         fp = paths_config.get("file_paths", {})
-        self.pdf_output_dir = pdf_output_dir or Path(fp.get("PDFs", {}).get("output", "pdfs_out"))
-        self.image_output_dir = image_output_dir or Path(fp.get("Images", {}).get("output", "images_out"))
-        self.epub_output_dir = epub_output_dir or Path(fp.get("EPUBs", {}).get("output", "epubs_out"))
-        self.mobi_output_dir = mobi_output_dir or Path(fp.get("MOBIs", {}).get("output", "mobis_out"))
+        self.pdf_output_dir = pdf_output_dir or Path(
+            fp.get("PDFs", {}).get("output", "pdfs_out")
+        )
+        self.image_output_dir = image_output_dir or Path(
+            fp.get("Images", {}).get("output", "images_out")
+        )
+        self.epub_output_dir = epub_output_dir or Path(
+            fp.get("EPUBs", {}).get("output", "epubs_out")
+        )
+        self.mobi_output_dir = mobi_output_dir or Path(
+            fp.get("MOBIs", {}).get("output", "mobis_out")
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -95,7 +104,9 @@ class ResumeChecker:
             A :class:`ResumeResult` describing the item's state.
         """
         if self.resume_mode == "overwrite":
-            return ResumeResult(item=item, state=ProcessingState.NONE, reason="overwrite mode")
+            return ResumeResult(
+                item=item, state=ProcessingState.NONE, reason="overwrite mode"
+            )
 
         if processing_type == "pdfs":
             return self._check_pdf(item)
@@ -108,7 +119,9 @@ class ResumeChecker:
         elif processing_type == "auto":
             return self._check_auto(item)
         else:
-            return ResumeResult(item=item, state=ProcessingState.NONE, reason="unknown type")
+            return ResumeResult(
+                item=item, state=ProcessingState.NONE, reason="unknown type"
+            )
 
     def _check_auto(self, item: Path) -> ResumeResult:
         """Auto-detect item type and delegate to the appropriate check."""
@@ -121,13 +134,15 @@ class ResumeChecker:
             return self._check_epub(item)
         if suffix in {".mobi", ".azw", ".azw3", ".kfx"}:
             return self._check_mobi(item)
-        return ResumeResult(item=item, state=ProcessingState.NONE, reason="unknown type")
+        return ResumeResult(
+            item=item, state=ProcessingState.NONE, reason="unknown type"
+        )
 
     def filter_items(
         self,
-        items: List[Path],
+        items: list[Path],
         processing_type: str,
-    ) -> Tuple[List[Path], List[ResumeResult]]:
+    ) -> tuple[list[Path], list[ResumeResult]]:
         """Partition *items* into those that need processing and those skipped.
 
         Args:
@@ -141,8 +156,8 @@ class ResumeChecker:
         if self.resume_mode == "overwrite":
             return list(items), []
 
-        to_process: List[Path] = []
-        skipped: List[ResumeResult] = []
+        to_process: list[Path] = []
+        skipped: list[ResumeResult] = []
 
         for item in items:
             result = self.should_skip(item, processing_type)
@@ -193,7 +208,9 @@ class ResumeChecker:
 
         if self.use_input_as_output:
             out_name = create_safe_filename(
-                item_stem, self._output_ext, co_locate_dir,
+                item_stem,
+                self._output_ext,
+                co_locate_dir,
             )
             out_path = co_locate_dir / out_name
             if out_path.exists() and out_path.stat().st_size > 0:
@@ -218,11 +235,15 @@ class ResumeChecker:
 
         if not parent_folder.exists():
             return ResumeResult(
-                item=item, state=ProcessingState.NONE, reason="no output folder",
+                item=item,
+                state=ProcessingState.NONE,
+                reason="no output folder",
             )
 
         txt_name_in_dir = create_safe_filename(
-            item_stem, self._output_ext, parent_folder,
+            item_stem,
+            self._output_ext,
+            parent_folder,
         )
         txt_path_in_dir = parent_folder / txt_name_in_dir
 
@@ -252,7 +273,9 @@ class ResumeChecker:
 
     def _check_pdf(self, pdf_path: Path) -> ResumeResult:
         return self._check_output_exists(
-            pdf_path, pdf_path.stem, self.pdf_output_dir,
+            pdf_path,
+            pdf_path.stem,
+            self.pdf_output_dir,
         )
 
     def _check_image_folder(self, folder: Path) -> ResumeResult:
@@ -267,12 +290,16 @@ class ResumeChecker:
 
     def _check_epub(self, epub_path: Path) -> ResumeResult:
         return self._check_output_exists(
-            epub_path, epub_path.stem, self.epub_output_dir,
+            epub_path,
+            epub_path.stem,
+            self.epub_output_dir,
             supports_partial_jsonl=False,
         )
 
     def _check_mobi(self, mobi_path: Path) -> ResumeResult:
         return self._check_output_exists(
-            mobi_path, mobi_path.stem, self.mobi_output_dir,
+            mobi_path,
+            mobi_path.stem,
+            self.mobi_output_dir,
             supports_partial_jsonl=False,
         )

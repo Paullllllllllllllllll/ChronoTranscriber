@@ -20,22 +20,19 @@ LangChain handles:
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
 
+from modules.config.capabilities import Capabilities, detect_capabilities
+from modules.infra.logger import setup_logger
 from modules.llm.providers.base import (
-    BaseProvider,
     OPENROUTER_TOKEN_MAPPING,
+    BaseProvider,
     TranscriptionResult,
     load_max_retries,
 )
-from modules.infra.logger import setup_logger
-from modules.config.capabilities import Capabilities, detect_capabilities
-from modules.config.service import get_config_service
 
 logger = setup_logger(__name__)
 
@@ -69,14 +66,13 @@ def _compute_openrouter_reasoning_max_tokens(*, max_tokens: int, effort: str) ->
     return budget
 
 
-
 class OpenRouterProvider(BaseProvider):
     """OpenRouter LLM provider using LangChain.
-    
+
     Uses the OpenAI-compatible API endpoint provided by OpenRouter
     to access 200+ models from various providers.
     """
-    
+
     def __init__(
         self,
         api_key: str,
@@ -84,13 +80,13 @@ class OpenRouterProvider(BaseProvider):
         *,
         temperature: float = 0.0,
         max_tokens: int = 4096,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
         top_p: float = 1.0,
         frequency_penalty: float = 0.0,
         presence_penalty: float = 0.0,
-        site_url: Optional[str] = None,
-        app_name: Optional[str] = None,
-        reasoning_config: Optional[Dict[str, Any]] = None,
+        site_url: str | None = None,
+        app_name: str | None = None,
+        reasoning_config: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(
@@ -101,33 +97,34 @@ class OpenRouterProvider(BaseProvider):
             timeout=timeout,
             **kwargs,
         )
-        
+
         self.top_p = top_p
         self.frequency_penalty = frequency_penalty
         self.presence_penalty = presence_penalty
         self.site_url = site_url
         self.app_name = app_name or "ChronoTranscriber"
         self.reasoning_config = reasoning_config
-        
+
         self._capabilities = detect_capabilities(model)
         max_retries = load_max_retries()
-        
+
         # Build disabled_params for models that don't support certain features
         disabled_params = self._build_disabled_params()
-        
-        # Build model kwargs - include all params, LangChain will filter via disabled_params
-        model_kwargs: Dict[str, Any] = {
+
+        # Build model kwargs - include all params, LangChain will filter via
+        # disabled_params
+        model_kwargs: dict[str, Any] = {
             "temperature": temperature,
             "top_p": top_p,
             "frequency_penalty": frequency_penalty,
             "presence_penalty": presence_penalty,
         }
-        
+
         # Apply OpenRouter unified reasoning controls.
         # OpenRouter accepts a top-level `reasoning` object and will route/translate
         # it when supported by the selected model/provider.
         if self._capabilities.supports_reasoning_effort and reasoning_config:
-            reasoning_payload: Dict[str, Any] = {}
+            reasoning_payload: dict[str, Any] = {}
 
             effort = reasoning_config.get("effort")
             if effort:
@@ -151,22 +148,30 @@ class OpenRouterProvider(BaseProvider):
                 reasoning_payload["enabled"] = bool(enabled)
 
             if reasoning_payload:
-                # Avoid sending both effort and max_tokens for models where OpenRouter expects
-                # one or the other.
+                # Avoid sending both effort and max_tokens for models where
+                # OpenRouter expects one or the other.
                 m = (model or "").lower().strip()
 
-                # For Anthropic and Gemini thinking models, OpenRouter supports reasoning.max_tokens.
-                # Map effort -> max_tokens budget when max_tokens isn't explicitly provided.
-                if ("anthropic/" in m or "claude" in m or "gemini" in m) and "max_tokens" not in reasoning_payload:
-                    eff = (reasoning_payload.get("effort") or "medium")
-                    budget = _compute_openrouter_reasoning_max_tokens(max_tokens=max_tokens, effort=str(eff))
+                # For Anthropic and Gemini thinking models, OpenRouter supports
+                # reasoning.max_tokens. Map effort -> max_tokens budget when
+                # max_tokens isn't explicitly provided.
+                if (
+                    "anthropic/" in m or "claude" in m or "gemini" in m
+                ) and "max_tokens" not in reasoning_payload:
+                    eff = reasoning_payload.get("effort") or "medium"
+                    budget = _compute_openrouter_reasoning_max_tokens(
+                        max_tokens=max_tokens, effort=str(eff)
+                    )
                     if budget > 0:
                         reasoning_payload.pop("effort", None)
                         reasoning_payload["max_tokens"] = budget
 
-                # For DeepSeek models, OpenRouter docs emphasize enabling reasoning, rather than effort.
+                # For DeepSeek models, OpenRouter docs emphasize enabling
+                # reasoning, rather than effort.
                 if "deepseek/" in m or "deepseek" in m:
-                    eff = str(reasoning_payload.get("effort") or "medium").lower().strip()
+                    eff = (
+                        str(reasoning_payload.get("effort") or "medium").lower().strip()
+                    )
                     reasoning_payload.pop("effort", None)
                     if "enabled" not in reasoning_payload:
                         reasoning_payload["enabled"] = eff != "none"
@@ -178,14 +183,16 @@ class OpenRouterProvider(BaseProvider):
                 extra_body["reasoning"] = reasoning_payload
                 model_kwargs["extra_body"] = extra_body
 
-                logger.info(f"Using OpenRouter reasoning={reasoning_payload} for model {model}")
-        
+                logger.info(
+                    f"Using OpenRouter reasoning={reasoning_payload} for model {model}"
+                )
+
         # OpenRouter-specific headers
         default_headers = {
             "HTTP-Referer": site_url or "https://github.com/ChronoTranscriber",
             "X-Title": self.app_name,
         }
-        
+
         # Initialize LangChain ChatOpenAI with OpenRouter endpoint
         # LangChain handles:
         # - Retry logic with exponential backoff (max_retries)
@@ -201,14 +208,14 @@ class OpenRouterProvider(BaseProvider):
             default_headers=default_headers,
             **model_kwargs,
         )
-    
+
     @property
     def provider_name(self) -> str:
         return "openrouter"
-    
+
     def get_capabilities(self) -> Capabilities:
         return self._capabilities
-    
+
     async def transcribe_image_from_base64(
         self,
         image_base64: str,
@@ -216,27 +223,28 @@ class OpenRouterProvider(BaseProvider):
         *,
         system_prompt: str,
         user_instruction: str = "Please transcribe the text from this image.",
-        json_schema: Optional[Dict[str, Any]] = None,
-        image_detail: Optional[str] = None,
-        media_resolution: Optional[str] = None,
+        json_schema: dict[str, Any] | None = None,
+        image_detail: str | None = None,
+        media_resolution: str | None = None,
     ) -> TranscriptionResult:
         """Transcribe text from a base64-encoded image using LangChain.
-        
-        Note: OpenRouter uses image_detail for OpenAI-compatible models, not media_resolution.
-        The media_resolution parameter is accepted for API compatibility but ignored.
+
+        Note: OpenRouter uses image_detail for OpenAI-compatible models, not
+        media_resolution. The media_resolution parameter is accepted for API
+        compatibility but ignored.
         """
         caps = self._capabilities
-        
+
         if not caps.supports_image_input:
             return TranscriptionResult(
                 content="",
                 error=f"Model {self.model} does not support vision/image inputs.",
                 transcription_not_possible=True,
             )
-        
+
         # Build data URL
         data_url = self.create_data_url(image_base64, mime_type)
-        
+
         # Normalize image detail
         detail = image_detail
         if detail:
@@ -245,15 +253,15 @@ class OpenRouterProvider(BaseProvider):
                 detail = None
         if detail is None and caps.supports_image_detail:
             detail = caps.default_image_detail
-        
+
         # Build image content block (OpenAI format for OpenRouter)
-        image_content: Dict[str, Any] = {
+        image_content: dict[str, Any] = {
             "type": "image_url",
             "image_url": {"url": data_url},
         }
         if detail and caps.supports_image_detail and detail in ("low", "high"):
             image_content["image_url"]["detail"] = detail
-        
+
         # Build system message — with cache_control for Anthropic models via OpenRouter
         use_cache_control = (
             self._caching_enabled
@@ -262,22 +270,26 @@ class OpenRouterProvider(BaseProvider):
             and ("claude" in self.model.lower() or "anthropic/" in self.model.lower())
         )
         if use_cache_control:
-            system_message = SystemMessage(content=[
-                {
-                    "type": "text",
-                    "text": system_prompt,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ])
+            system_message = SystemMessage(
+                content=[
+                    {
+                        "type": "text",
+                        "text": system_prompt,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]
+            )
         else:
             system_message = SystemMessage(content=system_prompt)
 
         messages = [
             system_message,
-            HumanMessage(content=[
-                {"type": "text", "text": user_instruction},
-                image_content,
-            ]),
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": user_instruction},
+                    image_content,
+                ]
+            ),
         ]
 
         # Use structured output if schema provided and supported
@@ -289,7 +301,7 @@ class OpenRouterProvider(BaseProvider):
                 actual_schema = json_schema["schema"]
             else:
                 actual_schema = json_schema
-            
+
             # Note: Not all OpenRouter models support structured output
             # For those that do, use json_mode method as it's more widely supported
             try:
@@ -303,23 +315,25 @@ class OpenRouterProvider(BaseProvider):
                     f"Structured output not available for {self.model}, "
                     f"falling back to standard output: {e}"
                 )
-        
+
         # Invoke LLM - LangChain handles retries internally
         return await self._invoke_llm(llm_to_use, messages)
-    
+
     async def _invoke_llm(
         self,
         llm: Any,
-        messages: List[Any],
+        messages: list[Any],
     ) -> TranscriptionResult:
         """Invoke the LLM and process the response.
-        
+
         LangChain handles retry logic internally.
         Response parsing and token tracking are handled by the shared
         BaseProvider._process_llm_response() method.
         """
         try:
-            response = await self._ainvoke_with_retry(llm, messages, expect_image_tokens=True)
+            response = await self._ainvoke_with_retry(
+                llm, messages, expect_image_tokens=True
+            )
             return await self._process_llm_response(response, OPENROUTER_TOKEN_MAPPING)
         except Exception as e:
             logger.error(f"Error invoking OpenRouter: {e}")
@@ -327,7 +341,7 @@ class OpenRouterProvider(BaseProvider):
                 content="",
                 error=str(e),
             )
-    
+
     async def close(self) -> None:
         """Clean up resources."""
         pass

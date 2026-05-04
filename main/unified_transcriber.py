@@ -10,43 +10,38 @@ Supports two modes:
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 _project_root = Path(__file__).resolve().parents[1]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from modules.config.config_loader import PROJECT_ROOT
-from modules.config.service import get_config_service
-from modules.infra.logger import setup_logger
-from modules.llm import open_transcriber
-from modules.ui import (
+from modules.config.service import get_config_service  # noqa: E402
+from modules.core.cli_args import (  # noqa: E402
+    create_transcriber_parser,
+    resolve_path,
+    validate_output_path,
+)
+from modules.documents.auto_selector import AutoSelector  # noqa: E402
+from modules.infra.logger import setup_logger  # noqa: E402
+from modules.infra.paths import PathConfig  # noqa: E402
+from modules.llm import open_transcriber  # noqa: E402
+from modules.llm.schema_utils import list_schema_options  # noqa: E402, F401
+from modules.transcribe.config_builder import (  # noqa: E402
+    _resolve_model_config_from_cli,
+    create_config_from_cli_args,
+)
+from modules.transcribe.dual_mode import AsyncDualModeScript  # noqa: E402
+from modules.transcribe.manager import WorkflowManager  # noqa: E402
+from modules.transcribe.user_config import UserConfiguration  # noqa: E402
+from modules.ui import (  # noqa: E402
     WorkflowUI,
+    print_error,
     print_info,
     print_success,
     print_warning,
-    print_error,
-)
-from modules.transcribe.manager import WorkflowManager
-from modules.transcribe.user_config import UserConfiguration
-from modules.documents.auto_selector import AutoSelector
-from modules.core.cli_args import (
-    create_transcriber_parser,
-    resolve_path,
-    validate_input_path,
-    validate_output_path,
-)
-from modules.transcribe.dual_mode import AsyncDualModeScript
-from modules.infra.paths import PathConfig
-from modules.llm.schema_utils import list_schema_options
-from modules.transcribe.config_builder import (
-    _collect_files_for_type,
-    _resolve_context,
-    _resolve_model_config_from_cli,
-    _resolve_schema,
-    create_config_from_cli_args,
 )
 
 logger = setup_logger(__name__)
@@ -70,7 +65,7 @@ async def _open_transcriber_from_config(
         provider=tm.get("provider"),
         schema_path=user_config.selected_schema_path,
         additional_context_path=user_config.additional_context_path,
-        use_hierarchical_context=getattr(user_config, 'use_hierarchical_context', True),
+        use_hierarchical_context=getattr(user_config, "use_hierarchical_context", True),
         max_output_tokens=tm.get("max_output_tokens"),
         reasoning_config=tm.get("reasoning"),
         text_config=tm.get("text"),
@@ -92,24 +87,24 @@ async def configure_user_workflow_interactive(
 ) -> UserConfiguration:
     """
     Guide user through configuration with navigation support (interactive mode).
-    
+
     Args:
         pdf_input_dir: PDF input directory
         image_input_dir: Image input directory
         epub_input_dir: EPUB input directory
         auto_input_dir: Auto mode input directory
-    
+
     Returns:
         UserConfiguration object with all settings
     """
     config = UserConfiguration()
-    
+
     # Display welcome banner
     WorkflowUI.display_welcome()
-    
+
     # Navigation state machine
     current_step = "processing_type"
-    
+
     while True:
         if current_step == "processing_type":
             if WorkflowUI.configure_processing_type(config):
@@ -120,19 +115,19 @@ async def configure_user_workflow_interactive(
                     current_step = "transcription_method"
             else:
                 current_step = "processing_type"
-        
+
         elif current_step == "transcription_method":
             if WorkflowUI.configure_transcription_method(config):
                 current_step = "batch_processing"
             else:
                 current_step = "processing_type"
-        
+
         elif current_step == "batch_processing":
             if WorkflowUI.configure_batch_processing(config):
                 current_step = "item_selection"
             else:
                 current_step = "transcription_method"
-        
+
         elif current_step == "item_selection":
             if config.processing_type == "auto":
                 base_dir = auto_input_dir
@@ -151,8 +146,12 @@ async def configure_user_workflow_interactive(
                     current_step = "page_range"
             else:
                 # Auto mode goes back to processing_type, others to batch_processing
-                current_step = "processing_type" if config.processing_type == "auto" else "batch_processing"
-        
+                current_step = (
+                    "processing_type"
+                    if config.processing_type == "auto"
+                    else "batch_processing"
+                )
+
         elif current_step == "auto_schema_selection":
             # Schema selection for auto mode (when GPT files are detected)
             if WorkflowUI.configure_auto_mode_schema(config):
@@ -192,7 +191,7 @@ async def process_auto_mode(
     image_processing_config: dict[str, Any],
 ) -> None:
     """Process documents in auto mode with per-file method decisions.
-    
+
     Args:
         user_config: User configuration with auto_decisions
         paths_config: Paths configuration
@@ -200,8 +199,7 @@ async def process_auto_mode(
         concurrency_config: Concurrency configuration
         image_processing_config: Image processing configuration
     """
-    from modules.documents.auto_selector import AutoSelector, FileDecision
-    
+
     print_info("AUTO MODE", "Processing files with automatic method selection...")
 
     decisions = user_config.auto_decisions or []
@@ -215,9 +213,9 @@ async def process_auto_mode(
     selector = user_config.auto_selector or AutoSelector(paths_config)
     user_config.auto_selector = selector
     selector.print_decision_summary(decisions)
-    
+
     pc = PathConfig.from_paths_config(paths_config)
-    
+
     # Group decisions by method only.  All file types within the same method
     # share a single processing queue so that PDFs and image folders are
     # interleaved, preventing one type from exhausting the daily token budget
@@ -226,7 +224,7 @@ async def process_auto_mode(
     by_method: dict[str, list[Any]] = {}
     for decision in decisions:
         by_method.setdefault(decision.method, []).append(decision)
-    
+
     # Process each method group
     for method, items in by_method.items():
         print_info(f"Processing {len(items)} file(s) with {method.upper()} method...")
@@ -237,7 +235,9 @@ async def process_auto_mode(
         temp_config.use_batch_processing = False  # Auto mode uses synchronous
         temp_config.selected_items = [d.file_path for d in items]
         temp_config.resume_mode = user_config.resume_mode
-        temp_config.processing_type = "auto"  # per-item routing in process_selected_items
+        temp_config.processing_type = (
+            "auto"  # per-item routing in process_selected_items
+        )
         temp_config.page_range = user_config.page_range
 
         # Create workflow manager
@@ -246,7 +246,7 @@ async def process_auto_mode(
             paths_config,
             model_config,
             concurrency_config,
-            image_processing_config
+            image_processing_config,
         )
 
         # When output is NOT co-located with input, redirect all output
@@ -262,16 +262,19 @@ async def process_auto_mode(
             # Ensure schema is set (fall back to default if not specified)
             if user_config.selected_schema_path is None:
                 from modules.config.config_loader import PROJECT_ROOT
+
                 user_config.selected_schema_path = (
                     PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json"
                 ).resolve()
 
-            async with await _open_transcriber_from_config(user_config, model_config) as t:
+            async with await _open_transcriber_from_config(
+                user_config, model_config
+            ) as t:
                 transcriber = t
                 await workflow_manager.process_selected_items(transcriber)
         else:
             await workflow_manager.process_selected_items()
-    
+
     print_success("Auto mode processing complete!")
 
 
@@ -284,7 +287,7 @@ async def process_documents(
 ) -> None:
     """
     Process documents based on user configuration.
-    
+
     Args:
         user_config: User's processing preferences
         paths_config: Paths configuration
@@ -293,19 +296,22 @@ async def process_documents(
         image_processing_config: Image processing configuration
     """
     print_info("PROCESSING", "Starting document processing...")
-    
+
     # Create workflow manager
     workflow_manager = WorkflowManager(
         user_config,
         paths_config,
         model_config,
         concurrency_config,
-        image_processing_config
+        image_processing_config,
     )
-    
+
     # Initialize transcriber if needed for synchronous GPT processing
     transcriber = None
-    if user_config.transcription_method == "gpt" and not user_config.use_batch_processing:
+    if (
+        user_config.transcription_method == "gpt"
+        and not user_config.use_batch_processing
+    ):
         async with await _open_transcriber_from_config(user_config, model_config) as t:
             transcriber = t
             await workflow_manager.process_selected_items(transcriber)
@@ -317,13 +323,13 @@ async def process_documents(
 async def transcribe_interactive() -> None:
     """Handle interactive mode transcription workflow."""
     import time
-    
+
     # Load configurations
     config_service = get_config_service()
     paths_config = config_service.get_paths_config()
     pc = PathConfig.from_paths_config(paths_config)
     pc.ensure_input_dirs()
-    
+
     # Create user configuration through interactive workflow
     user_config = await configure_user_workflow_interactive(
         pc.pdf_input_dir,
@@ -332,12 +338,12 @@ async def transcribe_interactive() -> None:
         pc.auto_input_dir,
         paths_config,
     )
-    
+
     # Track processing time
     start_time = time.time()
     processed_count = len(user_config.selected_items or [])
     failed_count = 0
-    
+
     # Process documents
     if user_config.processing_type == "auto":
         # Override output directory with Auto output
@@ -347,7 +353,7 @@ async def transcribe_interactive() -> None:
             paths_config,
             config_service.get_model_config(),
             config_service.get_concurrency_config(),
-            config_service.get_image_processing_config()
+            config_service.get_image_processing_config(),
         )
     else:
         await process_documents(
@@ -355,12 +361,12 @@ async def transcribe_interactive() -> None:
             paths_config,
             config_service.get_model_config(),
             config_service.get_concurrency_config(),
-            config_service.get_image_processing_config()
+            config_service.get_image_processing_config(),
         )
-    
+
     # Calculate duration
     duration_seconds = time.time() - start_time
-    
+
     # Display completion summary
     if user_config.processing_type != "auto":  # Auto mode prints its own summary
         WorkflowUI.display_completion_summary(
@@ -373,7 +379,7 @@ async def transcribe_interactive() -> None:
 
 async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> None:
     """Handle CLI mode transcription workflow.
-    
+
     Args:
         args: Parsed command-line arguments
         paths_config: Paths configuration dictionary
@@ -381,13 +387,15 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> None:
     # Load additional configurations
     config_service = get_config_service()
     pc = PathConfig.from_paths_config(paths_config)
-    
+
     # Determine base directories based on processing type
     ptype = "auto" if args.auto else (args.type or "pdfs")
     base_input_dir, base_output_dir = pc.base_dirs_for_type(ptype)
-    
+
     # Create configuration from CLI arguments
-    user_config = create_config_from_cli_args(args, base_input_dir, base_output_dir, paths_config)
+    user_config = create_config_from_cli_args(
+        args, base_input_dir, base_output_dir, paths_config
+    )
 
     # Resolve model config from base config + optional CLI overrides
     effective_model_config, applied_model_overrides = _resolve_model_config_from_cli(
@@ -404,10 +412,15 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> None:
 
         effective_paths_config = deepcopy(paths_config)
         file_paths_cfg = effective_paths_config.setdefault("file_paths", {})
-        _TYPE_TO_SECTION = {"images": "Images", "pdfs": "PDFs", "epubs": "EPUBs", "mobis": "MOBIs"}
+        _TYPE_TO_SECTION = {
+            "images": "Images",
+            "pdfs": "PDFs",
+            "epubs": "EPUBs",
+            "mobis": "MOBIs",
+        }
         section = _TYPE_TO_SECTION.get(args.type, "PDFs")
         file_paths_cfg.setdefault(section, {})["output"] = str(output_path)
-    
+
     # Log resume mode for CLI awareness
     if user_config.resume_mode == "skip":
         print_info("Resume mode: skip (use --force to reprocess all)")
@@ -421,7 +434,8 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> None:
         and any(d.method == "gpt" for d in user_config.auto_decisions)
     ):
         if user_config.additional_context_path:
-            print_info(f"Additional context: Global ({user_config.additional_context_path.name})")
+            ctx_name = user_config.additional_context_path.name
+            print_info(f"Additional context: Global ({ctx_name})")
         elif getattr(user_config, "use_hierarchical_context", False):
             print_info("Additional context: Hierarchical (file/folder-specific)")
         else:
@@ -434,7 +448,7 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> None:
             effective_paths_config,
             effective_model_config,
             config_service.get_concurrency_config(),
-            config_service.get_image_processing_config()
+            config_service.get_image_processing_config(),
         )
     else:
         await process_documents(
@@ -442,27 +456,26 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> None:
             effective_paths_config,
             effective_model_config,
             config_service.get_concurrency_config(),
-            config_service.get_image_processing_config()
+            config_service.get_image_processing_config(),
         )
-    
+
     print_success("Processing complete!")
 
 
 class UnifiedTranscriberScript(AsyncDualModeScript):
     """Main script for the ChronoTranscriber application."""
-    
+
     def __init__(self) -> None:
         super().__init__("unified_transcriber")
-    
+
     def create_argument_parser(self) -> Any:
         """Create argument parser for CLI mode."""
-        from argparse import ArgumentParser
         return create_transcriber_parser()
-    
+
     async def run_interactive(self) -> None:
         """Run transcription in interactive mode."""
         await transcribe_interactive()
-    
+
     async def run_cli(self, args: Any) -> None:
         """Run transcription in CLI mode."""
         try:

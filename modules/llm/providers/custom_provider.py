@@ -29,20 +29,19 @@ Three operating modes (determined by config):
 
 from __future__ import annotations
 
-import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
 
+from modules.config.capabilities import Capabilities
+from modules.infra.logger import setup_logger
 from modules.llm.providers.base import (
-    BaseProvider,
     OPENAI_TOKEN_MAPPING,
+    BaseProvider,
     TranscriptionResult,
     load_max_retries,
 )
-from modules.infra.logger import setup_logger
-from modules.config.capabilities import Capabilities
 
 logger = setup_logger(__name__)
 
@@ -63,8 +62,8 @@ class CustomProvider(BaseProvider):
         base_url: str,
         temperature: float = 0.0,
         max_tokens: int = 4096,
-        timeout: Optional[float] = None,
-        custom_capabilities: Optional[Dict[str, Any]] = None,
+        timeout: float | None = None,
+        custom_capabilities: dict[str, Any] | None = None,
         use_plain_text_prompt: bool = False,
         **kwargs: Any,
     ) -> None:
@@ -83,9 +82,7 @@ class CustomProvider(BaseProvider):
         # Build capabilities from conservative defaults + user overrides
         caps = custom_capabilities or {}
         supports_vision = bool(caps.get("supports_vision", True))
-        supports_structured = bool(
-            caps.get("supports_structured_output", False)
-        )
+        supports_structured = bool(caps.get("supports_structured_output", False))
 
         self._capabilities = Capabilities(
             model=model,
@@ -129,9 +126,11 @@ class CustomProvider(BaseProvider):
             else ("plain-text" if use_plain_text_prompt else "json-instructed")
         )
         logger.info(
-            "CustomProvider initialized: model=%s, base_url=%s, "
-            "max_tokens=%s, mode=%s",
-            model, base_url, max_tokens, mode,
+            "CustomProvider initialized: model=%s, base_url=%s, max_tokens=%s, mode=%s",
+            model,
+            base_url,
+            max_tokens,
+            mode,
         )
 
     @property
@@ -152,9 +151,9 @@ class CustomProvider(BaseProvider):
         *,
         system_prompt: str,
         user_instruction: str = "Please transcribe the text from this image.",
-        json_schema: Optional[Dict[str, Any]] = None,
-        image_detail: Optional[str] = None,
-        media_resolution: Optional[str] = None,
+        json_schema: dict[str, Any] | None = None,
+        image_detail: str | None = None,
+        media_resolution: str | None = None,
     ) -> TranscriptionResult:
         """Transcribe text from a base64-encoded image.
 
@@ -177,17 +176,19 @@ class CustomProvider(BaseProvider):
         data_url = self.create_data_url(image_base64, mime_type)
 
         # Build image content block (OpenAI format)
-        image_content: Dict[str, Any] = {
+        image_content: dict[str, Any] = {
             "type": "image_url",
             "image_url": {"url": data_url},
         }
 
-        messages: List[Any] = [
+        messages: list[Any] = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=[
-                {"type": "text", "text": user_instruction},
-                image_content,
-            ]),
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": user_instruction},
+                    image_content,
+                ]
+            ),
         ]
 
         caps = self._capabilities
@@ -197,6 +198,7 @@ class CustomProvider(BaseProvider):
         if json_schema and caps.supports_structured_outputs:
             try:
                 from modules.llm.schemas import TranscriptionOutput
+
                 llm_to_use = self._llm.with_structured_output(  # type: ignore[assignment]
                     TranscriptionOutput,
                     include_raw=True,
@@ -225,9 +227,7 @@ class CustomProvider(BaseProvider):
             response = await self._ainvoke_with_retry(
                 llm_to_use, messages, expect_image_tokens=True
             )
-            return await self._process_llm_response(
-                response, OPENAI_TOKEN_MAPPING
-            )
+            return await self._process_llm_response(response, OPENAI_TOKEN_MAPPING)
         except Exception as e:
             logger.error("Error invoking custom endpoint: %s", e)
             return TranscriptionResult(content="", error=str(e))

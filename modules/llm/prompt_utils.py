@@ -8,16 +8,19 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, Optional
+from typing import Any
 
 
-def render_prompt_with_schema(prompt_text: str, schema_obj: Dict[str, Any]) -> str:
+def render_prompt_with_schema(prompt_text: str, schema_obj: dict[str, Any]) -> str:
     """
     Inject a JSON schema into a prompt using one of three strategies:
-    - If the token "{{TRANSCRIPTION_SCHEMA}}" exists, replace it with a pretty-printed schema.
-    - If the marker "The JSON schema:" exists, replace any parsable JSON object that follows
-      the marker with the new schema; if no parsable block is found, append the schema after the marker.
-    - If neither token nor marker exists, append a new section "The JSON schema:" followed by the schema.
+    - If the token "{{TRANSCRIPTION_SCHEMA}}" exists, replace it with a
+      pretty-printed schema.
+    - If the marker "The JSON schema:" exists, replace any parsable JSON object
+      that follows the marker with the new schema; if no parsable block is found,
+      append the schema after the marker.
+    - If neither token nor marker exists, append a new section "The JSON schema:"
+      followed by the schema.
     """
     try:
         schema_str = json.dumps(schema_obj, indent=2, ensure_ascii=False)
@@ -35,7 +38,8 @@ def render_prompt_with_schema(prompt_text: str, schema_obj: Dict[str, Any]) -> s
         # Locate the first opening brace after the marker
         start_brace = prompt_text.find("{", idx)
         if start_brace != -1:
-            # Heuristic: find the last closing brace in the document; ensures we capture a block
+            # Heuristic: find the last closing brace in the document;
+            # ensures we capture a block
             end_brace = prompt_text.rfind("}")
             if end_brace != -1 and end_brace > start_brace:
                 return (
@@ -53,19 +57,20 @@ def render_prompt_with_schema(prompt_text: str, schema_obj: Dict[str, Any]) -> s
 def inject_additional_context(prompt_text: str, context: str) -> str:
     """
     Inject additional context into a prompt using the {{ADDITIONAL_CONTEXT}} marker.
-    
-    If the marker exists and context is provided, the marker is replaced with the context.
-    If the marker exists but context is empty/None, the entire "Additional context:" section
-    is removed to save tokens and avoid confusing the model.
-    If the marker does not exist, the prompt is returned unchanged (fail-safe behavior).
-    
+
+    If the marker exists and context is provided, the marker is replaced with
+    the context. If the marker exists but context is empty/None, the entire
+    "Additional context:" section is removed to save tokens and avoid confusing
+    the model. If the marker does not exist, the prompt is returned unchanged
+    (fail-safe behavior).
+
     Parameters
     ----------
     prompt_text : str
         The prompt template text containing the marker
     context : str
         The additional context to inject
-        
+
     Returns
     -------
     str
@@ -74,47 +79,49 @@ def inject_additional_context(prompt_text: str, context: str) -> str:
     marker = "{{ADDITIONAL_CONTEXT}}"
     if marker not in prompt_text:
         return prompt_text
-    
+
     context_text = context.strip() if context else ""
-    
+
     if context_text:
         # Replace marker with the actual context
         return prompt_text.replace(marker, context_text)
     else:
         # Remove the entire "Additional context:" section to save tokens
         # Look for patterns like "Additional context:\n{{ADDITIONAL_CONTEXT}}\n"
-        # Pattern to match "Additional context:" line followed by marker and trailing newlines
+        # Pattern to match "Additional context:" line followed by marker and
+        # trailing newlines
         patterns = [
             r"Additional context:\s*\n\s*\{\{ADDITIONAL_CONTEXT\}\}\s*\n?",
             r"Additional context:\s*\{\{ADDITIONAL_CONTEXT\}\}\s*\n?",
-            r"- Use any additional context provided below to guide transcription\.\s*\n?",
+            r"- Use any additional context provided below to guide"
+            r" transcription\.\s*\n?",
         ]
-        
+
         result = prompt_text
         for pattern in patterns:
             result = re.sub(pattern, "", result)
-        
+
         # If patterns didn't match, just remove the marker itself
         if marker in result:
             result = result.replace(marker, "")
-        
+
         # Clean up any resulting double blank lines
         result = re.sub(r"\n{3,}", "\n\n", result)
-        
+
         return result
 
 
 def prepare_prompt_with_context(
     prompt_text: str,
-    schema_obj: Optional[Dict[str, Any]] = None,
-    context: Optional[str] = None,
+    schema_obj: dict[str, Any] | None = None,
+    context: str | None = None,
 ) -> str:
     """
     Prepare a complete prompt by rendering schema and injecting context.
-    
+
     This is a convenience function that combines render_prompt_with_schema
     and inject_additional_context into a single call.
-    
+
     Parameters
     ----------
     prompt_text : str
@@ -123,17 +130,17 @@ def prepare_prompt_with_context(
         The JSON schema to inject. If None, schema injection is skipped.
     context : Optional[str]
         The additional context to inject. If None/empty, the context section is removed.
-        
+
     Returns
     -------
     str
         The fully prepared prompt with schema and context applied
     """
     result = prompt_text
-    
+
     if schema_obj:
         result = render_prompt_with_schema(result, schema_obj)
-    
+
     result = inject_additional_context(result, context or "")
-    
+
     return result

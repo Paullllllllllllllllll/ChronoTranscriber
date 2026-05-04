@@ -12,13 +12,11 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from typing import Dict
-from typing import Optional
 
 import yaml
 
-from modules.config.constants import DOCUMENT_CATEGORIES
 from modules.config.capabilities import ensure_image_support
+from modules.config.constants import DOCUMENT_CATEGORIES
 
 
 def _is_repo_root(candidate: Path) -> bool:
@@ -30,7 +28,9 @@ def _is_repo_root(candidate: Path) -> bool:
     try:
         if (candidate / "config").is_dir() and (candidate / "schemas").is_dir():
             return True
-        if (candidate / "README.md").exists() and (candidate / "requirements.txt").exists():
+        if (candidate / "README.md").exists() and (
+            candidate / "requirements.txt"
+        ).exists():
             return True
     except Exception:
         pass
@@ -39,7 +39,8 @@ def _is_repo_root(candidate: Path) -> bool:
 
 def _compute_project_root() -> Path:
     """
-    Compute the project root robustly regardless of where this file lives within 'modules/'.
+    Compute the project root robustly regardless of where this file lives
+    within 'modules/'.
     Walk up parents to find a directory that looks like the repo root.
     """
     here = Path(__file__).resolve()
@@ -75,8 +76,9 @@ def _compute_config_dir() -> Path:
     raw = os.environ.get("CHRONO_CONFIG_DIR")
     if raw:
         expanded = _expand_path_str(raw)
-        return (expanded if expanded.is_absolute()
-                else (PROJECT_ROOT / expanded)).resolve()
+        return (
+            expanded if expanded.is_absolute() else (PROJECT_ROOT / expanded)
+        ).resolve()
     return (PROJECT_ROOT / "config").resolve()
 
 
@@ -92,16 +94,16 @@ class _TranscriptionModel:
     name: str
     expects_image_inputs: bool = True
     # Optional advanced fields (read if present; safe defaults otherwise)
-    max_output_tokens: Optional[int] = None
-    service_tier: Optional[str] = None
-    temperature: Optional[float] = None
-    top_p: Optional[float] = None
-    frequency_penalty: Optional[float] = None
-    presence_penalty: Optional[float] = None
-    stop: Optional[list[str]] = None
-    seed: Optional[int] = None
-    reasoning: Optional[Dict[str, Any]] = None
-    text: Optional[Dict[str, Any]] = None
+    max_output_tokens: int | None = None
+    service_tier: str | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    frequency_penalty: float | None = None
+    presence_penalty: float | None = None
+    stop: list[str] | None = None
+    seed: int | None = None
+    reasoning: dict[str, Any] | None = None
+    text: dict[str, Any] | None = None
 
 
 class ConfigLoader:
@@ -109,15 +111,15 @@ class ConfigLoader:
     Loads configuration files and exposes normalized dictionaries to callers.
     """
 
-    def __init__(self, config_path: Optional[Path] = None) -> None:
+    def __init__(self, config_path: Path | None = None) -> None:
         self.config_path = config_path or DEFAULT_CONFIG_PATH
-        self._raw: Dict[str, Any] = {}
-        self._paths: Optional[Dict[str, Any]] = None
-        self._concurrency: Optional[Dict[str, Any]] = None
-        self._image_processing: Optional[Dict[str, Any]] = None
+        self._raw: dict[str, Any] = {}
+        self._paths: dict[str, Any] | None = None
+        self._concurrency: dict[str, Any] | None = None
+        self._image_processing: dict[str, Any] | None = None
 
     @staticmethod
-    def _load_yaml_file(path: Path) -> Dict[str, Any]:
+    def _load_yaml_file(path: Path) -> dict[str, Any]:
         if not path.exists():
             raise FileNotFoundError(f"Missing configuration file: {path}")
         try:
@@ -137,9 +139,7 @@ class ConfigLoader:
         Load YAML configuration into memory.
         """
         if not self.config_path.exists():
-            raise FileNotFoundError(
-                f"Missing configuration file: {self.config_path}"
-            )
+            raise FileNotFoundError(f"Missing configuration file: {self.config_path}")
         with self.config_path.open("r", encoding="utf-8") as f:
             self._raw = yaml.safe_load(f) or {}
 
@@ -172,18 +172,18 @@ class ConfigLoader:
         # Fail fast if images are required but the model cannot accept them
         ensure_image_support(tm.name, tm.expects_image_inputs)
 
-    def get_model_config(self) -> Dict[str, Any]:
+    def get_model_config(self) -> dict[str, Any]:
         """
         Return the model configuration dictionary.
-        
+
         Image capability is validated during load_configs().
         """
         return self._raw.copy()
 
-    def get_paths_config(self) -> Dict[str, Any]:
+    def get_paths_config(self) -> dict[str, Any]:
         """
         Load, normalize, and return the paths configuration (cached).
-        
+
         Expands ~ and environment variables in all paths. Relative paths are
         resolved against PROJECT_ROOT.
         """
@@ -192,15 +192,13 @@ class ConfigLoader:
             self._paths = self._normalize_paths_config(raw)
         return self._paths.copy()
 
-    def get_concurrency_config(self) -> Dict[str, Any]:
+    def get_concurrency_config(self) -> dict[str, Any]:
         """Load and return the concurrency configuration (cached)."""
         if self._concurrency is None:
-            self._concurrency = self._load_yaml_file(
-                DEFAULT_CONCURRENCY_CONFIG_PATH
-            )
+            self._concurrency = self._load_yaml_file(DEFAULT_CONCURRENCY_CONFIG_PATH)
         return self._concurrency.copy()
 
-    def get_image_processing_config(self) -> Dict[str, Any]:
+    def get_image_processing_config(self) -> dict[str, Any]:
         """Load and return the image processing configuration (cached)."""
         if self._image_processing is None:
             self._image_processing = self._load_yaml_file(
@@ -211,7 +209,7 @@ class ConfigLoader:
     # -------- Internal helpers for path normalization --------
 
     @staticmethod
-    def _to_abs(p: Optional[str], base: Path) -> Optional[str]:
+    def _to_abs(p: str | None, base: Path) -> str | None:
         if not p:
             return p
         cand = _expand_path_str(str(p))
@@ -219,13 +217,17 @@ class ConfigLoader:
             return str(cand.resolve())
         return str((base / cand).resolve())
 
-    def _normalize_paths_config(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_paths_config(self, cfg: dict[str, Any]) -> dict[str, Any]:
         """Normalize paths config by expanding env vars and resolving relative paths."""
         out = dict(cfg or {})
         general = dict(out.get("general", {}))
 
         # Normalize general paths
-        for key in ("logs_dir", "transcription_prompt_path", "transcription_schema_path"):
+        for key in (
+            "logs_dir",
+            "transcription_prompt_path",
+            "transcription_schema_path",
+        ):
             raw_path = general.get(key)
             if raw_path:
                 general[key] = self._to_abs(raw_path, PROJECT_ROOT)

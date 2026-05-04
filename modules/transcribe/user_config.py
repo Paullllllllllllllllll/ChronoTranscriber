@@ -14,8 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional, TYPE_CHECKING
-
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from modules.documents.auto_selector import AutoSelector
@@ -25,7 +24,7 @@ if TYPE_CHECKING:
 @dataclass
 class UserConfiguration:
     """Stores user's processing preferences to avoid re-prompting during workflow.
-    
+
     Attributes:
         processing_type: Type of documents ("images", "pdfs", "epubs", or "auto")
         transcription_method: Method to use ("native", "tesseract", or "gpt")
@@ -43,19 +42,21 @@ class UserConfiguration:
         page_range: Optional page-range filter (first N, last N, or explicit spans)
     """
 
-    processing_type: Optional[str] = None
-    transcription_method: Optional[str] = None
+    processing_type: str | None = None
+    transcription_method: str | None = None
     use_batch_processing: bool = False
-    selected_items: List[Path] | None = None
+    selected_items: list[Path] | None = None
     process_all: bool = False
-    selected_schema_name: Optional[str] = None
-    selected_schema_path: Optional[Path] = None
-    additional_context_path: Optional[Path] = None
-    use_hierarchical_context: bool = True  # Enable file/folder-specific context resolution
-    auto_decisions: Optional[List[Any]] = None
-    auto_selector: Optional["AutoSelector"] = None
+    selected_schema_name: str | None = None
+    selected_schema_path: Path | None = None
+    additional_context_path: Path | None = None
+    use_hierarchical_context: bool = (
+        True  # Enable file/folder-specific context resolution
+    )
+    auto_decisions: list[Any] | None = None
+    auto_selector: AutoSelector | None = None
     resume_mode: str = "skip"
-    page_range: Optional["PageRange"] = None
+    page_range: PageRange | None = None
     output_format: str = "txt"
 
     def __post_init__(self) -> None:
@@ -65,9 +66,13 @@ class UserConfiguration:
     def __str__(self) -> str:
         if self.processing_type == "auto":
             decision_count = len(self.auto_decisions) if self.auto_decisions else 0
-            page_text = f", Pages: {self.page_range.describe()}" if self.page_range else ""
-            return f"Processing type: auto, Decisions: {decision_count} files{page_text}"
-        
+            page_text = (
+                f", Pages: {self.page_range.describe()}" if self.page_range else ""
+            )
+            return (
+                f"Processing type: auto, Decisions: {decision_count} files{page_text}"
+            )
+
         method_name = {
             "native": "Native PDF extraction",
             "tesseract": "Tesseract OCR",
@@ -79,11 +84,7 @@ class UserConfiguration:
             if self.transcription_method == "gpt" and self.selected_schema_name
             else ""
         )
-        page_text = (
-            f", Pages: {self.page_range.describe()}"
-            if self.page_range
-            else ""
-        )
+        page_text = f", Pages: {self.page_range.describe()}" if self.page_range else ""
         return (
             f"Processing type: {self.processing_type}, "
             f"Method: {method_name}{batch_text}{schema_text}, "

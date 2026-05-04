@@ -5,14 +5,12 @@ used throughout the codebase.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from modules.config.capabilities.registry import (
-    Capabilities,
-    ProviderType,
     _MODEL_REGISTRY,
     _OPENAI_REASONING_BASE,
     _OPENROUTER_BASE,
+    Capabilities,
+    ProviderType,
     _build_caps,
 )
 
@@ -37,8 +35,12 @@ def detect_provider(model_name: str) -> ProviderType:
             return "openrouter"
     if m.startswith("claude") or "anthropic" in m:
         return "anthropic"
-    if (m.startswith("gemini") or m.startswith("gemma")
-            or m.startswith("models/") or "google" in m):
+    if (
+        m.startswith("gemini")
+        or m.startswith("gemma")
+        or m.startswith("models/")
+        or "google" in m
+    ):
         return "google"
     if any(m.startswith(p) for p in ("gpt", "o1", "o3", "o4", "chatgpt", "text-")):
         return "openai"
@@ -69,7 +71,9 @@ def detect_capabilities(model_name: str) -> Capabilities:
         and not m.startswith("o3-pro")
     ):
         return _build_caps(
-            model_name, "o3", _OPENAI_REASONING_BASE,
+            model_name,
+            "o3",
+            _OPENAI_REASONING_BASE,
             dict(supports_structured_outputs=False),
         )
 
@@ -84,7 +88,9 @@ def detect_capabilities(model_name: str) -> Capabilities:
         )
     ):
         return _build_caps(
-            model_name, "o1", _OPENAI_REASONING_BASE,
+            model_name,
+            "o1",
+            _OPENAI_REASONING_BASE,
             dict(
                 api_preference="either",
                 supports_reasoning_effort=False,
@@ -100,7 +106,9 @@ def detect_capabilities(model_name: str) -> Capabilities:
             is_r1 = "deepseek-r1" in m
             is_terminus = "terminus" in m
             return _build_caps(
-                model_name, "openrouter-deepseek", _OPENROUTER_BASE,
+                model_name,
+                "openrouter-deepseek",
+                _OPENROUTER_BASE,
                 dict(
                     is_reasoning_model=is_r1 or is_terminus,
                     supports_reasoning_effort=True,
@@ -111,9 +119,12 @@ def detect_capabilities(model_name: str) -> Capabilities:
 
         if "gpt-oss" in m:
             return _build_caps(
-                model_name, "openrouter-gpt-oss", _OPENROUTER_BASE,
+                model_name,
+                "openrouter-gpt-oss",
+                _OPENROUTER_BASE,
                 dict(
-                    supports_image_detail=True, default_image_detail="high",
+                    supports_image_detail=True,
+                    default_image_detail="high",
                     is_reasoning_model=True,
                     supports_reasoning_effort=True,
                     supports_frequency_penalty=True,
@@ -123,9 +134,12 @@ def detect_capabilities(model_name: str) -> Capabilities:
 
         if "gpt-5" in m:
             or_overrides = dict(
-                supports_image_detail=True, default_image_detail="high",
-                is_reasoning_model=True, supports_reasoning_effort=True,
-                supports_sampler_controls=False, supports_top_p=False,
+                supports_image_detail=True,
+                default_image_detail="high",
+                is_reasoning_model=True,
+                supports_reasoning_effort=True,
+                supports_sampler_controls=False,
+                supports_top_p=False,
             )
             if "gpt-5.4" in m:
                 or_overrides["supports_image_detail_original"] = True
@@ -138,23 +152,29 @@ def detect_capabilities(model_name: str) -> Capabilities:
                 model_name, "openrouter-gpt5", _OPENROUTER_BASE, or_overrides
             )
 
-        if any(x in m for x in (
-            "/o1", "/o3", "/o4", "openai/o1", "openai/o3", "openai/o4"
-        )):
+        if any(
+            x in m for x in ("/o1", "/o3", "/o4", "openai/o1", "openai/o3", "openai/o4")
+        ):
             return _build_caps(
-                model_name, "openrouter-o-series", _OPENROUTER_BASE,
+                model_name,
+                "openrouter-o-series",
+                _OPENROUTER_BASE,
                 dict(
-                    supports_image_detail=True, default_image_detail="high",
+                    supports_image_detail=True,
+                    default_image_detail="high",
                     is_reasoning_model=True,
                     supports_reasoning_effort=True,
                     supports_image_input="mini" not in m,
-                    supports_sampler_controls=False, supports_top_p=False,
+                    supports_sampler_controls=False,
+                    supports_top_p=False,
                 ),
             )
 
         if "claude" in underlying or "anthropic/" in m:
             return _build_caps(
-                model_name, "openrouter-claude", _OPENROUTER_BASE,
+                model_name,
+                "openrouter-claude",
+                _OPENROUTER_BASE,
                 dict(
                     is_reasoning_model=True,
                     supports_reasoning_effort=True,
@@ -164,24 +184,27 @@ def detect_capabilities(model_name: str) -> Capabilities:
 
         if "gemini" in underlying or "google/" in m:
             is_thinking = any(
-                x in m for x in (
-                    "gemini-2.5", "gemini-3", "gemini-2-5", "gemini-3-"
-                )
+                x in m for x in ("gemini-2.5", "gemini-3", "gemini-2-5", "gemini-3-")
             )
             return _build_caps(
-                model_name, "openrouter-gemini", _OPENROUTER_BASE,
+                model_name,
+                "openrouter-gemini",
+                _OPENROUTER_BASE,
                 dict(
                     is_reasoning_model=is_thinking,
                     supports_reasoning_effort=True,
                     supports_media_resolution=True,
                     default_media_resolution="high",
-                    max_context_tokens=1000000, max_output_tokens=8192,
+                    max_context_tokens=1000000,
+                    max_output_tokens=8192,
                 ),
             )
 
         if "llama" in underlying or "meta/" in m:
             return _build_caps(
-                model_name, "openrouter-llama", _OPENROUTER_BASE,
+                model_name,
+                "openrouter-llama",
+                _OPENROUTER_BASE,
                 dict(
                     supports_image_input="vision" in m or "llama-3.2" in m,
                     supports_frequency_penalty=True,
@@ -191,13 +214,17 @@ def detect_capabilities(model_name: str) -> Capabilities:
 
         if "mistral" in underlying or "mixtral" in m:
             return _build_caps(
-                model_name, "openrouter-mistral", _OPENROUTER_BASE,
+                model_name,
+                "openrouter-mistral",
+                _OPENROUTER_BASE,
                 dict(supports_image_input="pixtral" in m),
             )
 
         if "qwen" in underlying or "qwen" in m:
             return _build_caps(
-                model_name, "openrouter-qwen", _OPENROUTER_BASE,
+                model_name,
+                "openrouter-qwen",
+                _OPENROUTER_BASE,
                 dict(
                     is_reasoning_model=True,
                     supports_reasoning_effort=True,
@@ -207,9 +234,7 @@ def detect_capabilities(model_name: str) -> Capabilities:
                 ),
             )
 
-        return _build_caps(
-            model_name, "openrouter", _OPENROUTER_BASE, {}
-        )
+        return _build_caps(model_name, "openrouter", _OPENROUTER_BASE, {})
 
     # --- Fallback: conservative text-only -----------------------------------
     return Capabilities(
@@ -239,7 +264,8 @@ def detect_capabilities(model_name: str) -> Capabilities:
 # Model-type helpers (absorbed from the former modules.config.capabilities.detection)
 # ---------------------------------------------------------------------------
 
-def detect_model_type(provider: str, model_name: Optional[str] = None) -> str:
+
+def detect_model_type(provider: str, model_name: str | None = None) -> str:
     """Detect the underlying model type from provider and model name.
 
     Allows correct preprocessing even when using models via OpenRouter.
@@ -267,10 +293,7 @@ def detect_model_type(provider: str, model_name: Optional[str] = None) -> str:
             return "google"
         if "claude" in model_name or "anthropic/" in model_name:
             return "anthropic"
-        if any(
-            x in model_name
-            for x in ["gpt-", "o1", "o3", "o4", "openai/"]
-        ):
+        if any(x in model_name for x in ["gpt-", "o1", "o3", "o4", "openai/"]):
             return "openai"
 
     return "openai"
@@ -278,14 +301,11 @@ def detect_model_type(provider: str, model_name: Optional[str] = None) -> str:
 
 def get_image_config_section_name(model_type: str) -> str:
     """Get the image processing config section name for a model type."""
-    if model_type == "custom":
-        return "custom_image_processing"
-    elif model_type == "google":
-        return "google_image_processing"
-    elif model_type == "anthropic":
-        return "anthropic_image_processing"
-    else:
-        return "api_image_processing"
+    return {
+        "custom": "custom_image_processing",
+        "google": "google_image_processing",
+        "anthropic": "anthropic_image_processing",
+    }.get(model_type, "api_image_processing")
 
 
 __all__ = [

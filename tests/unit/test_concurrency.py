@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -41,9 +40,7 @@ class TestRunConcurrentTranscriptionTasks:
             return args
 
         args_list = [(i,) for i in range(10)]
-        await run_concurrent_transcription_tasks(
-            track, args_list, concurrency_limit=3
-        )
+        await run_concurrent_transcription_tasks(track, args_list, concurrency_limit=3)
         assert max_running <= 3
 
     async def test_delay_between_tasks(self) -> None:

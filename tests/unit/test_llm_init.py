@@ -30,4 +30,4 @@ def test_llm_exposes_provider_abstraction() -> None:
 @pytest.mark.unit
 def test_llm_unknown_attribute_raises() -> None:
     with pytest.raises(AttributeError):
-        _ = getattr(llm, "definitely_not_a_symbol")
+        _ = llm.definitely_not_a_symbol

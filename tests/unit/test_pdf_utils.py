@@ -18,17 +18,16 @@ import pytest
 # first to touch modules.documents. See test_execution_framework.py for the
 # canonical pattern.
 import modules.transcribe.dual_mode  # noqa: F401
-
 from modules.documents.pdf import (
     PDFProcessor,
     _get_effective_dpi,
     native_extract_pdf_text,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _write_text_pdf(path: Path, text: str = "Hello PDF") -> None:
     """Write a minimal searchable PDF containing *text* to *path*."""
@@ -54,6 +53,7 @@ def _write_image_only_pdf(path: Path) -> None:
 # ---------------------------------------------------------------------------
 # PDFProcessor context manager
 # ---------------------------------------------------------------------------
+
 
 class TestPDFProcessorContextManager:
     """Context manager opens the PDF on enter and closes it on exit."""
@@ -96,8 +96,8 @@ class TestPDFProcessorContextManager:
 # is_native_pdf
 # ---------------------------------------------------------------------------
 
-class TestIsNativePDF:
 
+class TestIsNativePDF:
     @pytest.mark.unit
     def test_returns_true_for_searchable_pdf(self, tmp_path: Path) -> None:
         pdf = tmp_path / "searchable.pdf"
@@ -123,8 +123,8 @@ class TestIsNativePDF:
 # native_extract_pdf_text
 # ---------------------------------------------------------------------------
 
-class TestNativeExtractPDFText:
 
+class TestNativeExtractPDFText:
     @pytest.mark.unit
     def test_returns_text_for_searchable_pdf(self, tmp_path: Path) -> None:
         pdf = tmp_path / "searchable.pdf"
@@ -164,8 +164,8 @@ class TestNativeExtractPDFText:
 # prepare_output_folder
 # ---------------------------------------------------------------------------
 
-class TestPrepareOutputFolder:
 
+class TestPrepareOutputFolder:
     @pytest.mark.unit
     def test_creates_parent_folder_and_paths(self, tmp_path: Path) -> None:
         pdf = tmp_path / "MyDocument.pdf"
@@ -203,8 +203,8 @@ class TestPrepareOutputFolder:
 # _get_effective_dpi
 # ---------------------------------------------------------------------------
 
-class TestGetEffectiveDPI:
 
+class TestGetEffectiveDPI:
     @pytest.mark.unit
     def test_returns_unchanged_when_no_budget(self, tmp_path: Path) -> None:
         pdf = tmp_path / "p.pdf"
@@ -247,8 +247,7 @@ class TestGetEffectiveDPI:
             effective = _get_effective_dpi(page, 300, budget)
             assert effective < 300
             # Verify the rendered pixel count really is within budget
-            rendered_pixels = (
-                (page.rect.width / 72 * effective)
-                * (page.rect.height / 72 * effective)
+            rendered_pixels = (page.rect.width / 72 * effective) * (
+                page.rect.height / 72 * effective
             )
             assert rendered_pixels <= budget * 1.01  # tolerate tiny rounding

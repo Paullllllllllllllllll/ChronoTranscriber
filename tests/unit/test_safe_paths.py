@@ -5,31 +5,32 @@ Tests Windows path length limitation handling with safe directory/file names.
 
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
 
+import pytest
+
 from modules.infra.paths import (
+    HASH_LENGTH,
+    MAX_SAFE_NAME_LENGTH,
+    MIN_READABLE_LENGTH,
+    WINDOWS_MAX_PATH,
     create_safe_directory_name,
     create_safe_filename,
     create_safe_log_filename,
     ensure_path_safe,
-    WINDOWS_MAX_PATH,
-    MAX_SAFE_NAME_LENGTH,
-    HASH_LENGTH,
-    MIN_READABLE_LENGTH,
 )
 
 
 class TestCreateSafeDirectoryName:
     """Tests for create_safe_directory_name function."""
-    
+
     @pytest.mark.unit
     def test_short_name_unchanged_with_hash(self) -> None:
         """Test that short names get hash appended."""
         result = create_safe_directory_name("short_name")
         assert result.startswith("short_name-")
         assert len(result) == len("short_name") + 1 + HASH_LENGTH  # name + dash + hash
-    
+
     @pytest.mark.unit
     def test_long_name_truncated(self) -> None:
         """Test that long names are truncated."""
@@ -37,13 +38,13 @@ class TestCreateSafeDirectoryName:
         result = create_safe_directory_name(long_name)
         assert len(result) <= MAX_SAFE_NAME_LENGTH
         assert "-" in result  # Should have hash separator
-    
+
     @pytest.mark.unit
     def test_suffix_included(self) -> None:
         """Test that suffix is appended correctly."""
         result = create_safe_directory_name("document", suffix="_working_files")
         assert result.endswith("_working_files")
-    
+
     @pytest.mark.unit
     def test_long_name_with_suffix(self) -> None:
         """Test long name with suffix stays within limits."""
@@ -52,7 +53,7 @@ class TestCreateSafeDirectoryName:
         result = create_safe_directory_name(long_name, suffix=suffix)
         assert len(result) <= MAX_SAFE_NAME_LENGTH
         assert result.endswith(suffix)
-    
+
     @pytest.mark.unit
     def test_hash_provides_uniqueness(self) -> None:
         """Test that different names produce different hashes."""
@@ -62,14 +63,14 @@ class TestCreateSafeDirectoryName:
         hash1 = result1.split("-")[-1]
         hash2 = result2.split("-")[-1]
         assert hash1 != hash2
-    
+
     @pytest.mark.unit
     def test_same_name_produces_same_hash(self) -> None:
         """Test that same name always produces same hash."""
         result1 = create_safe_directory_name("consistent_name")
         result2 = create_safe_directory_name("consistent_name")
         assert result1 == result2
-    
+
     @pytest.mark.unit
     def test_trailing_punctuation_stripped(self) -> None:
         """Test that trailing punctuation is stripped from truncated names."""
@@ -83,13 +84,13 @@ class TestCreateSafeDirectoryName:
 
 class TestCreateSafeFilename:
     """Tests for create_safe_filename function."""
-    
+
     @pytest.mark.unit
     def test_short_name_no_truncation(self) -> None:
         """Test that short names are not truncated."""
         result = create_safe_filename("short", ".txt")
         assert result == "short.txt"  # No hash needed for short names
-    
+
     @pytest.mark.unit
     def test_long_name_truncated_with_hash(self) -> None:
         """Test that long names are truncated and get hash."""
@@ -98,25 +99,25 @@ class TestCreateSafeFilename:
         assert len(result) <= MAX_SAFE_NAME_LENGTH
         assert result.endswith(".txt")
         assert "-" in result  # Should have hash
-    
+
     @pytest.mark.unit
     def test_extension_preserved(self) -> None:
         """Test that file extension is always preserved."""
         result = create_safe_filename("A" * 200, ".jsonl")
         assert result.endswith(".jsonl")
-    
+
     @pytest.mark.unit
     def test_parent_path_considered(self, temp_dir: Path) -> None:
         """Test that parent path length is considered for truncation."""
         # Create a deep directory structure
         deep_dir = temp_dir / ("a" * 50) / ("b" * 50) / ("c" * 50)
         deep_dir.mkdir(parents=True, exist_ok=True)
-        
+
         result = create_safe_filename("document", ".txt", parent_path=deep_dir)
         full_path_len = len(str(deep_dir / result))
         # Should stay under MAX_PATH with some margin
         assert full_path_len < WINDOWS_MAX_PATH
-    
+
     @pytest.mark.unit
     def test_various_extensions(self) -> None:
         """Test with various file extensions."""
@@ -128,19 +129,19 @@ class TestCreateSafeFilename:
 
 class TestCreateSafeLogFilename:
     """Tests for create_safe_log_filename function."""
-    
+
     @pytest.mark.unit
     def test_log_suffix_format(self) -> None:
         """Test that log filename has correct format."""
         result = create_safe_log_filename("document", "transcription")
         assert "_transcription_log.json" in result
-    
+
     @pytest.mark.unit
     def test_short_name_format(self) -> None:
         """Test format with short base name."""
         result = create_safe_log_filename("doc", "summary")
         assert result.endswith("_summary_log.json")
-    
+
     @pytest.mark.unit
     def test_long_name_truncated(self) -> None:
         """Test that long names are truncated."""
@@ -148,7 +149,7 @@ class TestCreateSafeLogFilename:
         result = create_safe_log_filename(long_name, "transcription")
         assert len(result) <= MAX_SAFE_NAME_LENGTH
         assert result.endswith("_transcription_log.json")
-    
+
     @pytest.mark.unit
     def test_hash_included(self) -> None:
         """Test that hash is always included for uniqueness."""
@@ -159,20 +160,20 @@ class TestCreateSafeLogFilename:
 
 class TestEnsurePathSafe:
     """Tests for ensure_path_safe function."""
-    
+
     @pytest.mark.unit
     def test_returns_resolved_path(self, temp_dir: Path) -> None:
         """Test that path is resolved to absolute."""
         path = temp_dir / "subdir" / ".." / "file.txt"
         result = ensure_path_safe(path)
         assert result.is_absolute()
-    
+
     @pytest.mark.unit
     def test_existing_path(self, temp_dir: Path) -> None:
         """Test with existing directory."""
         result = ensure_path_safe(temp_dir)
         assert result == temp_dir.resolve()
-    
+
     @pytest.mark.unit
     def test_nonexistent_path(self, temp_dir: Path) -> None:
         """Test with non-existent path (should not raise)."""
@@ -184,23 +185,23 @@ class TestEnsurePathSafe:
 
 class TestConstants:
     """Tests for module constants."""
-    
+
     @pytest.mark.unit
     def test_windows_max_path_value(self) -> None:
         """Test WINDOWS_MAX_PATH constant."""
         assert WINDOWS_MAX_PATH == 260
-    
+
     @pytest.mark.unit
     def test_max_safe_name_length(self) -> None:
         """Test MAX_SAFE_NAME_LENGTH is reasonable."""
         assert MAX_SAFE_NAME_LENGTH < 255  # NTFS limit
         assert MAX_SAFE_NAME_LENGTH > 50  # Usable length
-    
+
     @pytest.mark.unit
     def test_hash_length(self) -> None:
         """Test HASH_LENGTH provides enough uniqueness."""
         assert HASH_LENGTH >= 8  # At least 4 billion combinations
-    
+
     @pytest.mark.unit
     def test_min_readable_length(self) -> None:
         """Test MIN_READABLE_LENGTH is reasonable."""
@@ -214,6 +215,7 @@ class TestComputeNameHash:
     @pytest.mark.unit
     def test_returns_8_char_hex(self) -> None:
         from modules.infra.paths import _compute_name_hash
+
         result = _compute_name_hash("test")
         assert len(result) == 8
         assert all(c in "0123456789abcdef" for c in result)
@@ -221,11 +223,13 @@ class TestComputeNameHash:
     @pytest.mark.unit
     def test_deterministic(self) -> None:
         from modules.infra.paths import _compute_name_hash
+
         assert _compute_name_hash("hello") == _compute_name_hash("hello")
 
     @pytest.mark.unit
     def test_different_inputs_different_hashes(self) -> None:
         from modules.infra.paths import _compute_name_hash
+
         assert _compute_name_hash("a") != _compute_name_hash("b")
 
 
@@ -235,17 +239,20 @@ class TestTruncateName:
     @pytest.mark.unit
     def test_no_truncation_when_within_limit(self) -> None:
         from modules.infra.paths import _truncate_name
+
         assert _truncate_name("short", 10) == "short"
 
     @pytest.mark.unit
     def test_truncates_to_max_length(self) -> None:
         from modules.infra.paths import _truncate_name
+
         result = _truncate_name("a" * 20, 10)
         assert len(result) <= 10
 
     @pytest.mark.unit
     def test_strips_trailing_punctuation(self) -> None:
         from modules.infra.paths import _truncate_name
+
         # "hello world." truncated to 12 chars = "hello world." but that ends with '.'
         result = _truncate_name("hello world. more text", 12)
         assert not result.endswith(".")
@@ -253,4 +260,5 @@ class TestTruncateName:
     @pytest.mark.unit
     def test_exact_length_no_truncation(self) -> None:
         from modules.infra.paths import _truncate_name
+
         assert _truncate_name("12345", 5) == "12345"

@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, cast
 
 from modules.ui import print_info
 
 
-def sdk_to_dict(obj: Any) -> Dict[str, Any]:
+def sdk_to_dict(obj: Any) -> dict[str, Any]:
     """
     Convert an OpenAI SDK object into a plain dict when possible.
 
@@ -27,17 +27,17 @@ def sdk_to_dict(obj: Any) -> Dict[str, Any]:
         fn = getattr(obj, attr, None)
         if callable(fn):
             try:
-                return cast(Dict[str, Any], fn())
+                return cast(dict[str, Any], fn())
             except Exception:
                 pass
     try:
         j = getattr(obj, "json", None)
         if callable(j):
-            return cast(Dict[str, Any], json.loads(j()))
+            return cast(dict[str, Any], json.loads(j()))
     except Exception:
         pass
     # Last resort: best-effort attribute extraction
-    d: Dict[str, Any] = {}
+    d: dict[str, Any] = {}
     for name in dir(obj):
         if name.startswith("_"):
             continue
@@ -50,7 +50,7 @@ def sdk_to_dict(obj: Any) -> Dict[str, Any]:
     return d
 
 
-def list_all_batches(client: Any, limit: int = 100) -> List[Dict[str, Any]]:
+def list_all_batches(client: Any, limit: int = 100) -> list[dict[str, Any]]:
     """
     List all batches with robust pagination. Returns a list of dicts.
 
@@ -61,8 +61,8 @@ def list_all_batches(client: Any, limit: int = 100) -> List[Dict[str, Any]]:
     limit : int
         Page size for listing; defaults to 100.
     """
-    batches: List[Dict[str, Any]] = []
-    after: Optional[str] = None
+    batches: list[dict[str, Any]] = []
+    after: str | None = None
     page_index = 0
     while True:
         page_index += 1
@@ -88,14 +88,17 @@ def list_all_batches(client: Any, limit: int = 100) -> List[Dict[str, Any]]:
             except Exception:
                 has_more = False
                 last_id = None
-        print_info(f"Batches page {page_index}: fetched {len(page_items)} item(s); has_more={has_more}")
+        print_info(
+            f"Batches page {page_index}: fetched {len(page_items)} item(s);"
+            f" has_more={has_more}"
+        )
         if not has_more or not last_id:
             break
         after = last_id
     return batches
 
 
-def coerce_file_id(candidate: Any) -> Optional[str]:
+def coerce_file_id(candidate: Any) -> str | None:
     """
     Attempt to coerce various SDK response shapes into a file_id string.
     Supports str, dict-like with id/file_id, and one-item lists of either.
@@ -115,35 +118,35 @@ def coerce_file_id(candidate: Any) -> Optional[str]:
     return None
 
 
-def get_openai_client(api_key: Optional[str] = None) -> Any:
+def get_openai_client(api_key: str | None = None) -> Any:
     """Get configured OpenAI client.
-    
+
     Args:
         api_key: Optional API key. If None, uses OPENAI_API_KEY environment variable.
-        
+
     Returns:
         Configured OpenAI client.
-        
+
     Raises:
         ValueError: If no API key is available.
     """
     from openai import OpenAI
-    
+
     if api_key is None:
         api_key = os.environ.get("OPENAI_API_KEY")
-    
+
     if not api_key:
         raise ValueError(
             "OpenAI API key not found. Set OPENAI_API_KEY environment variable "
             "or pass api_key parameter."
         )
-    
+
     return OpenAI(api_key=api_key)
 
 
 def validate_api_key() -> bool:
     """Check if OpenAI API key is available.
-    
+
     Returns:
         True if API key is set, False otherwise.
     """

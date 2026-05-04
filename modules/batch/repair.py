@@ -13,42 +13,42 @@ that all batch repair code lives in a single location.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import re
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from openai import OpenAI
 
-from modules.infra.logger import setup_logger
 from modules.config.service import get_config_service
-from modules.ui import (
-    NavigationAction,
-    PromptResult,
-    prompt_select,
-    prompt_yes_no,
-    prompt_text,
-    print_header,
-    print_separator,
-    print_info,
-    print_success,
-    print_warning,
-    print_error,
-    ui_print,
-    PromptStyle,
-)
+from modules.infra.concurrency import run_concurrent_transcription_tasks
+from modules.infra.logger import setup_logger
+from modules.llm import open_transcriber
+from modules.llm.openai_sdk_utils import coerce_file_id, sdk_to_dict
 from modules.llm.response_parsing import (
+    detect_transcription_cause,
     extract_transcribed_text,
     format_page_line,
-    detect_transcription_cause,
 )
-from modules.llm import open_transcriber
-from modules.infra.concurrency import run_concurrent_transcription_tasks
-from modules.llm.openai_sdk_utils import sdk_to_dict, coerce_file_id
+from modules.ui import (
+    NavigationAction,
+    PromptStyle,
+    print_error,
+    print_header,
+    print_info,
+    print_separator,
+    print_success,
+    print_warning,
+    prompt_select,
+    prompt_text,
+    prompt_yes_no,
+    ui_print,
+)
 
 logger = setup_logger(__name__)
 
@@ -62,18 +62,22 @@ logger = setup_logger(__name__)
 FAILURE_PATTERNS = [
     # Allow optional leading "Page N:" or "Image name:" prefixes before the bracket
     re.compile(r"^(?:[^\[]+?:\s*)?\[\s*transcription\s+error.*\]$", re.IGNORECASE),
-    re.compile(r"^(?:[^\[]+?:\s*)?\[\s*Transcription\s+not\s+possible.*\]$", re.IGNORECASE),
+    re.compile(
+        r"^(?:[^\[]+?:\s*)?\[\s*Transcription\s+not\s+possible.*\]$", re.IGNORECASE
+    ),
 ]
-NO_TEXT_PATTERN = re.compile(r"^(?:[^\[]+?:\s*)?\[\s*No\s+transcribable\s+text.*\]$", re.IGNORECASE)
+NO_TEXT_PATTERN = re.compile(
+    r"^(?:[^\[]+?:\s*)?\[\s*No\s+transcribable\s+text.*\]$", re.IGNORECASE
+)
 
 
 @dataclass
 class ImageEntry:
     order_index: int
     image_name: str
-    pre_processed_image: Optional[str]
-    custom_id: Optional[str]
-    page_number: Optional[int] = None
+    pre_processed_image: str | None
+    custom_id: str | None
+    page_number: int | None = None
 
 
 @dataclass
@@ -81,11 +85,11 @@ class Job:
     parent_folder: Path
     identifier: str
     final_txt_path: Path
-    temp_jsonl_path: Optional[Path]
+    temp_jsonl_path: Path | None
     kind: str  # "PDF" or "Images"
 
 
-def extract_image_name_from_failure_line(line: str) -> Optional[str]:
+def extract_image_name_from_failure_line(line: str) -> str | None:
     """
     Extract the image file name from a placeholder line such as:
       - "0089_pre_processed.jpg: [transcription error]"       (prefix format)
@@ -109,7 +113,8 @@ def extract_image_name_from_failure_line(line: str) -> Optional[str]:
     # Inline format: "[placeholder: image_name; ...]"
     core = re.sub(r"^[^\[]*?:\s*", "", stripped)
     pattern = re.compile(
-        r"^\[(?:transcription error|Transcription not possible|No transcribable text):\s*([^;]+)",
+        r"^\[(?:transcription error|Transcription not possible"
+        r"|No transcribable text):\s*([^;]+)",
         re.IGNORECASE,
     )
     m = pattern.match(core)
@@ -122,18 +127,15 @@ def extract_image_name_from_failure_line(line: str) -> Optional[str]:
 
 
 def is_failure_line(line: str) -> bool:
-    for pat in FAILURE_PATTERNS:
-        if pat.match(line.strip()):
-            return True
-    return False
+    return any(pat.match(line.strip()) for pat in FAILURE_PATTERNS)
 
 
-def collect_image_entries_from_jsonl(temp_jsonl_path: Optional[Path]) -> List[ImageEntry]:
+def collect_image_entries_from_jsonl(temp_jsonl_path: Path | None) -> list[ImageEntry]:
     """
     Parse local transcription JSONL to reconstruct page ordering and metadata.
     Returns a list of ImageEntry sorted by order_index.
     """
-    entries: Dict[int, ImageEntry] = {}
+    entries: dict[int, ImageEntry] = {}
     if temp_jsonl_path is None or not temp_jsonl_path.exists():
         return []
 
@@ -156,7 +158,10 @@ def collect_image_entries_from_jsonl(temp_jsonl_path: Optional[Path]) -> List[Im
                         entries[oi] = ImageEntry(
                             order_index=oi,
                             image_name=str(meta.get("image_name") or "").strip(),
-                            pre_processed_image=str(meta.get("pre_processed_image") or "").strip() or None,
+                            pre_processed_image=str(
+                                meta.get("pre_processed_image") or ""
+                            ).strip()
+                            or None,
                             custom_id=str(meta.get("custom_id") or "").strip() or None,
                             page_number=meta.get("page_number"),
                         )
@@ -179,7 +184,11 @@ def collect_image_entries_from_jsonl(temp_jsonl_path: Optional[Path]) -> List[Im
                     continue
 
                 # Synchronous GPT JSONL records
-                if "method" in obj and obj.get("method") == "gpt" and "order_index" in obj:
+                if (
+                    "method" in obj
+                    and obj.get("method") == "gpt"
+                    and "order_index" in obj
+                ):
                     try:
                         oi = int(obj.get("order_index"))
                         entries.setdefault(
@@ -187,7 +196,10 @@ def collect_image_entries_from_jsonl(temp_jsonl_path: Optional[Path]) -> List[Im
                             ImageEntry(
                                 order_index=oi,
                                 image_name=str(obj.get("image_name") or "").strip(),
-                                pre_processed_image=str(obj.get("pre_processed_image") or "").strip() or None,
+                                pre_processed_image=str(
+                                    obj.get("pre_processed_image") or ""
+                                ).strip()
+                                or None,
                                 custom_id=None,
                                 page_number=None,
                             ),
@@ -201,12 +213,14 @@ def collect_image_entries_from_jsonl(temp_jsonl_path: Optional[Path]) -> List[Im
     return [entries[k] for k in sorted(entries.keys())]
 
 
-def find_failure_indices(lines: List[str], include_no_text: bool) -> List[int]:
-    idxs: List[int] = []
+def find_failure_indices(lines: list[str], include_no_text: bool) -> list[int]:
+    idxs: list[int] = []
     for i, line in enumerate(lines):
-        if is_failure_line(line):
-            idxs.append(i)
-        elif include_no_text and NO_TEXT_PATTERN.match(line.strip()):
+        if (
+            is_failure_line(line)
+            or include_no_text
+            and NO_TEXT_PATTERN.match(line.strip())
+        ):
             idxs.append(i)
     return idxs
 
@@ -214,8 +228,8 @@ def find_failure_indices(lines: List[str], include_no_text: bool) -> List[int]:
 def resolve_image_path(
     parent_folder: Path,
     entry: ImageEntry,
-    identifier: Optional[str] = None,
-) -> Optional[Path]:
+    identifier: str | None = None,
+) -> Path | None:
     if entry.pre_processed_image:
         p = Path(entry.pre_processed_image)
         if p.exists():
@@ -258,12 +272,12 @@ def backup_file(path: Path) -> Path:
     return backup
 
 
-def write_repair_jsonl_line(path: Path, record: Dict[str, Any]) -> None:
+def write_repair_jsonl_line(path: Path, record: dict[str, Any]) -> None:
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record) + "\n")
 
 
-def discover_jobs(paths_config: Dict[str, Any]) -> List[Job]:
+def discover_jobs(paths_config: dict[str, Any]) -> list[Job]:
     """
     Discover repairable jobs by scanning the configured output folders for
     transcription .txt and .md files and locating their corresponding temporary
@@ -274,9 +288,9 @@ def discover_jobs(paths_config: Dict[str, Any]) -> List[Job]:
 
     Returns a list of Job records sorted by parent folder path.
     """
-    jobs: List[Job] = []
+    jobs: list[Job] = []
 
-    def find_companion_jsonl(txt_path: Path, identifier: str) -> Optional[Path]:
+    def find_companion_jsonl(txt_path: Path, identifier: str) -> Path | None:
         """Find the companion JSONL file for a transcription txt file."""
         parent = txt_path.parent
         # Try new format first (same base name)
@@ -298,7 +312,7 @@ def discover_jobs(paths_config: Dict[str, Any]) -> List[Job]:
                 return legacy_candidate
         return None
 
-    def scan_root(root: Optional[str], kind: str) -> None:
+    def scan_root(root: str | None, kind: str) -> None:
         if not root:
             return
         root_path = Path(root)
@@ -330,7 +344,7 @@ def discover_jobs(paths_config: Dict[str, Any]) -> List[Job]:
     return jobs
 
 
-def read_final_lines(final_txt_path: Path) -> List[str]:
+def read_final_lines(final_txt_path: Path) -> list[str]:
     """
     Read a final transcription file and return its lines without trailing newlines.
     """
@@ -362,19 +376,19 @@ class RepairTarget:
     order_index: int
     image_name: str
     image_path: Path
-    custom_id: Optional[str]
+    custom_id: str | None
     line_index: int
-    page_number: Optional[int] = None
+    page_number: int | None = None
 
 
 # Failure patterns centralized above.
 
 
-def _extract_image_name_from_failure_line(line: str) -> Optional[str]:
+def _extract_image_name_from_failure_line(line: str) -> str | None:
     return ru_extract_image_name_from_failure_line(line)
 
 
-def _load_configs() -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+def _load_configs() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     config_service = get_config_service()
     paths = config_service.get_paths_config()
     model = config_service.get_model_config()
@@ -382,11 +396,11 @@ def _load_configs() -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     return paths, model, image_proc
 
 
-def _discover_jobs(paths_config: Dict[str, Any]) -> List[Job]:
+def _discover_jobs(paths_config: dict[str, Any]) -> list[Job]:
     return ru_discover_jobs(paths_config)
 
 
-def _read_final_lines(final_txt_path: Path) -> List[str]:
+def _read_final_lines(final_txt_path: Path) -> list[str]:
     return ru_read_final_lines(final_txt_path)
 
 
@@ -395,58 +409,59 @@ def _is_failure_line(line: str) -> bool:
 
 
 def _collect_image_entries_from_jsonl(
-    temp_jsonl_path: Optional[Path],
-) -> List[ImageEntry]:
+    temp_jsonl_path: Path | None,
+) -> list[ImageEntry]:
     # Delegate to centralized utility; returned items are attribute-compatible
     return ru_collect_image_entries_from_jsonl(temp_jsonl_path)
 
 
 def _find_failure_indices(
-    lines: List[str],
+    lines: list[str],
     include_no_text: bool,
-) -> List[int]:
+) -> list[int]:
     return ru_find_failure_indices(lines, include_no_text)
 
 
 def _resolve_image_path(
     parent_folder: Path,
     entry: ImageEntry,
-    identifier: Optional[str] = None,
-) -> Optional[Path]:
+    identifier: str | None = None,
+) -> Path | None:
     return ru_resolve_image_path(parent_folder, entry, identifier)
-
 
 
 def _backup_file(path: Path) -> Path:
     return ru_backup_file(path)
 
 
-def _write_repair_jsonl_line(path: Path, record: Dict[str, Any]) -> None:
+def _write_repair_jsonl_line(path: Path, record: dict[str, Any]) -> None:
     return ru_write_repair_jsonl_line(path, record)
 
 
 def _resolve_repair_targets(
     job: Job,
-    image_entries: List[ImageEntry],
-    failure_indices: List[int],
-    final_lines: List[str],
-) -> List[RepairTarget]:
+    image_entries: list[ImageEntry],
+    failure_indices: list[int],
+    final_lines: list[str],
+) -> list[RepairTarget]:
     """Resolve failure line indices to concrete RepairTarget objects.
 
     Shared between sync and batch repair modes.
     """
-    name_to_entry: Dict[str, ImageEntry] = {e.image_name: e for e in image_entries}
-    targets: List[RepairTarget] = []
+    name_to_entry: dict[str, ImageEntry] = {e.image_name: e for e in image_entries}
+    targets: list[RepairTarget] = []
 
     for idx in failure_indices:
         image_name = _extract_image_name_from_failure_line(final_lines[idx])
         entry = name_to_entry.get(image_name) if image_name else None
 
-        resolved_path: Optional[Path] = None
+        resolved_path: Path | None = None
         resolved_order_index: int = -1
 
         if entry:
-            resolved_path = _resolve_image_path(job.parent_folder, entry, job.identifier)
+            resolved_path = _resolve_image_path(
+                job.parent_folder, entry, job.identifier
+            )
             resolved_order_index = entry.order_index
         else:
             if image_name:
@@ -476,7 +491,7 @@ def _resolve_repair_targets(
             )
             continue
 
-        pn: Optional[int] = None
+        pn: int | None = None
         if entry and isinstance(entry.page_number, int):
             pn = entry.page_number
         elif resolved_order_index is not None and resolved_order_index >= 0:
@@ -498,7 +513,7 @@ def _resolve_repair_targets(
 
 def _persist_repaired_file(
     job: Job,
-    final_lines: List[str],
+    final_lines: list[str],
 ) -> Path:
     """Back up the original file and write updated lines. Returns backup path."""
     backup = _backup_file(job.final_txt_path)
@@ -508,13 +523,13 @@ def _persist_repaired_file(
 
 async def _repair_sync_mode(
     job: Job,
-    model_config: Dict[str, Any],
-    image_entries: List[ImageEntry],
-    failure_indices: List[int],
-    final_lines: List[str],
+    model_config: dict[str, Any],
+    image_entries: list[ImageEntry],
+    failure_indices: list[int],
+    final_lines: list[str],
     repair_jsonl_path: Path,
-    schema_path: Optional[Path] = None,
-    additional_context_path: Optional[Path] = None,
+    schema_path: Path | None = None,
+    additional_context_path: Path | None = None,
 ) -> None:
     from modules.llm import transcribe_image_with_llm
 
@@ -527,7 +542,7 @@ async def _repair_sync_mode(
             "repair_session": {
                 "identifier": job.identifier,
                 "mode": "synchronous",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "targets": len(targets),
             }
         },
@@ -538,13 +553,12 @@ async def _repair_sync_mode(
         return
 
     print_info(
-        f"[INFO] Synchronous repair of {len(targets)} page(s) for "
-        f"'{job.identifier}'."
+        f"[INFO] Synchronous repair of {len(targets)} page(s) for '{job.identifier}'."
     )
 
     async def worker(
         img_path: Path, line_index: int, image_name: str, transcriber: Any
-    ) -> Tuple[int, str, Dict[str, Any]]:
+    ) -> tuple[int, str, dict[str, Any]]:
         try:
             raw = await transcribe_image_with_llm(img_path, transcriber)
             text = extract_transcribed_text(raw, image_name)
@@ -586,7 +600,7 @@ async def _repair_sync_mode(
             img_name = next(
                 (t.image_name for t in targets if t.line_index == line_index), None
             )
-            # Keep placeholders minimal; page/image context will be added during formatting
+            # Keep placeholders minimal; page/image context added during formatting
             normalized_text = text
             record = {
                 "repair_response": {
@@ -603,7 +617,7 @@ async def _repair_sync_mode(
                     "raw_response": raw,
                     "text": normalized_text,
                     "raw_text": text,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             }
             async with write_lock:
@@ -620,14 +634,20 @@ async def _repair_sync_mode(
         )
 
     # Apply edits to final_lines with unified page-aware formatting
-    target_by_line: Dict[int, RepairTarget] = {t.line_index: t for t in targets}
+    target_by_line: dict[int, RepairTarget] = {t.line_index: t for t in targets}
 
     for line_index, text, _raw in results:
         if 0 <= line_index < len(final_lines):
             t = target_by_line.get(line_index)
             if t:
-                pn = t.page_number if isinstance(t.page_number, int) else (
-                    t.order_index + 1 if isinstance(t.order_index, int) and t.order_index >= 0 else None
+                pn = (
+                    t.page_number
+                    if isinstance(t.page_number, int)
+                    else (
+                        t.order_index + 1
+                        if isinstance(t.order_index, int) and t.order_index >= 0
+                        else None
+                    )
                 )
                 final_lines[line_index] = format_page_line(text, pn, t.image_name)
 
@@ -640,12 +660,12 @@ async def _repair_sync_mode(
 
 def _await_batches_blocking(
     client: OpenAI,
-    batch_ids: List[str],
+    batch_ids: list[str],
     poll_seconds: float = 10.0,
     timeout_seconds: float = 7200.0,
-) -> Tuple[bool, Dict[str, str]]:
+) -> tuple[bool, dict[str, str]]:
     start = time.time()
-    status_map: Dict[str, str] = {}
+    status_map: dict[str, str] = {}
     terminal = {"completed", "failed", "expired", "cancelled"}
 
     while True:
@@ -671,10 +691,10 @@ def _await_batches_blocking(
 
 
 def _parse_batch_outputs_for_repairs(
-    batches: List[Dict[str, Any]],
+    batches: list[dict[str, Any]],
     client: OpenAI,
-) -> List[Dict[str, Any]]:
-    parsed_lines: List[Dict[str, Any]] = []
+) -> list[dict[str, Any]]:
+    parsed_lines: list[dict[str, Any]] = []
     for b in batches:
         try:
             if str(b.get("status", "")).lower() != "completed":
@@ -698,16 +718,16 @@ def _parse_batch_outputs_for_repairs(
                 continue
             resp = client.files.content(output_file_id)
             content = resp.read()
-            text = content.decode("utf-8") if isinstance(content, bytes) else str(content)
+            text = (
+                content.decode("utf-8") if isinstance(content, bytes) else str(content)
+            )
             text = text.strip()
             for ln in text.splitlines():
                 ln = ln.strip()
                 if not ln:
                     continue
-                try:
+                with contextlib.suppress(Exception):
                     parsed_lines.append(json.loads(ln))
-                except Exception:
-                    pass
         except Exception as e:
             logger.warning("Error reading batch output: %s", e)
     return parsed_lines
@@ -715,16 +735,16 @@ def _parse_batch_outputs_for_repairs(
 
 async def _repair_batch_mode(
     job: Job,
-    model_config: Dict[str, Any],
-    image_entries: List[ImageEntry],
-    failure_indices: List[int],
-    final_lines: List[str],
+    model_config: dict[str, Any],
+    image_entries: list[ImageEntry],
+    failure_indices: list[int],
+    final_lines: list[str],
     repair_jsonl_path: Path,
-    schema_path: Optional[Path] = None,
-    additional_context_path: Optional[Path] = None,
+    schema_path: Path | None = None,
+    additional_context_path: Path | None = None,
 ) -> None:
     targets = _resolve_repair_targets(job, image_entries, failure_indices, final_lines)
-    images_for_batch: List[Path] = [t.image_path for t in targets]
+    images_for_batch: list[Path] = [t.image_path for t in targets]
 
     # Always write a session record (even if zero targets)
     repairs_dir = job.parent_folder / "repairs"
@@ -736,7 +756,7 @@ async def _repair_batch_mode(
             "repair_session": {
                 "identifier": job.identifier,
                 "mode": "batch",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "targets": len(targets),
             }
         },
@@ -768,7 +788,7 @@ async def _repair_batch_mode(
     for rec in metadata_records:
         _write_repair_jsonl_line(repair_jsonl_path, rec)
 
-    batch_ids: List[str] = []
+    batch_ids: list[str] = []
     for resp in batch_responses:
         try:
             bid = resp.id
@@ -778,7 +798,7 @@ async def _repair_batch_mode(
                 {
                     "batch_tracking": {
                         "batch_id": bid,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                         "batch_file": str(bid),
                         "repair": True,
                     }
@@ -793,7 +813,9 @@ async def _repair_batch_mode(
 
     client = OpenAI()
     print_info("[INFO] Waiting for repair batches to complete...")
-    _ = await asyncio.to_thread(_await_batches_blocking, client, batch_ids, 10.0, 7200.0)
+    _ = await asyncio.to_thread(
+        _await_batches_blocking, client, batch_ids, 10.0, 7200.0
+    )
 
     batches = []
     for bid in batch_ids:
@@ -805,7 +827,7 @@ async def _repair_batch_mode(
 
     parsed_lines = _parse_batch_outputs_for_repairs(batches, client)
 
-    fixed_text_by_custom: Dict[str, str] = {}
+    fixed_text_by_custom: dict[str, str] = {}
 
     for obj in parsed_lines:
         custom_id = obj.get("custom_id")
@@ -819,9 +841,11 @@ async def _repair_batch_mode(
                 transcription_text = "[transcription error: [repair item]]"
             elif isinstance(body, dict):
                 error_obj = body.get("error")
-                if isinstance(status_code, int) and status_code != 200:
-                    transcription_text = "[transcription error: [repair item]]"
-                elif isinstance(error_obj, dict):
+                if (
+                    isinstance(status_code, int)
+                    and status_code != 200
+                    or isinstance(error_obj, dict)
+                ):
                     transcription_text = "[transcription error: [repair item]]"
                 else:
                     transcription_text = extract_transcribed_text(body, "")
@@ -836,11 +860,11 @@ async def _repair_batch_mode(
 
     # IMPORTANT: Map custom_id back to the selected target, including
     # both original order_index and the selected line_index.
-    order_by_custom: Dict[str, int] = {}
-    line_index_by_custom: Dict[str, int] = {}
-    image_name_by_custom: Dict[str, str] = {}
+    order_by_custom: dict[str, int] = {}
+    line_index_by_custom: dict[str, int] = {}
+    image_name_by_custom: dict[str, str] = {}
 
-    for t, rec in zip(targets, metadata_records):
+    for t, rec in zip(targets, metadata_records, strict=False):
         br = rec.get("batch_request", {})
         cid = br.get("custom_id")
         if isinstance(cid, str):
@@ -862,7 +886,7 @@ async def _repair_batch_mode(
                     "line_index": li,
                     "image_name": img_name,
                     "text": text,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             },
         )
@@ -903,15 +927,13 @@ async def main() -> None:
         return
 
     # Build options for job selection
-    job_options: List[Tuple[str, str]] = []
+    job_options: list[tuple[str, str]] = []
     for idx, j in enumerate(jobs, 1):
         desc = f"[{j.kind}] {j.parent_folder.name} → {j.final_txt_path.name}"
         job_options.append((str(idx), desc))
 
     result = prompt_select(
-        "Select a transcription to repair:",
-        job_options,
-        allow_back=False
+        "Select a transcription to repair:", job_options, allow_back=False
     )
 
     if result.action != NavigationAction.CONTINUE:
@@ -934,23 +956,17 @@ async def main() -> None:
     ui_print("\n  Configure which failure types to repair:\n", PromptStyle.INFO)
 
     include_api_errors_result = prompt_yes_no(
-        "Include '[transcription error]' lines?",
-        default=True,
-        allow_back=False
+        "Include '[transcription error]' lines?", default=True, allow_back=False
     )
     include_api_errors = include_api_errors_result.value
 
     include_not_possible_result = prompt_yes_no(
-        "Include '[Transcription not possible]' lines?",
-        default=False,
-        allow_back=False
+        "Include '[Transcription not possible]' lines?", default=False, allow_back=False
     )
     include_not_possible = include_not_possible_result.value
 
     include_no_text_result = prompt_yes_no(
-        "Include '[No transcribable text]' lines?",
-        default=False,
-        allow_back=False
+        "Include '[No transcribable text]' lines?", default=False, allow_back=False
     )
     include_no_text = include_no_text_result.value
 
@@ -968,7 +984,8 @@ async def main() -> None:
 
     # Detect causes on the already-formatted final lines
     failure_indices = [
-        i for i, ln in enumerate(final_lines)
+        i
+        for i, ln in enumerate(final_lines)
         if detect_transcription_cause((ln or "").strip()) in selected_causes
     ]
 
@@ -978,35 +995,49 @@ async def main() -> None:
 
     print_success(f"Found {len(failure_indices)} line(s) to repair.")
     if len(failure_indices) <= 10:
-        ui_print(f"  Line indices: {', '.join(map(str, failure_indices))}", PromptStyle.DIM)
+        ui_print(
+            f"  Line indices: {', '.join(map(str, failure_indices))}", PromptStyle.DIM
+        )
     else:
-        ui_print(f"  First 10 indices: {', '.join(map(str, failure_indices[:10]))}", PromptStyle.DIM)
+        ui_print(
+            f"  First 10 indices: {', '.join(map(str, failure_indices[:10]))}",
+            PromptStyle.DIM,
+        )
 
     # Ask whether to repair all or subset
     scope_result = prompt_select(
         "Repair all detected lines, or select a subset?",
         [
             ("all", "Repair all detected failures"),
-            ("subset", "Select specific line indices to repair")
+            ("subset", "Select specific line indices to repair"),
         ],
-        allow_back=False
+        allow_back=False,
     )
 
     if scope_result.value == "subset":
-        ui_print("\n  Enter comma-separated line indices to repair (e.g., 0,5,12)", PromptStyle.INFO)
+        ui_print(
+            "\n  Enter comma-separated line indices to repair (e.g., 0,5,12)",
+            PromptStyle.INFO,
+        )
 
         while True:
             indices_result = prompt_text(
-                "Line indices:",
-                allow_empty=False,
-                allow_back=False
+                "Line indices:", allow_empty=False, allow_back=False
             )
 
             try:
-                chosen = sorted(set(int(x.strip()) for x in indices_result.value.split(",") if x.strip()))
+                chosen = sorted(
+                    set(
+                        int(x.strip())
+                        for x in indices_result.value.split(",")
+                        if x.strip()
+                    )
+                )
                 failure_indices = [i for i in chosen if 0 <= i < len(final_lines)]
                 if failure_indices:
-                    print_success(f"Selected {len(failure_indices)} line(s) for repair.")
+                    print_success(
+                        f"Selected {len(failure_indices)} line(s) for repair."
+                    )
                     break
                 print_error("No valid indices provided.")
             except Exception:
@@ -1017,9 +1048,9 @@ async def main() -> None:
         "Choose repair mode:",
         [
             ("sync", "Synchronous Repair — Direct API calls with immediate results"),
-            ("batch", "Batch Repair — Submit as batch job (will wait for completion)")
+            ("batch", "Batch Repair — Submit as batch job (will wait for completion)"),
         ],
-        allow_back=False
+        allow_back=False,
     )
 
     mode = mode_result.value
@@ -1036,7 +1067,9 @@ async def main() -> None:
     from modules.config.context import resolve_context_for_folder
 
     # Use default schema
-    default_schema = (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json").resolve()
+    default_schema = (
+        PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json"
+    ).resolve()
     schema_path = default_schema if default_schema.exists() else None
 
     # Resolve context using folder-based hierarchy
@@ -1078,15 +1111,15 @@ async def main() -> None:
     print_info(f"Repair log: {repair_jsonl_path.relative_to(job_sel.parent_folder)}")
 
 
-async def main_cli(args: Any, paths_config: Dict[str, Any]) -> None:
+async def main_cli(args: Any, paths_config: dict[str, Any]) -> None:
     """CLI mode repair workflow entrypoint.
 
     Args:
         args: Parsed command-line arguments
         paths_config: Paths configuration dictionary
     """
-    from modules.core.cli_args import resolve_path, validate_input_path, parse_indices
     from modules.config.config_loader import PROJECT_ROOT
+    from modules.core.cli_args import parse_indices, resolve_path, validate_input_path
 
     print_header("REPAIR TRANSCRIPTIONS (CLI MODE)", "")
 
@@ -1102,7 +1135,9 @@ async def main_cli(args: Any, paths_config: Dict[str, Any]) -> None:
     validate_input_path(transcription_path)
 
     if transcription_path.suffix not in (".txt", ".md"):
-        print_error(f"Expected .txt or .md transcription file, got: {transcription_path.name}")
+        print_error(
+            f"Expected .txt or .md transcription file, got: {transcription_path.name}"
+        )
         return
 
     # Find corresponding temp JSONL file
@@ -1121,7 +1156,9 @@ async def main_cli(args: Any, paths_config: Dict[str, Any]) -> None:
             if candidate.exists():
                 temp_jsonl_path = candidate
                 break
-            legacy_candidate = parent_folder / subdir_name / f"{identifier}_transcription.jsonl"
+            legacy_candidate = (
+                parent_folder / subdir_name / f"{identifier}_transcription.jsonl"
+            )
             if legacy_candidate.exists():
                 temp_jsonl_path = legacy_candidate
                 break
@@ -1132,7 +1169,7 @@ async def main_cli(args: Any, paths_config: Dict[str, Any]) -> None:
         parent_folder=parent_folder,
         final_txt_path=transcription_path,
         temp_jsonl_path=temp_jsonl_path if temp_jsonl_path.exists() else None,
-        kind="manual_cli"
+        kind="manual_cli",
     )
 
     print_info(f"Repairing: {transcription_path.name}")
@@ -1140,7 +1177,10 @@ async def main_cli(args: Any, paths_config: Dict[str, Any]) -> None:
     # Collect image entries
     image_entries = _collect_image_entries_from_jsonl(job.temp_jsonl_path)
     if not image_entries:
-        print_warning("Could not reconstruct page order from JSONL. Will attempt to map by filename.")
+        print_warning(
+            "Could not reconstruct page order from JSONL."
+            " Will attempt to map by filename."
+        )
 
     # Read final lines
     final_lines = _read_final_lines(job.final_txt_path)
@@ -1160,14 +1200,18 @@ async def main_cli(args: Any, paths_config: Dict[str, Any]) -> None:
             selected_causes.add("no_text")
 
     if not selected_causes:
-        print_error("No failure types selected. Use --errors-only, --not-possible, --no-text, or --all-failures")
+        print_error(
+            "No failure types selected."
+            " Use --errors-only, --not-possible, --no-text, or --all-failures"
+        )
         return
 
     print_info(f"Targeting failure types: {', '.join(selected_causes)}")
 
     # Detect failures
     failure_indices = [
-        i for i, ln in enumerate(final_lines)
+        i
+        for i, ln in enumerate(final_lines)
         if detect_transcription_cause((ln or "").strip()) in selected_causes
     ]
 
@@ -1181,7 +1225,11 @@ async def main_cli(args: Any, paths_config: Dict[str, Any]) -> None:
     if args.indices:
         try:
             specified_indices = parse_indices(args.indices)
-            failure_indices = [i for i in specified_indices if i in failure_indices and 0 <= i < len(final_lines)]
+            failure_indices = [
+                i
+                for i in specified_indices
+                if i in failure_indices and 0 <= i < len(final_lines)
+            ]
             if not failure_indices:
                 print_error("None of the specified indices matched detected failures.")
                 return
@@ -1206,16 +1254,18 @@ async def main_cli(args: Any, paths_config: Dict[str, Any]) -> None:
 
     # Use default schema or CLI-specified schema
     schema_path = None
-    if hasattr(args, 'schema') and args.schema:
+    if hasattr(args, "schema") and args.schema:
         schema_path = resolve_path(args.schema, PROJECT_ROOT)
     else:
-        default_schema = (PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json").resolve()
+        default_schema = (
+            PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json"
+        ).resolve()
         if default_schema.exists():
             schema_path = default_schema
 
     # Resolve context using folder-based hierarchy or CLI-specified context
     additional_context_path = None
-    if hasattr(args, 'context') and args.context:
+    if hasattr(args, "context") and args.context:
         additional_context_path = resolve_path(args.context, PROJECT_ROOT)
     else:
         context_content, context_path = resolve_context_for_folder(job.parent_folder)

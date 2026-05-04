@@ -6,8 +6,8 @@ Creates provider instances based on configuration or explicit parameters.
 from __future__ import annotations
 
 import os
-from enum import Enum
-from typing import Any, Dict, Type, cast
+from enum import StrEnum
+from typing import Any, cast
 
 from modules.infra.logger import setup_logger
 from modules.llm.providers.base import BaseProvider
@@ -15,8 +15,9 @@ from modules.llm.providers.base import BaseProvider
 logger = setup_logger(__name__)
 
 
-class ProviderType(str, Enum):
+class ProviderType(StrEnum):
     """Supported LLM provider types."""
+
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     GOOGLE = "google"
@@ -25,16 +26,20 @@ class ProviderType(str, Enum):
 
 
 # Lazy import mapping to avoid circular imports and unnecessary dependencies
-_PROVIDER_CLASSES: Dict[ProviderType, str] = {
+_PROVIDER_CLASSES: dict[ProviderType, str] = {
     ProviderType.OPENAI: "modules.llm.providers.openai_provider.OpenAIProvider",
-    ProviderType.ANTHROPIC: "modules.llm.providers.anthropic_provider.AnthropicProvider",
+    ProviderType.ANTHROPIC: (
+        "modules.llm.providers.anthropic_provider.AnthropicProvider"
+    ),
     ProviderType.GOOGLE: "modules.llm.providers.google_provider.GoogleProvider",
-    ProviderType.OPENROUTER: "modules.llm.providers.openrouter_provider.OpenRouterProvider",
+    ProviderType.OPENROUTER: (
+        "modules.llm.providers.openrouter_provider.OpenRouterProvider"
+    ),
     ProviderType.CUSTOM: "modules.llm.providers.custom_provider.CustomProvider",
 }
 
 # Environment variable names for API keys
-_API_KEY_ENV_VARS: Dict[ProviderType, str] = {
+_API_KEY_ENV_VARS: dict[ProviderType, str] = {
     ProviderType.OPENAI: "OPENAI_API_KEY",
     ProviderType.ANTHROPIC: "ANTHROPIC_API_KEY",
     ProviderType.GOOGLE: "GOOGLE_API_KEY",
@@ -44,14 +49,15 @@ _API_KEY_ENV_VARS: Dict[ProviderType, str] = {
 }
 
 
-def _import_provider_class(provider_type: ProviderType) -> Type[BaseProvider]:
+def _import_provider_class(provider_type: ProviderType) -> type[BaseProvider]:
     """Dynamically import a provider class."""
     module_path = _PROVIDER_CLASSES[provider_type]
     module_name, class_name = module_path.rsplit(".", 1)
-    
+
     import importlib
+
     module = importlib.import_module(module_name)
-    return cast(Type[BaseProvider], getattr(module, class_name))
+    return cast(type[BaseProvider], getattr(module, class_name))
 
 
 def get_available_providers() -> list[ProviderType]:
@@ -83,26 +89,26 @@ def get_api_key_for_provider(
     api_key: str | None = None,
 ) -> str:
     """Get the API key for a provider.
-    
+
     Args:
         provider_type: The provider type
         api_key: Optional explicit API key
-    
+
     Returns:
         The API key to use
-    
+
     Raises:
         ValueError: If no API key is available
     """
     if api_key:
         return api_key
-    
+
     env_var = _API_KEY_ENV_VARS.get(provider_type)
     if env_var:
         key = os.environ.get(env_var)
         if key:
             return key
-    
+
     # Fallback: try OPENAI_API_KEY for OpenRouter if OPENROUTER_API_KEY not set
     if provider_type == ProviderType.OPENROUTER:
         key = os.environ.get("OPENAI_API_KEY")
@@ -112,11 +118,12 @@ def get_api_key_for_provider(
                 "This may not work with all OpenRouter features."
             )
             return key
-    
+
     # Custom provider: read env var name from model config
     if provider_type == ProviderType.CUSTOM:
         try:
             from modules.config.service import get_config_service
+
             config = get_config_service().get_model_config()
             tm = config.get("transcription_model", {})
             custom_cfg = tm.get("custom_endpoint", {})
@@ -154,7 +161,7 @@ def get_provider(
     **kwargs: Any,
 ) -> BaseProvider:
     """Create a provider instance.
-    
+
     Args:
         provider: Provider name ("openai", "anthropic", "google", "openrouter")
                   If None, attempts to detect from model name or config
@@ -164,10 +171,10 @@ def get_provider(
         max_tokens: Maximum output tokens
         timeout: Request timeout in seconds
         **kwargs: Provider-specific configuration
-    
+
     Returns:
         Configured provider instance
-    
+
     Raises:
         ValueError: If provider cannot be determined or API key is missing
     """
@@ -175,14 +182,15 @@ def get_provider(
     if model is None or provider is None:
         try:
             from modules.config.service import get_config_service
+
             config = get_config_service().get_model_config()
             tm = config.get("transcription_model", {})
-            
+
             if model is None:
                 model = tm.get("name", "gpt-4o")
             if provider is None:
                 provider = tm.get("provider")  # May still be None
-            
+
             # Load other defaults from config
             if "temperature" not in kwargs and tm.get("temperature") is not None:
                 temperature = float(tm.get("temperature", 0.0))
@@ -190,12 +198,12 @@ def get_provider(
                 max_tokens = int(tm.get("max_output_tokens", max_tokens))
             elif tm.get("max_tokens") is not None:
                 max_tokens = int(tm.get("max_tokens", max_tokens))
-            
+
             # Load optional parameters
             for key in ["top_p", "frequency_penalty", "presence_penalty", "top_k"]:
                 if key not in kwargs and tm.get(key) is not None:
                     kwargs[key] = tm.get(key)
-            
+
             # Load reasoning config (cross-provider)
             if "reasoning_config" not in kwargs and tm.get("reasoning") is not None:
                 kwargs["reasoning_config"] = tm.get("reasoning")
@@ -209,6 +217,7 @@ def get_provider(
     if (provider or "").lower() == "custom" and "base_url" not in kwargs:
         try:
             from modules.config.service import get_config_service
+
             config = get_config_service().get_model_config()
             tm = config.get("transcription_model", {})
             custom_cfg = tm.get("custom_endpoint", {})
@@ -222,9 +231,7 @@ def get_provider(
 
             # Forward user-configurable capabilities and prompt mode
             custom_capabilities = dict(custom_cfg.get("capabilities", {}))
-            use_plain_text_prompt = bool(
-                custom_cfg.get("use_plain_text_prompt", False)
-            )
+            use_plain_text_prompt = bool(custom_cfg.get("use_plain_text_prompt", False))
 
             if use_plain_text_prompt and custom_capabilities.get(
                 "supports_structured_output", False
@@ -247,22 +254,24 @@ def get_provider(
     # Determine provider type
     if provider is None:
         provider_type = detect_provider_from_model(model)
-        logger.info(f"Auto-detected provider '{provider_type.value}' for model '{model}'")
+        logger.info(
+            f"Auto-detected provider '{provider_type.value}' for model '{model}'"
+        )
     else:
         try:
             provider_type = ProviderType(provider.lower())
-        except ValueError:
+        except ValueError as err:
             raise ValueError(
                 f"Unknown provider '{provider}'. "
                 f"Supported: {', '.join(p.value for p in ProviderType)}"
-            )
-    
+            ) from err
+
     # Get API key
     resolved_api_key = get_api_key_for_provider(provider_type, api_key)
-    
+
     # Import and instantiate provider
     provider_class = _import_provider_class(provider_type)
-    
+
     return provider_class(
         api_key=resolved_api_key,
         model=model,

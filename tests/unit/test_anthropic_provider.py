@@ -6,7 +6,7 @@ translation for Anthropic Claude models.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -145,13 +145,17 @@ class TestAnthropicProviderInit:
         """provider_name property returns 'anthropic'."""
         from modules.llm.providers.anthropic_provider import AnthropicProvider
 
-        with patch("modules.llm.providers.anthropic_provider.ChatAnthropic"):
-            with patch("modules.llm.providers.anthropic_provider.load_max_retries",
-                       return_value=3):
-                provider = AnthropicProvider(
-                    api_key="sk-ant-test",
-                    model="claude-3-5-sonnet-20241022",
-                )
+        with (
+            patch("modules.llm.providers.anthropic_provider.ChatAnthropic"),
+            patch(
+                "modules.llm.providers.anthropic_provider.load_max_retries",
+                return_value=3,
+            ),
+        ):
+            provider = AnthropicProvider(
+                api_key="sk-ant-test",
+                model="claude-3-5-sonnet-20241022",
+            )
 
         assert provider.provider_name == "anthropic"
 
@@ -160,33 +164,43 @@ class TestAnthropicProviderInit:
         """reasoning_config is stored when provided."""
         from modules.llm.providers.anthropic_provider import AnthropicProvider
 
-        with patch("modules.llm.providers.anthropic_provider.ChatAnthropic"):
-            with patch("modules.llm.providers.anthropic_provider.load_max_retries",
-                       return_value=3):
-                provider = AnthropicProvider(
-                    api_key="sk-ant-test",
-                    model="claude-sonnet-4-5-20250929",
-                    reasoning_config={"effort": "high"},
-                )
+        with (
+            patch("modules.llm.providers.anthropic_provider.ChatAnthropic"),
+            patch(
+                "modules.llm.providers.anthropic_provider.load_max_retries",
+                return_value=3,
+            ),
+        ):
+            provider = AnthropicProvider(
+                api_key="sk-ant-test",
+                model="claude-sonnet-4-5-20250929",
+                reasoning_config={"effort": "high"},
+            )
 
         assert provider.reasoning_config == {"effort": "high"}
 
     @pytest.mark.unit
     def test_thinking_param_set_for_reasoning_model(self) -> None:
-        """Extended thinking parameter is passed to ChatAnthropic for reasoning models."""
+        """Extended thinking is passed to ChatAnthropic for reasoning models."""
         from modules.llm.providers.anthropic_provider import AnthropicProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.anthropic_provider.ChatAnthropic",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.anthropic_provider.load_max_retries",
-                       return_value=3):
-                AnthropicProvider(
-                    api_key="sk-ant-test",
-                    model="claude-sonnet-4-5-20250929",
-                    reasoning_config={"effort": "medium"},
-                )
+        with (
+            patch(
+                "modules.llm.providers.anthropic_provider.ChatAnthropic",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.anthropic_provider.load_max_retries",
+                return_value=3,
+            ),
+        ):
+            AnthropicProvider(
+                api_key="sk-ant-test",
+                model="claude-sonnet-4-5-20250929",
+                reasoning_config={"effort": "medium"},
+            )
 
         assert "thinking" in captured, "thinking param must be set for reasoning models"
         assert captured["thinking"]["type"] == "enabled"
@@ -197,17 +211,23 @@ class TestAnthropicProviderInit:
         """effort='low' maps to budget_tokens=1024."""
         from modules.llm.providers.anthropic_provider import AnthropicProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.anthropic_provider.ChatAnthropic",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.anthropic_provider.load_max_retries",
-                       return_value=3):
-                AnthropicProvider(
-                    api_key="sk-ant-test",
-                    model="claude-sonnet-4-5-20250929",
-                    reasoning_config={"effort": "low"},
-                )
+        with (
+            patch(
+                "modules.llm.providers.anthropic_provider.ChatAnthropic",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.anthropic_provider.load_max_retries",
+                return_value=3,
+            ),
+        ):
+            AnthropicProvider(
+                api_key="sk-ant-test",
+                model="claude-sonnet-4-5-20250929",
+                reasoning_config={"effort": "low"},
+            )
 
         assert captured["thinking"]["budget_tokens"] == 1024
 
@@ -216,17 +236,23 @@ class TestAnthropicProviderInit:
         """effort='high' maps to budget_tokens=16384."""
         from modules.llm.providers.anthropic_provider import AnthropicProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.anthropic_provider.ChatAnthropic",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.anthropic_provider.load_max_retries",
-                       return_value=3):
-                AnthropicProvider(
-                    api_key="sk-ant-test",
-                    model="claude-sonnet-4-5-20250929",
-                    reasoning_config={"effort": "high"},
-                )
+        with (
+            patch(
+                "modules.llm.providers.anthropic_provider.ChatAnthropic",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.anthropic_provider.load_max_retries",
+                return_value=3,
+            ),
+        ):
+            AnthropicProvider(
+                api_key="sk-ant-test",
+                model="claude-sonnet-4-5-20250929",
+                reasoning_config={"effort": "high"},
+            )
 
         assert captured["thinking"]["budget_tokens"] == 16384
 
@@ -235,17 +261,23 @@ class TestAnthropicProviderInit:
         """No thinking parameter for non-reasoning models (e.g. Claude 3.5 Sonnet)."""
         from modules.llm.providers.anthropic_provider import AnthropicProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.anthropic_provider.ChatAnthropic",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.anthropic_provider.load_max_retries",
-                       return_value=3):
-                AnthropicProvider(
-                    api_key="sk-ant-test",
-                    model="claude-3-5-sonnet-20241022",
-                    reasoning_config={"effort": "medium"},
-                )
+        with (
+            patch(
+                "modules.llm.providers.anthropic_provider.ChatAnthropic",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.anthropic_provider.load_max_retries",
+                return_value=3,
+            ),
+        ):
+            AnthropicProvider(
+                api_key="sk-ant-test",
+                model="claude-3-5-sonnet-20241022",
+                reasoning_config={"effort": "medium"},
+            )
 
         assert "thinking" not in captured
 
@@ -254,16 +286,22 @@ class TestAnthropicProviderInit:
         """No thinking parameter when reasoning_config is None."""
         from modules.llm.providers.anthropic_provider import AnthropicProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.anthropic_provider.ChatAnthropic",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.anthropic_provider.load_max_retries",
-                       return_value=3):
-                AnthropicProvider(
-                    api_key="sk-ant-test",
-                    model="claude-sonnet-4-5-20250929",
-                )
+        with (
+            patch(
+                "modules.llm.providers.anthropic_provider.ChatAnthropic",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.anthropic_provider.load_max_retries",
+                return_value=3,
+            ),
+        ):
+            AnthropicProvider(
+                api_key="sk-ant-test",
+                model="claude-sonnet-4-5-20250929",
+            )
 
         assert "thinking" not in captured
 
@@ -272,17 +310,23 @@ class TestAnthropicProviderInit:
         """Opus 4.7 uses adaptive thinking, not budget_tokens."""
         from modules.llm.providers.anthropic_provider import AnthropicProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.anthropic_provider.ChatAnthropic",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.anthropic_provider.load_max_retries",
-                       return_value=3):
-                AnthropicProvider(
-                    api_key="sk-ant-test",
-                    model="claude-opus-4-7",
-                    reasoning_config={"effort": "high"},
-                )
+        with (
+            patch(
+                "modules.llm.providers.anthropic_provider.ChatAnthropic",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.anthropic_provider.load_max_retries",
+                return_value=3,
+            ),
+        ):
+            AnthropicProvider(
+                api_key="sk-ant-test",
+                model="claude-opus-4-7",
+                reasoning_config={"effort": "high"},
+            )
 
         assert captured["thinking"] == {"type": "adaptive"}
 
@@ -291,17 +335,23 @@ class TestAnthropicProviderInit:
         """Opus 4.6 uses adaptive thinking (recommended over budget_tokens)."""
         from modules.llm.providers.anthropic_provider import AnthropicProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.anthropic_provider.ChatAnthropic",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.anthropic_provider.load_max_retries",
-                       return_value=3):
-                AnthropicProvider(
-                    api_key="sk-ant-test",
-                    model="claude-opus-4-6",
-                    reasoning_config={"effort": "medium"},
-                )
+        with (
+            patch(
+                "modules.llm.providers.anthropic_provider.ChatAnthropic",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.anthropic_provider.load_max_retries",
+                return_value=3,
+            ),
+        ):
+            AnthropicProvider(
+                api_key="sk-ant-test",
+                model="claude-opus-4-6",
+                reasoning_config={"effort": "medium"},
+            )
 
         assert captured["thinking"] == {"type": "adaptive"}
 
@@ -310,17 +360,23 @@ class TestAnthropicProviderInit:
         """Sonnet 4.6 uses adaptive thinking."""
         from modules.llm.providers.anthropic_provider import AnthropicProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.anthropic_provider.ChatAnthropic",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.anthropic_provider.load_max_retries",
-                       return_value=3):
-                AnthropicProvider(
-                    api_key="sk-ant-test",
-                    model="claude-sonnet-4-6",
-                    reasoning_config={"effort": "high"},
-                )
+        with (
+            patch(
+                "modules.llm.providers.anthropic_provider.ChatAnthropic",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.anthropic_provider.load_max_retries",
+                return_value=3,
+            ),
+        ):
+            AnthropicProvider(
+                api_key="sk-ant-test",
+                model="claude-sonnet-4-6",
+                reasoning_config={"effort": "high"},
+            )
 
         assert captured["thinking"] == {"type": "adaptive"}
 
@@ -329,33 +385,43 @@ class TestAnthropicProviderInit:
         """max_tokens is capped at model's max_output_tokens."""
         from modules.llm.providers.anthropic_provider import AnthropicProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.anthropic_provider.ChatAnthropic",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.anthropic_provider.load_max_retries",
-                       return_value=3):
-                AnthropicProvider(
-                    api_key="sk-ant-test",
-                    model="claude-3-haiku-20240307",  # max 4096
-                    max_tokens=100000,  # far exceeds model limit
-                )
+        with (
+            patch(
+                "modules.llm.providers.anthropic_provider.ChatAnthropic",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.anthropic_provider.load_max_retries",
+                return_value=3,
+            ),
+        ):
+            AnthropicProvider(
+                api_key="sk-ant-test",
+                model="claude-3-haiku-20240307",  # max 4096
+                max_tokens=100000,  # far exceeds model limit
+            )
 
         assert captured.get("max_tokens") <= 4096
 
     @pytest.mark.unit
     def test_get_capabilities_returns_provider_capabilities(self) -> None:
         """get_capabilities() returns a ProviderCapabilities instance."""
-        from modules.llm.providers.anthropic_provider import AnthropicProvider
         from modules.config.capabilities import Capabilities
+        from modules.llm.providers.anthropic_provider import AnthropicProvider
 
-        with patch("modules.llm.providers.anthropic_provider.ChatAnthropic"):
-            with patch("modules.llm.providers.anthropic_provider.load_max_retries",
-                       return_value=3):
-                provider = AnthropicProvider(
-                    api_key="sk-ant-test",
-                    model="claude-3-5-sonnet-20241022",
-                )
+        with (
+            patch("modules.llm.providers.anthropic_provider.ChatAnthropic"),
+            patch(
+                "modules.llm.providers.anthropic_provider.load_max_retries",
+                return_value=3,
+            ),
+        ):
+            provider = AnthropicProvider(
+                api_key="sk-ant-test",
+                model="claude-3-5-sonnet-20241022",
+            )
 
         caps = provider.get_capabilities()
         assert isinstance(caps, Capabilities)
@@ -368,7 +434,9 @@ class TestTransformSchemaForAnthropic:
     @pytest.mark.unit
     def test_union_type_collapsed_to_first_non_null(self) -> None:
         """Union types like ['string', 'null'] are collapsed to 'string'."""
-        from modules.llm.providers.anthropic_provider import _transform_schema_for_anthropic
+        from modules.llm.providers.anthropic_provider import (
+            _transform_schema_for_anthropic,
+        )
 
         schema = {
             "type": "object",
@@ -382,7 +450,9 @@ class TestTransformSchemaForAnthropic:
     @pytest.mark.unit
     def test_title_added_if_missing(self) -> None:
         """Title key is added when not present."""
-        from modules.llm.providers.anthropic_provider import _transform_schema_for_anthropic
+        from modules.llm.providers.anthropic_provider import (
+            _transform_schema_for_anthropic,
+        )
 
         schema = {"type": "object", "properties": {}}
         result = _transform_schema_for_anthropic(schema)
@@ -391,7 +461,9 @@ class TestTransformSchemaForAnthropic:
     @pytest.mark.unit
     def test_description_added_if_missing(self) -> None:
         """Description key is added when not present."""
-        from modules.llm.providers.anthropic_provider import _transform_schema_for_anthropic
+        from modules.llm.providers.anthropic_provider import (
+            _transform_schema_for_anthropic,
+        )
 
         schema = {"type": "object", "properties": {}}
         result = _transform_schema_for_anthropic(schema)
@@ -400,7 +472,9 @@ class TestTransformSchemaForAnthropic:
     @pytest.mark.unit
     def test_existing_title_preserved(self) -> None:
         """Existing title is not overwritten."""
-        from modules.llm.providers.anthropic_provider import _transform_schema_for_anthropic
+        from modules.llm.providers.anthropic_provider import (
+            _transform_schema_for_anthropic,
+        )
 
         schema = {"type": "object", "title": "MyTitle", "properties": {}}
         result = _transform_schema_for_anthropic(schema)
@@ -409,7 +483,9 @@ class TestTransformSchemaForAnthropic:
     @pytest.mark.unit
     def test_nested_union_types_collapsed(self) -> None:
         """Union types in nested properties are also collapsed."""
-        from modules.llm.providers.anthropic_provider import _transform_schema_for_anthropic
+        from modules.llm.providers.anthropic_provider import (
+            _transform_schema_for_anthropic,
+        )
 
         schema = {
             "type": "object",
@@ -428,7 +504,9 @@ class TestTransformSchemaForAnthropic:
     @pytest.mark.unit
     def test_original_schema_not_mutated(self) -> None:
         """The original schema dict is not modified (deep copy is used)."""
-        from modules.llm.providers.anthropic_provider import _transform_schema_for_anthropic
+        from modules.llm.providers.anthropic_provider import (
+            _transform_schema_for_anthropic,
+        )
 
         schema = {
             "type": "object",

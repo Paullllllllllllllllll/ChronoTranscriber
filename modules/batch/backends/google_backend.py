@@ -9,11 +9,10 @@ from __future__ import annotations
 import base64
 import json
 import time
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any
 
-from modules.config.constants import SUPPORTED_IMAGE_FORMATS
-from modules.infra.logger import setup_logger
 from modules.batch.backends.base import (
     BatchBackend,
     BatchHandle,
@@ -22,6 +21,8 @@ from modules.batch.backends.base import (
     BatchStatus,
     BatchStatusInfo,
 )
+from modules.config.constants import SUPPORTED_IMAGE_FORMATS
+from modules.infra.logger import setup_logger
 from modules.llm.prompt_utils import prepare_prompt_with_context
 
 logger = setup_logger(__name__)
@@ -53,6 +54,7 @@ class GoogleBatchBackend(BatchBackend):
         """Lazy initialization of Google GenAI client."""
         if self._client is None:
             from google import genai
+
             self._client = genai.Client()
         return self._client
 
@@ -70,13 +72,13 @@ class GoogleBatchBackend(BatchBackend):
 
     def submit_batch(
         self,
-        requests: List[BatchRequest],
-        model_config: Dict[str, Any],
+        requests: list[BatchRequest],
+        model_config: dict[str, Any],
         *,
         system_prompt: str,
-        schema: Optional[Dict[str, Any]] = None,
-        schema_path: Optional[Path] = None,
-        additional_context: Optional[str] = None,
+        schema: dict[str, Any] | None = None,
+        schema_path: Path | None = None,
+        additional_context: str | None = None,
     ) -> BatchHandle:
         """Submit a batch to Google's Gemini Batch API."""
         client = self._get_client()
@@ -101,8 +103,10 @@ class GoogleBatchBackend(BatchBackend):
             api_model_name = model_name
 
         # Build generation config
-        generation_config: Dict[str, Any] = {}
-        max_tokens = model_config.get("max_output_tokens") or model_config.get("max_tokens")
+        generation_config: dict[str, Any] = {}
+        max_tokens = model_config.get("max_output_tokens") or model_config.get(
+            "max_tokens"
+        )
         if max_tokens:
             generation_config["max_output_tokens"] = int(max_tokens)
         temperature = model_config.get("temperature")
@@ -146,10 +150,12 @@ class GoogleBatchBackend(BatchBackend):
             if generation_config:
                 request_obj["generation_config"] = generation_config
 
-            inline_requests.append({
-                "key": req.custom_id,
-                "request": request_obj,
-            })
+            inline_requests.append(
+                {
+                    "key": req.custom_id,
+                    "request": request_obj,
+                }
+            )
 
         # Check if we should use file-based submission (larger batches)
         # For now, we'll try inline first, then fall back to file if needed
@@ -157,16 +163,21 @@ class GoogleBatchBackend(BatchBackend):
 
         if total_size < MAX_INLINE_BYTES:
             # Use inline requests
-            logger.info("Submitting inline batch with %d requests to Google...", len(inline_requests))
+            logger.info(
+                "Submitting inline batch with %d requests to Google...",
+                len(inline_requests),
+            )
 
             # Convert to the format expected by the SDK
             src_requests = []
             for item in inline_requests:
-                src_requests.append({
-                    "contents": item["request"]["contents"],  # type: ignore[index]  # SDK stub types src as Collection[str]; runtime accepts dicts
-                    "system_instruction": item["request"].get("system_instruction"),  # type: ignore[attr-defined]  # SDK stub types src as Collection[str]; runtime accepts dicts
-                    "generation_config": item["request"].get("generation_config"),  # type: ignore[attr-defined]  # SDK stub types src as Collection[str]; runtime accepts dicts
-                })
+                src_requests.append(
+                    {
+                        "contents": item["request"]["contents"],  # type: ignore[index]  # SDK stub types src as Collection[str]; runtime accepts dicts
+                        "system_instruction": item["request"].get("system_instruction"),  # type: ignore[attr-defined]  # SDK stub types src as Collection[str]; runtime accepts dicts
+                        "generation_config": item["request"].get("generation_config"),  # type: ignore[attr-defined]  # SDK stub types src as Collection[str]; runtime accepts dicts
+                    }
+                )
 
             batch_job = client.batches.create(
                 model=api_model_name,
@@ -177,15 +188,16 @@ class GoogleBatchBackend(BatchBackend):
             )
         else:
             # Use file-based submission for larger batches
-            logger.info("Submitting file-based batch with %d requests to Google...", len(inline_requests))
+            logger.info(
+                "Submitting file-based batch with %d requests to Google...",
+                len(inline_requests),
+            )
 
             # Create JSONL file
             import tempfile
+
             with tempfile.NamedTemporaryFile(
-                mode="w",
-                suffix=".jsonl",
-                delete=False,
-                encoding="utf-8"
+                mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
             ) as f:
                 for item in inline_requests:
                     f.write(json.dumps(item) + "\n")
@@ -194,12 +206,13 @@ class GoogleBatchBackend(BatchBackend):
             try:
                 # Upload file
                 from google.genai import types
+
                 uploaded_file = client.files.upload(
                     file=str(temp_path),
                     config=types.UploadFileConfig(
                         display_name=f"batch-requests-{int(time.time())}",
-                        mime_type="jsonl"
-                    )
+                        mime_type="jsonl",
+                    ),
                 )
                 logger.info("Uploaded batch file: %s", uploaded_file.name)
 
@@ -294,7 +307,11 @@ class GoogleBatchBackend(BatchBackend):
         if hasattr(dest, "file_name") and dest.file_name:
             # Download result file
             file_content = client.files.download(file=dest.file_name)
-            text = file_content.decode("utf-8") if isinstance(file_content, bytes) else str(file_content)
+            text = (
+                file_content.decode("utf-8")
+                if isinstance(file_content, bytes)
+                else str(file_content)
+            )
 
             # Parse JSONL
             for line in text.strip().split("\n"):
@@ -362,7 +379,7 @@ class GoogleBatchBackend(BatchBackend):
                         custom_id = cid
                         break
                 if custom_id is None:
-                    custom_id = f"req-{i+1}"
+                    custom_id = f"req-{i + 1}"
 
                 result_item = BatchResultItem(custom_id=custom_id)
 

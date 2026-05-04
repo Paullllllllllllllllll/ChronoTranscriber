@@ -5,7 +5,8 @@ using filename-suffix-based matching across three resolution levels.
 
 Context Resolution Hierarchy (most specific wins):
 1. File-specific:   {input_stem}_transcr_context.txt   next to the input file
-2. Folder-specific: {parent_folder}_transcr_context.txt next to the input's parent folder
+2. Folder-specific: {parent_folder}_transcr_context.txt next to the input's parent
+   folder
 3. General fallback: context/transcr_context.txt        in the project root
 
 Suffix: transcr_context
@@ -14,10 +15,9 @@ Suffix: transcr_context
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Tuple
 
-from modules.infra.logger import setup_logger
 from modules.config.config_loader import PROJECT_ROOT
+from modules.infra.logger import setup_logger
 
 logger = setup_logger(__name__)
 
@@ -31,14 +31,15 @@ _SUFFIX = "transcr_context"
 
 def _resolve_context(
     suffix: str,
-    input_path: Optional[Path] = None,
-    context_dir: Optional[Path] = None,
+    input_path: Path | None = None,
+    context_dir: Path | None = None,
     size_threshold: int = DEFAULT_CONTEXT_SIZE_THRESHOLD,
-) -> Tuple[Optional[str], Optional[Path]]:
+) -> tuple[str | None, Path | None]:
     """Generic hierarchical context resolution.
 
     Searches for context in this order:
-    1. File-specific:   {input_stem}_{suffix}.txt   in the same directory as *input_path*
+    1. File-specific:   {input_stem}_{suffix}.txt   in the same directory as
+       *input_path*
     2. Folder-specific: {parent_folder}_{suffix}.txt in the grandparent directory
     3. General fallback: context/{suffix}.txt        in the project context directory
 
@@ -77,9 +78,13 @@ def _resolve_context(
             # 2. Folder-specific context (parent folder name)
             parent_folder = input_path.parent
             if parent_folder.parent.exists():
-                folder_specific = parent_folder.parent / f"{parent_folder.name}{filename_suffix}"
+                folder_specific = (
+                    parent_folder.parent / f"{parent_folder.name}{filename_suffix}"
+                )
                 if folder_specific.exists():
-                    content = _read_and_validate_context(folder_specific, size_threshold)
+                    content = _read_and_validate_context(
+                        folder_specific, size_threshold
+                    )
                     if content:
                         logger.info(f"Using folder-specific context: {folder_specific}")
                         return content, folder_specific
@@ -87,9 +92,13 @@ def _resolve_context(
         elif input_path.is_dir():
             # For folders: folder-specific context lives next to the folder
             if input_path.parent.exists():
-                folder_specific = input_path.parent / f"{input_path.name}{filename_suffix}"
+                folder_specific = (
+                    input_path.parent / f"{input_path.name}{filename_suffix}"
+                )
                 if folder_specific.exists():
-                    content = _read_and_validate_context(folder_specific, size_threshold)
+                    content = _read_and_validate_context(
+                        folder_specific, size_threshold
+                    )
                     if content:
                         logger.info(f"Using folder-specific context: {folder_specific}")
                         return content, folder_specific
@@ -108,9 +117,9 @@ def _resolve_context(
 
 def resolve_context_for_file(
     file_path: Path,
-    context_dir: Optional[Path] = None,
+    context_dir: Path | None = None,
     size_threshold: int = DEFAULT_CONTEXT_SIZE_THRESHOLD,
-) -> Tuple[Optional[str], Optional[Path]]:
+) -> tuple[str | None, Path | None]:
     """Resolve transcription context for a specific file.
 
     Parameters
@@ -132,9 +141,9 @@ def resolve_context_for_file(
 
 def resolve_context_for_folder(
     folder_path: Path,
-    context_dir: Optional[Path] = None,
+    context_dir: Path | None = None,
     size_threshold: int = DEFAULT_CONTEXT_SIZE_THRESHOLD,
-) -> Tuple[Optional[str], Optional[Path]]:
+) -> tuple[str | None, Path | None]:
     """Resolve transcription context for an image folder.
 
     Parameters
@@ -156,9 +165,9 @@ def resolve_context_for_folder(
 
 def resolve_context_for_image(
     image_path: Path,
-    context_dir: Optional[Path] = None,
+    context_dir: Path | None = None,
     size_threshold: int = DEFAULT_CONTEXT_SIZE_THRESHOLD,
-) -> Tuple[Optional[str], Optional[Path]]:
+) -> tuple[str | None, Path | None]:
     """Resolve transcription context for a specific image file.
 
     Parameters
@@ -179,9 +188,9 @@ def resolve_context_for_image(
 
 
 def load_context_from_path(
-    context_path: Optional[Path],
+    context_path: Path | None,
     size_threshold: int = DEFAULT_CONTEXT_SIZE_THRESHOLD,
-) -> Optional[str]:
+) -> str | None:
     """Load context from a specific path with validation.
 
     Parameters
@@ -209,7 +218,7 @@ def load_context_from_path(
 def _read_and_validate_context(
     context_path: Path,
     size_threshold: int = DEFAULT_CONTEXT_SIZE_THRESHOLD,
-) -> Optional[str]:
+) -> str | None:
     """Read and validate a context file.
 
     Parameters
@@ -232,8 +241,10 @@ def _read_and_validate_context(
 
         if len(content) > size_threshold:
             logger.warning(
-                f"Context file '{context_path.name}' is large ({len(content):,} chars). "
-                f"Consider reducing to under {size_threshold:,} chars for optimal performance."
+                f"Context file '{context_path.name}' is large "
+                f"({len(content):,} chars). "
+                f"Consider reducing to under {size_threshold:,} chars "
+                f"for optimal performance."
             )
 
         return content

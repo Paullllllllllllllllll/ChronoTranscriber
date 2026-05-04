@@ -2,7 +2,7 @@
 
 Tests the 3-level hierarchy:
 1. File-specific:   {input_stem}_transcr_context.txt   next to the input file
-2. Folder-specific: {parent_folder}_transcr_context.txt next to the input's parent folder
+2. Folder-specific: {parent_folder}_transcr_context.txt  next to the input's parent
 3. General fallback: context/transcr_context.txt        in the project context directory
 
 Suffix: transcr_context
@@ -10,13 +10,14 @@ Suffix: transcr_context
 
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # _resolve_context (generic engine)
 # ---------------------------------------------------------------------------
+
 
 class TestResolveContext:
     """Tests for _resolve_context hierarchical resolution."""
@@ -31,7 +32,9 @@ class TestResolveContext:
         ctx = temp_dir / "document_transcr_context.txt"
         ctx.write_text("File-specific context")
 
-        content, path = _resolve_context("transcr_context", input_path=pdf, context_dir=temp_dir)
+        content, path = _resolve_context(
+            "transcr_context", input_path=pdf, context_dir=temp_dir
+        )
         assert content == "File-specific context"
         assert path == ctx
 
@@ -47,7 +50,9 @@ class TestResolveContext:
         ctx = temp_dir / "my_archive_transcr_context.txt"
         ctx.write_text("Folder-specific context")
 
-        content, path = _resolve_context("transcr_context", input_path=pdf, context_dir=temp_dir)
+        content, path = _resolve_context(
+            "transcr_context", input_path=pdf, context_dir=temp_dir
+        )
         assert content == "Folder-specific context"
         assert path == ctx
 
@@ -66,7 +71,9 @@ class TestResolveContext:
         pdf = deep / "document.pdf"
         pdf.write_text("dummy")
 
-        content, path = _resolve_context("transcr_context", input_path=pdf, context_dir=ctx_dir)
+        content, path = _resolve_context(
+            "transcr_context", input_path=pdf, context_dir=ctx_dir
+        )
         assert content == "General context"
         assert path == general
 
@@ -85,7 +92,9 @@ class TestResolveContext:
         folder_ctx = temp_dir / "archive_transcr_context.txt"
         folder_ctx.write_text("folder loses")
 
-        content, path = _resolve_context("transcr_context", input_path=pdf, context_dir=temp_dir)
+        content, path = _resolve_context(
+            "transcr_context", input_path=pdf, context_dir=temp_dir
+        )
         assert content == "file wins"
         assert path == file_ctx
 
@@ -106,7 +115,9 @@ class TestResolveContext:
         folder_ctx = temp_dir / "archive_transcr_context.txt"
         folder_ctx.write_text("folder wins")
 
-        content, path = _resolve_context("transcr_context", input_path=pdf, context_dir=ctx_dir)
+        content, path = _resolve_context(
+            "transcr_context", input_path=pdf, context_dir=ctx_dir
+        )
         assert content == "folder wins"
         assert path == folder_ctx
 
@@ -118,7 +129,9 @@ class TestResolveContext:
         pdf = temp_dir / "document.pdf"
         pdf.write_text("dummy pdf")
 
-        content, path = _resolve_context("transcr_context", input_path=pdf, context_dir=temp_dir)
+        content, path = _resolve_context(
+            "transcr_context", input_path=pdf, context_dir=temp_dir
+        )
         assert content is None
         assert path is None
 
@@ -132,7 +145,9 @@ class TestResolveContext:
         ctx = temp_dir / "document_transcr_context.txt"
         ctx.write_text("")
 
-        content, path = _resolve_context("transcr_context", input_path=pdf, context_dir=temp_dir)
+        content, path = _resolve_context(
+            "transcr_context", input_path=pdf, context_dir=temp_dir
+        )
         assert content is None
         assert path is None
 
@@ -146,7 +161,9 @@ class TestResolveContext:
         ctx = temp_dir / "my_images_transcr_context.txt"
         ctx.write_text("Folder context")
 
-        content, path = _resolve_context("transcr_context", input_path=folder, context_dir=temp_dir)
+        content, path = _resolve_context(
+            "transcr_context", input_path=folder, context_dir=temp_dir
+        )
         assert content == "Folder context"
         assert path == ctx
 
@@ -160,7 +177,9 @@ class TestResolveContext:
         general = ctx_dir / "transcr_context.txt"
         general.write_text("fallback only")
 
-        content, path = _resolve_context("transcr_context", input_path=None, context_dir=ctx_dir)
+        content, path = _resolve_context(
+            "transcr_context", input_path=None, context_dir=ctx_dir
+        )
         assert content == "fallback only"
         assert path == general
 
@@ -168,6 +187,7 @@ class TestResolveContext:
 # ---------------------------------------------------------------------------
 # Public convenience functions
 # ---------------------------------------------------------------------------
+
 
 class TestResolveContextForFile:
     """Tests for resolve_context_for_file function."""
@@ -283,6 +303,7 @@ class TestResolveContextForImage:
 # _read_and_validate_context
 # ---------------------------------------------------------------------------
 
+
 class TestReadAndValidateContext:
     """Tests for _read_and_validate_context function."""
 
@@ -327,6 +348,7 @@ class TestReadAndValidateContext:
 # load_context_from_path
 # ---------------------------------------------------------------------------
 
+
 class TestLoadContextFromPath:
     """Tests for load_context_from_path function."""
 
@@ -343,18 +365,21 @@ class TestLoadContextFromPath:
     def test_returns_none_for_none_path(self) -> None:
         """Returns None when path is None."""
         from modules.config.context import load_context_from_path
+
         assert load_context_from_path(None) is None
 
     @pytest.mark.unit
     def test_returns_none_for_nonexistent_path(self, temp_dir: Path) -> None:
         """Returns None for nonexistent path."""
         from modules.config.context import load_context_from_path
+
         assert load_context_from_path(temp_dir / "nonexistent.txt") is None
 
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+
 
 class TestContextSizeThreshold:
     """Tests for context size threshold handling."""
@@ -363,4 +388,5 @@ class TestContextSizeThreshold:
     def test_default_threshold_constant(self) -> None:
         """Default threshold constant value."""
         from modules.config.context import DEFAULT_CONTEXT_SIZE_THRESHOLD
+
         assert DEFAULT_CONTEXT_SIZE_THRESHOLD == 4000

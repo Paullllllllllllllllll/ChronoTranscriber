@@ -69,9 +69,7 @@ def _call_create_config(args, paths_config, input_dir, output_dir):
     from main.unified_transcriber import create_config_from_cli_args
 
     with patch("main.unified_transcriber.AutoSelector"):
-        return create_config_from_cli_args(
-            args, input_dir, output_dir, paths_config
-        )
+        return create_config_from_cli_args(args, input_dir, output_dir, paths_config)
 
 
 # =========================================================================
@@ -83,7 +81,9 @@ class TestResumeModeOverride:
     """Tests for resume_mode precedence: CLI flag > config > hardcoded default."""
 
     @pytest.mark.unit
-    def test_default_no_flag_no_config_key(self, temp_input_dir: Path, temp_output_dir: Path) -> None:
+    def test_default_no_flag_no_config_key(
+        self, temp_input_dir: Path, temp_output_dir: Path
+    ) -> None:
         """Neither flag nor config key -> hardcoded default 'skip'."""
         args = _make_args()
         config = _call_create_config(
@@ -92,7 +92,9 @@ class TestResumeModeOverride:
         assert config.resume_mode == "skip"
 
     @pytest.mark.unit
-    def test_force_flag_sets_overwrite(self, temp_input_dir: Path, temp_output_dir: Path) -> None:
+    def test_force_flag_sets_overwrite(
+        self, temp_input_dir: Path, temp_output_dir: Path
+    ) -> None:
         """--force flag -> 'overwrite' regardless of config."""
         args = _make_args(force=True)
         config = _call_create_config(
@@ -101,7 +103,9 @@ class TestResumeModeOverride:
         assert config.resume_mode == "overwrite"
 
     @pytest.mark.unit
-    def test_resume_flag_sets_skip(self, temp_input_dir: Path, temp_output_dir: Path) -> None:
+    def test_resume_flag_sets_skip(
+        self, temp_input_dir: Path, temp_output_dir: Path
+    ) -> None:
         """--resume flag -> 'skip' regardless of config."""
         args = _make_args(resume=True)
         config = _call_create_config(
@@ -167,7 +171,9 @@ class TestOutputFormatOverride:
         assert config.output_format == "md"
 
     @pytest.mark.unit
-    def test_cli_flag_overrides_config(self, temp_input_dir: Path, temp_output_dir: Path) -> None:
+    def test_cli_flag_overrides_config(
+        self, temp_input_dir: Path, temp_output_dir: Path
+    ) -> None:
         """--output-format json + config 'txt' -> 'json' (CLI wins)."""
         args = _make_args(output_format="json")
         paths_config = _make_paths_config(output_format="txt")
@@ -198,7 +204,9 @@ class TestPageRangeOverride:
     """Tests for page_range CLI flag."""
 
     @pytest.mark.unit
-    def test_pages_flag_sets_page_range(self, temp_input_dir: Path, temp_output_dir: Path) -> None:
+    def test_pages_flag_sets_page_range(
+        self, temp_input_dir: Path, temp_output_dir: Path
+    ) -> None:
         """--pages '1-5' -> page_range is set."""
         args = _make_args(pages="1-5")
         config = _call_create_config(
@@ -207,7 +215,9 @@ class TestPageRangeOverride:
         assert config.page_range is not None
 
     @pytest.mark.unit
-    def test_no_pages_flag_leaves_none(self, temp_input_dir: Path, temp_output_dir: Path) -> None:
+    def test_no_pages_flag_leaves_none(
+        self, temp_input_dir: Path, temp_output_dir: Path
+    ) -> None:
         """No --pages -> page_range is None."""
         args = _make_args()
         config = _call_create_config(

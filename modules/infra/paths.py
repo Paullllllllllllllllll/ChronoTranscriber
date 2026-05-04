@@ -19,7 +19,7 @@ import hashlib
 import platform
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from modules.config.constants import DOCUMENT_CATEGORIES
 from modules.infra.logger import setup_logger
@@ -65,7 +65,7 @@ def create_safe_directory_name(original_name: str, suffix: str = "") -> str:
 def create_safe_filename(
     original_name: str,
     extension: str,
-    parent_path: Optional[Path] = None,
+    parent_path: Path | None = None,
 ) -> str:
     """Create a safe filename that won't exceed Windows path limits."""
     name_hash = _compute_name_hash(original_name)
@@ -128,16 +128,16 @@ def ensure_path_safe(path: Path) -> Path:
 # Typed path configuration
 # ---------------------------------------------------------------------------
 
-_DEFAULTS: Dict[str, Dict[str, str]] = {
-    "PDFs":   {"input": "pdfs_in",   "output": "pdfs_out"},
+_DEFAULTS: dict[str, dict[str, str]] = {
+    "PDFs": {"input": "pdfs_in", "output": "pdfs_out"},
     "Images": {"input": "images_in", "output": "images_out"},
-    "EPUBs":  {"input": "epubs_in",  "output": "epubs_out"},
-    "MOBIs":  {"input": "mobis_in",  "output": "mobis_out"},
-    "Auto":   {"input": "auto_in",   "output": "auto_out"},
+    "EPUBs": {"input": "epubs_in", "output": "epubs_out"},
+    "MOBIs": {"input": "mobis_in", "output": "mobis_out"},
+    "Auto": {"input": "auto_in", "output": "auto_out"},
 }
 
 
-def _get_path(file_paths: Dict[str, Any], section: str, key: str) -> Path:
+def _get_path(file_paths: dict[str, Any], section: str, key: str) -> Path:
     """Resolve a single path from the ``file_paths`` config section."""
     default = _DEFAULTS.get(section, {}).get(key, "")
     return Path(file_paths.get(section, {}).get(key, default))
@@ -161,7 +161,7 @@ class PathConfig:
     use_input_as_output: bool = False
 
     @classmethod
-    def from_paths_config(cls, paths_config: Dict[str, Any]) -> "PathConfig":
+    def from_paths_config(cls, paths_config: dict[str, Any]) -> PathConfig:
         """Build a :class:`PathConfig` from a raw ``paths_config`` dict."""
         fp = paths_config.get("file_paths", {})
         general = paths_config.get("general", {})
@@ -176,19 +176,17 @@ class PathConfig:
             mobi_output_dir=_get_path(fp, "MOBIs", "output"),
             auto_input_dir=_get_path(fp, "Auto", "input"),
             auto_output_dir=_get_path(fp, "Auto", "output"),
-            use_input_as_output=general.get(
-                "input_paths_is_output_path", False
-            ),
+            use_input_as_output=general.get("input_paths_is_output_path", False),
         )
 
     def base_dirs_for_type(self, processing_type: str) -> tuple[Path, Path]:
         """Return ``(input_dir, output_dir)`` for a processing type string."""
-        mapping: Dict[str, tuple[Path, Path]] = {
-            "pdfs":   (self.pdf_input_dir,   self.pdf_output_dir),
+        mapping: dict[str, tuple[Path, Path]] = {
+            "pdfs": (self.pdf_input_dir, self.pdf_output_dir),
             "images": (self.image_input_dir, self.image_output_dir),
-            "epubs":  (self.epub_input_dir,  self.epub_output_dir),
-            "mobis":  (self.mobi_input_dir,  self.mobi_output_dir),
-            "auto":   (self.auto_input_dir,  self.auto_output_dir),
+            "epubs": (self.epub_input_dir, self.epub_output_dir),
+            "mobis": (self.mobi_input_dir, self.mobi_output_dir),
+            "auto": (self.auto_input_dir, self.auto_output_dir),
         }
         if processing_type not in mapping:
             raise ValueError(f"Unknown processing type: {processing_type!r}")
@@ -198,14 +196,22 @@ class PathConfig:
         """Create all output directories (when *not* using input-as-output)."""
         if self.use_input_as_output:
             return
-        for d in (self.pdf_output_dir, self.image_output_dir,
-                  self.epub_output_dir, self.mobi_output_dir):
+        for d in (
+            self.pdf_output_dir,
+            self.image_output_dir,
+            self.epub_output_dir,
+            self.mobi_output_dir,
+        ):
             d.mkdir(parents=True, exist_ok=True)
 
     def ensure_input_dirs(self) -> None:
         """Create all input directories (interactive-mode convenience)."""
-        for d in (self.pdf_input_dir, self.image_input_dir,
-                  self.epub_input_dir, self.auto_input_dir):
+        for d in (
+            self.pdf_input_dir,
+            self.image_input_dir,
+            self.epub_input_dir,
+            self.auto_input_dir,
+        ):
             d.mkdir(parents=True, exist_ok=True)
         self.auto_output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -213,6 +219,7 @@ class PathConfig:
 # ---------------------------------------------------------------------------
 # Directory ensure / collect helpers
 # ---------------------------------------------------------------------------
+
 
 def ensure_directory(path: Path, create: bool = True) -> Path:
     """Ensure a directory exists, optionally creating it.
@@ -236,7 +243,7 @@ def ensure_directory(path: Path, create: bool = True) -> Path:
     raise FileNotFoundError(f"Directory does not exist: {resolved}")
 
 
-def ensure_directories(*paths: Path, create: bool = True) -> List[Path]:
+def ensure_directories(*paths: Path, create: bool = True) -> list[Path]:
     """Ensure multiple directories exist, optionally creating them."""
     return [ensure_directory(p, create=create) for p in paths]
 
@@ -284,7 +291,7 @@ def get_input_directories_from_config(
 def get_logs_directory(
     paths_config: dict[str, Any],
     create: bool = True,
-) -> Optional[Path]:
+) -> Path | None:
     """Get logs directory from configuration."""
     logs_dir = paths_config.get("general", {}).get("logs_dir")
     if logs_dir:
@@ -292,7 +299,7 @@ def get_logs_directory(
     return None
 
 
-def collect_scan_directories(paths_config: dict[str, Any]) -> List[Path]:
+def collect_scan_directories(paths_config: dict[str, Any]) -> list[Path]:
     """Collect all unique input and output directories for scanning.
 
     Useful for batch checking and repair operations that need to scan
@@ -309,9 +316,7 @@ def collect_scan_directories(paths_config: dict[str, Any]) -> List[Path]:
                     dir_path = Path(path_str)
                     if dir_path.exists() or key == "output":
                         scan_dirs.add(
-                            ensure_directory(
-                                dir_path, create=(key == "output")
-                            )
+                            ensure_directory(dir_path, create=(key == "output"))
                         )
 
     return sorted(scan_dirs)

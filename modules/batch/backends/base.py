@@ -6,14 +6,16 @@ Defines the abstract interface that all batch processing backends must implement
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any
 
 
 class BatchStatus(Enum):
     """Status of a batch job."""
+
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
@@ -32,11 +34,12 @@ class BatchHandle:
         batch_id: Provider-specific batch identifier
         metadata: Additional provider-specific metadata
     """
+
     provider: str
     batch_id: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for persistence."""
         return {
             "provider": self.provider,
@@ -45,7 +48,7 @@ class BatchHandle:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "BatchHandle":
+    def from_dict(cls, data: dict[str, Any]) -> BatchHandle:
         """Deserialize from dictionary."""
         return cls(
             provider=data.get("provider", ""),
@@ -66,12 +69,13 @@ class BatchRequest:
         order_index: Original order index for result sorting
         image_info: Additional metadata about the image
     """
+
     custom_id: str
-    image_path: Optional[Path] = None
-    image_base64: Optional[str] = None
-    mime_type: Optional[str] = None
+    image_path: Path | None = None
+    image_base64: str | None = None
+    mime_type: str | None = None
     order_index: int = 0
-    image_info: Dict[str, Any] = field(default_factory=dict)
+    image_info: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -89,13 +93,14 @@ class BatchResultItem:
         input_tokens: Number of input tokens used
         output_tokens: Number of output tokens used
     """
+
     custom_id: str
     success: bool = True
     content: str = ""
-    parsed_output: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-    error_code: Optional[str] = None
-    raw_response: Dict[str, Any] = field(default_factory=dict)
+    parsed_output: dict[str, Any] | None = None
+    error: str | None = None
+    error_code: str | None = None
+    raw_response: dict[str, Any] = field(default_factory=dict)
     input_tokens: int = 0
     output_tokens: int = 0
     cached_input_tokens: int = 0
@@ -130,14 +135,15 @@ class BatchStatusInfo:
         results_available: Whether results can be downloaded
         output_file_id: Provider-specific output file identifier (if applicable)
     """
+
     status: BatchStatus
     total_requests: int = 0
     completed_requests: int = 0
     failed_requests: int = 0
     pending_requests: int = 0
-    error_message: Optional[str] = None
+    error_message: str | None = None
     results_available: bool = False
-    output_file_id: Optional[str] = None
+    output_file_id: str | None = None
 
 
 class BatchBackend(ABC):
@@ -168,13 +174,13 @@ class BatchBackend(ABC):
     @abstractmethod
     def submit_batch(
         self,
-        requests: List[BatchRequest],
-        model_config: Dict[str, Any],
+        requests: list[BatchRequest],
+        model_config: dict[str, Any],
         *,
         system_prompt: str,
-        schema: Optional[Dict[str, Any]] = None,
-        schema_path: Optional[Path] = None,
-        additional_context: Optional[str] = None,
+        schema: dict[str, Any] | None = None,
+        schema_path: Path | None = None,
+        additional_context: str | None = None,
     ) -> BatchHandle:
         """Submit a batch of requests for processing.
 

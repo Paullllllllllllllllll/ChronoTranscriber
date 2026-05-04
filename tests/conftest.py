@@ -22,13 +22,15 @@ import pytest
 
 # Add project root to path for imports
 PROJECT_ROOT = Path(__file__).parent.parent
-import sys
+import sys  # noqa: E402
+
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
 # =============================================================================
 # Configuration Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def mock_paths_config(tmp_path: Path) -> dict[str, Any]:
@@ -156,8 +158,9 @@ def mock_config_service(
 # Temporary Directory Fixtures
 # =============================================================================
 
+
 @pytest.fixture
-def temp_dir() -> Generator[Path, None, None]:
+def temp_dir() -> Generator[Path]:
     """Create a temporary directory that is cleaned up after test."""
     temp_path = Path(tempfile.mkdtemp(prefix="chronotest_"))
     yield temp_path
@@ -185,11 +188,11 @@ def sample_image_folder(temp_input_dir: Path) -> Path:
     """Create a sample image folder with placeholder images."""
     img_folder = temp_input_dir / "test_images"
     img_folder.mkdir(parents=True, exist_ok=True)
-    
+
     # Create placeholder image files (empty files with image extensions)
     for i in range(3):
-        (img_folder / f"page_{i+1:03d}.png").write_bytes(b"")
-    
+        (img_folder / f"page_{i + 1:03d}.png").write_bytes(b"")
+
     return img_folder
 
 
@@ -210,7 +213,7 @@ def sample_text_file(temp_input_dir: Path) -> Path:
         "Page 1:\nThis is sample transcription text.\n\n"
         "Page 2:\n[transcription error: page_002.png]\n\n"
         "Page 3:\n[No transcribable text]\n",
-        encoding="utf-8"
+        encoding="utf-8",
     )
     return txt_path
 
@@ -220,8 +223,16 @@ def sample_jsonl_file(temp_input_dir: Path) -> Path:
     """Create a sample JSONL file for testing."""
     jsonl_path = temp_input_dir / "batch_results.jsonl"
     records = [
-        {"image_name": "page_001.png", "text_chunk": "First page text", "order_index": 0},
-        {"image_name": "page_002.png", "text_chunk": "Second page text", "order_index": 1},
+        {
+            "image_name": "page_001.png",
+            "text_chunk": "First page text",
+            "order_index": 0,
+        },
+        {
+            "image_name": "page_002.png",
+            "text_chunk": "Second page text",
+            "order_index": 1,
+        },
         {"batch_tracking": {"batch_id": "batch_test123", "provider": "openai"}},
     ]
     with open(jsonl_path, "w", encoding="utf-8") as f:
@@ -233,6 +244,7 @@ def sample_jsonl_file(temp_input_dir: Path) -> Path:
 # =============================================================================
 # Mock API Client Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def mock_openai_response() -> dict[str, Any]:
@@ -248,20 +260,24 @@ def mock_openai_response() -> dict[str, Any]:
                 "content": [
                     {
                         "type": "text",
-                        "text": json.dumps({
-                            "transcription": "This is the transcribed text.",
-                            "no_transcribable_text": False,
-                            "transcription_not_possible": False,
-                        })
+                        "text": json.dumps(
+                            {
+                                "transcription": "This is the transcribed text.",
+                                "no_transcribable_text": False,
+                                "transcription_not_possible": False,
+                            }
+                        ),
                     }
-                ]
+                ],
             }
         ],
-        "output_text": json.dumps({
-            "transcription": "This is the transcribed text.",
-            "no_transcribable_text": False,
-            "transcription_not_possible": False,
-        }),
+        "output_text": json.dumps(
+            {
+                "transcription": "This is the transcribed text.",
+                "no_transcribable_text": False,
+                "transcription_not_possible": False,
+            }
+        ),
         "usage": {
             "input_tokens": 100,
             "output_tokens": 50,
@@ -276,11 +292,19 @@ def mock_openai_client(mock_openai_response: dict[str, Any]) -> MagicMock:
     mock_client = MagicMock()
     mock_client.responses.create.return_value = mock_openai_response
     mock_client.chat.completions.create.return_value = MagicMock(
-        choices=[MagicMock(message=MagicMock(content=json.dumps({
-            "transcription": "Test transcription",
-            "no_transcribable_text": False,
-            "transcription_not_possible": False,
-        })))]
+        choices=[
+            MagicMock(
+                message=MagicMock(
+                    content=json.dumps(
+                        {
+                            "transcription": "Test transcription",
+                            "no_transcribable_text": False,
+                            "transcription_not_possible": False,
+                        }
+                    )
+                )
+            )
+        ]
     )
     return mock_client
 
@@ -290,11 +314,13 @@ def mock_langchain_llm() -> MagicMock:
     """Provide a mock LangChain LLM."""
     mock_llm = MagicMock()
     mock_response = MagicMock()
-    mock_response.content = json.dumps({
-        "transcription": "LangChain transcribed text",
-        "no_transcribable_text": False,
-        "transcription_not_possible": False,
-    })
+    mock_response.content = json.dumps(
+        {
+            "transcription": "LangChain transcribed text",
+            "no_transcribable_text": False,
+            "transcription_not_possible": False,
+        }
+    )
     mock_response.response_metadata = {
         "token_usage": {"prompt_tokens": 100, "completion_tokens": 50}
     }
@@ -307,11 +333,12 @@ def mock_langchain_llm() -> MagicMock:
 # User Configuration Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def sample_user_config() -> Any:
     """Create a sample UserConfiguration for testing."""
     from modules.transcribe.user_config import UserConfiguration
-    
+
     config = UserConfiguration()
     config.processing_type = "images"
     config.transcription_method = "tesseract"
@@ -326,7 +353,9 @@ def sample_user_config_gpt(sample_user_config: Any) -> Any:
     """Create a sample UserConfiguration for GPT testing."""
     sample_user_config.transcription_method = "gpt"
     sample_user_config.selected_schema_name = "markdown_transcription_schema"
-    sample_user_config.selected_schema_path = PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json"
+    sample_user_config.selected_schema_path = (
+        PROJECT_ROOT / "schemas" / "markdown_transcription_schema.json"
+    )
     return sample_user_config
 
 
@@ -334,20 +363,26 @@ def sample_user_config_gpt(sample_user_config: Any) -> Any:
 # Environment Fixtures
 # =============================================================================
 
+
 @pytest.fixture
-def mock_env_no_api_keys() -> Generator[None, None, None]:
+def mock_env_no_api_keys() -> Generator[None]:
     """Mock environment with no API keys set."""
     with patch.dict(os.environ, {}, clear=True):
         # Explicitly remove API keys if present
         env_copy = os.environ.copy()
-        for key in ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY"]:
+        for key in [
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GOOGLE_API_KEY",
+            "OPENROUTER_API_KEY",
+        ]:
             env_copy.pop(key, None)
         with patch.dict(os.environ, env_copy, clear=True):
             yield
 
 
 @pytest.fixture
-def mock_env_with_openai_key() -> Generator[None, None, None]:
+def mock_env_with_openai_key() -> Generator[None]:
     """Mock environment with OpenAI API key set."""
     with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test-key-12345"}):
         yield
@@ -357,6 +392,7 @@ def mock_env_with_openai_key() -> Generator[None, None, None]:
 # Schema Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def sample_transcription_schema() -> dict[str, Any]:
     """Provide a sample transcription schema."""
@@ -365,18 +401,22 @@ def sample_transcription_schema() -> dict[str, Any]:
         "properties": {
             "transcription": {
                 "type": "string",
-                "description": "The transcribed text from the image"
+                "description": "The transcribed text from the image",
             },
             "no_transcribable_text": {
                 "type": "boolean",
-                "description": "True if no text could be found"
+                "description": "True if no text could be found",
             },
             "transcription_not_possible": {
                 "type": "boolean",
-                "description": "True if transcription was not possible"
+                "description": "True if transcription was not possible",
             },
         },
-        "required": ["transcription", "no_transcribable_text", "transcription_not_possible"],
+        "required": [
+            "transcription",
+            "no_transcribable_text",
+            "transcription_not_possible",
+        ],
         "additionalProperties": False,
     }
 
@@ -385,10 +425,12 @@ def sample_transcription_schema() -> dict[str, Any]:
 # Batch Processing Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def mock_batch_handle() -> Any:
     """Provide a mock batch handle."""
     from modules.batch.backends.base import BatchHandle
+
     return BatchHandle(
         batch_id="batch_test_12345",
         provider="openai",
@@ -400,6 +442,7 @@ def mock_batch_handle() -> Any:
 def mock_batch_status() -> Any:
     """Provide a mock batch status."""
     from modules.batch.backends.base import BatchStatus, BatchStatusInfo
+
     return BatchStatusInfo(
         status=BatchStatus.COMPLETED,
         total_requests=10,
@@ -412,10 +455,12 @@ def mock_batch_status() -> Any:
 # Async Test Helpers
 # =============================================================================
 
+
 @pytest.fixture
-def event_loop() -> Generator[Any, None, None]:
+def event_loop() -> Generator[Any]:
     """Create an event loop for async tests."""
     import asyncio
+
     loop = asyncio.new_event_loop()
     yield loop
     loop.close()
@@ -425,9 +470,12 @@ def event_loop() -> Generator[Any, None, None]:
 # Skip Markers
 # =============================================================================
 
+
 def pytest_configure(config):
     """Configure custom pytest markers."""
-    config.addinivalue_line("markers", "unit: Unit tests (fast, no external dependencies)")
+    config.addinivalue_line(
+        "markers", "unit: Unit tests (fast, no external dependencies)"
+    )
     config.addinivalue_line("markers", "integration: Integration tests")
     config.addinivalue_line("markers", "slow: Slow tests")
     config.addinivalue_line("markers", "api: Tests requiring API keys")

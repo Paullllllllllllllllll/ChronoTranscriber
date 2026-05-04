@@ -43,31 +43,50 @@ from modules.batch.requests import (
     encode_image_to_data_url,
     get_batch_chunk_size,
     process_batch_transcription,
-    submit_batch as submit_batch_legacy,
     write_batch_file,
+)
+from modules.batch.requests import (
+    submit_batch as submit_batch_legacy,
 )
 from modules.batch.submission import submit_batch
 
 __all__ = [
     # Backends
-    "BatchBackend", "BatchHandle", "BatchRequest", "BatchResultItem",
-    "BatchStatus", "BatchStatusInfo", "get_batch_backend",
-    "supports_batch", "clear_backend_cache",
+    "BatchBackend",
+    "BatchHandle",
+    "BatchRequest",
+    "BatchResultItem",
+    "BatchStatus",
+    "BatchStatusInfo",
+    "get_batch_backend",
+    "supports_batch",
+    "clear_backend_cache",
     # Cancel
     "cancel_batch_by_id",
     # Check
-    "process_all_batches", "run_batch_finalization",
+    "process_all_batches",
+    "run_batch_finalization",
     # JSONL
-    "ImageMetadata", "read_jsonl_records", "write_jsonl_record",
-    "extract_image_metadata", "extract_batch_ids",
-    "extract_transcription_records", "get_processed_image_names",
-    "is_batch_jsonl", "backup_file", "find_companion_files",
+    "ImageMetadata",
+    "read_jsonl_records",
+    "write_jsonl_record",
+    "extract_image_metadata",
+    "extract_batch_ids",
+    "extract_transcription_records",
+    "get_processed_image_names",
+    "is_batch_jsonl",
+    "backup_file",
+    "find_companion_files",
     # Mapping
-    "diagnose_batch_failure", "extract_custom_id_mapping",
+    "diagnose_batch_failure",
+    "extract_custom_id_mapping",
     # Requests
-    "DEFAULT_BATCH_CHUNK_SIZE", "get_batch_chunk_size",
-    "encode_image_to_data_url", "create_batch_request_line",
-    "write_batch_file", "submit_batch_legacy",
+    "DEFAULT_BATCH_CHUNK_SIZE",
+    "get_batch_chunk_size",
+    "encode_image_to_data_url",
+    "create_batch_request_line",
+    "write_batch_file",
+    "submit_batch_legacy",
     "process_batch_transcription",
     # Submission
     "submit_batch",

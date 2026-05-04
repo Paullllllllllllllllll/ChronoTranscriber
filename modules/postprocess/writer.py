@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from modules.infra.logger import setup_logger
 from modules.llm.response_parsing import format_page_line
@@ -138,11 +138,13 @@ def _write_json(pages: list[dict[str, Any]], path: Path) -> None:
     """Structured JSON array — no post-processing (preserves raw text)."""
     records = []
     for page in pages:
-        records.append({
-            "page_number": page.get("page_number"),
-            "image_name": page.get("image_name"),
-            "transcription": page.get("text", ""),
-        })
+        records.append(
+            {
+                "page_number": page.get("page_number"),
+                "image_name": page.get("image_name"),
+                "transcription": page.get("text", ""),
+            }
+        )
     path.write_text(
         json.dumps(records, ensure_ascii=False, indent=2),
         encoding="utf-8",

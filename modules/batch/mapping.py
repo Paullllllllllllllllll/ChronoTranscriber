@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any
 
 from modules.infra.logger import setup_logger
 from modules.llm.openai_sdk_utils import sdk_to_dict
@@ -31,21 +31,21 @@ def diagnose_batch_failure(batch_id: str, client: Any) -> str:
         batch = sdk_to_dict(batch_obj)
         status = str(batch.get("status", "")).lower()
 
-        if status == "failed":
-            return (
-                f"Batch {batch_id} failed. Check your OpenAI dashboard for specific error details."
-            )
-        elif status == "cancelled":
-            return f"Batch {batch_id} was cancelled."
-        elif status == "expired":
-            return f"Batch {batch_id} expired (not completed within 24 hours)."
-        else:
-            return f"Batch {batch_id} has status '{status}'."
+        status_messages = {
+            "failed": (
+                f"Batch {batch_id} failed."
+                f" Check your OpenAI dashboard for specific error details."
+            ),
+            "cancelled": f"Batch {batch_id} was cancelled.",
+            "expired": f"Batch {batch_id} expired (not completed within 24 hours).",
+        }
+        return status_messages.get(status, f"Batch {batch_id} has status '{status}'.")
     except Exception as e:
         error_message = str(e).lower()
         if "not found" in error_message:
             return (
-                f"Batch {batch_id} not found in OpenAI. It may have been deleted or belong to a different API key."
+                f"Batch {batch_id} not found in OpenAI."
+                f" It may have been deleted or belong to a different API key."
             )
         elif "unauthorized" in error_message:
             return "API key unauthorized. Check your OpenAI API key permissions."
@@ -57,7 +57,7 @@ def diagnose_batch_failure(batch_id: str, client: Any) -> str:
 
 def extract_custom_id_mapping(
     temp_file: Path,
-) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, int]]:
+) -> tuple[dict[str, dict[str, Any]], dict[str, int]]:
     """
     Extract mapping between custom_ids and image information from a local JSONL file.
 
@@ -71,8 +71,8 @@ def extract_custom_id_mapping(
     Returns:
         Tuple of (custom_id -> image_info dict, custom_id -> order_index dict).
     """
-    custom_id_map: Dict[str, Dict[str, Any]] = {}
-    batch_order: Dict[str, int] = {}
+    custom_id_map: dict[str, dict[str, Any]] = {}
+    batch_order: dict[str, int] = {}
 
     try:
         with temp_file.open("r", encoding="utf-8") as f:

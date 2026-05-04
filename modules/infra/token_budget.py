@@ -22,7 +22,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from modules.config.service import get_config_service
 from modules.infra.logger import setup_logger
@@ -32,7 +32,7 @@ logger = setup_logger(__name__)
 
 _TOKEN_TRACKER_FILE = Path.cwd() / ".chronotranscriber_token_state.json"
 
-_tracker_instance: Optional["DailyTokenTracker"] = None
+_tracker_instance: DailyTokenTracker | None = None
 _tracker_lock = threading.Lock()
 
 
@@ -55,7 +55,7 @@ class DailyTokenTracker:
         self,
         daily_limit: int,
         enabled: bool = True,
-        state_file: Optional[Path] = None,
+        state_file: Path | None = None,
     ) -> None:
         self.daily_limit = daily_limit
         self.enabled = enabled
@@ -84,7 +84,7 @@ class DailyTokenTracker:
             return
 
         try:
-            with open(self.state_file, "r", encoding="utf-8") as f:
+            with open(self.state_file, encoding="utf-8") as f:
                 state = json.load(f)
 
             saved_date = state.get("date", "")
@@ -147,15 +147,11 @@ class DailyTokenTracker:
                             f"{self.state_file} after {max_retries} "
                             f"attempts; falling back to direct write"
                         )
-                        with open(
-                            self.state_file, "w", encoding="utf-8"
-                        ) as f:
+                        with open(self.state_file, "w", encoding="utf-8") as f:
                             json.dump(state, f, indent=2)
 
         except Exception as e:
-            logger.error(
-                f"Error saving token state to {self.state_file}: {e}"
-            )
+            logger.error(f"Error saving token state to {self.state_file}: {e}")
 
         finally:
             try:
@@ -284,7 +280,7 @@ def get_token_tracker() -> DailyTokenTracker:
 
 
 async def check_and_wait_for_token_limit(
-    concurrency_config: Dict[str, Any],
+    concurrency_config: dict[str, Any],
 ) -> bool:
     """Check if daily token limit is reached and wait until next day if needed.
 

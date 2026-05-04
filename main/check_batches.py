@@ -18,30 +18,36 @@ _project_root = Path(__file__).resolve().parents[1]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from modules.core.cli_args import create_check_batches_parser, resolve_path, validate_input_path
-from modules.transcribe.dual_mode import DualModeScript
-from modules.batch.check import run_batch_finalization
+from modules.batch.check import run_batch_finalization  # noqa: E402
+from modules.core.cli_args import (  # noqa: E402
+    create_check_batches_parser,
+    resolve_path,
+    validate_input_path,
+)
+from modules.transcribe.dual_mode import DualModeScript  # noqa: E402
 
 
 class CheckBatchesScript(DualModeScript):
     """Script to check batch job status and download completed results."""
-    
+
     def __init__(self) -> None:
         super().__init__("check_batches")
-    
+
     def create_argument_parser(self) -> ArgumentParser:
         """Create argument parser for CLI mode."""
         return create_check_batches_parser()
-    
+
     def run_interactive(self) -> None:
         """Check batches in interactive mode with diagnostics enabled."""
         run_batch_finalization(run_diagnostics=True)
-    
+
     def run_cli(self, args: Namespace) -> None:
         """Check batches in CLI mode with command-line arguments."""
         run_diagnostics = not args.no_diagnostics
         custom_directory = None
-        config_default = self.paths_config.get("general", {}).get("output_format", "txt")
+        config_default = self.paths_config.get("general", {}).get(
+            "output_format", "txt"
+        )
         output_format = getattr(args, "output_format", None) or config_default
 
         # If directory specified, validate and use it

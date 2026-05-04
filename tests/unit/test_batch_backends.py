@@ -5,17 +5,18 @@ Tests batch processing backend abstractions and factory.
 
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch
+
+import pytest
 
 from modules.batch.backends.base import (
     BatchBackend,
     BatchHandle,
+    BatchRequest,
+    BatchResultItem,
     BatchStatus,
     BatchStatusInfo,
-    BatchResultItem,
-    BatchRequest,
 )
 from modules.batch.backends.factory import (
     get_batch_backend,
@@ -25,7 +26,7 @@ from modules.batch.backends.factory import (
 
 class TestBatchHandle:
     """Tests for BatchHandle dataclass."""
-    
+
     @pytest.mark.unit
     def test_creation(self) -> None:
         """Test BatchHandle can be created."""
@@ -37,7 +38,7 @@ class TestBatchHandle:
         assert handle.batch_id == "batch_123"
         assert handle.provider == "openai"
         assert handle.metadata == {"key": "value"}
-    
+
     @pytest.mark.unit
     def test_minimal_creation(self) -> None:
         """Test BatchHandle with minimal args."""
@@ -49,14 +50,21 @@ class TestBatchHandle:
 
 class TestBatchStatus:
     """Tests for BatchStatus enum."""
-    
+
     @pytest.mark.unit
     def test_all_statuses_exist(self) -> None:
         """Test that all expected statuses exist."""
-        expected = ["PENDING", "IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED", "EXPIRED"]
+        expected = [
+            "PENDING",
+            "IN_PROGRESS",
+            "COMPLETED",
+            "FAILED",
+            "CANCELLED",
+            "EXPIRED",
+        ]
         for status_name in expected:
             assert hasattr(BatchStatus, status_name)
-    
+
     @pytest.mark.unit
     def test_status_values(self) -> None:
         """Test status enum values."""
@@ -67,7 +75,7 @@ class TestBatchStatus:
 
 class TestBatchStatusInfo:
     """Tests for BatchStatusInfo dataclass."""
-    
+
     @pytest.mark.unit
     def test_creation(self) -> None:
         """Test BatchStatusInfo creation."""
@@ -81,7 +89,7 @@ class TestBatchStatusInfo:
         assert info.total_requests == 100
         assert info.completed_requests == 95
         assert info.failed_requests == 5
-    
+
     @pytest.mark.unit
     def test_minimal_creation(self) -> None:
         """Test BatchStatusInfo with minimal args."""
@@ -92,7 +100,7 @@ class TestBatchStatusInfo:
 
 class TestBatchResultItem:
     """Tests for BatchResultItem dataclass."""
-    
+
     @pytest.mark.unit
     def test_creation(self) -> None:
         """Test BatchResultItem creation."""
@@ -106,7 +114,7 @@ class TestBatchResultItem:
         assert item.content == "Transcribed text"
         assert item.success is True
         assert item.error is None
-    
+
     @pytest.mark.unit
     def test_failed_item(self) -> None:
         """Test BatchResultItem for failed request."""
@@ -122,13 +130,13 @@ class TestBatchResultItem:
 
 class TestBatchRequest:
     """Tests for BatchRequest dataclass."""
-    
+
     @pytest.mark.unit
     def test_creation(self, temp_dir: Path) -> None:
         """Test BatchRequest creation."""
         img_path = temp_dir / "image.png"
         img_path.write_bytes(b"")
-        
+
         request = BatchRequest(
             custom_id="req-1",
             image_path=img_path,
@@ -142,27 +150,27 @@ class TestBatchRequest:
 
 class TestSupportsBatch:
     """Tests for supports_batch function."""
-    
+
     @pytest.mark.unit
     def test_openai_supported(self) -> None:
         """Test that OpenAI batch is supported."""
         assert supports_batch("openai") is True
-    
+
     @pytest.mark.unit
     def test_anthropic_supported(self) -> None:
         """Test that Anthropic batch is supported."""
         assert supports_batch("anthropic") is True
-    
+
     @pytest.mark.unit
     def test_google_supported(self) -> None:
         """Test that Google batch is supported."""
         assert supports_batch("google") is True
-    
+
     @pytest.mark.unit
     def test_unknown_not_supported(self) -> None:
         """Test that unknown provider is not supported."""
         assert supports_batch("unknown_provider") is False
-    
+
     @pytest.mark.unit
     def test_case_insensitive(self) -> None:
         """Test case insensitivity."""
@@ -172,46 +180,47 @@ class TestSupportsBatch:
 
 class TestGetBatchBackend:
     """Tests for get_batch_backend function."""
-    
+
     @pytest.mark.unit
     def test_returns_backend_for_openai(self) -> None:
         """Test getting OpenAI backend."""
         backend = get_batch_backend("openai")
         assert backend is not None
         assert isinstance(backend, BatchBackend)
-    
+
     @pytest.mark.unit
     def test_returns_backend_for_anthropic(self) -> None:
         """Test getting Anthropic backend."""
         backend = get_batch_backend("anthropic")
         assert backend is not None
         assert isinstance(backend, BatchBackend)
-    
+
     @pytest.mark.unit
     def test_returns_backend_for_google(self) -> None:
         """Test getting Google backend."""
         backend = get_batch_backend("google")
         assert backend is not None
         assert isinstance(backend, BatchBackend)
-    
+
     @pytest.mark.unit
     def test_raises_for_unknown(self) -> None:
         """Test that unknown provider raises ValueError."""
         with pytest.raises(ValueError, match="Unknown provider"):
             get_batch_backend("unknown_provider")
-    
+
     @pytest.mark.unit
     def test_case_insensitive(self) -> None:
         """Test case insensitivity."""
         backend1 = get_batch_backend("openai")
         backend2 = get_batch_backend("OpenAI")
-        assert type(backend1) == type(backend2)
+        assert type(backend1) is type(backend2)
 
 
 # =============================================================================
 # CT-3: text.verbosity forwarding in OpenAI batch backend (fix for bug where
 #        text.verbosity was never included in batch request bodies)
 # =============================================================================
+
 
 class TestOpenAIBuildResponsesBodyTextVerbosity:
     """Verify _build_responses_body includes text.verbosity for reasoning models.
@@ -232,7 +241,9 @@ class TestOpenAIBuildResponsesBodyTextVerbosity:
         """text.verbosity is added to the body for GPT-5 (reasoning) models."""
         from modules.batch.backends.openai_backend import _build_responses_body
 
-        with patch("modules.batch.backends.openai_backend.get_config_service") as mock_cs:
+        with patch(
+            "modules.batch.backends.openai_backend.get_config_service"
+        ) as mock_cs:
             mock_cs.return_value.get_concurrency_config.return_value = {}
             body = _build_responses_body(
                 model_config=self._model_cfg("gpt-5-mini", "concise"),
@@ -248,7 +259,9 @@ class TestOpenAIBuildResponsesBodyTextVerbosity:
         """text.verbosity is NOT added for non-reasoning models (e.g. gpt-4o)."""
         from modules.batch.backends.openai_backend import _build_responses_body
 
-        with patch("modules.batch.backends.openai_backend.get_config_service") as mock_cs:
+        with patch(
+            "modules.batch.backends.openai_backend.get_config_service"
+        ) as mock_cs:
             mock_cs.return_value.get_concurrency_config.return_value = {}
             body = _build_responses_body(
                 model_config=self._model_cfg("gpt-4o", "verbose"),
@@ -263,7 +276,9 @@ class TestOpenAIBuildResponsesBodyTextVerbosity:
         """No text.verbosity in body when model_config has no text key."""
         from modules.batch.backends.openai_backend import _build_responses_body
 
-        with patch("modules.batch.backends.openai_backend.get_config_service") as mock_cs:
+        with patch(
+            "modules.batch.backends.openai_backend.get_config_service"
+        ) as mock_cs:
             mock_cs.return_value.get_concurrency_config.return_value = {}
             body = _build_responses_body(
                 model_config={"name": "gpt-5-mini", "max_output_tokens": 4096},
@@ -285,7 +300,9 @@ class TestOpenAIBuildResponsesBodyTextVerbosity:
             "additionalProperties": False,
         }
 
-        with patch("modules.batch.backends.openai_backend.get_config_service") as mock_cs:
+        with patch(
+            "modules.batch.backends.openai_backend.get_config_service"
+        ) as mock_cs:
             mock_cs.return_value.get_concurrency_config.return_value = {}
             body = _build_responses_body(
                 model_config=self._model_cfg("gpt-5-mini", "medium"),

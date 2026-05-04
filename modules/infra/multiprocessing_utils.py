@@ -5,15 +5,16 @@ Provides process pool management for parallel execution of functions.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from multiprocessing import Pool, cpu_count
-from typing import Callable, List, Any, Tuple
+from typing import Any
 
 from modules.infra.logger import setup_logger
 
 logger = setup_logger(__name__)
 
 
-def wrapper(func: Callable[..., Any], args: Tuple[Any, ...]) -> Any:
+def wrapper(func: Callable[..., Any], args: tuple[Any, ...]) -> Any:
     """
     Unpack arguments and call the target function with error handling.
 
@@ -33,9 +34,9 @@ def wrapper(func: Callable[..., Any], args: Tuple[Any, ...]) -> Any:
 
 def run_multiprocessing_tasks(
     func: Callable[..., Any],
-    args_list: List[Tuple[Any, ...]],
+    args_list: list[tuple[Any, ...]],
     processes: int | None = None,
-) -> List[Any]:
+) -> list[Any]:
     """
     Run function over argument tuples using multiprocessing.
 

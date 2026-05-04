@@ -18,29 +18,34 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from openai.types import Batch
 
+from modules.config.capabilities import detect_capabilities
 from modules.config.config_loader import PROJECT_ROOT
 from modules.config.service import get_config_service
 from modules.infra.logger import setup_logger
-from modules.config.capabilities import detect_capabilities
-from modules.llm.prompt_utils import render_prompt_with_schema, inject_additional_context, prepare_prompt_with_context
+from modules.llm.prompt_utils import (
+    inject_additional_context,
+    render_prompt_with_schema,
+)
 from modules.llm.structured_outputs import build_structured_text_format
-from modules.ui import print_info, print_warning, print_error, print_success
+from modules.ui import print_error, print_info, print_success
 
 logger = setup_logger(__name__)
 
 
-# Centralized batch chunk size default and getter (configurable via concurrency_config.yaml)
+# Centralized batch chunk size default and getter
+# (configurable via concurrency_config.yaml)
 DEFAULT_BATCH_CHUNK_SIZE: int = 50
 
 
 def get_batch_chunk_size() -> int:
     """
-    Returns the batch chunk size from concurrency_config.yaml if present, otherwise a safe default.
+    Returns the batch chunk size from concurrency_config.yaml if present,
+    otherwise a safe default.
 
     Expected path in YAML:
     concurrency:
@@ -72,17 +77,18 @@ def encode_image_to_data_url(image_path: Path) -> str:
     Delegates to modules.images.encoding for the shared implementation.
     """
     from modules.images.encoding import encode_image_to_data_url as _encode
+
     return _encode(image_path)
 
 
 def _build_responses_body_for_image(
     *,
-    model_config: Dict[str, Any],
+    model_config: dict[str, Any],
     system_prompt: str,
     image_url: str,
-    transcription_schema: Dict[str, Any],
-    llm_detail: Optional[str] = None,
-) -> Dict[str, Any]:
+    transcription_schema: dict[str, Any],
+    llm_detail: str | None = None,
+) -> dict[str, Any]:
     """
     Construct a Responses API request body for vision transcription,
     with feature gating based on the capabilities registry.
@@ -92,7 +98,7 @@ def _build_responses_body_for_image(
     caps = detect_capabilities(model_name)
 
     # Normalize detail from caller/config
-    detail_norm: Optional[str] = None
+    detail_norm: str | None = None
     if isinstance(llm_detail, str):
         d = llm_detail.lower().strip()
         valid = {"low", "high"}
@@ -104,7 +110,7 @@ def _build_responses_body_for_image(
             detail_norm = None
 
     # Base body
-    body: Dict[str, Any] = {
+    body: dict[str, Any] = {
         "model": model_name,
         "input": [
             {
@@ -156,8 +162,8 @@ def _build_responses_body_for_image(
     # Fallback: use model_config if service_tier not in concurrency_config
     effective_service_tier = st if st is not None else tm.get("service_tier")
 
-    # IMPORTANT: Flex processing is only available for synchronous API calls, NOT batch API
-    # If flex is configured, use "auto" instead for batch requests
+    # IMPORTANT: Flex processing is only available for synchronous API calls, NOT
+    # batch API. If flex is configured, use "auto" instead for batch requests.
     if effective_service_tier:
         allowed_service_tiers = {"auto", "default", "priority"}
         tier_str = str(effective_service_tier)
@@ -207,11 +213,17 @@ def _build_responses_body_for_image(
         caching_cfg = get_config_service().get_prompt_caching_config()
         if caching_cfg.get("enabled"):
             openai_cfg = caching_cfg.get("openai", {})
-            retention = openai_cfg.get("prompt_cache_retention") if isinstance(openai_cfg, dict) else None
+            retention = (
+                openai_cfg.get("prompt_cache_retention")
+                if isinstance(openai_cfg, dict)
+                else None
+            )
             if retention:
                 body["prompt_cache_retention"] = retention
     except (KeyError, AttributeError, TypeError):
-        logger.debug("Could not load prompt caching config for batch request; skipping.")
+        logger.debug(
+            "Could not load prompt caching config for batch request; skipping."
+        )
 
     return body
 
@@ -219,13 +231,13 @@ def _build_responses_body_for_image(
 def create_batch_request_line(
     custom_id: str,
     image_url: str,
-    image_info: Dict[str, Any],
-    model_config: Dict[str, Any],
-    system_prompt_path: Optional[Path] = None,
-    schema_path: Optional[Path] = None,
-    additional_context_path: Optional[Path] = None,
+    image_info: dict[str, Any],
+    model_config: dict[str, Any],
+    system_prompt_path: Path | None = None,
+    schema_path: Path | None = None,
+    additional_context_path: Path | None = None,
     use_hierarchical_context: bool = True,
-) -> Tuple[str, Dict[str, Any]]:
+) -> tuple[str, dict[str, Any]]:
     """
     Create a Responses API batch request line for an image transcription task.
 
@@ -247,7 +259,9 @@ def create_batch_request_line(
             system_prompt_path = (
                 Path(override_prompt)
                 if override_prompt
-                else (PROJECT_ROOT / "system_prompt" / "transcription_prompt_schema.txt")
+                else (
+                    PROJECT_ROOT / "system_prompt" / "transcription_prompt_schema.txt"
+                )
             )
         if schema_path is None:
             override_schema = general.get("transcription_schema_path")
@@ -291,7 +305,9 @@ def create_batch_request_line(
     additional_context = None
     if additional_context_path is not None and additional_context_path.exists():
         try:
-            additional_context = additional_context_path.read_text(encoding="utf-8").strip()
+            additional_context = additional_context_path.read_text(
+                encoding="utf-8"
+            ).strip()
         except (OSError, PermissionError, UnicodeDecodeError) as e:
             logger.warning(
                 "Failed to load additional context from %s: %s",
@@ -301,6 +317,7 @@ def create_batch_request_line(
     elif use_hierarchical_context:
         # Use hierarchical context resolution for file-specific context
         from modules.config.context import resolve_context_for_file
+
         # Extract image path from image_url if it's a file path
         if image_url.startswith("file://"):
             image_path = Path(image_url[7:])
@@ -322,9 +339,13 @@ def create_batch_request_line(
 
     # Load image processing config for llm_detail
     try:
-        image_cfg = get_config_service().get_image_processing_config().get("api_image_processing", {})
+        image_cfg = (
+            get_config_service()
+            .get_image_processing_config()
+            .get("api_image_processing", {})
+        )
         raw_detail = str(image_cfg.get("llm_detail", "high")).lower().strip()
-        llm_detail: Optional[str]
+        llm_detail: str | None
         if raw_detail in ("low", "high", "original"):
             llm_detail = raw_detail
         elif raw_detail == "auto":
@@ -346,7 +367,8 @@ def create_batch_request_line(
     logger.debug(
         "Batch image body: model=%s include_detail=%s detail=%s",
         model_config.get("name"),
-        isinstance(llm_detail, str) and llm_detail.lower().strip() in ("low", "high", "original"),
+        isinstance(llm_detail, str)
+        and llm_detail.lower().strip() in ("low", "high", "original"),
         llm_detail,
     )
 
@@ -365,7 +387,7 @@ def create_batch_request_line(
     return json.dumps(request_line), metadata_record
 
 
-def write_batch_file(request_lines: List[str], output_path: Path) -> Path:
+def write_batch_file(request_lines: list[str], output_path: Path) -> Path:
     """
     Write JSONL lines to disk for Batch submission.
     """
@@ -376,13 +398,13 @@ def write_batch_file(request_lines: List[str], output_path: Path) -> Path:
     return output_path
 
 
-def submit_batch(batch_file_path: Path) -> "Batch":
+def submit_batch(batch_file_path: Path) -> Batch:
     """
     Submit a prepared JSONL batch to the OpenAI Batch API targeting /v1/responses.
     """
-    # Lazy import to avoid import-time dependency issues when this module is imported for config/telemetry only
+    # Lazy import to avoid import-time dependency issues when this module is
+    # imported for config/telemetry only.
     from openai import OpenAI
-    from openai.types import Batch
 
     client = OpenAI()
     try:
@@ -409,14 +431,14 @@ def submit_batch(batch_file_path: Path) -> "Batch":
 
 
 def process_batch_transcription(
-    image_files: List[Path],
+    image_files: list[Path],
     prompt_text: str,  # kept for signature parity
-    model_config: Dict[str, Any],
+    model_config: dict[str, Any],
     *,
-    schema_path: Optional[Path] = None,
-    additional_context_path: Optional[Path] = None,
+    schema_path: Path | None = None,
+    additional_context_path: Path | None = None,
     use_hierarchical_context: bool = True,
-) -> Tuple[List[Any], List[Dict[str, Any]]]:
+) -> tuple[list[Any], list[dict[str, Any]]]:
     """
     Prepare and submit batched image transcriptions using the Responses API.
 
@@ -427,8 +449,8 @@ def process_batch_transcription(
     """
     chunk_size = get_batch_chunk_size()
     total_images = len(image_files)
-    batch_responses: List[Any] = []
-    all_metadata_records: List[Dict[str, Any]] = []
+    batch_responses: list[Any] = []
+    all_metadata_records: list[dict[str, Any]] = []
 
     # Safety margin under 180 MB limit
     max_batch_size = 150 * 1024 * 1024
@@ -449,15 +471,16 @@ def process_batch_transcription(
             f"images {chunk_start + 1}-{chunk_end} of {total_images}..."
         )
 
-        batch_request_lines: List[str] = []
-        metadata_records: List[Dict[str, Any]] = []
+        batch_request_lines: list[str] = []
+        metadata_records: list[dict[str, Any]] = []
 
         for idx, image_file in enumerate(chunk_images):
             try:
                 global_idx = chunk_start + idx
                 custom_id = f"req-{global_idx + 1}"
+                pos = chunk_start + idx + 1
                 print(
-                    f"[INFO] Encoding image {chunk_start + idx + 1}/{total_images}: {image_file.name}",
+                    f"[INFO] Encoding image {pos}/{total_images}: {image_file.name}",
                     end="\r",
                 )
                 data_url = encode_image_to_data_url(image_file)
@@ -484,9 +507,9 @@ def process_batch_transcription(
 
         print_info(f"Creating batch files for chunk {chunk_start // chunk_size + 1}...")
 
-        current_lines: List[str] = []
+        current_lines: list[str] = []
         current_size = 0
-        current_metadata: List[Dict[str, Any]] = []
+        current_metadata: list[dict[str, Any]] = []
 
         for i, line in enumerate(batch_request_lines):
             line_bytes = len(line.encode("utf-8"))
@@ -498,13 +521,14 @@ def process_batch_transcription(
                 try:
                     response = submit_batch(batch_file)
                     batch_id = response.id
-                    print_success(f"Successfully submitted batch {batch_index} with ID: {batch_id}")
+                    print_success(
+                        f"Successfully submitted batch {batch_index}"
+                        f" with ID: {batch_id}"
+                    )
                     batch_responses.append(response)
                     submitted_parts += 1
                 except Exception as exc:
-                    logger.error(
-                        "Error submitting batch file %s: %s", batch_file, exc
-                    )
+                    logger.error("Error submitting batch file %s: %s", batch_file, exc)
                     print_error(f"Failed to submit batch file {batch_file}: {exc}")
                 try:
                     batch_file.unlink()
@@ -530,7 +554,9 @@ def process_batch_transcription(
             try:
                 response = submit_batch(batch_file)
                 batch_id = response.id
-                print_success(f"Successfully submitted batch {batch_index} with ID: {batch_id}")
+                print_success(
+                    f"Successfully submitted batch {batch_index} with ID: {batch_id}"
+                )
                 batch_responses.append(response)
                 submitted_parts += 1
             except Exception as exc:
@@ -543,12 +569,16 @@ def process_batch_transcription(
             batch_index += 1
     total_parts = attempted_parts
     if submitted_parts == total_parts and total_parts > 0:
-        print_info(f"All {total_images} images processed and submitted in {total_parts} batch file(s)")
+        print_info(
+            f"All {total_images} images processed and submitted"
+            f" in {total_parts} batch file(s)"
+        )
     else:
-        print_info(f"Submitted {submitted_parts}/{total_parts} batch file(s) for {total_images} images")
+        print_info(
+            f"Submitted {submitted_parts}/{total_parts} batch file(s)"
+            f" for {total_images} images"
+        )
         if submitted_parts == 0:
             # Propagate failure to caller so workflow can decide on fallback
-            raise RuntimeError(
-                "No batch submissions succeeded; see logs for details."
-            )
+            raise RuntimeError("No batch submissions succeeded; see logs for details.")
     return batch_responses, all_metadata_records

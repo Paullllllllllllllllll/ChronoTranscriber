@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from modules.config.config_loader import PROJECT_ROOT
 from modules.infra.logger import setup_logger
@@ -27,7 +27,7 @@ def _schemas_dir() -> Path:
     return (PROJECT_ROOT / "schemas").resolve()
 
 
-def _load_json(path: Path) -> Optional[Dict[str, Any]]:
+def _load_json(path: Path) -> dict[str, Any] | None:
     try:
         with path.open("r", encoding="utf-8") as f:
             result = json.load(f)
@@ -37,14 +37,14 @@ def _load_json(path: Path) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _extract_bare_schema(obj: Dict[str, Any]) -> Dict[str, Any]:
+def _extract_bare_schema(obj: dict[str, Any]) -> dict[str, Any]:
     # Accept wrapper form { name, strict, schema: {...} } or bare {...}
     if isinstance(obj, dict) and "schema" in obj and isinstance(obj["schema"], dict):
         return obj["schema"]
     return obj
 
 
-def _extract_schema_name(obj: Dict[str, Any], fallback: str) -> str:
+def _extract_schema_name(obj: dict[str, Any], fallback: str) -> str:
     if isinstance(obj, dict):
         name = obj.get("name")
         if isinstance(name, str) and name.strip():
@@ -52,7 +52,7 @@ def _extract_schema_name(obj: Dict[str, Any], fallback: str) -> str:
     return fallback
 
 
-def _has_required_structure(bare: Dict[str, Any]) -> bool:
+def _has_required_structure(bare: dict[str, Any]) -> bool:
     try:
         if not isinstance(bare, dict):
             return False
@@ -67,7 +67,7 @@ def _has_required_structure(bare: Dict[str, Any]) -> bool:
         return False
 
 
-def list_schema_options() -> List[Tuple[str, Path]]:
+def list_schema_options() -> list[tuple[str, Path]]:
     """
     Discover valid transcription schemas under schemas/.
 
@@ -79,7 +79,7 @@ def list_schema_options() -> List[Tuple[str, Path]]:
         logger.warning("Schemas directory does not exist: %s", dir_path)
         return []
 
-    results: List[Tuple[str, Path]] = []
+    results: list[tuple[str, Path]] = []
     for p in sorted(dir_path.glob("*.json")):
         obj = _load_json(p)
         if not obj:
@@ -96,7 +96,7 @@ def list_schema_options() -> List[Tuple[str, Path]]:
     return results
 
 
-def find_schema_path_by_name(name: str) -> Optional[Path]:
+def find_schema_path_by_name(name: str) -> Path | None:
     for n, p in list_schema_options():
         if n == name:
             return p

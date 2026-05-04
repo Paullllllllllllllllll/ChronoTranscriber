@@ -2,23 +2,22 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from modules.batch.backends.base import BatchHandle
 from modules.batch.submission import (
-    submit_batch,
     _load_system_prompt,
     _resolve_additional_context,
+    submit_batch,
 )
-from modules.batch.backends.base import BatchHandle
-
 
 # ---------------------------------------------------------------------------
 # _load_system_prompt
 # ---------------------------------------------------------------------------
+
 
 class TestLoadSystemPrompt:
     @patch("modules.config.service.get_config_service")
@@ -50,9 +49,7 @@ class TestLoadSystemPrompt:
     @patch("modules.config.service.get_config_service")
     @patch("modules.config.config_loader.PROJECT_ROOT")
     def test_raises_when_missing(self, mock_root, mock_svc, tmp_path: Path) -> None:
-        mock_root.__truediv__ = MagicMock(
-            side_effect=lambda x: tmp_path / x
-        )
+        mock_root.__truediv__ = MagicMock(side_effect=lambda x: tmp_path / x)
         mock_svc.return_value.get_paths_config.return_value = {"general": {}}
 
         with pytest.raises(FileNotFoundError):
@@ -62,6 +59,7 @@ class TestLoadSystemPrompt:
 # ---------------------------------------------------------------------------
 # _resolve_additional_context
 # ---------------------------------------------------------------------------
+
 
 class TestResolveAdditionalContext:
     def test_explicit_path_exists(self, tmp_path: Path) -> None:
@@ -108,10 +106,13 @@ class TestResolveAdditionalContext:
 # submit_batch
 # ---------------------------------------------------------------------------
 
+
 class TestSubmitBatch:
     @pytest.mark.asyncio
     @patch("modules.batch.submission.supports_batch", return_value=False)
-    async def test_unsupported_provider_returns_none(self, mock_supports, tmp_path: Path) -> None:
+    async def test_unsupported_provider_returns_none(
+        self, mock_supports, tmp_path: Path
+    ) -> None:
         result = await submit_batch(
             image_files=[tmp_path / "img.png"],
             temp_jsonl_path=tmp_path / "temp.jsonl",
@@ -129,7 +130,13 @@ class TestSubmitBatch:
     @patch("modules.batch.submission._resolve_additional_context", return_value=None)
     @patch("modules.batch.submission.get_batch_backend")
     async def test_submission_failure_returns_none(
-        self, mock_backend, mock_ctx, mock_prompt, mock_chunk, mock_supports, tmp_path: Path
+        self,
+        mock_backend,
+        mock_ctx,
+        mock_prompt,
+        mock_chunk,
+        mock_supports,
+        tmp_path: Path,
     ) -> None:
         mock_backend.return_value.submit_batch.side_effect = RuntimeError("fail")
 
@@ -157,7 +164,13 @@ class TestSubmitBatch:
     @patch("modules.batch.submission._resolve_additional_context", return_value=None)
     @patch("modules.batch.submission.get_batch_backend")
     async def test_successful_submission_returns_handle(
-        self, mock_backend_fn, mock_ctx, mock_prompt, mock_chunk, mock_supports, tmp_path: Path
+        self,
+        mock_backend_fn,
+        mock_ctx,
+        mock_prompt,
+        mock_chunk,
+        mock_supports,
+        tmp_path: Path,
     ) -> None:
         mock_handle = BatchHandle(batch_id="batch_123", provider="openai")
         mock_backend = MagicMock()

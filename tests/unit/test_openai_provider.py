@@ -6,7 +6,7 @@ Includes CT-3 regression tests for text.verbosity forwarding.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -87,13 +87,17 @@ class TestOpenAIProviderInit:
         """service_tier is stored on the provider instance."""
         from modules.llm.providers.openai_provider import OpenAIProvider
 
-        with patch("modules.llm.providers.openai_provider.ChatOpenAI"):
-            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
-                provider = OpenAIProvider(
-                    api_key="sk-test",
-                    model="gpt-4o",
-                    service_tier="auto",
-                )
+        with (
+            patch("modules.llm.providers.openai_provider.ChatOpenAI"),
+            patch(
+                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
+            ),
+        ):
+            provider = OpenAIProvider(
+                api_key="sk-test",
+                model="gpt-4o",
+                service_tier="auto",
+            )
 
         assert provider.service_tier == "auto"
 
@@ -102,31 +106,41 @@ class TestOpenAIProviderInit:
         """reasoning_config is stored on the provider instance."""
         from modules.llm.providers.openai_provider import OpenAIProvider
 
-        with patch("modules.llm.providers.openai_provider.ChatOpenAI"):
-            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
-                provider = OpenAIProvider(
-                    api_key="sk-test",
-                    model="gpt-5-mini",
-                    reasoning_config={"effort": "high"},
-                )
+        with (
+            patch("modules.llm.providers.openai_provider.ChatOpenAI"),
+            patch(
+                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
+            ),
+        ):
+            provider = OpenAIProvider(
+                api_key="sk-test",
+                model="gpt-5-mini",
+                reasoning_config={"effort": "high"},
+            )
 
         assert provider.reasoning_config == {"effort": "high"}
 
     @pytest.mark.unit
     def test_reasoning_dict_forwarded_to_chat_openai(self) -> None:
-        """reasoning dict is passed to ChatOpenAI for reasoning models (Responses API)."""
+        """reasoning dict is passed to ChatOpenAI for reasoning models."""
         from modules.llm.providers.openai_provider import OpenAIProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.openai_provider.ChatOpenAI",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
-                OpenAIProvider(
-                    api_key="sk-test",
-                    model="gpt-5-mini",
-                    reasoning_config={"effort": "high"},
-                )
+        with (
+            patch(
+                "modules.llm.providers.openai_provider.ChatOpenAI",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
+            ),
+        ):
+            OpenAIProvider(
+                api_key="sk-test",
+                model="gpt-5-mini",
+                reasoning_config={"effort": "high"},
+            )
 
         assert captured.get("reasoning") == {"effort": "high"}
         assert "reasoning_effort" not in captured
@@ -136,16 +150,22 @@ class TestOpenAIProviderInit:
         """service_tier is passed to ChatOpenAI when set."""
         from modules.llm.providers.openai_provider import OpenAIProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.openai_provider.ChatOpenAI",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
-                OpenAIProvider(
-                    api_key="sk-test",
-                    model="gpt-4o",
-                    service_tier="flex",
-                )
+        with (
+            patch(
+                "modules.llm.providers.openai_provider.ChatOpenAI",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
+            ),
+        ):
+            OpenAIProvider(
+                api_key="sk-test",
+                model="gpt-4o",
+                service_tier="flex",
+            )
 
         assert captured.get("service_tier") == "flex"
 
@@ -154,9 +174,13 @@ class TestOpenAIProviderInit:
         """provider_name property returns 'openai'."""
         from modules.llm.providers.openai_provider import OpenAIProvider
 
-        with patch("modules.llm.providers.openai_provider.ChatOpenAI"):
-            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
-                provider = OpenAIProvider(api_key="sk-test", model="gpt-4o")
+        with (
+            patch("modules.llm.providers.openai_provider.ChatOpenAI"),
+            patch(
+                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
+            ),
+        ):
+            provider = OpenAIProvider(api_key="sk-test", model="gpt-4o")
 
         assert provider.provider_name == "openai"
 
@@ -165,16 +189,22 @@ class TestOpenAIProviderInit:
         """Reasoning models use max_completion_tokens instead of max_tokens."""
         from modules.llm.providers.openai_provider import OpenAIProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.openai_provider.ChatOpenAI",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
-                OpenAIProvider(
-                    api_key="sk-test",
-                    model="gpt-5-mini",
-                    max_tokens=8192,
-                )
+        with (
+            patch(
+                "modules.llm.providers.openai_provider.ChatOpenAI",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
+            ),
+        ):
+            OpenAIProvider(
+                api_key="sk-test",
+                model="gpt-5-mini",
+                max_tokens=8192,
+            )
 
         assert captured.get("max_completion_tokens") == 8192
         assert "max_tokens" not in captured
@@ -184,16 +214,22 @@ class TestOpenAIProviderInit:
         """Non-reasoning models use max_tokens."""
         from modules.llm.providers.openai_provider import OpenAIProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.openai_provider.ChatOpenAI",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
-                OpenAIProvider(
-                    api_key="sk-test",
-                    model="gpt-4o",
-                    max_tokens=4096,
-                )
+        with (
+            patch(
+                "modules.llm.providers.openai_provider.ChatOpenAI",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
+            ),
+        ):
+            OpenAIProvider(
+                api_key="sk-test",
+                model="gpt-4o",
+                max_tokens=4096,
+            )
 
         assert captured.get("max_tokens") == 4096
         assert "max_completion_tokens" not in captured
@@ -208,23 +244,30 @@ class TestOpenAIProviderInit:
         """
         from modules.llm.providers.openai_provider import OpenAIProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.openai_provider.ChatOpenAI",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
-                OpenAIProvider(
-                    api_key="sk-test",
-                    model="gpt-5-mini",
-                    presence_penalty=0.01,
-                    frequency_penalty=0.01,
-                    top_p=0.9,
-                    temperature=0.5,
-                )
+        with (
+            patch(
+                "modules.llm.providers.openai_provider.ChatOpenAI",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
+            ),
+        ):
+            OpenAIProvider(
+                api_key="sk-test",
+                model="gpt-5-mini",
+                presence_penalty=0.01,
+                frequency_penalty=0.01,
+                top_p=0.9,
+                temperature=0.5,
+            )
 
         for param in ("presence_penalty", "frequency_penalty", "top_p", "temperature"):
-            assert captured.get(param) is None, (
-                f"{param} should be None for reasoning models but was {captured.get(param)!r}"
+            val = captured.get(param)
+            assert val is None, (
+                f"{param} should be None for reasoning models but was {val!r}"
             )
 
     @pytest.mark.unit
@@ -232,12 +275,18 @@ class TestOpenAIProviderInit:
         """use_responses_api=True is always passed to ChatOpenAI."""
         from modules.llm.providers.openai_provider import OpenAIProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.openai_provider.ChatOpenAI",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
-                OpenAIProvider(api_key="sk-test", model="gpt-4o")
+        with (
+            patch(
+                "modules.llm.providers.openai_provider.ChatOpenAI",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
+            ),
+        ):
+            OpenAIProvider(api_key="sk-test", model="gpt-4o")
 
         assert captured.get("use_responses_api") is True
 
@@ -245,6 +294,7 @@ class TestOpenAIProviderInit:
 # =============================================================================
 # CT-3: text.verbosity forwarding through OpenAIProvider (Responses API)
 # =============================================================================
+
 
 class TestOpenAIProviderTextVerbosity:
     """CT-3 regression tests: text_config stored and verbosity forwarded.
@@ -258,13 +308,17 @@ class TestOpenAIProviderTextVerbosity:
         """OpenAIProvider stores text_config attribute when provided."""
         from modules.llm.providers.openai_provider import OpenAIProvider
 
-        with patch("modules.llm.providers.openai_provider.ChatOpenAI"):
-            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
-                provider = OpenAIProvider(
-                    api_key="sk-test",
-                    model="gpt-5-mini",
-                    text_config={"verbosity": "concise"},
-                )
+        with (
+            patch("modules.llm.providers.openai_provider.ChatOpenAI"),
+            patch(
+                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
+            ),
+        ):
+            provider = OpenAIProvider(
+                api_key="sk-test",
+                model="gpt-5-mini",
+                text_config={"verbosity": "concise"},
+            )
 
         assert provider.text_config == {"verbosity": "concise"}
 
@@ -273,9 +327,13 @@ class TestOpenAIProviderTextVerbosity:
         """text_config defaults to None when not provided."""
         from modules.llm.providers.openai_provider import OpenAIProvider
 
-        with patch("modules.llm.providers.openai_provider.ChatOpenAI"):
-            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
-                provider = OpenAIProvider(api_key="sk-test", model="gpt-4o")
+        with (
+            patch("modules.llm.providers.openai_provider.ChatOpenAI"),
+            patch(
+                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
+            ),
+        ):
+            provider = OpenAIProvider(api_key="sk-test", model="gpt-4o")
 
         assert provider.text_config is None
 
@@ -284,16 +342,22 @@ class TestOpenAIProviderTextVerbosity:
         """For GPT-5 reasoning models, text verbosity is passed as direct parameter."""
         from modules.llm.providers.openai_provider import OpenAIProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.openai_provider.ChatOpenAI",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
-                OpenAIProvider(
-                    api_key="sk-test",
-                    model="gpt-5-mini",
-                    text_config={"verbosity": "verbose"},
-                )
+        with (
+            patch(
+                "modules.llm.providers.openai_provider.ChatOpenAI",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
+            ),
+        ):
+            OpenAIProvider(
+                api_key="sk-test",
+                model="gpt-5-mini",
+                text_config={"verbosity": "verbose"},
+            )
 
         assert captured.get("verbosity") == "verbose"
 
@@ -302,16 +366,22 @@ class TestOpenAIProviderTextVerbosity:
         """For non-reasoning models (gpt-4o), verbosity is NOT passed."""
         from modules.llm.providers.openai_provider import OpenAIProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.openai_provider.ChatOpenAI",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
-                OpenAIProvider(
-                    api_key="sk-test",
-                    model="gpt-4o",
-                    text_config={"verbosity": "concise"},
-                )
+        with (
+            patch(
+                "modules.llm.providers.openai_provider.ChatOpenAI",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
+            ),
+        ):
+            OpenAIProvider(
+                api_key="sk-test",
+                model="gpt-4o",
+                text_config={"verbosity": "concise"},
+            )
 
         assert "verbosity" not in captured
 
@@ -320,36 +390,48 @@ class TestOpenAIProviderTextVerbosity:
         """Empty text_config dict does not add verbosity parameter."""
         from modules.llm.providers.openai_provider import OpenAIProvider
 
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-        with patch("modules.llm.providers.openai_provider.ChatOpenAI",
-                   side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
-                OpenAIProvider(
-                    api_key="sk-test",
-                    model="gpt-5-mini",
-                    text_config={},
-                )
+        with (
+            patch(
+                "modules.llm.providers.openai_provider.ChatOpenAI",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+            patch(
+                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
+            ),
+        ):
+            OpenAIProvider(
+                api_key="sk-test",
+                model="gpt-5-mini",
+                text_config={},
+            )
 
         assert "verbosity" not in captured
 
     @pytest.mark.unit
     def test_all_verbosity_levels_forwarded(self) -> None:
-        """All valid verbosity levels (concise/medium/verbose) are forwarded correctly."""
+        """All verbosity levels (concise/medium/verbose) are forwarded correctly."""
         from modules.llm.providers.openai_provider import OpenAIProvider
 
         for level in ("concise", "medium", "verbose"):
-            captured: Dict[str, Any] = {}
+            captured: dict[str, Any] = {}
 
-            with patch("modules.llm.providers.openai_provider.ChatOpenAI",
-                       side_effect=lambda **kw: captured.update(kw) or MagicMock()):
-                with patch("modules.llm.providers.openai_provider.load_max_retries",
-                           return_value=3):
-                    OpenAIProvider(
-                        api_key="sk-test",
-                        model="gpt-5-mini",
-                        text_config={"verbosity": level},
-                    )
+            with (
+                patch(
+                    "modules.llm.providers.openai_provider.ChatOpenAI",
+                    side_effect=lambda _c=captured, **kw: _c.update(kw) or MagicMock(),
+                ),
+                patch(
+                    "modules.llm.providers.openai_provider.load_max_retries",
+                    return_value=3,
+                ),
+            ):
+                OpenAIProvider(
+                    api_key="sk-test",
+                    model="gpt-5-mini",
+                    text_config={"verbosity": level},
+                )
 
             assert captured.get("verbosity") == level
 
@@ -361,15 +443,18 @@ class TestOpenAIProviderInvokeLLM:
     def test_invoke_llm_forwards_expect_image_tokens(self) -> None:
         """_invoke_llm passes expect_image_tokens=True to _ainvoke_with_retry."""
         import asyncio
-        from unittest.mock import AsyncMock
+
         from modules.llm.providers.openai_provider import OpenAIProvider
 
-        with patch("modules.llm.providers.openai_provider.ChatOpenAI"):
-            with patch("modules.llm.providers.openai_provider.load_max_retries", return_value=3):
-                provider = OpenAIProvider(api_key="sk-test", model="gpt-4o")
+        with (
+            patch("modules.llm.providers.openai_provider.ChatOpenAI"),
+            patch(
+                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
+            ),
+        ):
+            provider = OpenAIProvider(api_key="sk-test", model="gpt-4o")
 
         captured_kwargs = {}
-        original_retry = provider._ainvoke_with_retry
 
         async def _capture_retry(llm, messages, **kwargs):
             captured_kwargs.update(kwargs)
@@ -377,7 +462,11 @@ class TestOpenAIProviderInvokeLLM:
             msg = MagicMock()
             msg.content = "transcribed"
             msg.response_metadata = {}
-            msg.usage_metadata = {"input_tokens": 1000, "output_tokens": 100, "total_tokens": 1100}
+            msg.usage_metadata = {
+                "input_tokens": 1000,
+                "output_tokens": 100,
+                "total_tokens": 1100,
+            }
             return msg
 
         provider._ainvoke_with_retry = _capture_retry

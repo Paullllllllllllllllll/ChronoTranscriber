@@ -8,9 +8,9 @@ from __future__ import annotations
 import pytest
 
 from modules.llm.prompt_utils import (
-    render_prompt_with_schema,
     inject_additional_context,
     prepare_prompt_with_context,
+    render_prompt_with_schema,
 )
 
 
@@ -71,10 +71,10 @@ class TestRenderPromptWithSchema:
                 "no_transcribable_text": {"type": "boolean"},
                 "metadata": {
                     "type": "object",
-                    "properties": {"page": {"type": "integer"}}
-                }
+                    "properties": {"page": {"type": "integer"}},
+                },
             },
-            "required": ["transcription"]
+            "required": ["transcription"],
         }
 
         result = render_prompt_with_schema(prompt, schema)
@@ -211,7 +211,9 @@ class TestPreparePromptWithContext:
     @pytest.mark.unit
     def test_combines_schema_and_context(self) -> None:
         """Test that schema and context are both applied."""
-        prompt = "{{TRANSCRIPTION_SCHEMA}}\n\nAdditional context:\n{{ADDITIONAL_CONTEXT}}"
+        prompt = (
+            "{{TRANSCRIPTION_SCHEMA}}\n\nAdditional context:\n{{ADDITIONAL_CONTEXT}}"
+        )
         schema = {"type": "object"}
         context = "Historical document from 1850."
 
@@ -223,7 +225,9 @@ class TestPreparePromptWithContext:
     @pytest.mark.unit
     def test_schema_only(self) -> None:
         """Test with schema but no context."""
-        prompt = "{{TRANSCRIPTION_SCHEMA}}\n\nAdditional context:\n{{ADDITIONAL_CONTEXT}}"
+        prompt = (
+            "{{TRANSCRIPTION_SCHEMA}}\n\nAdditional context:\n{{ADDITIONAL_CONTEXT}}"
+        )
         schema = {"type": "object"}
 
         result = prepare_prompt_with_context(prompt, schema, None)

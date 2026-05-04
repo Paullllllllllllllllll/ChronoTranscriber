@@ -66,13 +66,15 @@ def test_sdk_to_dict_best_effort_attribute_extraction() -> None:
     assert d.get("id") == "attr"
     assert d.get("status") == "completed"
 
-    # Ensure this helper method isn't invoked by sdk_to_dict (it should ignore callables),
-    # but still keep the helper line covered for test suite coverage.
+    # Ensure sdk_to_dict ignores callables; keep the helper line covered.
+    # (sdk_to_dict should not invoke the method, only attribute-style properties)
     assert _AttrObj().method() == "callable"
 
 
 @pytest.mark.unit
-def test_list_all_batches_paginates_and_coerces_objects(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_list_all_batches_paginates_and_coerces_objects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     mock_print = MagicMock()
     monkeypatch.setattr("modules.llm.openai_sdk_utils.print_info", mock_print)
 
@@ -124,7 +126,9 @@ def test_get_openai_client_uses_explicit_api_key() -> None:
 
 
 @pytest.mark.unit
-def test_get_openai_client_raises_when_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_openai_client_raises_when_missing_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     with pytest.raises(ValueError):
         _ = get_openai_client(api_key=None)

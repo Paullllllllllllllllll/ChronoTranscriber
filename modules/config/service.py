@@ -9,18 +9,18 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import Any, Dict, Optional, cast
+from typing import Any, cast
 
 from modules.config.config_loader import ConfigLoader
 
 
 class ConfigService:
     """Thread-safe singleton configuration service with lazy loading and caching."""
-    
-    _instance: Optional[ConfigService] = None
+
+    _instance: ConfigService | None = None
     _lock = threading.Lock()
     _initialized: bool = False
-    
+
     def __new__(cls) -> ConfigService:
         if cls._instance is None:
             with cls._lock:
@@ -28,22 +28,22 @@ class ConfigService:
                     cls._instance = super().__new__(cls)
                     cls._instance._initialized = False
         return cls._instance
-    
+
     def __init__(self) -> None:
         # Prevent re-initialization
         if self._initialized:
             return
-        
-        self._loader: Optional[ConfigLoader] = None
-        self._model_config: Optional[Dict[str, Any]] = None
-        self._paths_config: Optional[Dict[str, Any]] = None
-        self._concurrency_config: Optional[Dict[str, Any]] = None
-        self._image_processing_config: Optional[Dict[str, Any]] = None
+
+        self._loader: ConfigLoader | None = None
+        self._model_config: dict[str, Any] | None = None
+        self._paths_config: dict[str, Any] | None = None
+        self._concurrency_config: dict[str, Any] | None = None
+        self._image_processing_config: dict[str, Any] | None = None
         self._initialized = True
-    
-    def load(self, config_path: Optional[Path] = None) -> None:
+
+    def load(self, config_path: Path | None = None) -> None:
         """Load all configurations.
-        
+
         Args:
             config_path: Optional path to model_config.yaml. If None, uses default.
         """
@@ -55,15 +55,15 @@ class ConfigService:
             self._paths_config = None
             self._concurrency_config = None
             self._image_processing_config = None
-    
+
     def _ensure_loaded(self) -> None:
         """Ensure configuration is loaded, loading with defaults if necessary."""
         if self._loader is None:
             self.load()
-    
-    def get_model_config(self) -> Dict[str, Any]:
+
+    def get_model_config(self) -> dict[str, Any]:
         """Get model configuration (cached).
-        
+
         Returns:
             Model configuration dictionary.
         """
@@ -73,10 +73,10 @@ class ConfigService:
                 if self._model_config is None and self._loader is not None:
                     self._model_config = self._loader.get_model_config()
         return self._model_config.copy() if self._model_config else {}
-    
-    def get_paths_config(self) -> Dict[str, Any]:
+
+    def get_paths_config(self) -> dict[str, Any]:
         """Get paths configuration (cached).
-        
+
         Returns:
             Paths configuration dictionary with normalized paths.
         """
@@ -86,10 +86,10 @@ class ConfigService:
                 if self._paths_config is None and self._loader is not None:
                     self._paths_config = self._loader.get_paths_config()
         return self._paths_config.copy() if self._paths_config else {}
-    
-    def get_concurrency_config(self) -> Dict[str, Any]:
+
+    def get_concurrency_config(self) -> dict[str, Any]:
         """Get concurrency configuration (cached).
-        
+
         Returns:
             Concurrency configuration dictionary.
         """
@@ -99,8 +99,8 @@ class ConfigService:
                 if self._concurrency_config is None and self._loader is not None:
                     self._concurrency_config = self._loader.get_concurrency_config()
         return self._concurrency_config.copy() if self._concurrency_config else {}
-    
-    def get_image_processing_config(self) -> Dict[str, Any]:
+
+    def get_image_processing_config(self) -> dict[str, Any]:
         """Get image processing configuration (cached).
 
         Returns:
@@ -110,10 +110,16 @@ class ConfigService:
         if self._image_processing_config is None:
             with self._lock:
                 if self._image_processing_config is None and self._loader is not None:
-                    self._image_processing_config = self._loader.get_image_processing_config()
-        return self._image_processing_config.copy() if self._image_processing_config else {}
+                    self._image_processing_config = (
+                        self._loader.get_image_processing_config()
+                    )
+        return (
+            self._image_processing_config.copy()
+            if self._image_processing_config
+            else {}
+        )
 
-    def get_prompt_caching_config(self) -> Dict[str, Any]:
+    def get_prompt_caching_config(self) -> dict[str, Any]:
         """Get prompt caching configuration from concurrency config.
 
         Returns:
@@ -121,16 +127,16 @@ class ConfigService:
             ``{"enabled": False}`` when the section is absent.
         """
         conc_cfg = self.get_concurrency_config() or {}
-        return cast(Dict[str, Any], conc_cfg.get("prompt_caching", {"enabled": False}))
-    
-    def reload(self, config_path: Optional[Path] = None) -> None:
+        return cast(dict[str, Any], conc_cfg.get("prompt_caching", {"enabled": False}))
+
+    def reload(self, config_path: Path | None = None) -> None:
         """Force reload of all configurations.
-        
+
         Args:
             config_path: Optional path to model_config.yaml. If None, uses default.
         """
         self.load(config_path)
-    
+
     @classmethod
     def reset(cls) -> None:
         """Reset the singleton instance (primarily for testing)."""
@@ -141,41 +147,41 @@ class ConfigService:
 # Convenience functions for direct access
 def get_config_service() -> ConfigService:
     """Get the singleton ConfigService instance.
-    
+
     Returns:
         ConfigService singleton.
     """
     return ConfigService()
 
 
-def get_model_config() -> Dict[str, Any]:
+def get_model_config() -> dict[str, Any]:
     """Get model configuration.
-    
+
     Returns:
         Model configuration dictionary.
     """
     return get_config_service().get_model_config()
 
 
-def get_paths_config() -> Dict[str, Any]:
+def get_paths_config() -> dict[str, Any]:
     """Get paths configuration.
-    
+
     Returns:
         Paths configuration dictionary.
     """
     return get_config_service().get_paths_config()
 
 
-def get_concurrency_config() -> Dict[str, Any]:
+def get_concurrency_config() -> dict[str, Any]:
     """Get concurrency configuration.
-    
+
     Returns:
         Concurrency configuration dictionary.
     """
     return get_config_service().get_concurrency_config()
 
 
-def get_image_processing_config() -> Dict[str, Any]:
+def get_image_processing_config() -> dict[str, Any]:
     """Get image processing configuration.
 
     Returns:
@@ -184,7 +190,7 @@ def get_image_processing_config() -> Dict[str, Any]:
     return get_config_service().get_image_processing_config()
 
 
-def get_prompt_caching_config() -> Dict[str, Any]:
+def get_prompt_caching_config() -> dict[str, Any]:
     """Get prompt caching configuration.
 
     Returns:

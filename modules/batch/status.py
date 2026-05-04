@@ -9,24 +9,26 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any
 
 from openai import OpenAI, OpenAIError
 
+from modules.batch.mapping import diagnose_batch_failure
 from modules.config.service import get_config_service
 from modules.infra.logger import setup_logger
 from modules.infra.paths import collect_scan_directories
-from modules.batch.mapping import diagnose_batch_failure
-from modules.llm.openai_sdk_utils import list_all_batches, sdk_to_dict
-from modules.ui import print_error, print_info, print_warning
+from modules.llm.openai_sdk_utils import sdk_to_dict
+from modules.ui import print_error, print_info
 
 logger = setup_logger(__name__)
 
 
-def load_config() -> Tuple[List[Path], Dict[str, Any], Dict[str, Any]]:
-    """Load YAML configuration and return (scan_dirs, processing_settings, postprocessing_config).
+def load_config() -> tuple[list[Path], dict[str, Any], dict[str, Any]]:
+    """Load YAML configuration and return scan_dirs, processing_settings,
+    and postprocessing_config.
 
     Ensures file paths exist (creates input/output directories on demand).
     """
@@ -45,7 +47,7 @@ def load_config() -> Tuple[List[Path], Dict[str, Any], Dict[str, Any]]:
 
 def _parse_temp_file_metadata(
     temp_file: Path,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Parse a single JSONL temp file and extract batch-related metadata.
 
     Reads the file line-by-line, collecting batch tracking records, session
@@ -56,15 +58,15 @@ def _parse_temp_file_metadata(
         has_batch_request, has_batch_metadata, image_metadata_count,
         batch_request_count, batch_session_statuses.
     """
-    batch_ids: Set[str] = set()
-    batch_provider: Optional[str] = None
-    batch_tracking_records: List[Dict[str, Any]] = []
+    batch_ids: set[str] = set()
+    batch_provider: str | None = None
+    batch_tracking_records: list[dict[str, Any]] = []
     has_batch_session = False
     has_batch_request = False
     has_batch_metadata = False
     image_metadata_count = 0
     batch_request_count = 0
-    batch_session_statuses: Set[str] = set()
+    batch_session_statuses: set[str] = set()
 
     with temp_file.open("r", encoding="utf-8") as f:
         for line in f:
@@ -130,9 +132,9 @@ def _parse_temp_file_metadata(
 def _recover_batch_ids(
     temp_file: Path,
     identifier: str,
-    batch_ids: Set[str],
-    processing_settings: Dict[str, Any],
-) -> Set[str]:
+    batch_ids: set[str],
+    processing_settings: dict[str, Any],
+) -> set[str]:
     """Attempt to recover missing batch IDs from the debug artifact file.
 
     Looks for a ``<identifier>_batch_submission_debug.json`` file alongside the
@@ -154,7 +156,8 @@ def _recover_batch_ids(
         to_add = [bid for bid in dbg_ids if bid not in batch_ids]
         if to_add:
             print_info(
-                f"Recovered {len(to_add)} missing batch id(s) for {temp_file.name} from debug artifact."
+                f"Recovered {len(to_add)} missing batch id(s) for"
+                f" {temp_file.name} from debug artifact."
             )
             for bid in to_add:
                 batch_ids.add(bid)
@@ -167,17 +170,20 @@ def _recover_batch_ids(
                             rec = {
                                 "batch_tracking": {
                                     "batch_id": bid,
-                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                    "timestamp": datetime.now(UTC).isoformat(),
                                     "batch_file": str(bid),
                                 }
                             }
                             wf.write(json.dumps(rec) + "\n")
                     print_info(
-                        f"Persisted {len(to_add)} recovered batch id(s) into {temp_file.name}."
+                        f"Persisted {len(to_add)} recovered batch id(s)"
+                        f" into {temp_file.name}."
                     )
                 except OSError as pe:
                     logger.warning(
-                        "Failed to persist recovered batch ids for %s: %s", temp_file.name, pe
+                        "Failed to persist recovered batch ids for %s: %s",
+                        temp_file.name,
+                        pe,
                     )
     except (json.JSONDecodeError, OSError, ValueError, KeyError) as de:
         logger.warning("Failed to read debug artifact %s: %s", debug_artifact.name, de)
@@ -186,10 +192,10 @@ def _recover_batch_ids(
 
 
 def _check_openai_batch_status(
-    batch_ids: Set[str],
-    batch_dict: Dict[str, Dict[str, Any]],
+    batch_ids: set[str],
+    batch_dict: dict[str, dict[str, Any]],
     client: OpenAI,
-) -> Tuple[bool, List[str], int, int]:
+) -> tuple[bool, list[str], int, int]:
     """Check OpenAI batch status for all *batch_ids*.
 
     Attempts to retrieve any batch not already present in *batch_dict* from
@@ -199,7 +205,7 @@ def _check_openai_batch_status(
         (all_completed, missing_batches, completed_count, failed_count)
     """
     all_completed = True
-    missing_batches: List[str] = []
+    missing_batches: list[str] = []
     completed_count = 0
     failed_count = 0
 
@@ -214,16 +220,17 @@ def _check_openai_batch_status(
                 else:
                     all_completed = False
                     missing_batches.append(batch_id)
-                    logger.warning(
-                        "Batch ID %s retrieval returned no object", batch_id
-                    )
+                    logger.warning("Batch ID %s retrieval returned no object", batch_id)
                     continue
             except (OpenAIError, OSError, ValueError, TypeError) as e:
                 all_completed = False
                 missing_batches.append(batch_id)
                 diagnosis = diagnose_batch_failure(batch_id, client)
                 logger.warning(
-                    f"Batch ID {batch_id} not found in OpenAI batches. {diagnosis} ({e})"
+                    "Batch ID %s not found in OpenAI batches. %s (%s)",
+                    batch_id,
+                    diagnosis,
+                    e,
                 )
                 continue
 
@@ -237,9 +244,7 @@ def _check_openai_batch_status(
             all_completed = False
         else:
             all_completed = False
-            logger.info(
-                f"Batch {batch_id} has status '{status}' - not yet completed."
-            )
+            logger.info(f"Batch {batch_id} has status '{status}' - not yet completed.")
 
     return all_completed, missing_batches, completed_count, failed_count
 

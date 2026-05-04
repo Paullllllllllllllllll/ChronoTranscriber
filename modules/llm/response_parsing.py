@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
 import re
+from typing import Any
 
 from modules.infra.logger import setup_logger
 
@@ -13,9 +13,15 @@ logger = setup_logger(__name__)
 
 # --- Global placeholder detection (exported) ---
 # Allow optional leading header like "image_name:" before the bracket
-_PLACEHOLDER_RE_ERROR = re.compile(r"^(?:[^\[]+?:\s*)?\[\s*transcription\s+error.*\]$", re.IGNORECASE)
-_PLACEHOLDER_RE_NO_TEXT = re.compile(r"^(?:[^\[]+?:\s*)?\[\s*No\s+transcribable\s+text.*\]$", re.IGNORECASE)
-_PLACEHOLDER_RE_NOT_POSSIBLE = re.compile(r"^(?:[^\[]+?:\s*)?\[\s*Transcription\s+not\s+possible.*\]$", re.IGNORECASE)
+_PLACEHOLDER_RE_ERROR = re.compile(
+    r"^(?:[^\[]+?:\s*)?\[\s*transcription\s+error.*\]$", re.IGNORECASE
+)
+_PLACEHOLDER_RE_NO_TEXT = re.compile(
+    r"^(?:[^\[]+?:\s*)?\[\s*No\s+transcribable\s+text.*\]$", re.IGNORECASE
+)
+_PLACEHOLDER_RE_NOT_POSSIBLE = re.compile(
+    r"^(?:[^\[]+?:\s*)?\[\s*Transcription\s+not\s+possible.*\]$", re.IGNORECASE
+)
 
 
 def detect_transcription_cause(text: str) -> str:
@@ -39,8 +45,10 @@ def format_page_line(text: str, page_number: int | None, image_name: str | None)
     - Prefer the image file name as the header: '<image_name>:'
     - If image_name is missing, fall back to 'Page {n}:' when available,
       otherwise '[unknown image]:'
-    - If the text is a known placeholder (error/no_text/not_possible), keep it inline on the header line.
-    - Otherwise, emit a header line followed by the page transcription on the next line(s).
+    - If the text is a known placeholder (error/no_text/not_possible), keep it
+      inline on the header line.
+    - Otherwise, emit a header line followed by the page transcription on the
+      next line(s).
     """
     # Prefer image filename for tracking/debugging
     safe_name = (image_name or "").strip()
@@ -60,7 +68,7 @@ def format_page_line(text: str, page_number: int | None, image_name: str | None)
     return s
 
 
-def _extract_from_responses_object(data: Dict[str, Any]) -> str:
+def _extract_from_responses_object(data: dict[str, Any]) -> str:
     """
     Normalize **Responses API** output into a string.
     Tries `output_text`; if missing, reconstructs from `output[*].content[].text`.
@@ -68,7 +76,7 @@ def _extract_from_responses_object(data: Dict[str, Any]) -> str:
     if isinstance(data, dict) and isinstance(data.get("output_text"), str):
         return str(data["output_text"]).strip()
 
-    parts: List[str] = []
+    parts: list[str] = []
     output = data.get("output")
     if isinstance(output, list):
         for item in output:
@@ -80,7 +88,7 @@ def _extract_from_responses_object(data: Dict[str, Any]) -> str:
     return "".join(parts).strip()
 
 
-def _try_parse_json(text: str) -> Dict[str, Any] | None:
+def _try_parse_json(text: str) -> dict[str, Any] | None:
     try:
         result = json.loads(text)
         return result if isinstance(result, dict) else None
@@ -153,7 +161,7 @@ def _normalize_llm_text(text: str) -> str:
     return stripped
 
 
-def _salvage_last_json_object(text: str) -> Dict[str, Any] | None:
+def _salvage_last_json_object(text: str) -> dict[str, Any] | None:
     """
     When the model returns concatenated JSON objects or mixed prose+JSON,
     try to salvage the last valid JSON object near the end of the string.
@@ -167,7 +175,7 @@ def _salvage_last_json_object(text: str) -> Dict[str, Any] | None:
     i = last_close
     while i >= 0:
         if text[i] == "{":
-            candidate = text[i:last_close + 1]
+            candidate = text[i : last_close + 1]
             obj = _try_parse_json(candidate)
             if obj is not None:
                 return obj
@@ -176,7 +184,8 @@ def _salvage_last_json_object(text: str) -> Dict[str, Any] | None:
 
 
 def _check_transcription_flags(parsed: dict[str, Any]) -> str | None:
-    """Return a placeholder string if schema flags indicate no usable text, else None."""
+    """Return a placeholder string if schema flags indicate no usable text,
+    else None."""
     if parsed.get("no_transcribable_text", False):
         return "[No transcribable text]"
     if parsed.get("transcription_not_possible", False):
@@ -208,7 +217,9 @@ def _extract_from_chat_completions(result: dict[str, Any], image_name: str) -> s
             if flag is not None:
                 return flag
             transcription_value = parsed.get("transcription")
-            return transcription_value.strip() if transcription_value is not None else ""
+            return (
+                transcription_value.strip() if transcription_value is not None else ""
+            )
         else:
             try:
                 parsed_obj = json.loads(parsed)
@@ -216,9 +227,15 @@ def _extract_from_chat_completions(result: dict[str, Any], image_name: str) -> s
                 if flag is not None:
                     return flag
                 transcription_value = parsed_obj.get("transcription")
-                return transcription_value.strip() if transcription_value is not None else ""
+                return (
+                    transcription_value.strip()
+                    if transcription_value is not None
+                    else ""
+                )
             except (json.JSONDecodeError, ValueError, TypeError) as exc:
-                logger.error("Error parsing structured output for %s: %s", image_name, exc)
+                logger.error(
+                    "Error parsing structured output for %s: %s", image_name, exc
+                )
                 return ""
 
     # Plain content
@@ -237,11 +254,13 @@ def _extract_from_chat_completions(result: dict[str, Any], image_name: str) -> s
                     return str(parsed["transcription"]).strip()
         return normalized if normalized else content
 
-    logger.error("Empty content field in response for %s: %s", image_name, json.dumps(result))
+    logger.error(
+        "Empty content field in response for %s: %s", image_name, json.dumps(result)
+    )
     return "[transcription error]"
 
 
-def extract_transcribed_text(result: Dict[str, Any], image_name: str = "") -> str:
+def extract_transcribed_text(result: dict[str, Any], image_name: str = "") -> str:
     """
     Extract a transcription string from either:
       - A structured object already containing our schema keys
@@ -302,11 +321,13 @@ def extract_transcribed_text(result: Dict[str, Any], image_name: str = "") -> st
         return chat_result
 
     # Last resort
-    logger.error("Unrecognized response shape for image %s: %s", image_name, json.dumps(result))
+    logger.error(
+        "Unrecognized response shape for image %s: %s", image_name, json.dumps(result)
+    )
     return "[transcription error]"
 
 
-def process_batch_output(file_content: bytes) -> List[str]:
+def process_batch_output(file_content: bytes) -> list[str]:
     """
     Parse the JSONL content from an OpenAI Batch output file.
 
@@ -320,9 +341,13 @@ def process_batch_output(file_content: bytes) -> List[str]:
     List[str]
         One transcription per line/object.
     """
-    content = file_content.decode("utf-8") if isinstance(file_content, bytes) else str(file_content)
+    content = (
+        file_content.decode("utf-8")
+        if isinstance(file_content, bytes)
+        else str(file_content)
+    )
     content = content.strip()
-    transcriptions: List[str] = []
+    transcriptions: list[str] = []
 
     # Normalize to a list of JSON lines
     if content.startswith("[") and content.endswith("]"):
@@ -345,7 +370,7 @@ def process_batch_output(file_content: bytes) -> List[str]:
             continue
 
         # Prefer Responses 'response.body'
-        data: Dict[str, Any] | None = None
+        data: dict[str, Any] | None = None
         if "response" in obj and isinstance(obj["response"], dict):
             body = obj["response"].get("body")
             if isinstance(body, dict):
@@ -355,7 +380,8 @@ def process_batch_output(file_content: bytes) -> List[str]:
             data = obj
 
         if data is None:
-            # Page/image identification will be added by the caller via format_page_line()
+            # Page/image identification will be added by the caller via
+            # format_page_line()
             transcriptions.append("[transcription error]")
             continue
 

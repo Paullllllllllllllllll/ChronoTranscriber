@@ -3,14 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from typing import List, Optional
 
 import ebooklib
 from ebooklib import epub
 from lxml import html
 
-from modules.infra.paths import create_safe_directory_name, create_safe_filename
 from modules.infra.logger import setup_logger
+from modules.infra.paths import create_safe_directory_name, create_safe_filename
 
 logger = setup_logger(__name__)
 
@@ -19,18 +18,20 @@ logger = setup_logger(__name__)
 class EPUBTextExtraction:
     """Represents the result of extracting plain text from an EPUB file."""
 
-    title: Optional[str]
-    authors: List[str]
-    sections: List[str]
+    title: str | None
+    authors: list[str]
+    sections: list[str]
 
     def to_plain_text(self) -> str:
         """Render the extracted content (with metadata) as plain text."""
-        lines: List[str] = []
+        lines: list[str] = []
 
         if self.title:
             lines.append(f"# Title: {self.title.strip()}")
         if self.authors:
-            author_line = ", ".join(author.strip() for author in self.authors if author.strip())
+            author_line = ", ".join(
+                author.strip() for author in self.authors if author.strip()
+            )
             if author_line:
                 lines.append(f"# Author(s): {author_line}")
 
@@ -44,7 +45,8 @@ class EPUBTextExtraction:
             lines.append(normalized)
             lines.append("")
 
-        # Remove trailing blank lines while keeping a terminating newline for POSIX compliance
+        # Remove trailing blank lines while keeping a terminating newline
+        # for POSIX compliance.
         while lines and lines[-1] == "":
             lines.pop()
 
@@ -58,7 +60,9 @@ class EPUBProcessor:
     def __init__(self, epub_path: Path) -> None:
         self.epub_path = epub_path
 
-    def extract_text(self, section_indices: Optional[List[int]] = None) -> EPUBTextExtraction:
+    def extract_text(
+        self, section_indices: list[int] | None = None
+    ) -> EPUBTextExtraction:
         """Extract the EPUB text content and metadata using EbookLib.
 
         Args:
@@ -67,21 +71,25 @@ class EPUBProcessor:
         """
         try:
             book = epub.read_epub(str(self.epub_path))
-        except Exception as exc:  # pragma: no cover - surface errors upstream
+        except Exception:  # pragma: no cover - surface errors upstream
             logger.exception("Failed to read EPUB: %s", self.epub_path)
             raise
 
         title = _first_metadata_value(book.get_metadata("DC", "title"))
         author_entries = book.get_metadata("DC", "creator")
-        authors = [entry[0].strip() for entry in author_entries if entry and entry[0].strip()]
+        authors = [
+            entry[0].strip() for entry in author_entries if entry and entry[0].strip()
+        ]
 
         all_items = list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
 
         # Apply section filter
         if section_indices is not None:
-            all_items = [all_items[i] for i in section_indices if 0 <= i < len(all_items)]
+            all_items = [
+                all_items[i] for i in section_indices if 0 <= i < len(all_items)
+            ]
 
-        sections: List[str] = []
+        sections: list[str] = []
         for item in all_items:
             try:
                 content_bytes = item.get_content()
@@ -89,7 +97,11 @@ class EPUBProcessor:
                 if text:
                     sections.append(text)
             except Exception as exc:
-                logger.warning("Skipping EPUB item %s due to parsing error: %s", getattr(item, "file_name", "<unknown>"), exc)
+                logger.warning(
+                    "Skipping EPUB item %s due to parsing error: %s",
+                    getattr(item, "file_name", "<unknown>"),
+                    exc,
+                )
 
         return EPUBTextExtraction(title=title, authors=authors, sections=sections)
 
@@ -99,8 +111,11 @@ class EPUBProcessor:
         parent_folder = epub_output_dir / safe_dir_name
         parent_folder.mkdir(parents=True, exist_ok=True)
 
-        # Create safe filename (truncated with hash if needed, considering full path length)
-        output_txt_name = create_safe_filename(self.epub_path.stem, ".txt", parent_folder)
+        # Create safe filename (truncated with hash if needed,
+        # considering full path length).
+        output_txt_name = create_safe_filename(
+            self.epub_path.stem, ".txt", parent_folder
+        )
         output_txt_path = parent_folder / output_txt_name
         return parent_folder, output_txt_path
 
@@ -126,7 +141,7 @@ def _normalize_text(value: str) -> str:
         return ""
 
     lines = [line.strip() for line in value.splitlines()]
-    normalized_lines: List[str] = []
+    normalized_lines: list[str] = []
 
     for line in lines:
         if line:
@@ -141,7 +156,7 @@ def _normalize_text(value: str) -> str:
     return "\n".join(normalized_lines)
 
 
-def _first_metadata_value(entries: List[tuple[str, dict]]) -> Optional[str]:
+def _first_metadata_value(entries: list[tuple[str, dict]]) -> str | None:
     """Return the first metadata value from an EbookLib metadata list."""
     for value, _attrs in entries or []:
         cleaned = value.strip()

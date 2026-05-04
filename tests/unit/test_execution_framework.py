@@ -4,20 +4,20 @@ from __future__ import annotations
 
 import sys
 from argparse import ArgumentParser, Namespace
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from modules.transcribe.dual_mode import (
-    _DualModeBase,
-    DualModeScript,
     AsyncDualModeScript,
+    DualModeScript,
+    _DualModeBase,
 )
-
 
 # ---------------------------------------------------------------------------
 # Concrete subclasses for testing the abstract bases
 # ---------------------------------------------------------------------------
+
 
 class _SyncScript(DualModeScript):
     """Minimal concrete DualModeScript for testing."""
@@ -67,6 +67,7 @@ class _AsyncScript(AsyncDualModeScript):
 # _DualModeBase
 # ---------------------------------------------------------------------------
 
+
 class TestDualModeBaseInit:
     def test_init_sets_script_name(self) -> None:
         base = _DualModeBase("my_script")
@@ -94,7 +95,10 @@ class TestDualModeBaseInitializeConfig:
         assert base.paths_config == mock_config_service.get_paths_config()
         assert base.model_config == mock_config_service.get_model_config()
         assert base.concurrency_config == mock_config_service.get_concurrency_config()
-        assert base.image_processing_config == mock_config_service.get_image_processing_config()
+        assert (
+            base.image_processing_config
+            == mock_config_service.get_image_processing_config()
+        )
 
 
 class TestDualModeBaseDetectMode:
@@ -157,6 +161,7 @@ class TestDualModeBasePrintOrLog:
 # DualModeScript (sync)
 # ---------------------------------------------------------------------------
 
+
 class TestDualModeScriptExecuteInteractive:
     def test_execute_interactive_mode(self, mock_config_service: MagicMock) -> None:
         script = _SyncScript("test_sync")
@@ -190,7 +195,9 @@ class TestDualModeScriptExecuteInteractive:
 
 
 class TestDualModeScriptExecuteErrorHandling:
-    def test_execute_handles_keyboard_interrupt(self, mock_config_service: MagicMock) -> None:
+    def test_execute_handles_keyboard_interrupt(
+        self, mock_config_service: MagicMock
+    ) -> None:
         script = _SyncScript("test_sync")
         mock_config_service.get_paths_config.return_value = {
             "general": {"interactive_mode": True}
@@ -200,9 +207,7 @@ class TestDualModeScriptExecuteErrorHandling:
                 "modules.transcribe.dual_mode.get_config_service",
                 return_value=mock_config_service,
             ),
-            patch.object(
-                script, "run_interactive", side_effect=KeyboardInterrupt
-            ),
+            patch.object(script, "run_interactive", side_effect=KeyboardInterrupt),
             pytest.raises(SystemExit) as exc_info,
         ):
             script.execute()
@@ -218,9 +223,7 @@ class TestDualModeScriptExecuteErrorHandling:
                 "modules.transcribe.dual_mode.get_config_service",
                 return_value=mock_config_service,
             ),
-            patch.object(
-                script, "run_interactive", side_effect=ValueError("bad")
-            ),
+            patch.object(script, "run_interactive", side_effect=ValueError("bad")),
             pytest.raises(SystemExit) as exc_info,
         ):
             script.execute()
@@ -230,6 +233,7 @@ class TestDualModeScriptExecuteErrorHandling:
 # ---------------------------------------------------------------------------
 # AsyncDualModeScript
 # ---------------------------------------------------------------------------
+
 
 class TestAsyncDualModeScriptExecuteInteractive:
     def test_execute_interactive_mode(self, mock_config_service: MagicMock) -> None:
@@ -263,7 +267,9 @@ class TestAsyncDualModeScriptExecuteInteractive:
 
 
 class TestAsyncDualModeScriptExecuteErrorHandling:
-    def test_execute_handles_keyboard_interrupt(self, mock_config_service: MagicMock) -> None:
+    def test_execute_handles_keyboard_interrupt(
+        self, mock_config_service: MagicMock
+    ) -> None:
         script = _AsyncScript("test_async")
         mock_config_service.get_paths_config.return_value = {
             "general": {"interactive_mode": True}

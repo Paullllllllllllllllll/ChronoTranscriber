@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from modules.infra.logger import setup_logger
 
@@ -22,11 +22,11 @@ class ImageMetadata:
 
     image_name: str
     order_index: int
-    page_number: Optional[int] = None
-    custom_id: Optional[str] = None
+    page_number: int | None = None
+    custom_id: str | None = None
 
 
-def read_jsonl_records(jsonl_path: Path) -> List[Dict[str, Any]]:
+def read_jsonl_records(jsonl_path: Path) -> list[dict[str, Any]]:
     """Read all records from a JSONL file.
 
     Args:
@@ -47,12 +47,14 @@ def read_jsonl_records(jsonl_path: Path) -> List[Dict[str, Any]]:
             try:
                 records.append(json.loads(line))
             except json.JSONDecodeError as e:
-                logger.warning(f"Invalid JSON at line {line_num} in {jsonl_path.name}: {e}")
+                logger.warning(
+                    f"Invalid JSON at line {line_num} in {jsonl_path.name}: {e}"
+                )
 
     return records
 
 
-def write_jsonl_record(jsonl_path: Path, record: Dict[str, Any]) -> None:
+def write_jsonl_record(jsonl_path: Path, record: dict[str, Any]) -> None:
     """Append a single record to a JSONL file.
 
     Args:
@@ -63,7 +65,7 @@ def write_jsonl_record(jsonl_path: Path, record: Dict[str, Any]) -> None:
         f.write(json.dumps(record) + "\n")
 
 
-def extract_image_metadata(records: List[Dict[str, Any]]) -> List[ImageMetadata]:
+def extract_image_metadata(records: list[dict[str, Any]]) -> list[ImageMetadata]:
     """Extract image metadata from JSONL records.
 
     Args:
@@ -78,17 +80,19 @@ def extract_image_metadata(records: List[Dict[str, Any]]) -> List[ImageMetadata]
         if "image_metadata" in record:
             meta = record["image_metadata"]
             if isinstance(meta, dict):
-                metadata_list.append(ImageMetadata(
-                    image_name=meta.get("image_name", ""),
-                    order_index=meta.get("order_index", -1),
-                    page_number=meta.get("page_number"),
-                    custom_id=meta.get("custom_id"),
-                ))
+                metadata_list.append(
+                    ImageMetadata(
+                        image_name=meta.get("image_name", ""),
+                        order_index=meta.get("order_index", -1),
+                        page_number=meta.get("page_number"),
+                        custom_id=meta.get("custom_id"),
+                    )
+                )
 
     return metadata_list
 
 
-def extract_batch_ids(records: List[Dict[str, Any]]) -> List[str]:
+def extract_batch_ids(records: list[dict[str, Any]]) -> list[str]:
     """Extract batch IDs from JSONL records.
 
     Args:
@@ -109,9 +113,9 @@ def extract_batch_ids(records: List[Dict[str, Any]]) -> List[str]:
 
 
 def extract_transcription_records(
-    records: List[Dict[str, Any]],
+    records: list[dict[str, Any]],
     deduplicate: bool = True,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Extract transcription records from JSONL, filtering out metadata.
 
     Args:
@@ -135,7 +139,7 @@ def extract_transcription_records(
 
     if deduplicate and transcription_records:
         # Keep latest record per image_name (last occurrence wins)
-        by_image: Dict[str, Dict[str, Any]] = {}
+        by_image: dict[str, dict[str, Any]] = {}
         for record in transcription_records:
             by_image[record["image_name"]] = record
         transcription_records = list(by_image.values())
@@ -177,7 +181,8 @@ def is_batch_jsonl(jsonl_path: Path) -> bool:
     has_batch_session = any("batch_session" in r for r in records)
     has_batch_tracking = any("batch_tracking" in r for r in records)
     has_batch_metadata = any(
-        "image_metadata" in r and isinstance(r["image_metadata"], dict)
+        "image_metadata" in r
+        and isinstance(r["image_metadata"], dict)
         and r["image_metadata"].get("custom_id")
         for r in records
     )
@@ -199,14 +204,16 @@ def backup_file(file_path: Path, suffix: str = "_backup") -> Path:
     from datetime import datetime
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = file_path.parent / f"{file_path.stem}{suffix}_{timestamp}{file_path.suffix}"
+    backup_path = (
+        file_path.parent / f"{file_path.stem}{suffix}_{timestamp}{file_path.suffix}"
+    )
     shutil.copy2(file_path, backup_path)
     logger.info(f"Created backup: {backup_path}")
 
     return backup_path
 
 
-def find_companion_files(base_path: Path) -> Dict[str, Optional[Path]]:
+def find_companion_files(base_path: Path) -> dict[str, Path | None]:
     """Find companion files for a transcription (JSONL, debug, etc.).
 
     Supports both legacy (*_transcription.*) and new (*.*) naming conventions.
@@ -220,7 +227,7 @@ def find_companion_files(base_path: Path) -> Dict[str, Optional[Path]]:
     parent = base_path.parent
     stem = base_path.stem.replace("_transcription", "")
 
-    def find_file(stem: str, extensions: list[str]) -> Optional[Path]:
+    def find_file(stem: str, extensions: list[str]) -> Path | None:
         """Find file with any of the given extensions, trying new format first."""
         for ext in extensions:
             # Try new format first
@@ -235,6 +242,8 @@ def find_companion_files(base_path: Path) -> Dict[str, Optional[Path]]:
 
     return {
         "jsonl": find_file(stem, [".jsonl"]),
-        "debug": parent / f"{stem}_batch_submission_debug.json" if (parent / f"{stem}_batch_submission_debug.json").exists() else None,
+        "debug": parent / f"{stem}_batch_submission_debug.json"
+        if (parent / f"{stem}_batch_submission_debug.json").exists()
+        else None,
         "txt": find_file(stem, [".txt"]),
     }

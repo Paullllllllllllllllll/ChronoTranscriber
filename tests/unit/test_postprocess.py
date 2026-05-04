@@ -6,19 +6,20 @@ hyphenation fixing, spacing normalization, and line wrapping.
 
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
 
+import pytest
+
 from modules.postprocess.text import (
-    normalize_unicode_text,
+    compute_auto_wrap_width,
     fix_hyphenation,
     normalize_spacing,
-    should_wrap_line,
-    compute_auto_wrap_width,
-    wrap_long_lines,
+    normalize_unicode_text,
+    postprocess_file,
     postprocess_text,
     postprocess_transcription,
-    postprocess_file,
+    should_wrap_line,
+    wrap_long_lines,
 )
 
 
@@ -259,7 +260,7 @@ class TestWrapLongLines:
     @pytest.mark.unit
     def test_preserves_indentation(self) -> None:
         """Test that leading indentation is preserved on first line."""
-        text = "    Indented long line that should be wrapped into multiple lines eventually"
+        text = "    Indented long line that should be wrapped into multiple lines"
         result = wrap_long_lines(text, width=40)
         lines = result.split("\n")
         # First line should preserve indentation

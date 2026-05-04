@@ -6,7 +6,8 @@ Provides semaphore-based concurrency control for async operations.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable, List, Tuple, Awaitable, Optional
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from modules.infra.logger import setup_logger
 
@@ -15,11 +16,11 @@ logger = setup_logger(__name__)
 
 async def run_concurrent_transcription_tasks(
     corofunc: Callable[..., Awaitable[Any]],
-    args_list: List[Tuple[Any, ...]],
+    args_list: list[tuple[Any, ...]],
     concurrency_limit: int = 20,
     delay: float = 0,
-    on_result: Optional[Callable[[Any], Awaitable[None]]] = None,
-) -> List[Any]:
+    on_result: Callable[[Any], Awaitable[None]] | None = None,
+) -> list[Any]:
     """
     Run async function concurrently over argument tuples with concurrency control.
 
@@ -35,7 +36,7 @@ async def run_concurrent_transcription_tasks(
     """
     semaphore = asyncio.Semaphore(concurrency_limit)
 
-    async def worker(args: Tuple[Any, ...]) -> Any:
+    async def worker(args: tuple[Any, ...]) -> Any:
         async with semaphore:
             if delay > 0:
                 await asyncio.sleep(delay)
@@ -46,11 +47,12 @@ async def run_concurrent_transcription_tasks(
                     try:
                         await on_result(result)
                     except Exception as cb_exc:
-                        logger.error(f"on_result callback failed for args {args}: {cb_exc}")
+                        logger.error(
+                            f"on_result callback failed for args {args}: {cb_exc}"
+                        )
                 return result
             except Exception as e:
-                logger.error(
-                    f"Transcription task failed with arguments {args}: {e}")
+                logger.error(f"Transcription task failed with arguments {args}: {e}")
                 return None
 
     tasks = [asyncio.create_task(worker(args)) for args in args_list]

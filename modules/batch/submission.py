@@ -127,6 +127,9 @@ async def submit_batch(
     # Load additional context
     additional_context = _resolve_additional_context(user_config, parent_folder)
 
+    # Resolve context image
+    ctx_image_url = _resolve_context_image(user_config, parent_folder)
+
     # Submit via backend
     try:
         backend = get_batch_backend(provider)
@@ -137,6 +140,7 @@ async def submit_batch(
             system_prompt=system_prompt,
             schema_path=user_config.selected_schema_path,
             additional_context=additional_context,
+            context_image_url=ctx_image_url,
         )
     except Exception as e:
         logger.exception(f"Batch submission failed for {source_name}: {e}")
@@ -241,3 +245,36 @@ def _resolve_additional_context(
             logger.info(f"Using resolved context from: {context_path}")
             return context_content
     return None
+
+
+def _resolve_context_image(
+    user_config: UserConfiguration,
+    parent_folder: Path,
+) -> str | None:
+    """Resolve a context image and encode it as a data URL.
+
+    Returns a ``data:`` URL string or ``None``.
+    """
+    image_path: Path | None = None
+
+    if user_config.additional_context_image_path:
+        p = Path(user_config.additional_context_image_path)
+        if p.exists():
+            image_path = p
+    elif getattr(user_config, "use_hierarchical_context", True):
+        from modules.config.context import resolve_context_image_for_folder
+
+        image_path = resolve_context_image_for_folder(parent_folder)
+
+    if image_path is None:
+        return None
+
+    from modules.images.encoding import encode_image_to_data_url
+
+    try:
+        data_url = encode_image_to_data_url(image_path)
+        logger.info("Using context image for batch: %s", image_path)
+        return data_url
+    except Exception as exc:
+        logger.warning("Failed to encode context image %s: %s", image_path, exc)
+        return None

@@ -35,6 +35,26 @@ class InputTokensBelowThresholdError(Exception):
         )
 
 
+class OutputTokensTruncatedError(Exception):
+    """Raised when a response is truncated because it hit max_output_tokens.
+
+    Retrying is pointless — the same limit applies.  Reasoning models
+    (GPT-5, o-series) can consume the entire output budget on the
+    internal reasoning chain, leaving zero tokens for the actual answer.
+    The fix is to increase ``max_output_tokens`` in model_config.yaml or
+    via ``--max-output-tokens`` on the CLI.
+    """
+
+    def __init__(self, output_tokens: int, reasoning_tokens: int) -> None:
+        self.output_tokens = output_tokens
+        self.reasoning_tokens = reasoning_tokens
+        super().__init__(
+            f"Response truncated: model used {output_tokens} output tokens "
+            f"({reasoning_tokens} on reasoning) and hit max_output_tokens. "
+            f"Increase --max-output-tokens or lower --reasoning-effort."
+        )
+
+
 def load_max_retries() -> int:
     """Load max retries from concurrency_config.yaml.
 
@@ -255,6 +275,9 @@ class BaseProvider(ABC):
         json_schema: dict[str, Any] | None = None,
         image_detail: str | None = None,
         media_resolution: str | None = None,
+        context_image_base64: str | None = None,
+        context_image_mime_type: str | None = None,
+        context_image_detail: str | None = None,
     ) -> TranscriptionResult:
         """Transcribe text from an image file.
 
@@ -269,6 +292,9 @@ class BaseProvider(ABC):
             image_detail: Image detail level for OpenAI ("low", "high", "auto")
             media_resolution: Media resolution for Google
                 ("low", "medium", "high", "ultra_high", "auto")
+            context_image_base64: Optional base64-encoded context image
+            context_image_mime_type: MIME type of the context image
+            context_image_detail: Detail level for the context image
 
         Returns:
             TranscriptionResult with the transcription and metadata
@@ -282,6 +308,9 @@ class BaseProvider(ABC):
             json_schema=json_schema,
             image_detail=image_detail,
             media_resolution=media_resolution,
+            context_image_base64=context_image_base64,
+            context_image_mime_type=context_image_mime_type,
+            context_image_detail=context_image_detail,
         )
 
     @abstractmethod
@@ -295,6 +324,9 @@ class BaseProvider(ABC):
         json_schema: dict[str, Any] | None = None,
         image_detail: str | None = None,
         media_resolution: str | None = None,
+        context_image_base64: str | None = None,
+        context_image_mime_type: str | None = None,
+        context_image_detail: str | None = None,
     ) -> TranscriptionResult:
         """Transcribe text from a base64-encoded image.
 
@@ -307,6 +339,9 @@ class BaseProvider(ABC):
             image_detail: Image detail level for OpenAI ("low", "high", "auto")
             media_resolution: Media resolution for Google
                 ("low", "medium", "high", "ultra_high", "auto")
+            context_image_base64: Optional base64-encoded context image
+            context_image_mime_type: MIME type of the context image
+            context_image_detail: Detail level for the context image
 
         Returns:
             TranscriptionResult with the transcription and metadata
@@ -819,6 +854,26 @@ class BaseProvider(ABC):
         ):
             with attempt:
                 result = await llm.ainvoke(messages, **invoke_kwargs)
+                # Detect max_output_tokens truncation before checking
+                # parsing errors — retrying a truncated response is
+                # pointless and wastes tokens + time.
+                if isinstance(result, dict):
+                    raw_msg = result.get("raw")
+                    if raw_msg is not None:
+                        meta = getattr(raw_msg, "response_metadata", {}) or {}
+                        incomplete = meta.get("incomplete_details") or {}
+                        if incomplete.get("reason") == "max_output_tokens":
+                            usage = getattr(raw_msg, "usage_metadata", {}) or {}
+                            out_tok = usage.get("output_tokens", 0)
+                            out_detail = usage.get("output_token_details", {}) or {}
+                            reasoning_tok = out_detail.get(
+                                "flex_reasoning",
+                                out_detail.get("reasoning", 0),
+                            )
+                            discarded = self._extract_total_tokens(result)
+                            if discarded > 0:
+                                self._track_token_usage(discarded, 0, 0)
+                            raise OutputTokensTruncatedError(out_tok, reasoning_tok)
                 # Detect silent parsing failures from
                 # with_structured_output(include_raw=True).
                 if isinstance(result, dict) and result.get("parsing_error") is not None:

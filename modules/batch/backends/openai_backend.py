@@ -51,6 +51,7 @@ def _build_responses_body(
     image_url: str,
     transcription_schema: dict[str, Any] | None = None,
     llm_detail: str | None = None,
+    context_image_url: str | None = None,
 ) -> dict[str, Any]:
     """Construct a Responses API request body for vision transcription."""
     tm = model_config or {}
@@ -64,6 +65,32 @@ def _build_responses_body(
         if d in ("low", "high"):
             detail_norm = d
 
+    detail_kwargs: dict[str, str] = {}
+    if detail_norm and caps.supports_image_detail:
+        detail_kwargs["detail"] = detail_norm
+
+    # Build user content blocks
+    user_content: list[dict[str, Any]] = []
+
+    if context_image_url:
+        user_content.append({"type": "input_text", "text": "Context image:"})
+        user_content.append(
+            {
+                "type": "input_image",
+                "image_url": context_image_url,
+                **detail_kwargs,
+            }
+        )
+
+    user_content.append({"type": "input_text", "text": "The image:"})
+    user_content.append(
+        {
+            "type": "input_image",
+            "image_url": image_url,
+            **detail_kwargs,
+        }
+    )
+
     # Base body
     body: dict[str, Any] = {
         "model": model_name,
@@ -74,18 +101,7 @@ def _build_responses_body(
             },
             {
                 "role": "user",
-                "content": [
-                    {"type": "input_text", "text": "The image:"},
-                    {
-                        "type": "input_image",
-                        "image_url": image_url,
-                        **(
-                            {"detail": detail_norm}
-                            if detail_norm and caps.supports_image_detail
-                            else {}
-                        ),
-                    },
-                ],
+                "content": user_content,
             },
         ],
         "max_output_tokens": int(
@@ -182,6 +198,7 @@ class OpenAIBatchBackend(BatchBackend):
         schema: dict[str, Any] | None = None,
         schema_path: Path | None = None,
         additional_context: str | None = None,
+        context_image_url: str | None = None,
     ) -> BatchHandle:
         """Submit a batch to OpenAI's Batch API."""
         client = self._get_client()
@@ -233,6 +250,7 @@ class OpenAIBatchBackend(BatchBackend):
                 image_url=image_url,
                 transcription_schema=transcription_schema,
                 llm_detail=llm_detail,
+                context_image_url=context_image_url,
             )
 
             request_line = {

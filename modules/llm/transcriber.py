@@ -278,6 +278,10 @@ class LangChainTranscriber:
             **provider_kwargs,
         )
 
+        # Context image state (encoded once per item, reused across pages)
+        self._context_image_base64: str | None = None
+        self._context_image_mime_type: str | None = None
+
         # Session-level cache accumulators for run summary
         self._total_cached_tokens: int = 0
         self._total_input_tokens: int = 0
@@ -306,6 +310,24 @@ class LangChainTranscriber:
             self._base_prompt, context_content or ""
         )
 
+    def update_context_image(self, context_image_path: Path | None) -> None:
+        """Encode and cache a context image for subsequent transcription calls.
+
+        Call this before processing each item when per-file context image
+        resolution is needed.  Pass ``None`` to clear the context image.
+        """
+        if context_image_path is None or not context_image_path.exists():
+            self._context_image_base64 = None
+            self._context_image_mime_type = None
+            return
+
+        from modules.images.encoding import encode_image_to_base64
+
+        base64_data, mime_type = encode_image_to_base64(context_image_path)
+        self._context_image_base64 = base64_data
+        self._context_image_mime_type = mime_type
+        logger.info("Context image loaded: %s", context_image_path.name)
+
     @property
     def provider(self) -> BaseProvider:
         """Get the underlying provider instance."""
@@ -328,6 +350,9 @@ class LangChainTranscriber:
             json_schema=self.full_schema_obj,
             image_detail=self.image_detail,
             media_resolution=self.media_resolution,
+            context_image_base64=self._context_image_base64,
+            context_image_mime_type=self._context_image_mime_type,
+            context_image_detail=self.image_detail,
         )
 
         # Convert TranscriptionResult to dict format expected by existing code
@@ -355,6 +380,9 @@ class LangChainTranscriber:
             json_schema=self.full_schema_obj,
             image_detail=self.image_detail,
             media_resolution=self.media_resolution,
+            context_image_base64=self._context_image_base64,
+            context_image_mime_type=self._context_image_mime_type,
+            context_image_detail=self.image_detail,
         )
 
         return self._result_to_dict(result)

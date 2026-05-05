@@ -131,6 +131,9 @@ class GoogleProvider(BaseProvider):
         json_schema: dict[str, Any] | None = None,
         image_detail: str | None = None,
         media_resolution: str | None = None,
+        context_image_base64: str | None = None,
+        context_image_mime_type: str | None = None,
+        context_image_detail: str | None = None,
     ) -> TranscriptionResult:
         """Transcribe text from a base64-encoded image using LangChain."""
         caps = self._capabilities

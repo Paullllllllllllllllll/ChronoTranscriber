@@ -78,6 +78,7 @@ class AnthropicBatchBackend(BatchBackend):
         schema: dict[str, Any] | None = None,
         schema_path: Path | None = None,
         additional_context: str | None = None,
+        context_image_url: str | None = None,
     ) -> BatchHandle:
         """Submit a batch to Anthropic's Message Batches API."""
         client = self._get_client()

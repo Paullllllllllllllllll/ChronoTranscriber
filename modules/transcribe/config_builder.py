@@ -58,6 +58,19 @@ def _resolve_context(args_context: str | None, config: UserConfiguration) -> Non
         config.additional_context_path = None
 
 
+def _resolve_context_image(
+    args_context_image: str | None,
+    config: UserConfiguration,
+) -> None:
+    """Resolve and set additional context image path from CLI ``--context-image``."""
+    if args_context_image:
+        context_image_path = resolve_path(args_context_image, PROJECT_ROOT)
+        validate_input_path(context_image_path)
+        config.additional_context_image_path = context_image_path
+    else:
+        config.additional_context_image_path = None
+
+
 def _resolve_model_config_from_cli(
     base_model_config: dict[str, Any],
     args: Any,
@@ -259,6 +272,7 @@ def create_config_from_cli_args(
 
         _resolve_schema(args.schema, config)
         _resolve_context(args.context, config)
+        _resolve_context_image(getattr(args, "context_image", None), config)
 
         return config
 
@@ -279,6 +293,7 @@ def create_config_from_cli_args(
 
         _resolve_schema(args.schema, config)
         _resolve_context(args.context, config)
+        _resolve_context_image(getattr(args, "context_image", None), config)
 
     input_path = resolve_path(args.input, base_input_dir)
     validate_input_path(input_path)
@@ -299,6 +314,7 @@ def create_config_from_cli_args(
 __all__ = [
     "_resolve_schema",
     "_resolve_context",
+    "_resolve_context_image",
     "_resolve_model_config_from_cli",
     "_collect_files_for_type",
     "create_config_from_cli_args",

@@ -17,6 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from modules.config.config_loader import PROJECT_ROOT
+from modules.config.constants import SUPPORTED_IMAGE_EXTENSIONS
 from modules.infra.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -27,6 +28,7 @@ _CONTEXT_DIR = PROJECT_ROOT / "context"
 DEFAULT_CONTEXT_SIZE_THRESHOLD = 4000
 
 _SUFFIX = "transcr_context"
+_IMAGE_SUFFIX = "transcr_context_image"
 
 
 def _resolve_context(
@@ -252,3 +254,182 @@ def _read_and_validate_context(
     except (OSError, UnicodeDecodeError) as exc:
         logger.warning(f"Failed to read context file {context_path}: {exc}")
         return None
+
+
+# ---------------------------------------------------------------------------
+# Image context resolution
+# ---------------------------------------------------------------------------
+
+_SORTED_IMAGE_EXTENSIONS = sorted(SUPPORTED_IMAGE_EXTENSIONS)
+
+
+def _resolve_image_context(
+    suffix: str,
+    input_path: Path | None = None,
+    context_dir: Path | None = None,
+) -> Path | None:
+    """Hierarchical context *image* resolution.
+
+    Mirrors ``_resolve_context`` but searches for image files instead of
+    ``.txt`` files.  At each hierarchy level the function iterates through
+    supported image extensions in sorted order and returns the first match.
+
+    Hierarchy (most specific wins):
+    1. File-specific:   ``{input_stem}_{suffix}.{ext}``  next to input
+    2. Folder-specific: ``{parent_folder}_{suffix}.{ext}`` next to parent
+    3. General fallback: ``context/{suffix}.{ext}``
+
+    Parameters
+    ----------
+    suffix : str
+        Context-file suffix (e.g. ``"transcr_context_image"``).
+    input_path : Path | None
+        Path to the input file or folder.
+    context_dir : Path | None
+        Override for the project-level context directory.
+
+    Returns
+    -------
+    Path | None
+        Resolved image path, or ``None`` when nothing is found.
+    """
+    effective_context_dir = context_dir or _CONTEXT_DIR
+
+    def _first_match(directory: Path, stem: str) -> Path | None:
+        for ext in _SORTED_IMAGE_EXTENSIONS:
+            candidate = directory / f"{stem}_{suffix}{ext}"
+            if candidate.exists():
+                return candidate
+        return None
+
+    if input_path is not None:
+        input_path = Path(input_path).resolve()
+
+        if input_path.is_file():
+            # 1. File-specific
+            match = _first_match(input_path.parent, input_path.stem)
+            if match:
+                logger.info("Using file-specific context image: %s", match)
+                return match
+
+            # 2. Folder-specific
+            parent_folder = input_path.parent
+            if parent_folder.parent.exists():
+                match = _first_match(parent_folder.parent, parent_folder.name)
+                if match:
+                    logger.info("Using folder-specific context image: %s", match)
+                    return match
+
+        elif input_path.is_dir():
+            if input_path.parent.exists():
+                match = _first_match(input_path.parent, input_path.name)
+                if match:
+                    logger.info("Using folder-specific context image: %s", match)
+                    return match
+
+    # 3. General fallback
+    for ext in _SORTED_IMAGE_EXTENSIONS:
+        fallback = effective_context_dir / f"{suffix}{ext}"
+        if fallback.exists():
+            logger.info("Using general context image: %s", fallback)
+            return fallback
+
+    logger.debug("No %s context image found", suffix)
+    return None
+
+
+def resolve_context_image_for_file(
+    file_path: Path,
+    context_dir: Path | None = None,
+) -> Path | None:
+    """Resolve a context image for a specific input file.
+
+    Parameters
+    ----------
+    file_path : Path
+        Path to the input file (PDF, EPUB, image, etc.)
+    context_dir : Path | None
+        Override for the project-level context directory.
+
+    Returns
+    -------
+    Path | None
+        Resolved image path, or ``None``.
+    """
+    return _resolve_image_context(_IMAGE_SUFFIX, file_path, context_dir)
+
+
+def resolve_context_image_for_folder(
+    folder_path: Path,
+    context_dir: Path | None = None,
+) -> Path | None:
+    """Resolve a context image for an image folder.
+
+    Parameters
+    ----------
+    folder_path : Path
+        Path to the image folder.
+    context_dir : Path | None
+        Override for the project-level context directory.
+
+    Returns
+    -------
+    Path | None
+        Resolved image path, or ``None``.
+    """
+    return _resolve_image_context(_IMAGE_SUFFIX, folder_path, context_dir)
+
+
+def resolve_context_image_for_image(
+    image_path: Path,
+    context_dir: Path | None = None,
+) -> Path | None:
+    """Resolve a context image for a specific image file.
+
+    Parameters
+    ----------
+    image_path : Path
+        Path to the image file.
+    context_dir : Path | None
+        Override for the project-level context directory.
+
+    Returns
+    -------
+    Path | None
+        Resolved image path, or ``None``.
+    """
+    return _resolve_image_context(_IMAGE_SUFFIX, image_path, context_dir)
+
+
+def load_context_image_from_path(
+    context_image_path: Path | None,
+) -> Path | None:
+    """Validate and return an explicit context image path.
+
+    Parameters
+    ----------
+    context_image_path : Path | None
+        Path to the context image file.
+
+    Returns
+    -------
+    Path | None
+        The validated path, or ``None`` if invalid or unsupported.
+    """
+    if context_image_path is None:
+        return None
+
+    context_image_path = Path(context_image_path)
+    if not context_image_path.exists():
+        logger.warning("Context image file does not exist: %s", context_image_path)
+        return None
+
+    if context_image_path.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
+        logger.warning(
+            "Unsupported context image format '%s': %s",
+            context_image_path.suffix,
+            context_image_path,
+        )
+        return None
+
+    return context_image_path

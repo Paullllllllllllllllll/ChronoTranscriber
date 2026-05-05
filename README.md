@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.2.1
+# ChronoTranscriber v1.3.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -71,6 +71,10 @@ preprocessing.
 - **Hierarchical context resolution** -- file-specific, folder-specific,
   or project-wide transcription context
   (`{name}_transcr_context.txt` convention)
+- **Context image support** -- include a reference image (title page,
+  TOC, column headers) alongside each page image to improve
+  transcription quality (`{name}_transcr_context_image.{ext}`
+  convention; OpenAI provider)
 - **Batch processing** -- async batch APIs for OpenAI, Anthropic, and
   Google with smart chunking (150 MB per chunk) and 50% cost savings
   on OpenAI
@@ -259,6 +263,7 @@ python main/repair_transcriptions.py \
 --batch                    Use async batch API
 --schema NAME              JSON schema selection
 --context PATH             Override context file
+--context-image PATH       Context image for each page
 --model ID                 Override model
 --provider NAME            openai | anthropic | google | openrouter
 --reasoning-effort LEVEL   none | low | medium | high | xhigh
@@ -364,6 +369,18 @@ specific transcription guidance available:
 Context files should be plain text describing the document type,
 expected content, formatting conventions, and any domain-specific
 terminology. Keep under 4,000 characters.
+
+**Context images** follow the same hierarchy but use image files:
+
+1. **File-specific**: `{input_stem}_transcr_context_image.{ext}`
+2. **Folder-specific**: `{parent_folder}_transcr_context_image.{ext}`
+3. **General fallback**: `context/transcr_context_image.{ext}`
+
+A context image (e.g., a title page, table of contents, or column
+headers) is sent alongside each page image in the user message,
+giving the LLM visual reference material. Supported on the OpenAI
+provider; other providers accept the parameter but ignore it.
+Use `--context-image PATH` to override with a specific file.
 
 ### Custom Transcription Schemas
 
@@ -553,6 +570,18 @@ The suite contains 1,200+ tests (unit and integration) covering all
 modules, providers, batch backends, and CLI parsers.
 
 ## Changelog
+
+### v1.3.0 (2026-05-05)
+
+- Added context image support: include a reference image (title
+  page, table of contents, column headers) alongside each page
+  image to improve transcription quality. Uses the same hierarchical
+  resolution as text context
+  (`{name}_transcr_context_image.{ext}` convention).
+- New `--context-image` CLI flag to override context image path.
+- Interactive wizard prompt for context image selection.
+- Supported on the OpenAI provider (sync and batch paths); other
+  providers accept the parameter for interface compatibility.
 
 ### v1.2.1 (2026-05-05)
 

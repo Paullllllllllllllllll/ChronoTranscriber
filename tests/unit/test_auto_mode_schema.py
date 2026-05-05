@@ -69,12 +69,18 @@ class TestConfigureAutoModeSchema:
             patch.object(
                 WorkflowUI, "configure_additional_context", return_value=True
             ) as mock_context,
+            patch.object(
+                WorkflowUI,
+                "configure_additional_context_image",
+                return_value=True,
+            ) as mock_context_image,
         ):
             result = WorkflowUI.configure_auto_mode_schema(config)
 
         assert result is True
         mock_schema.assert_called_once_with(config)
         mock_context.assert_called_once_with(config)
+        mock_context_image.assert_called_once_with(config)
 
     @pytest.mark.unit
     def test_returns_false_when_schema_selection_cancelled(self) -> None:

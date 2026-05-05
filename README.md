@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.2.0
+# ChronoTranscriber v1.2.1
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -551,6 +551,38 @@ uv run python -m pytest -v
 
 The suite contains 1,200+ tests (unit and integration) covering all
 modules, providers, batch backends, and CLI parsers.
+
+## Changelog
+
+### v1.2.1 (2026-05-05)
+
+- Fixed circular import cycle between `modules.documents`,
+  `modules.images`, `modules.ui`, and `modules.transcribe` that
+  prevented startup. `WorkflowUI` is now lazily imported in
+  `modules.ui.__init__`; `AutoSelector` import in
+  `config_builder.py` deferred to function scope.
+- Fixed test-induced directory pollution: `WorkflowManager`
+  integration tests now provide `tmp_path`-based `file_paths`
+  instead of relying on relative-path defaults that created
+  `epubs_out`, `images_out`, `mobis_out`, `pdfs_out` in the
+  project root.
+
+### v1.2.0 (2026-05-04)
+
+- Applied ruff linter and formatter across entire codebase.
+
+### v1.1.0 (2026-05-04)
+
+- Version bump consolidating post-baseline development.
+
+### v1.0.1 (2026-04-25)
+
+- Migrated to `pyproject.toml` and updated dependencies.
+- Fixed test artifacts polluting project root (initial pass).
+
+### v1.0.0 (2026-04-25)
+
+- Repository baseline: squashed history into single commit.
 
 ## Versioning
 

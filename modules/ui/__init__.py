@@ -35,7 +35,6 @@ from .prompts import (
     ui_input,
     ui_print,
 )
-from .workflows import WorkflowUI
 
 __all__ = [
     # Navigation
@@ -58,7 +57,7 @@ __all__ = [
     "prompt_text",
     "prompt_multiselect",
     "confirm_action",
-    # Workflow UI
+    # Workflow UI (lazy)
     "WorkflowUI",
     # Batch display
     "display_batch_summary",
@@ -70,3 +69,12 @@ __all__ = [
     "display_page_error_summary",
     "display_transcription_not_possible_summary",
 ]
+
+
+def __getattr__(name: str):
+    if name == "WorkflowUI":
+        from .workflows import WorkflowUI
+
+        globals()["WorkflowUI"] = WorkflowUI
+        return WorkflowUI
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

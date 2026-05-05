@@ -268,7 +268,7 @@ class TestTransientTrackerIntegration:
     """Integration tests for TransientFileTracker with WorkflowManager."""
 
     @pytest.mark.unit
-    def test_workflow_manager_initializes_tracker(self) -> None:
+    def test_workflow_manager_initializes_tracker(self, tmp_path: Path) -> None:
         """Test that WorkflowManager initializes TransientFileTracker."""
         from modules.transcribe.manager import TransientFileTracker, WorkflowManager
         from modules.transcribe.user_config import UserConfiguration
@@ -277,10 +277,29 @@ class TestTransientTrackerIntegration:
         user_config.transcription_method = "gpt"
         user_config.use_batch_processing = False
 
+        paths_config = {
+            "general": {},
+            "file_paths": {
+                "PDFs": {"input": str(tmp_path / "pi"), "output": str(tmp_path / "po")},
+                "Images": {
+                    "input": str(tmp_path / "ii"),
+                    "output": str(tmp_path / "io"),
+                },
+                "EPUBs": {
+                    "input": str(tmp_path / "ei"),
+                    "output": str(tmp_path / "eo"),
+                },
+                "MOBIs": {
+                    "input": str(tmp_path / "mi"),
+                    "output": str(tmp_path / "mo"),
+                },
+            },
+        }
+
         with patch("modules.transcribe.manager.configure_tesseract_executable"):
             wm = WorkflowManager(
                 user_config=user_config,
-                paths_config={"general": {}},
+                paths_config=paths_config,
                 model_config={},
                 concurrency_config={},
                 image_processing_config={},
@@ -290,7 +309,7 @@ class TestTransientTrackerIntegration:
         assert isinstance(wm._transient_tracker, TransientFileTracker)
 
     @pytest.mark.unit
-    def test_tracker_configured_with_processing_settings(self) -> None:
+    def test_tracker_configured_with_processing_settings(self, tmp_path: Path) -> None:
         """Test that tracker is configured with processing settings."""
         from modules.transcribe.manager import WorkflowManager
         from modules.transcribe.user_config import UserConfiguration
@@ -305,10 +324,29 @@ class TestTransientTrackerIntegration:
             "keep_preprocessed_images": False,
         }
 
+        paths_config = {
+            "general": processing_settings,
+            "file_paths": {
+                "PDFs": {"input": str(tmp_path / "pi"), "output": str(tmp_path / "po")},
+                "Images": {
+                    "input": str(tmp_path / "ii"),
+                    "output": str(tmp_path / "io"),
+                },
+                "EPUBs": {
+                    "input": str(tmp_path / "ei"),
+                    "output": str(tmp_path / "eo"),
+                },
+                "MOBIs": {
+                    "input": str(tmp_path / "mi"),
+                    "output": str(tmp_path / "mo"),
+                },
+            },
+        }
+
         with patch("modules.transcribe.manager.configure_tesseract_executable"):
             wm = WorkflowManager(
                 user_config=user_config,
-                paths_config={"general": processing_settings},
+                paths_config=paths_config,
                 model_config={},
                 concurrency_config={},
                 image_processing_config={},
@@ -338,7 +376,7 @@ class TestTransientTrackerIntegration:
 class TestKeyboardInterruptCleanup:
     """CT-5: process_selected_items calls cleanup_pending on BaseException."""
 
-    def _make_workflow_manager(self):
+    def _make_workflow_manager(self, tmp_path: Path):
         """Build a minimal WorkflowManager with a replaceable tracker."""
         from modules.transcribe.manager import WorkflowManager
         from modules.transcribe.user_config import UserConfiguration
@@ -350,15 +388,32 @@ class TestKeyboardInterruptCleanup:
         user_config.resume_mode = "overwrite"
         user_config.selected_items = [Path("dummy_folder")]
 
+        paths_config = {
+            "general": {
+                "retain_temporary_jsonl": False,
+                "keep_preprocessed_images": False,
+            },
+            "file_paths": {
+                "PDFs": {"input": str(tmp_path / "pi"), "output": str(tmp_path / "po")},
+                "Images": {
+                    "input": str(tmp_path / "ii"),
+                    "output": str(tmp_path / "io"),
+                },
+                "EPUBs": {
+                    "input": str(tmp_path / "ei"),
+                    "output": str(tmp_path / "eo"),
+                },
+                "MOBIs": {
+                    "input": str(tmp_path / "mi"),
+                    "output": str(tmp_path / "mo"),
+                },
+            },
+        }
+
         with patch("modules.transcribe.manager.configure_tesseract_executable"):
             wm = WorkflowManager(
                 user_config=user_config,
-                paths_config={
-                    "general": {
-                        "retain_temporary_jsonl": False,
-                        "keep_preprocessed_images": False,
-                    }
-                },
+                paths_config=paths_config,
                 model_config={},
                 concurrency_config={},
                 image_processing_config={},
@@ -366,12 +421,12 @@ class TestKeyboardInterruptCleanup:
         return wm
 
     @pytest.mark.unit
-    def test_keyboard_interrupt_calls_cleanup_pending(self) -> None:
+    def test_keyboard_interrupt_calls_cleanup_pending(self, tmp_path: Path) -> None:
         """KeyboardInterrupt triggers cleanup_pending(), not clear()."""
         import asyncio
         from unittest.mock import patch
 
-        wm = self._make_workflow_manager()
+        wm = self._make_workflow_manager(tmp_path)
         mock_tracker = MagicMock()
         wm._transient_tracker = mock_tracker
 
@@ -388,12 +443,12 @@ class TestKeyboardInterruptCleanup:
         mock_tracker.clear.assert_not_called()
 
     @pytest.mark.unit
-    def test_cancelled_error_calls_cleanup_pending(self) -> None:
+    def test_cancelled_error_calls_cleanup_pending(self, tmp_path: Path) -> None:
         """asyncio.CancelledError triggers cleanup_pending(), not clear()."""
         import asyncio
         from unittest.mock import patch
 
-        wm = self._make_workflow_manager()
+        wm = self._make_workflow_manager(tmp_path)
         mock_tracker = MagicMock()
         wm._transient_tracker = mock_tracker
 
@@ -410,12 +465,14 @@ class TestKeyboardInterruptCleanup:
         mock_tracker.clear.assert_not_called()
 
     @pytest.mark.unit
-    def test_successful_run_calls_clear_not_cleanup_pending(self) -> None:
+    def test_successful_run_calls_clear_not_cleanup_pending(
+        self, tmp_path: Path
+    ) -> None:
         """Successful processing calls clear(), not cleanup_pending()."""
         import asyncio
         from unittest.mock import patch
 
-        wm = self._make_workflow_manager()
+        wm = self._make_workflow_manager(tmp_path)
         mock_tracker = MagicMock()
         wm._transient_tracker = mock_tracker
 
@@ -429,12 +486,12 @@ class TestKeyboardInterruptCleanup:
         mock_tracker.cleanup_pending.assert_not_called()
 
     @pytest.mark.unit
-    def test_item_exception_calls_cleanup_pending(self) -> None:
+    def test_item_exception_calls_cleanup_pending(self, tmp_path: Path) -> None:
         """A per-item Exception (caught internally) also triggers cleanup_pending()."""
         import asyncio
         from unittest.mock import patch
 
-        wm = self._make_workflow_manager()
+        wm = self._make_workflow_manager(tmp_path)
         mock_tracker = MagicMock()
         wm._transient_tracker = mock_tracker
 
@@ -451,12 +508,12 @@ class TestKeyboardInterruptCleanup:
         mock_tracker.clear.assert_not_called()
 
     @pytest.mark.unit
-    def test_keyboard_interrupt_propagates_after_cleanup(self) -> None:
+    def test_keyboard_interrupt_propagates_after_cleanup(self, tmp_path: Path) -> None:
         """KeyboardInterrupt is re-raised after cleanup_pending() is called."""
         import asyncio
         from unittest.mock import patch
 
-        wm = self._make_workflow_manager()
+        wm = self._make_workflow_manager(tmp_path)
         wm._transient_tracker = MagicMock()
 
         async def _raise(*args, **kwargs):
@@ -469,12 +526,12 @@ class TestKeyboardInterruptCleanup:
             asyncio.run(wm.process_selected_items(transcriber=None))
 
     @pytest.mark.unit
-    def test_cancelled_error_propagates_after_cleanup(self) -> None:
+    def test_cancelled_error_propagates_after_cleanup(self, tmp_path: Path) -> None:
         """asyncio.CancelledError is re-raised after cleanup_pending() is called."""
         import asyncio
         from unittest.mock import patch
 
-        wm = self._make_workflow_manager()
+        wm = self._make_workflow_manager(tmp_path)
         wm._transient_tracker = MagicMock()
 
         async def _raise(*args, **kwargs):

@@ -18,7 +18,6 @@ from modules.core.cli_args import (
     validate_input_path,
     validate_output_path,
 )
-from modules.documents.auto_selector import AutoSelector
 from modules.llm.schema_utils import list_schema_options
 from modules.transcribe.user_config import UserConfiguration
 from modules.ui import print_info, print_warning
@@ -166,6 +165,7 @@ def create_config_from_cli_args(
     paths_config: dict[str, Any],
 ) -> UserConfiguration:
     """Build a :class:`UserConfiguration` from parsed CLI arguments."""
+    from modules.documents.auto_selector import AutoSelector
     from modules.documents.page_range import parse_page_range
 
     config = UserConfiguration()

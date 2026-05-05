@@ -205,7 +205,11 @@ class WorkflowUI:
             return False
 
         # Configure additional context
-        return WorkflowUI.configure_additional_context(config)
+        if not WorkflowUI.configure_additional_context(config):
+            return False
+
+        # Configure additional context image
+        return WorkflowUI.configure_additional_context_image(config)
 
     @staticmethod
     def configure_schema_selection(config: UserConfiguration) -> bool:
@@ -330,6 +334,79 @@ class WorkflowUI:
         return True
 
     @staticmethod
+    def configure_additional_context_image(
+        config: UserConfiguration,
+    ) -> bool:
+        """Configure additional context image with navigation.
+
+        Context image resolution follows the same hierarchy as text context
+        but searches for image files ({name}_transcr_context_image.{ext}).
+
+        Returns:
+            True if configured successfully, False if user wants to go back
+        """
+        if config.transcription_method != "gpt":
+            return True
+
+        from modules.config.constants import SUPPORTED_IMAGE_EXTENSIONS
+
+        # Check for a default global context image
+        default_dir = PROJECT_ROOT / "additional_context"
+        global_image: Path | None = None
+        if default_dir.exists():
+            for ext in sorted(SUPPORTED_IMAGE_EXTENSIONS):
+                candidate = default_dir / f"additional_context_image{ext}"
+                if candidate.exists():
+                    global_image = candidate
+                    break
+
+        options = [
+            (
+                "hierarchical",
+                "Auto — Use file/folder-specific context image if available",
+            ),
+        ]
+        if global_image is not None:
+            options.append(
+                (
+                    "global",
+                    f"Global — Use {global_image.name} for all pages",
+                )
+            )
+        options.append(("none", "None — Proceed without a context image"))
+
+        result = prompt_select(
+            "Include a context image alongside each page image?",
+            options,
+            allow_back=True,
+        )
+
+        if result.action == NavigationAction.BACK:
+            return False
+
+        if result.value == "hierarchical":
+            config.additional_context_image_path = None
+            print_info(
+                "Using hierarchical context image resolution"
+                " (file > folder > general fallback)."
+            )
+        elif result.value == "global":
+            config.additional_context_image_path = global_image
+            print_info(
+                f"Using global context image: {global_image.name}"  # type: ignore[union-attr]
+            )
+        else:
+            config.additional_context_image_path = None
+            print_info("Proceeding without a context image.")
+
+        logger.info(
+            "Additional context image mode: %s, path: %s",
+            result.value,
+            config.additional_context_image_path,
+        )
+        return True
+
+    @staticmethod
     def configure_auto_mode_schema(config: UserConfiguration) -> bool:
         """Configure schema and context for auto mode when GPT files are detected.
 
@@ -368,6 +445,11 @@ class WorkflowUI:
 
         # Configure additional context
         if not WorkflowUI.configure_additional_context(config):
+            config.transcription_method = prev_method
+            return False
+
+        # Configure additional context image
+        if not WorkflowUI.configure_additional_context_image(config):
             config.transcription_method = prev_method
             return False
 
@@ -876,6 +958,21 @@ class WorkflowUI:
                 )
             else:
                 ui_print("    • Additional context: None", PromptStyle.DIM)
+
+            # Context image display
+            if config.additional_context_image_path:
+                img_name = config.additional_context_image_path.name
+                ui_print(
+                    f"    • Context image: Global ({img_name})",
+                    PromptStyle.INFO,
+                )
+            elif getattr(config, "use_hierarchical_context", False):
+                ui_print(
+                    "    • Context image: Hierarchical (auto-detect)",
+                    PromptStyle.INFO,
+                )
+            else:
+                ui_print("    • Context image: None", PromptStyle.DIM)
 
         # Show page range if configured
         if config.page_range is not None:

@@ -111,6 +111,17 @@ Examples:
         ),
     )
 
+    parser.add_argument(
+        "--context-image",
+        type=str,
+        help=(
+            "Path to a context image file (e.g., title page, TOC)"
+            " to include alongside each page image."
+            " If not specified, hierarchical context image"
+            " resolution is used."
+        ),
+    )
+
     # Optional model overrides for agentic CLI workflows
     parser.add_argument(
         "--model",

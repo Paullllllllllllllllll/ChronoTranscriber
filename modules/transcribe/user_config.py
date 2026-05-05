@@ -50,6 +50,7 @@ class UserConfiguration:
     selected_schema_name: str | None = None
     selected_schema_path: Path | None = None
     additional_context_path: Path | None = None
+    additional_context_image_path: Path | None = None
     use_hierarchical_context: bool = (
         True  # Enable file/folder-specific context resolution
     )

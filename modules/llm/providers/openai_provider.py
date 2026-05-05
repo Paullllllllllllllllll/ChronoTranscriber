@@ -183,6 +183,9 @@ class OpenAIProvider(BaseProvider):
         json_schema: dict[str, Any] | None = None,
         image_detail: str | None = None,
         media_resolution: str | None = None,
+        context_image_base64: str | None = None,
+        context_image_mime_type: str | None = None,
+        context_image_detail: str | None = None,
     ) -> TranscriptionResult:
         """Transcribe text from a base64-encoded image using LangChain.
 
@@ -221,14 +224,31 @@ class OpenAIProvider(BaseProvider):
         if detail and caps.supports_image_detail:
             image_content["image_url"]["detail"] = detail
 
+        # Assemble content blocks: optional context image, then page image
+        content_blocks: list[str | dict[str, Any]] = []
+
+        if context_image_base64 and context_image_mime_type:
+            ctx_data_url = self.create_data_url(
+                context_image_base64, context_image_mime_type
+            )
+            ctx_block: dict[str, Any] = {
+                "type": "image_url",
+                "image_url": {"url": ctx_data_url},
+            }
+            ctx_det = context_image_detail
+            if ctx_det:
+                ctx_det = ctx_det.lower().strip()
+            if ctx_det and caps.supports_image_detail:
+                ctx_block["image_url"]["detail"] = ctx_det
+            content_blocks.append({"type": "text", "text": "Context image:"})
+            content_blocks.append(ctx_block)
+
+        content_blocks.append({"type": "text", "text": user_instruction})
+        content_blocks.append(image_content)
+
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(
-                content=[
-                    {"type": "text", "text": user_instruction},
-                    image_content,
-                ]
-            ),
+            HumanMessage(content=content_blocks),
         ]
 
         # Use LangChain's structured output if schema provided and supported

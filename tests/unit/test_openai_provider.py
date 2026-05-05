@@ -475,3 +475,132 @@ class TestOpenAIProviderInvokeLLM:
             asyncio.run(provider._invoke_llm(MagicMock(), ["msg"]))
 
         assert captured_kwargs.get("expect_image_tokens") is True
+
+
+class TestOpenAIProviderContextImage:
+    """Tests for context image handling in transcribe_image_from_base64."""
+
+    def _make_provider(self) -> Any:
+        """Create an OpenAIProvider with mocked dependencies."""
+        from modules.llm.providers.openai_provider import OpenAIProvider
+
+        with (
+            patch("modules.llm.providers.openai_provider.ChatOpenAI"),
+            patch(
+                "modules.llm.providers.openai_provider.load_max_retries",
+                return_value=3,
+            ),
+        ):
+            return OpenAIProvider(api_key="sk-test", model="gpt-4o")
+
+    @pytest.mark.unit
+    async def test_context_image_blocks_present(self) -> None:
+        """HumanMessage contains context image blocks when provided."""
+        provider = self._make_provider()
+
+        captured_messages: list[Any] = []
+
+        async def _capture(llm: Any, messages: Any, **kw: Any) -> Any:
+            captured_messages.extend(messages)
+            msg = MagicMock()
+            msg.content = "transcribed"
+            msg.response_metadata = {}
+            msg.usage_metadata = {
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "total_tokens": 150,
+            }
+            return msg
+
+        provider._ainvoke_with_retry = _capture
+
+        with patch("modules.infra.token_budget.get_token_tracker"):
+            await provider.transcribe_image_from_base64(
+                image_base64="AAAA",
+                mime_type="image/png",
+                system_prompt="Transcribe.",
+                user_instruction="Please transcribe.",
+                context_image_base64="BBBB",
+                context_image_mime_type="image/jpeg",
+                context_image_detail="high",
+            )
+
+        assert len(captured_messages) == 2
+        human_msg = captured_messages[1]
+        content = human_msg.content
+        # Expect 4 blocks: text "Context image:", ctx image, text instruction, page image
+        assert len(content) == 4
+        assert content[0]["type"] == "text"
+        assert content[0]["text"] == "Context image:"
+        assert content[1]["type"] == "image_url"
+        assert "data:image/jpeg;base64,BBBB" in content[1]["image_url"]["url"]
+
+    @pytest.mark.unit
+    async def test_no_context_image_two_blocks(self) -> None:
+        """HumanMessage has only instruction + page image when no context."""
+        provider = self._make_provider()
+
+        captured_messages: list[Any] = []
+
+        async def _capture(llm: Any, messages: Any, **kw: Any) -> Any:
+            captured_messages.extend(messages)
+            msg = MagicMock()
+            msg.content = "transcribed"
+            msg.response_metadata = {}
+            msg.usage_metadata = {
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "total_tokens": 150,
+            }
+            return msg
+
+        provider._ainvoke_with_retry = _capture
+
+        with patch("modules.infra.token_budget.get_token_tracker"):
+            await provider.transcribe_image_from_base64(
+                image_base64="AAAA",
+                mime_type="image/png",
+                system_prompt="Transcribe.",
+                user_instruction="Please transcribe.",
+            )
+
+        human_msg = captured_messages[1]
+        content = human_msg.content
+        assert len(content) == 2
+        assert content[0]["type"] == "text"
+        assert content[1]["type"] == "image_url"
+
+    @pytest.mark.unit
+    async def test_context_image_detail_forwarded(self) -> None:
+        """Context image uses the detail level passed in."""
+        provider = self._make_provider()
+
+        captured_messages: list[Any] = []
+
+        async def _capture(llm: Any, messages: Any, **kw: Any) -> Any:
+            captured_messages.extend(messages)
+            msg = MagicMock()
+            msg.content = "transcribed"
+            msg.response_metadata = {}
+            msg.usage_metadata = {
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "total_tokens": 150,
+            }
+            return msg
+
+        provider._ainvoke_with_retry = _capture
+
+        with patch("modules.infra.token_budget.get_token_tracker"):
+            await provider.transcribe_image_from_base64(
+                image_base64="AAAA",
+                mime_type="image/png",
+                system_prompt="Transcribe.",
+                context_image_base64="BBBB",
+                context_image_mime_type="image/png",
+                context_image_detail="high",
+            )
+
+        human_msg = captured_messages[1]
+        ctx_block = human_msg.content[1]
+        assert ctx_block["image_url"].get("detail") == "high"

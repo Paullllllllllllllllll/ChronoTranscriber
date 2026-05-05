@@ -181,6 +181,7 @@ class BatchBackend(ABC):
         schema: dict[str, Any] | None = None,
         schema_path: Path | None = None,
         additional_context: str | None = None,
+        context_image_url: str | None = None,
     ) -> BatchHandle:
         """Submit a batch of requests for processing.
 
@@ -191,6 +192,7 @@ class BatchBackend(ABC):
             schema: JSON schema for structured output (optional)
             schema_path: Path to schema file (alternative to schema dict)
             additional_context: Additional context to inject into prompt
+            context_image_url: Data URL of a context image to include
 
         Returns:
             BatchHandle for tracking the submitted batch

@@ -556,6 +556,18 @@ class WorkflowManager:
             ctx_content, ctx_path = resolve_context_for_file(pdf_path)
             transcriber.update_context(ctx_content)
 
+        # Resolve per-file context image
+        if transcriber is not None:
+            if self.user_config.additional_context_image_path:
+                transcriber.update_context_image(
+                    self.user_config.additional_context_image_path
+                )
+            else:
+                from modules.config.context import resolve_context_image_for_file
+
+                ctx_img = resolve_context_image_for_file(pdf_path)
+                transcriber.update_context_image(ctx_img)
+
         pdf_processor = PDFProcessor(pdf_path)
         # Determine output directory and prepare working folder
         if self.use_input_as_output:
@@ -742,6 +754,20 @@ class WorkflowManager:
 
             ctx_content, ctx_path = resolve_context_for_folder(folder)
             transcriber.update_context(ctx_content)
+
+        # Resolve per-folder context image
+        if transcriber is not None:
+            if self.user_config.additional_context_image_path:
+                transcriber.update_context_image(
+                    self.user_config.additional_context_image_path
+                )
+            else:
+                from modules.config.context import (
+                    resolve_context_image_for_folder,
+                )
+
+                ctx_img = resolve_context_image_for_folder(folder)
+                transcriber.update_context_image(ctx_img)
 
         # Determine output directory and prepare working folder
         if self.use_input_as_output:

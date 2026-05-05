@@ -313,3 +313,80 @@ class TestOpenAIBuildResponsesBodyTextVerbosity:
 
         assert "text" in body
         assert body["text"].get("verbosity") == "medium"
+
+
+class TestOpenAIBuildResponsesBodyContextImage:
+    """Verify _build_responses_body handles context_image_url."""
+
+    @pytest.mark.unit
+    def test_context_image_prepended(self) -> None:
+        """Context image blocks appear before the page image."""
+        from modules.batch.backends.openai_backend import _build_responses_body
+
+        with patch(
+            "modules.batch.backends.openai_backend.get_config_service"
+        ) as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = {}
+            body = _build_responses_body(
+                model_config={"name": "gpt-4o", "max_output_tokens": 4096},
+                system_prompt="prompt",
+                image_url="data:image/png;base64,PAGE",
+                context_image_url="data:image/jpeg;base64,CTX",
+            )
+
+        user_msg = body["input"][1]
+        assert user_msg["role"] == "user"
+        content = user_msg["content"]
+        # 4 blocks: ctx label, ctx image, page label, page image
+        assert len(content) == 4
+        assert content[0] == {"type": "input_text", "text": "Context image:"}
+        assert content[1]["type"] == "input_image"
+        assert content[1]["image_url"] == "data:image/jpeg;base64,CTX"
+        assert content[2] == {"type": "input_text", "text": "The image:"}
+        assert content[3]["type"] == "input_image"
+        assert content[3]["image_url"] == "data:image/png;base64,PAGE"
+
+    @pytest.mark.unit
+    def test_no_context_image_two_blocks(self) -> None:
+        """Without context image, only page label + page image present."""
+        from modules.batch.backends.openai_backend import _build_responses_body
+
+        with patch(
+            "modules.batch.backends.openai_backend.get_config_service"
+        ) as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = {}
+            body = _build_responses_body(
+                model_config={"name": "gpt-4o", "max_output_tokens": 4096},
+                system_prompt="prompt",
+                image_url="data:image/png;base64,PAGE",
+            )
+
+        user_msg = body["input"][1]
+        content = user_msg["content"]
+        assert len(content) == 2
+        assert content[0] == {"type": "input_text", "text": "The image:"}
+        assert content[1]["type"] == "input_image"
+
+    @pytest.mark.unit
+    def test_context_image_uses_same_detail(self) -> None:
+        """Context image gets the same detail kwarg as the page image."""
+        from modules.batch.backends.openai_backend import _build_responses_body
+
+        with patch(
+            "modules.batch.backends.openai_backend.get_config_service"
+        ) as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = {}
+            body = _build_responses_body(
+                model_config={"name": "gpt-4o", "max_output_tokens": 4096},
+                system_prompt="prompt",
+                image_url="data:image/png;base64,PAGE",
+                context_image_url="data:image/jpeg;base64,CTX",
+                llm_detail="high",
+            )
+
+        user_msg = body["input"][1]
+        content = user_msg["content"]
+        ctx_img = content[1]
+        page_img = content[3]
+        assert ctx_img.get("detail") == "high"
+        assert page_img.get("detail") == "high"

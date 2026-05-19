@@ -1145,12 +1145,25 @@ class TestInteractiveMode:
     #   3. batch:            "2" = synchronous
     #   4. schema:           "1" = first schema (markdown)
     #   5. context:          "1" = hierarchical/auto
-    #   6. item_selection:   "1" = process all PDFs
-    #   7. page_range:       "2" = yes, specify
-    #   8. range text:       "first:1"
-    #   9. resume_mode:      "2" = overwrite
-    #  10. summary confirm:  "y"
-    GPT_PDF_RESPONSES = ["3", "3", "2", "1", "1", "1", "2", "first:1", "2", "y"]
+    #   6. context image:    "1" = hierarchical/auto
+    #   7. item_selection:   "1" = process all PDFs
+    #   8. page_range:       "2" = yes, specify
+    #   9. range text:       "first:1"
+    #  10. resume_mode:      "2" = overwrite
+    #  11. summary confirm:  "y"
+    GPT_PDF_RESPONSES = [
+        "3",
+        "3",
+        "2",
+        "1",
+        "1",
+        "1",
+        "1",
+        "2",
+        "first:1",
+        "2",
+        "y",
+    ]
 
     # Interactive prompt sequence for PDF + Tesseract:
     #   1. processing_type:  "3" = pdfs

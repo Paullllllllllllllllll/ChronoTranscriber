@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.3.0
+# ChronoTranscriber v1.3.1
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -570,6 +570,26 @@ The suite contains 1,200+ tests (unit and integration) covering all
 modules, providers, batch backends, and CLI parsers.
 
 ## Changelog
+
+### v1.3.1 (2026-05-19)
+
+- Dependency refresh from environment-wide CVE audit: bump
+  `langchain-core` 1.3.2 -> 1.4.0 (RCE on deserialization);
+  `langsmith` 0.7.36 -> 0.8.5 (unsafe deserialization; full
+  fix to 1.0.x deferred pending upstream constraint
+  relaxation); `pillow` 12.1.1 -> 12.2.0 (FITS GZIP
+  decompression bomb); `jupyterlab` 4.5.6 -> 4.5.7 and
+  `notebook` 7.5.5 -> 7.5.6 (one-click command execution
+  chain); `jupyter-server` 2.17.0 -> 2.18.2 (persistent
+  cookie secret); `urllib3` 2.6.3 -> 2.7.0
+  (audit-surface consolidation). `deskew` downgraded 1.6.0
+  -> 1.5.3 as a side effect of relaxing the `pillow<12.2`
+  peer constraint.
+- Fix `tests/integration/test_live_api.py` scripted-input
+  drift introduced by v1.3.0: insert one response for the
+  new `configure_additional_context_image` prompt so the
+  `GPT_PDF_RESPONSES` sequence matches the post-v1.3.0
+  workflow.
 
 ### v1.3.0 (2026-05-05)
 

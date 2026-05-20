@@ -59,6 +59,8 @@ class UserConfiguration:
     resume_mode: str = "skip"
     page_range: PageRange | None = None
     output_format: str = "txt"
+    output_mode: str = "hash"
+    input_root: Path | None = None
 
     def __post_init__(self) -> None:
         if self.selected_items is None:

@@ -206,6 +206,19 @@ Examples:
         ),
     )
 
+    # Output directory layout
+    parser.add_argument(
+        "--output-mode",
+        choices=["hash", "mirror"],
+        default=None,
+        help=(
+            "Output directory layout. 'hash' (default):"
+            " each item gets a hash-suffixed subdirectory."
+            " 'mirror': replicate the input directory"
+            " hierarchy under the output root."
+        ),
+    )
+
     # Page range filtering
     parser.add_argument(
         "--pages",

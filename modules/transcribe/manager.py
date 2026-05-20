@@ -20,7 +20,11 @@ from modules.images.tesseract_runtime import (
     ensure_tesseract_available,
 )
 from modules.infra.logger import setup_logger
-from modules.infra.paths import PathConfig, create_safe_filename
+from modules.infra.paths import (
+    PathConfig,
+    create_safe_filename,
+    mirror_output_path,
+)
 from modules.infra.token_budget import check_and_wait_for_token_limit
 from modules.postprocess.writer import write_transcription_output
 from modules.transcribe.pipeline import run_transcription_pipeline
@@ -29,6 +33,15 @@ from modules.transcribe.user_config import UserConfiguration
 from modules.ui import print_error, print_info, print_success, print_warning
 
 logger = setup_logger(__name__)
+
+
+def _relative_key(item: Path, input_root: Path | None) -> str | None:
+    if input_root is None:
+        return None
+    try:
+        return str(item.relative_to(input_root))
+    except ValueError:
+        return None
 
 
 class TransientFileTracker:
@@ -153,6 +166,10 @@ class WorkflowManager:
         self.mobi_output_dir = pc.mobi_output_dir
         pc.ensure_output_dirs()
 
+        # Output mode
+        self.output_mode: str = getattr(user_config, "output_mode", "hash")
+        self.input_root: Path | None = getattr(user_config, "input_root", None)
+
         # Resume checker
         self.resume_mode = user_config.resume_mode
         self.output_format = getattr(user_config, "output_format", "txt") or "txt"
@@ -165,6 +182,8 @@ class WorkflowManager:
             epub_output_dir=self.epub_output_dir,
             mobi_output_dir=self.mobi_output_dir,
             output_format=self.output_format,
+            output_mode=self.output_mode,
+            input_root=self.input_root,
         )
 
         # When resume mode is active, preserve JSONL files so page-level
@@ -579,9 +598,26 @@ class WorkflowManager:
             output_txt_path = pdf_path.parent / create_safe_filename(
                 pdf_path.stem, ".txt", pdf_path.parent
             )
+        elif self.output_mode == "mirror" and self.input_root is not None:
+            mirror_dir = mirror_output_path(
+                pdf_path.parent, self.input_root, self.pdf_output_dir
+            )
+            mirror_dir.mkdir(parents=True, exist_ok=True)
+            ext = f".{self.output_format}"
+            output_txt_path = mirror_dir / create_safe_filename(
+                pdf_path.stem, ext, mirror_dir
+            )
+            temp_jsonl_name = create_safe_filename(pdf_path.stem, ".jsonl", mirror_dir)
+            temp_jsonl_path = mirror_dir / temp_jsonl_name
+            if not temp_jsonl_path.exists():
+                temp_jsonl_path.touch()
+            parent_folder = mirror_dir
         else:
+            rel_key = _relative_key(pdf_path, self.input_root)
             parent_folder, output_txt_path, temp_jsonl_path = (
-                pdf_processor.prepare_output_folder(self.pdf_output_dir)
+                pdf_processor.prepare_output_folder(
+                    self.pdf_output_dir, relative_key=rel_key
+                )
             )
         method: str = self.user_config.transcription_method or "gpt"
 
@@ -779,9 +815,28 @@ class WorkflowManager:
             output_txt_path = folder.parent / create_safe_filename(
                 folder.name, ".txt", folder.parent
             )
+        elif self.output_mode == "mirror" and self.input_root is not None:
+            mirror_dir = mirror_output_path(
+                folder, self.input_root, self.image_output_dir
+            )
+            mirror_dir.mkdir(parents=True, exist_ok=True)
+            ext = f".{self.output_format}"
+            output_txt_path = mirror_dir / create_safe_filename(
+                folder.name, ext, mirror_dir
+            )
+            preprocessed_folder = mirror_dir / "preprocessed_images"
+            preprocessed_folder.mkdir(exist_ok=True)
+            temp_jsonl_name = create_safe_filename(folder.name, ".jsonl", mirror_dir)
+            temp_jsonl_path = mirror_dir / temp_jsonl_name
+            if not temp_jsonl_path.exists():
+                temp_jsonl_path.touch()
+            parent_folder = mirror_dir
         else:
+            rel_key = _relative_key(folder, self.input_root)
             parent_folder, preprocessed_folder, temp_jsonl_path, output_txt_path = (
-                ImageProcessor.prepare_image_folder(folder, self.image_output_dir)
+                ImageProcessor.prepare_image_folder(
+                    folder, self.image_output_dir, relative_key=rel_key
+                )
             )
         method: str = self.user_config.transcription_method or "gpt"
 

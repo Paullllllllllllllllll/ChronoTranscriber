@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import platform
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,29 @@ WINDOWS_MAX_PATH = 260
 MAX_SAFE_NAME_LENGTH = 80
 HASH_LENGTH = 8
 MIN_READABLE_LENGTH = 20
+
+
+class OutputMode(StrEnum):
+    """Output directory layout mode."""
+
+    HASH = "hash"
+    MIRROR = "mirror"
+
+
+def mirror_output_path(
+    item: Path,
+    input_root: Path,
+    output_root: Path,
+) -> Path:
+    """Return the mirrored output directory for *item*.
+
+    Replicates the relative path of *item* under *output_root*.
+    """
+    try:
+        rel = item.relative_to(input_root)
+    except ValueError:
+        rel = Path(item.name)
+    return output_root / rel
 
 
 def _compute_name_hash(name: str) -> str:

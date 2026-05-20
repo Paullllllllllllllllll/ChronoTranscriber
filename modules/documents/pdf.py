@@ -446,7 +446,11 @@ class PDFProcessor:
             )
             return False
 
-    def prepare_output_folder(self, pdf_output_dir: Path) -> tuple[Path, Path, Path]:
+    def prepare_output_folder(
+        self,
+        pdf_output_dir: Path,
+        relative_key: str | None = None,
+    ) -> tuple[Path, Path, Path]:
         """
         Prepares the output directory for this PDF file.
 
@@ -456,9 +460,8 @@ class PDFProcessor:
               - output_txt_path: File path for the final transcription text.
               - temp_jsonl_path: File path for temporary JSONL records.
         """
-        # Use the new path_utils to create a safe directory name with hash
-        # The directory name will be truncated with hash if too long
-        safe_dir_name = create_safe_directory_name(self.pdf_path.stem)
+        key = relative_key if relative_key is not None else self.pdf_path.stem
+        safe_dir_name = create_safe_directory_name(key)
 
         # Create parent folder with safe directory name
         parent_folder = pdf_output_dir / safe_dir_name

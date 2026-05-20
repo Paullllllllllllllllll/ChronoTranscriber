@@ -16,7 +16,11 @@ from pathlib import Path
 from typing import Any
 
 from modules.infra.logger import setup_logger
-from modules.infra.paths import create_safe_directory_name, create_safe_filename
+from modules.infra.paths import (
+    create_safe_directory_name,
+    create_safe_filename,
+    mirror_output_path,
+)
 
 logger = setup_logger(__name__)
 
@@ -67,12 +71,16 @@ class ResumeChecker:
         epub_output_dir: Path | None = None,
         mobi_output_dir: Path | None = None,
         output_format: str = "txt",
+        output_mode: str = "hash",
+        input_root: Path | None = None,
     ) -> None:
         self.resume_mode = resume_mode
         self.paths_config = paths_config
         self.use_input_as_output = use_input_as_output
         self.output_format = output_format
         self._output_ext = f".{output_format}" if output_format != "txt" else ".txt"
+        self.output_mode = output_mode
+        self.input_root = input_root
 
         fp = paths_config.get("file_paths", {})
         self.pdf_output_dir = pdf_output_dir or Path(
@@ -186,6 +194,7 @@ class ResumeChecker:
         *,
         supports_partial_jsonl: bool = True,
         working_dir_base_override: Path | None = None,
+        hash_key: str | None = None,
     ) -> ResumeResult:
         """Generic output-existence check shared by all document types.
 
@@ -200,6 +209,8 @@ class ResumeChecker:
                 ``use_input_as_output`` / *default_output_dir*.  Used by image
                 folders whose working directory lives in the parent, not inside
                 the folder.
+            hash_key: If provided, used instead of *item_stem* for the
+                directory hash (to match relative-path-aware hashing).
         """
         # -- Co-located output check (use_input_as_output) ----------------
         # For files the co-locate directory is item.parent; for folders it is
@@ -230,7 +241,7 @@ class ResumeChecker:
             working_dir_base = default_output_dir
 
         # -- Hash-suffixed working directory (legacy / JSONL location) -----
-        safe_dir = create_safe_directory_name(item_stem)
+        safe_dir = create_safe_directory_name(hash_key or item_stem)
         parent_folder = working_dir_base / safe_dir
 
         if not parent_folder.exists():
@@ -272,13 +283,30 @@ class ResumeChecker:
     # -- Thin per-type wrappers -------------------------------------------
 
     def _check_pdf(self, pdf_path: Path) -> ResumeResult:
+        if self.output_mode == "mirror" and self.input_root is not None:
+            return self._check_mirror_output(
+                pdf_path,
+                pdf_path.parent,
+                self.pdf_output_dir,
+                pdf_path.stem,
+            )
+        rel_key = self._relative_key(pdf_path)
         return self._check_output_exists(
             pdf_path,
             pdf_path.stem,
             self.pdf_output_dir,
+            hash_key=rel_key,
         )
 
     def _check_image_folder(self, folder: Path) -> ResumeResult:
+        if self.output_mode == "mirror" and self.input_root is not None:
+            return self._check_mirror_output(
+                folder,
+                folder,
+                self.image_output_dir,
+                folder.name,
+            )
+        rel_key = self._relative_key(folder)
         return self._check_output_exists(
             folder,
             folder.name,
@@ -286,6 +314,39 @@ class ResumeChecker:
             working_dir_base_override=(
                 folder.parent if self.use_input_as_output else None
             ),
+            hash_key=rel_key,
+        )
+
+    def _relative_key(self, item: Path) -> str | None:
+        if self.input_root is None:
+            return None
+        try:
+            return str(item.relative_to(self.input_root))
+        except ValueError:
+            return None
+
+    def _check_mirror_output(
+        self,
+        item: Path,
+        mirror_item: Path,
+        output_dir: Path,
+        stem: str,
+    ) -> ResumeResult:
+        assert self.input_root is not None
+        m_dir = mirror_output_path(mirror_item, self.input_root, output_dir)
+        txt_name = create_safe_filename(stem, self._output_ext, m_dir)
+        txt_path = m_dir / txt_name
+        if txt_path.exists() and txt_path.stat().st_size > 0:
+            return ResumeResult(
+                item=item,
+                state=ProcessingState.COMPLETE,
+                output_path=txt_path,
+                reason=f"mirror output exists: {txt_path.name}",
+            )
+        return ResumeResult(
+            item=item,
+            state=ProcessingState.NONE,
+            reason="no mirror output",
         )
 
     def _check_epub(self, epub_path: Path) -> ResumeResult:

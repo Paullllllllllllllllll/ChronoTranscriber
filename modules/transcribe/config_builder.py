@@ -197,6 +197,10 @@ def create_config_from_cli_args(
     config_default = paths_config.get("general", {}).get("output_format", "txt")
     config.output_format = getattr(args, "output_format", None) or config_default
 
+    # Output mode: CLI flag takes precedence; default "hash"
+    config.output_mode = getattr(args, "output_mode", None) or "hash"
+    config.input_root = resolve_path(getattr(args, "input", None), base_input_dir)
+
     # Parse page range if provided
     if getattr(args, "pages", None):
         config.page_range = parse_page_range(args.pages)
@@ -247,6 +251,8 @@ def create_config_from_cli_args(
                 epub_output_dir=pc.epub_output_dir,
                 mobi_output_dir=pc.mobi_output_dir,
                 output_format=config.output_format,
+                output_mode=config.output_mode,
+                input_root=config.input_root,
             )
             total_before = len(decisions)
             decisions = [

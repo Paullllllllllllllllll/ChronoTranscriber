@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.3.1
+# ChronoTranscriber v1.4.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -570,6 +570,20 @@ The suite contains 1,200+ tests (unit and integration) covering all
 modules, providers, batch backends, and CLI parsers.
 
 ## Changelog
+
+### v1.4.0 (2026-05-20)
+
+- Add `--output-mode {hash,mirror}` CLI flag: mirror mode
+  replicates the input directory hierarchy under the output
+  root, preserving edition/page structure for downstream
+  consumers.
+- Fix hash collision in non-colocated output mode: the
+  directory hash now incorporates the full relative path
+  from the input root instead of just the leaf folder name,
+  preventing overwrites when multiple editions share page
+  numbers.
+- Resume checker supports both mirror mode and
+  relative-path-aware hash lookups.
 
 ### v1.3.1 (2026-05-19)
 

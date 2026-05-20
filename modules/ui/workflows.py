@@ -859,6 +859,8 @@ class WorkflowUI:
                 image_output_dir=pc.image_output_dir,
                 epub_output_dir=pc.epub_output_dir,
                 mobi_output_dir=pc.mobi_output_dir,
+                output_mode=getattr(config, "output_mode", "hash"),
+                input_root=getattr(config, "input_root", None),
             )
             total_before = len(decisions)
             decisions = [
@@ -1117,6 +1119,8 @@ class WorkflowUI:
             resume_mode=config.resume_mode,
             paths_config=paths_config,
             use_input_as_output=use_input_as_output,
+            output_mode=getattr(config, "output_mode", "hash"),
+            input_root=getattr(config, "input_root", None),
         )
         # For auto mode, derive processing_type from each decision's file_type;
         # use "pdfs" as a reasonable default since most auto items are PDFs.

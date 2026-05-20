@@ -329,7 +329,9 @@ class ImageProcessor:
 
     @staticmethod
     def prepare_image_folder(
-        folder: Path, image_output_dir: Path
+        folder: Path,
+        image_output_dir: Path,
+        relative_key: str | None = None,
     ) -> tuple[Path, Path, Path, Path]:
         """
         Prepares the output directories for processing an image folder.
@@ -340,9 +342,8 @@ class ImageProcessor:
           - temp_jsonl_path: File for recording transcription logs.
           - output_txt_path: Final transcription text file.
         """
-        # Use the new path_utils to create a safe directory name with hash
-        # The directory name will be truncated with hash if too long
-        safe_dir_name = create_safe_directory_name(folder.name)
+        key = relative_key if relative_key is not None else folder.name
+        safe_dir_name = create_safe_directory_name(key)
 
         # Create parent folder with safe directory name
         parent_folder = image_output_dir / safe_dir_name

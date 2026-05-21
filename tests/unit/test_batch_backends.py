@@ -390,3 +390,89 @@ class TestOpenAIBuildResponsesBodyContextImage:
         page_img = content[3]
         assert ctx_img.get("detail") == "high"
         assert page_img.get("detail") == "high"
+
+    @pytest.mark.unit
+    def test_empty_user_instruction_omits_text_block(self) -> None:
+        """Empty user_instruction produces image-only content."""
+        from modules.batch.backends.openai_backend import (
+            _build_responses_body,
+        )
+
+        with patch(
+            "modules.batch.backends.openai_backend.get_config_service"
+        ) as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = {}
+            body = _build_responses_body(
+                model_config={
+                    "name": "gpt-4o",
+                    "max_output_tokens": 4096,
+                    "user_instruction": "",
+                },
+                system_prompt="prompt",
+                image_url="data:image/png;base64,PAGE",
+            )
+
+        content = body["input"][1]["content"]
+        assert len(content) == 1
+        assert content[0]["type"] == "input_image"
+
+    @pytest.mark.unit
+    def test_empty_context_image_instruction_omits_label(
+        self,
+    ) -> None:
+        """Empty context_image_instruction omits label but keeps image."""
+        from modules.batch.backends.openai_backend import (
+            _build_responses_body,
+        )
+
+        with patch(
+            "modules.batch.backends.openai_backend.get_config_service"
+        ) as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = {}
+            body = _build_responses_body(
+                model_config={
+                    "name": "gpt-4o",
+                    "max_output_tokens": 4096,
+                    "context_image_instruction": "",
+                },
+                system_prompt="prompt",
+                image_url="data:image/png;base64,PAGE",
+                context_image_url="data:image/jpeg;base64,CTX",
+            )
+
+        content = body["input"][1]["content"]
+        # 3 blocks: ctx image (no label), page label, page image
+        assert len(content) == 3
+        assert content[0]["type"] == "input_image"
+        assert content[1] == {
+            "type": "input_text",
+            "text": "The image:",
+        }
+
+    @pytest.mark.unit
+    def test_custom_user_instruction_string(self) -> None:
+        """Custom user_instruction string appears in content."""
+        from modules.batch.backends.openai_backend import (
+            _build_responses_body,
+        )
+
+        with patch(
+            "modules.batch.backends.openai_backend.get_config_service"
+        ) as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = {}
+            body = _build_responses_body(
+                model_config={
+                    "name": "gpt-4o",
+                    "max_output_tokens": 4096,
+                    "user_instruction": "OCR this page.",
+                },
+                system_prompt="prompt",
+                image_url="data:image/png;base64,PAGE",
+            )
+
+        content = body["input"][1]["content"]
+        assert len(content) == 2
+        assert content[0] == {
+            "type": "input_text",
+            "text": "OCR this page.",
+        }

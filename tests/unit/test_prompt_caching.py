@@ -102,6 +102,7 @@ class TestCacheTokenExtraction:
         provider._track_token_usage = lambda *a: BaseProvider._track_token_usage(
             provider, *a
         )
+        provider._get_content_quality_config = lambda: {"enabled": False}
         return provider
 
     @pytest.mark.unit

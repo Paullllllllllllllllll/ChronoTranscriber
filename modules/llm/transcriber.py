@@ -73,6 +73,11 @@ class LangChainTranscriber:
         self.model = model or tm.get("name", "gpt-4o")
         self.provider_name = provider or tm.get("provider")
 
+        self._user_instruction: str = tm.get("user_instruction", "The image:")
+        self._context_image_instruction: str = tm.get(
+            "context_image_instruction", "Context image:"
+        )
+
         # Detect plain-text prompt mode for custom endpoints.
         # Read directly from config because the provider instance is
         # created later but prompt loading must happen first.
@@ -346,13 +351,14 @@ class LangChainTranscriber:
         result = await self._provider.transcribe_image(
             image_path,
             system_prompt=self.system_prompt_text,
-            user_instruction="The image:",
+            user_instruction=self._user_instruction,
             json_schema=self.full_schema_obj,
             image_detail=self.image_detail,
             media_resolution=self.media_resolution,
             context_image_base64=self._context_image_base64,
             context_image_mime_type=self._context_image_mime_type,
             context_image_detail=self.image_detail,
+            context_image_instruction=self._context_image_instruction,
         )
 
         # Convert TranscriptionResult to dict format expected by existing code
@@ -376,13 +382,14 @@ class LangChainTranscriber:
             image_base64=image_base64,
             mime_type=mime_type,
             system_prompt=self.system_prompt_text,
-            user_instruction="The image:",
+            user_instruction=self._user_instruction,
             json_schema=self.full_schema_obj,
             image_detail=self.image_detail,
             media_resolution=self.media_resolution,
             context_image_base64=self._context_image_base64,
             context_image_mime_type=self._context_image_mime_type,
             context_image_detail=self.image_detail,
+            context_image_instruction=self._context_image_instruction,
         )
 
         return self._result_to_dict(result)

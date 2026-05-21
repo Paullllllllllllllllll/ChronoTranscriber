@@ -200,6 +200,7 @@ class AnthropicProvider(BaseProvider):
         context_image_base64: str | None = None,
         context_image_mime_type: str | None = None,
         context_image_detail: str | None = None,
+        context_image_instruction: str = "Context image:",
     ) -> TranscriptionResult:
         """Transcribe text from a base64-encoded image using LangChain.
 
@@ -249,14 +250,14 @@ class AnthropicProvider(BaseProvider):
         else:
             system_message = SystemMessage(content=system_prompt)
 
+        human_content: list[dict[str, Any]] = []
+        if user_instruction:
+            human_content.append({"type": "text", "text": user_instruction})
+        human_content.append(image_content)
+
         messages = [
             system_message,
-            HumanMessage(
-                content=[
-                    {"type": "text", "text": user_instruction},
-                    image_content,
-                ]
-            ),
+            HumanMessage(content=human_content),
         ]
 
         # Native structured outputs (no function calling)

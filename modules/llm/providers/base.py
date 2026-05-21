@@ -278,6 +278,7 @@ class BaseProvider(ABC):
         context_image_base64: str | None = None,
         context_image_mime_type: str | None = None,
         context_image_detail: str | None = None,
+        context_image_instruction: str = "Context image:",
     ) -> TranscriptionResult:
         """Transcribe text from an image file.
 
@@ -295,6 +296,8 @@ class BaseProvider(ABC):
             context_image_base64: Optional base64-encoded context image
             context_image_mime_type: MIME type of the context image
             context_image_detail: Detail level for the context image
+            context_image_instruction: Label for the context image block;
+                empty string omits the label entirely
 
         Returns:
             TranscriptionResult with the transcription and metadata
@@ -311,6 +314,7 @@ class BaseProvider(ABC):
             context_image_base64=context_image_base64,
             context_image_mime_type=context_image_mime_type,
             context_image_detail=context_image_detail,
+            context_image_instruction=context_image_instruction,
         )
 
     @abstractmethod
@@ -327,6 +331,7 @@ class BaseProvider(ABC):
         context_image_base64: str | None = None,
         context_image_mime_type: str | None = None,
         context_image_detail: str | None = None,
+        context_image_instruction: str = "Context image:",
     ) -> TranscriptionResult:
         """Transcribe text from a base64-encoded image.
 
@@ -342,6 +347,8 @@ class BaseProvider(ABC):
             context_image_base64: Optional base64-encoded context image
             context_image_mime_type: MIME type of the context image
             context_image_detail: Detail level for the context image
+            context_image_instruction: Label for the context image block;
+                empty string omits the label entirely
 
         Returns:
             TranscriptionResult with the transcription and metadata
@@ -607,19 +614,33 @@ class BaseProvider(ABC):
         # Content quality validation (catches hallucination loops, truncation,
         # system-prompt bleed, and excessive line repetition).
         # Raises ContentQualityError → retried by _ainvoke_with_retry.
-        if (
-            result.parsed_output
-            and not result.no_transcribable_text
-            and not result.transcription_not_possible
-        ):
+        transcription_text = None
+        skip_quality = False
+
+        if result.parsed_output and isinstance(result.parsed_output, dict):
+            transcription_text = result.parsed_output.get("transcription")
+            skip_quality = (
+                result.no_transcribable_text or result.transcription_not_possible
+            )
+        elif result.content:
+            stripped = result.content.strip()
+            if stripped in (
+                "[No transcribable text]",
+                "[Transcription not possible]",
+            ):
+                skip_quality = True
+            else:
+                transcription_text = stripped
+
+        if transcription_text and not skip_quality:
             cq_config = self._get_content_quality_config()
             if cq_config.get("enabled", True):
                 from modules.llm.quality import validate_content_quality
 
                 validate_content_quality(
-                    transcription_text=result.parsed_output.get("transcription"),
-                    no_transcribable_text=result.no_transcribable_text,
-                    transcription_not_possible=result.transcription_not_possible,
+                    transcription_text=transcription_text,
+                    no_transcribable_text=False,
+                    transcription_not_possible=False,
                     config=cq_config,
                 )
 

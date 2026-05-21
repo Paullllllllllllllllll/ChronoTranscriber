@@ -70,10 +70,13 @@ def _build_responses_body(
         detail_kwargs["detail"] = detail_norm
 
     # Build user content blocks
+    user_instruction = tm.get("user_instruction", "The image:")
+    ctx_instruction = tm.get("context_image_instruction", "Context image:")
     user_content: list[dict[str, Any]] = []
 
     if context_image_url:
-        user_content.append({"type": "input_text", "text": "Context image:"})
+        if ctx_instruction:
+            user_content.append({"type": "input_text", "text": ctx_instruction})
         user_content.append(
             {
                 "type": "input_image",
@@ -82,7 +85,8 @@ def _build_responses_body(
             }
         )
 
-    user_content.append({"type": "input_text", "text": "The image:"})
+    if user_instruction:
+        user_content.append({"type": "input_text", "text": user_instruction})
     user_content.append(
         {
             "type": "input_image",

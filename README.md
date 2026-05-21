@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.4.0
+# ChronoTranscriber v1.5.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -293,13 +293,18 @@ transcription_model:
     effort: medium       # Cross-provider preset (low | medium | high)
   temperature: 0.01
   top_p: 1.0
+  user_instruction: "The image:"          # text block before page image
+  context_image_instruction: "Context image:"  # text block before context image
 ```
 
 Key parameters: `provider` (auto-detected if omitted), `name` (model
 identifier), `max_output_tokens` (must cover reasoning tokens on
 reasoning models), `reasoning.effort` (OpenAI also supports `none`,
 `minimal`, `xhigh`), `temperature`/`top_p` (applied only when the
-model supports them).
+model supports them), `user_instruction` (text sent alongside each
+page image; set to `""` to omit the text block entirely for models
+that expect image-only input), `context_image_instruction` (label
+for the optional context image; independently configurable).
 
 ### 2. Paths Configuration (`paths_config.yaml`)
 
@@ -566,10 +571,26 @@ Run the test suite:
 uv run python -m pytest -v
 ```
 
-The suite contains 1,200+ tests (unit and integration) covering all
+The suite contains 1,250+ tests (unit and integration) covering all
 modules, providers, batch backends, and CLI parsers.
 
 ## Changelog
+
+### v1.5.0 (2026-05-21)
+
+- Add configurable `user_instruction` and
+  `context_image_instruction` keys under `transcription_model`
+  in `model_config.yaml`. When set to an empty string, the
+  text block is omitted entirely from the user message, sending
+  image-only input. Required for models like `churro-3B`
+  (Qwen2.5-VL fine-tune) that expect no accompanying text.
+  Both sync and batch paths respect the new keys across all
+  five providers (OpenAI, Anthropic, Google, OpenRouter,
+  Custom) and all four batch backends.
+- Fix pre-existing test failures in `TestCacheTokenExtraction`
+  where the mock provider's content quality validator received
+  a MagicMock config instead of a dict, triggering false
+  hallucination-loop detection on short test content.
 
 ### v1.4.0 (2026-05-20)
 

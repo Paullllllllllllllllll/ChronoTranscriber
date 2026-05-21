@@ -137,8 +137,11 @@ class AnthropicBatchBackend(BatchBackend):
                 raise ValueError(f"Request {req.custom_id} has no image data")
 
             # Build message content with image (Anthropic format)
-            user_content = [
-                {"type": "text", "text": "The image:"},
+            user_instruction = model_config.get("user_instruction", "The image:")
+            user_content: list[dict[str, Any]] = []
+            if user_instruction:
+                user_content.append({"type": "text", "text": user_instruction})
+            user_content.append(
                 {
                     "type": "image",
                     "source": {
@@ -147,7 +150,7 @@ class AnthropicBatchBackend(BatchBackend):
                         "data": image_base64,
                     },
                 },
-            ]
+            )
 
             # Build params for Messages API
             params: dict[str, Any] = {

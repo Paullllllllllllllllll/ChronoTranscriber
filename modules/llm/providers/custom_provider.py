@@ -157,6 +157,7 @@ class CustomProvider(BaseProvider):
         context_image_base64: str | None = None,
         context_image_mime_type: str | None = None,
         context_image_detail: str | None = None,
+        context_image_instruction: str = "Context image:",
     ) -> TranscriptionResult:
         """Transcribe text from a base64-encoded image.
 
@@ -184,14 +185,29 @@ class CustomProvider(BaseProvider):
             "image_url": {"url": data_url},
         }
 
+        content_blocks: list[str | dict[str, Any]] = []
+
+        if context_image_base64 and context_image_mime_type:
+            ctx_data_url = self.create_data_url(
+                context_image_base64, context_image_mime_type
+            )
+            ctx_block: dict[str, Any] = {
+                "type": "image_url",
+                "image_url": {"url": ctx_data_url},
+            }
+            if context_image_instruction:
+                content_blocks.append(
+                    {"type": "text", "text": context_image_instruction}
+                )
+            content_blocks.append(ctx_block)
+
+        if user_instruction:
+            content_blocks.append({"type": "text", "text": user_instruction})
+        content_blocks.append(image_content)
+
         messages: list[Any] = [
             SystemMessage(content=system_prompt),
-            HumanMessage(
-                content=[
-                    {"type": "text", "text": user_instruction},
-                    image_content,
-                ]
-            ),
+            HumanMessage(content=content_blocks),
         ]
 
         caps = self._capabilities

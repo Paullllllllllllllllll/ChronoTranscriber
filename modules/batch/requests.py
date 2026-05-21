@@ -109,6 +109,26 @@ def _build_responses_body_for_image(
         elif d == "auto":
             detail_norm = None
 
+    # Build user content blocks
+    user_instruction = tm.get("user_instruction", "The image:")
+    user_content: list[dict[str, Any]] = []
+    if user_instruction:
+        user_content.append({"type": "input_text", "text": user_instruction})
+    user_content.append(
+        {
+            "type": "input_image",
+            "image_url": image_url,
+            **(
+                {"detail": detail_norm}
+                if (
+                    detail_norm in ("low", "high", "original")
+                    and caps.supports_image_detail
+                )
+                else {}
+            ),
+        },
+    )
+
     # Base body
     body: dict[str, Any] = {
         "model": model_name,
@@ -119,26 +139,7 @@ def _build_responses_body_for_image(
             },
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": "The image:",
-                    },
-                    {
-                        "type": "input_image",
-                        # Responses API expects image_url as a STRING (URL or data URL)
-                        # with optional detail as a sibling property.
-                        "image_url": image_url,
-                        **(
-                            {"detail": detail_norm}
-                            if (
-                                detail_norm in ("low", "high", "original")
-                                and caps.supports_image_detail
-                            )
-                            else {}
-                        ),
-                    },
-                ],
+                "content": user_content,
             },
         ],
         "max_output_tokens": int(

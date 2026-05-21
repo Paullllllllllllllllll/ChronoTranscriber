@@ -128,20 +128,19 @@ class GoogleBatchBackend(BatchBackend):
                 raise ValueError(f"Request {req.custom_id} has no image data")
 
             # Build content parts
-            contents = [
+            user_instruction = model_config.get("user_instruction", "The image:")
+            parts: list[dict[str, Any]] = []
+            if user_instruction:
+                parts.append({"text": user_instruction})
+            parts.append(
                 {
-                    "role": "user",
-                    "parts": [
-                        {"text": "The image:"},
-                        {
-                            "inline_data": {
-                                "mime_type": mime_type,
-                                "data": image_base64,
-                            }
-                        },
-                    ],
+                    "inline_data": {
+                        "mime_type": mime_type,
+                        "data": image_base64,
+                    }
                 }
-            ]
+            )
+            contents = [{"role": "user", "parts": parts}]
 
             # Build the request with metadata key for correlation
             request_obj = {

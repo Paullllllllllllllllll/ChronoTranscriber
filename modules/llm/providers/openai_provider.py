@@ -186,6 +186,7 @@ class OpenAIProvider(BaseProvider):
         context_image_base64: str | None = None,
         context_image_mime_type: str | None = None,
         context_image_detail: str | None = None,
+        context_image_instruction: str = "Context image:",
     ) -> TranscriptionResult:
         """Transcribe text from a base64-encoded image using LangChain.
 
@@ -240,10 +241,14 @@ class OpenAIProvider(BaseProvider):
                 ctx_det = ctx_det.lower().strip()
             if ctx_det and caps.supports_image_detail:
                 ctx_block["image_url"]["detail"] = ctx_det
-            content_blocks.append({"type": "text", "text": "Context image:"})
+            if context_image_instruction:
+                content_blocks.append(
+                    {"type": "text", "text": context_image_instruction}
+                )
             content_blocks.append(ctx_block)
 
-        content_blocks.append({"type": "text", "text": user_instruction})
+        if user_instruction:
+            content_blocks.append({"type": "text", "text": user_instruction})
         content_blocks.append(image_content)
 
         messages = [

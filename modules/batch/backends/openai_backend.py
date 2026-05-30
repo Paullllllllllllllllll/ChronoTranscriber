@@ -5,7 +5,6 @@ Uses OpenAI's Batch API with the /v1/responses endpoint for async processing.
 
 from __future__ import annotations
 
-import base64
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -20,8 +19,8 @@ from modules.batch.backends.base import (
     BatchStatusInfo,
 )
 from modules.config.capabilities import detect_capabilities
-from modules.config.constants import SUPPORTED_IMAGE_FORMATS
 from modules.config.service import get_config_service
+from modules.images.encoding import encode_image_to_data_url
 from modules.infra.logger import setup_logger
 from modules.llm.prompt_utils import prepare_prompt_with_context
 from modules.llm.structured_outputs import build_structured_text_format
@@ -31,17 +30,6 @@ logger = setup_logger(__name__)
 # Limits for OpenAI Batch API
 MAX_BATCH_REQUESTS = 50000
 MAX_BATCH_BYTES = 150 * 1024 * 1024  # 150 MB safety margin (limit is 200MB)
-
-
-def _encode_image_to_data_url(image_path: Path) -> str:
-    """Encode an image file as a data URL."""
-    ext = image_path.suffix.lower()
-    mime = SUPPORTED_IMAGE_FORMATS.get(ext)
-    if not mime:
-        raise ValueError(f"Unsupported image format: {image_path.suffix}")
-    with image_path.open("rb") as f:
-        encoded = base64.b64encode(f.read()).decode("utf-8")
-    return f"data:{mime};base64,{encoded}"
 
 
 def _build_responses_body(
@@ -241,7 +229,7 @@ class OpenAIBatchBackend(BatchBackend):
         for req in requests:
             # Get image URL
             if req.image_path:
-                image_url = _encode_image_to_data_url(req.image_path)
+                image_url = encode_image_to_data_url(req.image_path)
             elif req.image_base64 and req.mime_type:
                 image_url = f"data:{req.mime_type};base64,{req.image_base64}"
             else:

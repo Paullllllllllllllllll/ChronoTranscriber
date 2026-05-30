@@ -859,6 +859,7 @@ class WorkflowUI:
                 image_output_dir=pc.image_output_dir,
                 epub_output_dir=pc.epub_output_dir,
                 mobi_output_dir=pc.mobi_output_dir,
+                output_format=getattr(config, "output_format", "txt"),
                 output_mode=getattr(config, "output_mode", "hash"),
                 input_root=getattr(config, "input_root", None),
             )
@@ -1110,15 +1111,23 @@ class WorkflowUI:
             *should_return* is ``True`` the caller must return
             *return_value* immediately.
         """
+        from modules.infra.paths import PathConfig
         from modules.transcribe.resume import ResumeChecker
 
-        use_input_as_output = paths_config.get("general", {}).get(
-            "input_paths_is_output_path", False
-        )
+        # Resolve the configured per-type output dirs and output format so the
+        # resume preview checks the same paths the writer will produce; without
+        # output_format the checker defaults to ".txt" and mis-reports skips
+        # for md/json output.
+        pc = PathConfig.from_paths_config(paths_config)
         resume_checker = ResumeChecker(
             resume_mode=config.resume_mode,
             paths_config=paths_config,
-            use_input_as_output=use_input_as_output,
+            use_input_as_output=pc.use_input_as_output,
+            pdf_output_dir=pc.pdf_output_dir,
+            image_output_dir=pc.image_output_dir,
+            epub_output_dir=pc.epub_output_dir,
+            mobi_output_dir=pc.mobi_output_dir,
+            output_format=getattr(config, "output_format", "txt"),
             output_mode=getattr(config, "output_mode", "hash"),
             input_root=getattr(config, "input_root", None),
         )

@@ -6,7 +6,6 @@ See: https://ai.google.dev/gemini-api/docs/batch-api
 
 from __future__ import annotations
 
-import base64
 import json
 import time
 from collections.abc import Iterator
@@ -21,7 +20,7 @@ from modules.batch.backends.base import (
     BatchStatus,
     BatchStatusInfo,
 )
-from modules.config.constants import SUPPORTED_IMAGE_FORMATS
+from modules.images.encoding import encode_image_to_base64
 from modules.infra.logger import setup_logger
 from modules.llm.prompt_utils import prepare_prompt_with_context
 
@@ -31,17 +30,6 @@ logger = setup_logger(__name__)
 MAX_BATCH_REQUESTS = 50000
 MAX_BATCH_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB for file input
 MAX_INLINE_BYTES = 20 * 1024 * 1024  # 20 MB for inline requests
-
-
-def _encode_image_to_base64(image_path: Path) -> tuple[str, str]:
-    """Encode an image file to base64 and return (data, mime_type)."""
-    ext = image_path.suffix.lower()
-    mime = SUPPORTED_IMAGE_FORMATS.get(ext)
-    if not mime:
-        raise ValueError(f"Unsupported image format: {image_path.suffix}")
-    with image_path.open("rb") as f:
-        encoded = base64.b64encode(f.read()).decode("utf-8")
-    return encoded, mime
 
 
 class GoogleBatchBackend(BatchBackend):
@@ -120,7 +108,7 @@ class GoogleBatchBackend(BatchBackend):
         for req in requests:
             # Get image data
             if req.image_path:
-                image_base64, mime_type = _encode_image_to_base64(req.image_path)
+                image_base64, mime_type = encode_image_to_base64(req.image_path)
             elif req.image_base64 and req.mime_type:
                 image_base64 = req.image_base64
                 mime_type = req.mime_type

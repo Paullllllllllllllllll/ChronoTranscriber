@@ -422,6 +422,18 @@ class TestParseIndices:
             parse_indices("invalid")
 
     @pytest.mark.unit
+    def test_leading_dash_rejected_clearly(self) -> None:
+        """A leading-dash token raises a clear error, not a range-parse error."""
+        with pytest.raises(ValueError, match="negative indices are not supported"):
+            parse_indices("-7")
+
+    @pytest.mark.unit
+    def test_open_range_rejected(self) -> None:
+        """An open-ended range with a missing bound is rejected as a range."""
+        with pytest.raises(ValueError, match="Invalid range format"):
+            parse_indices("5-")
+
+    @pytest.mark.unit
     def test_empty_parts_ignored(self) -> None:
         """Test that empty parts are ignored."""
         result = parse_indices("1,,2,")

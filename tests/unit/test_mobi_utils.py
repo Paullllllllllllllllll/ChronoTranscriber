@@ -231,8 +231,8 @@ class TestNormalizeText:
     @pytest.mark.unit
     def test_collapses_blank_lines(self) -> None:
         raw = "\n  A  \n\n\n  B\n\n\n\nC  \n\n"
-        assert mobi_mod._normalize_text(raw) == "A\n\nB\n\nC"
+        assert mobi_mod.normalize_text(raw) == "A\n\nB\n\nC"
 
     @pytest.mark.unit
     def test_empty_input_returns_empty(self) -> None:
-        assert mobi_mod._normalize_text("") == ""
+        assert mobi_mod.normalize_text("") == ""

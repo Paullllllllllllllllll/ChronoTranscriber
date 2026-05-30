@@ -248,7 +248,9 @@ class CustomProvider(BaseProvider):
             )
             return await self._process_llm_response(response, OPENAI_TOKEN_MAPPING)
         except Exception as e:
-            logger.error("Error invoking custom endpoint: %s", e)
+            # logger.exception captures the traceback so a programming error
+            # (e.g. KeyError from a refactor) is not masked as an API error.
+            logger.exception("Error invoking custom endpoint: %s", e)
             return TranscriptionResult(content="", error=str(e))
 
     async def close(self) -> None:

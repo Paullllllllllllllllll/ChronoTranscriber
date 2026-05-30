@@ -508,6 +508,46 @@ class TestKeyboardInterruptCleanup:
         mock_tracker.clear.assert_not_called()
 
     @pytest.mark.unit
+    def test_summary_counts_failure_only_as_failed(self, tmp_path: Path) -> None:
+        """A failed item is counted as failed, not also as processed."""
+        import asyncio
+        from unittest.mock import patch
+
+        wm = self._make_workflow_manager(tmp_path)
+        wm._transient_tracker = MagicMock()
+
+        async def _raise_runtime(*args, **kwargs):
+            raise RuntimeError("item failed")
+
+        with patch.object(
+            wm, "process_single_image_folder", side_effect=_raise_runtime
+        ):
+            summary = asyncio.run(wm.process_selected_items(transcriber=None))
+
+        assert summary.total == 1
+        assert summary.failed == 1
+        assert summary.processed == 0
+
+    @pytest.mark.unit
+    def test_summary_counts_success(self, tmp_path: Path) -> None:
+        """A successful item is counted as processed, with zero failures."""
+        import asyncio
+        from unittest.mock import patch
+
+        wm = self._make_workflow_manager(tmp_path)
+        wm._transient_tracker = MagicMock()
+
+        async def _succeed(*args, **kwargs):
+            return None
+
+        with patch.object(wm, "process_single_image_folder", side_effect=_succeed):
+            summary = asyncio.run(wm.process_selected_items(transcriber=None))
+
+        assert summary.total == 1
+        assert summary.processed == 1
+        assert summary.failed == 0
+
+    @pytest.mark.unit
     def test_keyboard_interrupt_propagates_after_cleanup(self, tmp_path: Path) -> None:
         """KeyboardInterrupt is re-raised after cleanup_pending() is called."""
         import asyncio

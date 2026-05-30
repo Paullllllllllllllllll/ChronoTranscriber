@@ -5,6 +5,7 @@ import asyncio
 import datetime
 import json
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,21 @@ from modules.transcribe.user_config import UserConfiguration
 from modules.ui import print_error, print_info, print_success, print_warning
 
 logger = setup_logger(__name__)
+
+
+@dataclass
+class ProcessingSummary:
+    """Outcome counts for a `process_selected_items` run.
+
+    `processed` counts only items that completed without raising; `failed`
+    counts items that raised during processing. `total` is the number of
+    items actually selected for processing (after resume filtering), so
+    `processed + failed` may be less than `total` when the run is interrupted.
+    """
+
+    processed: int = 0
+    failed: int = 0
+    total: int = 0
 
 
 def _relative_key(item: Path, input_root: Path | None) -> str | None:
@@ -281,9 +297,14 @@ class WorkflowManager:
         logger.info(msg)
         print_info(msg)
 
-    async def process_selected_items(self, transcriber: Any | None = None) -> None:
+    async def process_selected_items(
+        self, transcriber: Any | None = None
+    ) -> ProcessingSummary:
         """
         Process all selected items based on the user configuration.
+
+        Returns a `ProcessingSummary` with the real success/failure counts so
+        callers can render an accurate completion summary.
         """
         selected = list(self.user_config.selected_items or [])
 
@@ -361,8 +382,9 @@ class WorkflowManager:
                         f"Failed to process item {idx}/{total_items} ({item.name}): {e}"
                     )
                     print_error(f"Failed to process '{item.name}': {e}")
+                else:
+                    processed_count += 1
 
-                processed_count += 1
                 print_info(f"Completed item {idx}/{total_items}")
                 self._log_token_usage("after", idx, total_items)
         except (KeyboardInterrupt, asyncio.CancelledError):
@@ -386,6 +408,10 @@ class WorkflowManager:
             )
 
         self._log_token_usage("Final")
+
+        return ProcessingSummary(
+            processed=processed_count, failed=failed_count, total=total_items
+        )
 
     async def process_single_epub(self, epub_path: Path) -> None:
         """Extract and save text from a single EPUB file."""

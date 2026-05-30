@@ -140,8 +140,14 @@ def _build_jsonl_record(
                 }
             record["request_context"] = ctx
             record["raw_response"] = raw_response
-        except Exception:
-            pass
+        except (AttributeError, TypeError, ValueError) as exc:
+            # Diagnostic context is best-effort; never drop it silently, as
+            # batch repair relies on raw_response/request_context downstream.
+            logger.warning(
+                "Failed to attach request_context/raw_response for %s: %s",
+                image_name,
+                exc,
+            )
 
     return record
 

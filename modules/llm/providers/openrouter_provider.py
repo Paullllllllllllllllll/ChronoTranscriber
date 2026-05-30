@@ -340,7 +340,9 @@ class OpenRouterProvider(BaseProvider):
             )
             return await self._process_llm_response(response, OPENROUTER_TOKEN_MAPPING)
         except Exception as e:
-            logger.error(f"Error invoking OpenRouter: {e}")
+            # logger.exception captures the traceback so a programming error
+            # (e.g. KeyError from a refactor) is not masked as an API error.
+            logger.exception(f"Error invoking OpenRouter: {e}")
             return TranscriptionResult(
                 content="",
                 error=str(e),

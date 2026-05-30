@@ -357,20 +357,6 @@ def read_final_lines(final_txt_path: Path) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-# Local aliases kept for structural parity with the pre-merge layout; the
-# originals used ``ru_*`` prefixes to disambiguate centralized helpers from
-# thin wrapper functions defined alongside the orchestration code.
-ru_extract_image_name_from_failure_line = extract_image_name_from_failure_line
-ru_is_failure_line = is_failure_line
-ru_collect_image_entries_from_jsonl = collect_image_entries_from_jsonl
-ru_find_failure_indices = find_failure_indices
-ru_resolve_image_path = resolve_image_path
-ru_backup_file = backup_file
-ru_write_repair_jsonl_line = write_repair_jsonl_line
-ru_discover_jobs = discover_jobs
-ru_read_final_lines = read_final_lines
-
-
 @dataclass
 class RepairTarget:
     order_index: int
@@ -381,61 +367,12 @@ class RepairTarget:
     page_number: int | None = None
 
 
-# Failure patterns centralized above.
-
-
-def _extract_image_name_from_failure_line(line: str) -> str | None:
-    return ru_extract_image_name_from_failure_line(line)
-
-
 def _load_configs() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     config_service = get_config_service()
     paths = config_service.get_paths_config()
     model = config_service.get_model_config()
     image_proc = config_service.get_image_processing_config()
     return paths, model, image_proc
-
-
-def _discover_jobs(paths_config: dict[str, Any]) -> list[Job]:
-    return ru_discover_jobs(paths_config)
-
-
-def _read_final_lines(final_txt_path: Path) -> list[str]:
-    return ru_read_final_lines(final_txt_path)
-
-
-def _is_failure_line(line: str) -> bool:
-    return ru_is_failure_line(line)
-
-
-def _collect_image_entries_from_jsonl(
-    temp_jsonl_path: Path | None,
-) -> list[ImageEntry]:
-    # Delegate to centralized utility; returned items are attribute-compatible
-    return ru_collect_image_entries_from_jsonl(temp_jsonl_path)
-
-
-def _find_failure_indices(
-    lines: list[str],
-    include_no_text: bool,
-) -> list[int]:
-    return ru_find_failure_indices(lines, include_no_text)
-
-
-def _resolve_image_path(
-    parent_folder: Path,
-    entry: ImageEntry,
-    identifier: str | None = None,
-) -> Path | None:
-    return ru_resolve_image_path(parent_folder, entry, identifier)
-
-
-def _backup_file(path: Path) -> Path:
-    return ru_backup_file(path)
-
-
-def _write_repair_jsonl_line(path: Path, record: dict[str, Any]) -> None:
-    return ru_write_repair_jsonl_line(path, record)
 
 
 def _resolve_repair_targets(
@@ -452,16 +389,14 @@ def _resolve_repair_targets(
     targets: list[RepairTarget] = []
 
     for idx in failure_indices:
-        image_name = _extract_image_name_from_failure_line(final_lines[idx])
+        image_name = extract_image_name_from_failure_line(final_lines[idx])
         entry = name_to_entry.get(image_name) if image_name else None
 
         resolved_path: Path | None = None
         resolved_order_index: int = -1
 
         if entry:
-            resolved_path = _resolve_image_path(
-                job.parent_folder, entry, job.identifier
-            )
+            resolved_path = resolve_image_path(job.parent_folder, entry, job.identifier)
             resolved_order_index = entry.order_index
         else:
             if image_name:
@@ -516,7 +451,7 @@ def _persist_repaired_file(
     final_lines: list[str],
 ) -> Path:
     """Back up the original file and write updated lines. Returns backup path."""
-    backup = _backup_file(job.final_txt_path)
+    backup = backup_file(job.final_txt_path)
     job.final_txt_path.write_text("\n".join(final_lines), encoding="utf-8")
     return backup
 
@@ -536,7 +471,7 @@ async def _repair_sync_mode(
     targets = _resolve_repair_targets(job, image_entries, failure_indices, final_lines)
 
     # Always record a session entry, even with zero targets
-    _write_repair_jsonl_line(
+    write_repair_jsonl_line(
         repair_jsonl_path,
         {
             "repair_session": {
@@ -621,7 +556,7 @@ async def _repair_sync_mode(
                 }
             }
             async with write_lock:
-                _write_repair_jsonl_line(repair_jsonl_path, record)
+                write_repair_jsonl_line(repair_jsonl_path, record)
 
         args_list = [(t.image_path, t.line_index, t.image_name, trans) for t in targets]
 
@@ -750,7 +685,7 @@ async def _repair_batch_mode(
     repairs_dir = job.parent_folder / "repairs"
     repairs_dir.mkdir(parents=True, exist_ok=True)
 
-    _write_repair_jsonl_line(
+    write_repair_jsonl_line(
         repair_jsonl_path,
         {
             "repair_session": {
@@ -786,14 +721,14 @@ async def _repair_batch_mode(
 
     # Persist metadata and batch tracking in repair JSONL
     for rec in metadata_records:
-        _write_repair_jsonl_line(repair_jsonl_path, rec)
+        write_repair_jsonl_line(repair_jsonl_path, rec)
 
     batch_ids: list[str] = []
     for resp in batch_responses:
         try:
             bid = resp.id
             batch_ids.append(bid)
-            _write_repair_jsonl_line(
+            write_repair_jsonl_line(
                 repair_jsonl_path,
                 {
                     "batch_tracking": {
@@ -877,7 +812,7 @@ async def _repair_batch_mode(
         oi = order_by_custom.get(cid)
         li = line_index_by_custom.get(cid)
         img_name = image_name_by_custom.get(cid, "")
-        _write_repair_jsonl_line(
+        write_repair_jsonl_line(
             repair_jsonl_path,
             {
                 "repair_response": {
@@ -921,7 +856,7 @@ async def main() -> None:
         logger.critical(f"Failed to load configs: {e}")
         return
 
-    jobs = _discover_jobs(paths_cfg)
+    jobs = discover_jobs(paths_cfg)
     if not jobs:
         print_info("No completed transcription jobs found.")
         return
@@ -942,14 +877,14 @@ async def main() -> None:
     job_sel = jobs[int(result.value) - 1]
     logger.info(f"User selected job: {job_sel.identifier}")
 
-    image_entries = _collect_image_entries_from_jsonl(job_sel.temp_jsonl_path)
+    image_entries = collect_image_entries_from_jsonl(job_sel.temp_jsonl_path)
     if not image_entries:
         print_warning(
             "Could not reconstruct page order from the job's JSONL. "
             "Will attempt to map by filename where possible."
         )
 
-    final_lines = _read_final_lines(job_sel.final_txt_path)
+    final_lines = read_final_lines(job_sel.final_txt_path)
 
     # Configure which failure classes to repair
     print_separator()
@@ -1175,7 +1110,7 @@ async def main_cli(args: Any, paths_config: dict[str, Any]) -> None:
     print_info(f"Repairing: {transcription_path.name}")
 
     # Collect image entries
-    image_entries = _collect_image_entries_from_jsonl(job.temp_jsonl_path)
+    image_entries = collect_image_entries_from_jsonl(job.temp_jsonl_path)
     if not image_entries:
         print_warning(
             "Could not reconstruct page order from JSONL."
@@ -1183,7 +1118,7 @@ async def main_cli(args: Any, paths_config: dict[str, Any]) -> None:
         )
 
     # Read final lines
-    final_lines = _read_final_lines(job.final_txt_path)
+    final_lines = read_final_lines(job.final_txt_path)
 
     # Determine which failure classes to include
     selected_causes = set()

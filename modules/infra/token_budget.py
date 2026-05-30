@@ -36,12 +36,17 @@ _tracker_instance: DailyTokenTracker | None = None
 _tracker_lock = threading.Lock()
 
 
-def _sleep_compat(seconds: float) -> None:
-    """Sleep without blocking the asyncio event loop if one is running."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        time.sleep(seconds)
+def _blocking_retry_sleep(seconds: float) -> None:
+    """Block briefly between synchronous state-save retries.
+
+    This is a short, deliberately blocking sleep (≤0.1 s, used only inside the
+    synchronous ``_save_state`` retry loop). The previous implementation made
+    it a no-op whenever an event loop was running, which silently turned the
+    transient-lock backoff into a tight busy-retry. Since ``_save_state``
+    performs blocking file I/O on the calling thread anyway, a brief blocking
+    sleep here is both correct and consistent.
+    """
+    time.sleep(seconds)
 
 
 class DailyTokenTracker:
@@ -140,7 +145,7 @@ class DailyTokenTracker:
                             f"retrying in {retry_delay * 1000:.0f} ms "
                             f"(attempt {attempt + 1}/{max_retries})"
                         )
-                        _sleep_compat(retry_delay)
+                        _blocking_retry_sleep(retry_delay)
                     else:
                         logger.warning(
                             f"Could not atomically replace "

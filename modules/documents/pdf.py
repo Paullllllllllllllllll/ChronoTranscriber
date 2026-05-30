@@ -16,7 +16,7 @@ from modules.config.capabilities.detection import (
     get_image_config_section_name,
 )
 from modules.config.service import get_config_service
-from modules.images.pipeline import ImageProcessor
+from modules.images.pipeline import IMAGE_FAILURE_RATE_THRESHOLD, ImageProcessor
 from modules.infra.logger import setup_logger
 from modules.infra.paths import create_safe_directory_name, create_safe_filename
 
@@ -41,6 +41,27 @@ def _get_effective_dpi(page: fitz.Page, dpi: int, max_pixels: int) -> int:
         effective,
     )
     return effective
+
+
+def _raise_if_render_failure_excessive(
+    pdf_path: Path, total_pages: int, failed_pages: int
+) -> None:
+    """Raise ``RuntimeError`` when too many pages failed to render.
+
+    Per-page render errors are logged and tolerated individually, but a high
+    failure rate must surface rather than yield a silently-incomplete (and
+    potentially page-misaligned) extraction. Mirrors the guard used in
+    ``ImageProcessor.process_and_save_images``.
+    """
+    if (
+        total_pages > 1
+        and failed_pages >= 2
+        and (failed_pages / total_pages) >= IMAGE_FAILURE_RATE_THRESHOLD
+    ):
+        raise RuntimeError(
+            f"PDF page rendering failed for {failed_pages}/{total_pages} pages in "
+            f"'{pdf_path.name}'. Check the source PDF for corruption."
+        )
 
 
 class PDFProcessor:
@@ -133,6 +154,8 @@ class PDFProcessor:
         """
         try:
             with fitz.open(self.pdf_path) as doc:
+                total_pages = doc.page_count
+                failed_pages = 0
                 for page_num, page in enumerate(doc, start=1):
                     try:
                         effective_dpi = _get_effective_dpi(page, dpi, max_pixels)
@@ -152,12 +175,20 @@ class PDFProcessor:
                             jpeg_quality,
                         )
                     except Exception as e:
+                        failed_pages += 1
                         logger.error(
                             "Error extracting page %d from %s: %s",
                             page_num,
                             self.pdf_path,
                             e,
                         )
+                _raise_if_render_failure_excessive(
+                    self.pdf_path, total_pages, failed_pages
+                )
+        except RuntimeError:
+            # Deliberate failure-rate guard — propagate so a PDF that mostly
+            # fails to render cannot pass as a silently-incomplete extraction.
+            raise
         except Exception as e:
             logger.error(f"Failed to extract images from PDF: {self.pdf_path}, {e}")
 
@@ -294,8 +325,17 @@ class PDFProcessor:
                         e,
                     )
 
+            failed_pages = len(pages_to_process) - len(processed_image_paths)
+            _raise_if_render_failure_excessive(
+                self.pdf_path, len(pages_to_process), failed_pages
+            )
+
             return processed_image_paths
 
+        except RuntimeError:
+            # Deliberate failure-rate guard — propagate so partial/misaligned
+            # output cannot pass silently.
+            raise
         except Exception as e:
             logger.exception(
                 "Error extracting and processing images from PDF %s: %s",

@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.5.0
+# ChronoTranscriber v1.6.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -575,6 +575,39 @@ The suite contains 1,250+ tests (unit and integration) covering all
 modules, providers, batch backends, and CLI parsers.
 
 ## Changelog
+
+### v1.6.0 (2026-05-30)
+
+- Correctness fixes from a full code review. The completion summary
+  now reports real success/failure counts: `process_selected_items`
+  returns a `ProcessingSummary`, failed items are no longer also
+  counted as processed, and interactive mode stops hardcoding zero
+  failures.
+- Surface partial PDF page-render failures. Both PDF extraction paths
+  now raise when the per-page failure rate exceeds the existing image
+  threshold instead of silently returning a short, possibly
+  page-misaligned image list.
+- The interactive resume preview now passes `output_format` and the
+  resolved output directories to `ResumeChecker`, so skip counts are
+  accurate for `md`/`json` output rather than always assuming `.txt`.
+- The Anthropic batch backend now uses the capability registry
+  (`detect_capabilities`) to decide whether to send `temperature`,
+  replacing brittle model-name substring matching that drifted from
+  the sync providers.
+- Failures are no longer silently swallowed: provider `_invoke_llm`
+  handlers log full tracebacks, the JSONL diagnostic-context builder
+  logs instead of passing, the JPEG draft fast-path and Tesseract
+  checks use narrowed exceptions, and the token-state retry backoff
+  is honored instead of skipped inside a running event loop.
+- `parse_indices` rejects negative/open-ended tokens with a clear
+  message instead of a confusing range-parse error.
+- Dead-code and duplication cleanup: removed the unused `ru_*` aliases
+  and pass-through wrappers in batch repair, consolidated the three
+  per-backend image-encoding helpers onto the shared
+  `modules.images.encoding` functions, extracted the duplicated EPUB
+  and MOBI text-normalization helper into `modules.documents._text`,
+  and removed a dead `media_resolution` expression in the Google
+  provider.
 
 ### v1.5.0 (2026-05-21)
 

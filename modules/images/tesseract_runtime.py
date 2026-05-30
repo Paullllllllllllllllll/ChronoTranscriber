@@ -11,6 +11,7 @@ from typing import Any
 
 import pytesseract
 from PIL import Image
+from pytesseract import TesseractNotFoundError
 
 from modules.infra.logger import setup_logger
 from modules.ui import print_error
@@ -37,7 +38,7 @@ def configure_tesseract_executable(image_processing_config: dict[str, Any]) -> N
                 logger.info(f"Using Tesseract executable: {cmd_path}")
             else:
                 logger.warning(f"Configured tesseract_cmd does not exist: {cmd_path}")
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.warning(f"Could not set tesseract_cmd '{tess_cmd}': {e}")
 
 
@@ -50,7 +51,7 @@ def is_tesseract_available() -> bool:
     try:
         _ = pytesseract.get_tesseract_version()
         return True
-    except getattr(pytesseract, "TesseractNotFoundError", Exception):
+    except TesseractNotFoundError:
         return False
     except Exception as e:
         logger.error(f"Unexpected error checking Tesseract availability: {e}")

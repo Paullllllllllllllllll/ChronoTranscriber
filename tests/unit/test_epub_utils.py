@@ -5,12 +5,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from modules.documents._text import normalize_text
 from modules.documents.epub import (
     EPUBProcessor,
     EPUBTextExtraction,
     _first_metadata_value,
     _html_bytes_to_text,
-    _normalize_text,
 )
 
 
@@ -29,7 +29,7 @@ def test_first_metadata_value_returns_none_when_empty() -> None:
 @pytest.mark.unit
 def test_normalize_text_collapses_whitespace_and_preserves_single_blank_lines() -> None:
     raw = "\n  A  \n\n\n  B\n\n\n\nC  \n\n"
-    assert _normalize_text(raw) == "A\n\nB\n\nC"
+    assert normalize_text(raw) == "A\n\nB\n\nC"
 
 
 @pytest.mark.unit

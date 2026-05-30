@@ -34,7 +34,10 @@ from modules.transcribe.config_builder import (  # noqa: E402
     create_config_from_cli_args,
 )
 from modules.transcribe.dual_mode import AsyncDualModeScript  # noqa: E402
-from modules.transcribe.manager import WorkflowManager  # noqa: E402
+from modules.transcribe.manager import (  # noqa: E402
+    ProcessingSummary,
+    WorkflowManager,
+)
 from modules.transcribe.user_config import UserConfiguration  # noqa: E402
 from modules.ui import (  # noqa: E402
     WorkflowUI,
@@ -284,7 +287,7 @@ async def process_documents(
     model_config: dict[str, Any],
     concurrency_config: dict[str, Any],
     image_processing_config: dict[str, Any],
-) -> None:
+) -> ProcessingSummary:
     """
     Process documents based on user configuration.
 
@@ -294,6 +297,9 @@ async def process_documents(
         model_config: Model configuration
         concurrency_config: Concurrency configuration
         image_processing_config: Image processing configuration
+
+    Returns:
+        A `ProcessingSummary` with the real success/failure counts.
     """
     print_info("PROCESSING", "Starting document processing...")
 
@@ -307,17 +313,14 @@ async def process_documents(
     )
 
     # Initialize transcriber if needed for synchronous GPT processing
-    transcriber = None
     if (
         user_config.transcription_method == "gpt"
         and not user_config.use_batch_processing
     ):
         async with await _open_transcriber_from_config(user_config, model_config) as t:
-            transcriber = t
-            await workflow_manager.process_selected_items(transcriber)
-    else:
-        # For non-GPT methods or batch processing, no transcriber needed
-        await workflow_manager.process_selected_items()
+            return await workflow_manager.process_selected_items(t)
+    # For non-GPT methods or batch processing, no transcriber needed
+    return await workflow_manager.process_selected_items()
 
 
 async def transcribe_interactive() -> None:
@@ -341,8 +344,7 @@ async def transcribe_interactive() -> None:
 
     # Track processing time
     start_time = time.time()
-    processed_count = len(user_config.selected_items or [])
-    failed_count = 0
+    summary: ProcessingSummary | None = None
 
     # Process documents
     if user_config.processing_type == "auto":
@@ -356,7 +358,7 @@ async def transcribe_interactive() -> None:
             config_service.get_image_processing_config(),
         )
     else:
-        await process_documents(
+        summary = await process_documents(
             user_config,
             paths_config,
             config_service.get_model_config(),
@@ -367,12 +369,13 @@ async def transcribe_interactive() -> None:
     # Calculate duration
     duration_seconds = time.time() - start_time
 
-    # Display completion summary
-    if user_config.processing_type != "auto":  # Auto mode prints its own summary
+    # Display completion summary with real success/failure counts
+    if user_config.processing_type != "auto" and summary is not None:
+        # Auto mode prints its own summary
         WorkflowUI.display_completion_summary(
             user_config,
-            processed_count=processed_count,
-            failed_count=failed_count,
+            processed_count=summary.processed,
+            failed_count=summary.failed,
             duration_seconds=duration_seconds,
         )
 

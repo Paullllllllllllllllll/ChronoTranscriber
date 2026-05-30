@@ -6,7 +6,6 @@ See: https://docs.anthropic.com/en/docs/build-with-claude/message-batches
 
 from __future__ import annotations
 
-import base64
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -20,8 +19,9 @@ from modules.batch.backends.base import (
     BatchStatus,
     BatchStatusInfo,
 )
-from modules.config.constants import SUPPORTED_IMAGE_FORMATS
+from modules.config.capabilities import detect_capabilities
 from modules.config.service import get_config_service
+from modules.images.encoding import encode_image_to_base64
 from modules.infra.logger import setup_logger
 from modules.llm.prompt_utils import prepare_prompt_with_context
 
@@ -30,17 +30,6 @@ logger = setup_logger(__name__)
 # Limits for Anthropic Message Batches API
 MAX_BATCH_REQUESTS = 100000
 MAX_BATCH_BYTES = 256 * 1024 * 1024  # 256 MB
-
-
-def _encode_image_to_base64(image_path: Path) -> tuple[str, str]:
-    """Encode an image file to base64 and return (data, mime_type)."""
-    ext = image_path.suffix.lower()
-    mime = SUPPORTED_IMAGE_FORMATS.get(ext)
-    if not mime:
-        raise ValueError(f"Unsupported image format: {image_path.suffix}")
-    with image_path.open("rb") as f:
-        encoded = base64.b64encode(f.read()).decode("utf-8")
-    return encoded, mime
 
 
 class AnthropicBatchBackend(BatchBackend):
@@ -96,6 +85,7 @@ class AnthropicBatchBackend(BatchBackend):
 
         # Model configuration
         model_name = model_config.get("name", "claude-sonnet-4-6")
+        caps = detect_capabilities(model_name)
         max_tokens = int(
             model_config.get("max_output_tokens")
             or model_config.get("max_tokens", 4096)
@@ -129,7 +119,7 @@ class AnthropicBatchBackend(BatchBackend):
         for req in requests:
             # Get image data
             if req.image_path:
-                image_base64, mime_type = _encode_image_to_base64(req.image_path)
+                image_base64, mime_type = encode_image_to_base64(req.image_path)
             elif req.image_base64 and req.mime_type:
                 image_base64 = req.image_base64
                 mime_type = req.mime_type
@@ -162,16 +152,12 @@ class AnthropicBatchBackend(BatchBackend):
                 ],
             }
 
-            # Add temperature if supported and not a reasoning model
+            # Add temperature only when the model accepts sampler controls.
+            # Use the canonical capability registry rather than substring
+            # matching so the batch path stays in sync with the sync providers.
             temperature = model_config.get("temperature")
-            if temperature is not None:
-                # Check if model supports temperature (non-reasoning models)
-                model_lower = model_name.lower()
-                is_reasoning = any(
-                    x in model_lower for x in ["opus-4", "sonnet-4-5", "haiku-4-5"]
-                )
-                if not is_reasoning:
-                    params["temperature"] = float(temperature)
+            if temperature is not None and caps.supports_sampler_controls:
+                params["temperature"] = float(temperature)
 
             batch_requests.append(
                 {

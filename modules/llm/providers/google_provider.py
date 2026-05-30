@@ -146,29 +146,6 @@ class GoogleProvider(BaseProvider):
                 transcription_not_possible=True,
             )
 
-        # Normalize media_resolution parameter
-        resolution = media_resolution
-        if resolution:
-            resolution = resolution.lower().strip()
-            if resolution not in ("low", "medium", "high", "ultra_high", "auto"):
-                resolution = None
-        if resolution is None:
-            resolution = (
-                caps.default_media_resolution
-                if caps.supports_media_resolution
-                else None
-            )
-
-        # Map to Google's MediaResolution enum values
-        resolution_map = {
-            "low": "MEDIA_RESOLUTION_LOW",
-            "medium": "MEDIA_RESOLUTION_MEDIUM",
-            "high": "MEDIA_RESOLUTION_HIGH",
-            "ultra_high": "MEDIA_RESOLUTION_ULTRA_HIGH",
-            "auto": "MEDIA_RESOLUTION_UNSPECIFIED",
-        }
-        resolution_map.get(resolution) if resolution else None
-
         # Build data URL for Gemini
         data_url = self.create_data_url(image_base64, mime_type)
 
@@ -207,9 +184,9 @@ class GoogleProvider(BaseProvider):
                 include_raw=True,
             )
 
-        # media_resolution: LangChain's ChatGoogleGenerativeAI does not
-        # expose per-request media_resolution; the parameter is validated
-        # above for logging purposes only.
+        # media_resolution is accepted for interface parity but not applied
+        # here: LangChain's ChatGoogleGenerativeAI does not expose a per-request
+        # media_resolution control.
         invoke_kwargs: dict[str, Any] = {}
 
         # Invoke LLM - LangChain handles retries internally
@@ -234,7 +211,9 @@ class GoogleProvider(BaseProvider):
             )
             return await self._process_llm_response(response, GOOGLE_TOKEN_MAPPING)
         except Exception as e:
-            logger.error(f"Error invoking Google Gemini: {e}")
+            # logger.exception captures the traceback so a programming error
+            # (e.g. KeyError from a refactor) is not masked as an API error.
+            logger.exception(f"Error invoking Google Gemini: {e}")
             return TranscriptionResult(
                 content="",
                 error=str(e),

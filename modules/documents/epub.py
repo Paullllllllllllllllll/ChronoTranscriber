@@ -8,6 +8,7 @@ import ebooklib
 from ebooklib import epub
 from lxml import html
 
+from modules.documents._text import normalize_text
 from modules.infra.logger import setup_logger
 from modules.infra.paths import create_safe_directory_name, create_safe_filename
 
@@ -39,7 +40,7 @@ class EPUBTextExtraction:
             lines.append("")  # Add a blank line between metadata and content
 
         for section in self.sections:
-            normalized = _normalize_text(section)
+            normalized = normalize_text(section)
             if not normalized:
                 continue
             lines.append(normalized)
@@ -132,28 +133,7 @@ def _html_bytes_to_text(content: bytes) -> str:
     html.etree.strip_elements(document, "script", "style", with_tail=False)
 
     text_content = document.text_content()
-    return _normalize_text(text_content)
-
-
-def _normalize_text(value: str) -> str:
-    """Collapse extraneous whitespace while preserving single blank lines."""
-    if not value:
-        return ""
-
-    lines = [line.strip() for line in value.splitlines()]
-    normalized_lines: list[str] = []
-
-    for line in lines:
-        if line:
-            normalized_lines.append(line)
-        elif normalized_lines and normalized_lines[-1] != "":
-            normalized_lines.append("")
-
-    # Remove trailing blanks
-    while normalized_lines and normalized_lines[-1] == "":
-        normalized_lines.pop()
-
-    return "\n".join(normalized_lines)
+    return normalize_text(text_content)
 
 
 def _first_metadata_value(entries: list[tuple[str, dict]]) -> str | None:

@@ -13,6 +13,7 @@ from pathlib import Path
 import mobi
 from lxml import html
 
+from modules.documents._text import normalize_text
 from modules.documents.epub import EPUBProcessor, EPUBTextExtraction
 from modules.infra.logger import setup_logger
 from modules.infra.paths import create_safe_directory_name, create_safe_filename
@@ -46,7 +47,7 @@ class MOBITextExtraction:
             lines.append("")  # Add a blank line between metadata and content
 
         for section in self.sections:
-            normalized = _normalize_text(section)
+            normalized = normalize_text(section)
             if not normalized:
                 continue
             lines.append(normalized)
@@ -244,24 +245,3 @@ class MOBIProcessor:
         )
         output_txt_path = parent_folder / output_txt_name
         return parent_folder, output_txt_path
-
-
-def _normalize_text(value: str) -> str:
-    """Collapse extraneous whitespace while preserving single blank lines."""
-    if not value:
-        return ""
-
-    lines = [line.strip() for line in value.splitlines()]
-    normalized_lines: list[str] = []
-
-    for line in lines:
-        if line:
-            normalized_lines.append(line)
-        elif normalized_lines and normalized_lines[-1] != "":
-            normalized_lines.append("")
-
-    # Remove trailing blanks
-    while normalized_lines and normalized_lines[-1] == "":
-        normalized_lines.pop()
-
-    return "\n".join(normalized_lines)

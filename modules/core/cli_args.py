@@ -617,10 +617,20 @@ def parse_indices(indices_str: str) -> list[int]:
         if not part:
             continue
 
+        # A leading "-" is a negative/open token, not a range separator;
+        # reject it explicitly so "-7" gives a clear message rather than being
+        # misparsed by split("-") into an empty range bound.
+        if part.startswith("-"):
+            raise ValueError(
+                f"Invalid index: {part} (negative indices are not supported)"
+            )
+
         if "-" in part:
             # Range: "1-5"
             try:
                 start, end = part.split("-", 1)
+                if not start.strip() or not end.strip():
+                    raise ValueError(f"Invalid range format: {part}")
                 start_idx = int(start.strip())
                 end_idx = int(end.strip())
                 result.update(range(start_idx, end_idx + 1))

@@ -245,8 +245,14 @@ class ImageProcessor:
                             )
                             if scale < 1.0:
                                 img.draft(desired_mode, (target_width, target_height))
-                    except Exception:
-                        pass
+                    except (OSError, ValueError) as exc:
+                        # draft() is a best-effort decode-time optimization; on
+                        # failure we still fall through to the full resize path.
+                        logger.debug(
+                            "JPEG draft fast-path skipped for %s: %s",
+                            self.image_path,
+                            exc,
+                        )
 
                 img = self.handle_transparency(img)
                 img = self.convert_to_grayscale(img)

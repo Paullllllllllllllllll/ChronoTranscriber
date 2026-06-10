@@ -13,6 +13,23 @@ from modules.batch.submission import (
     _resolve_additional_context,
     submit_batch,
 )
+from modules.images.page_stream import PagePayload
+
+
+def _make_payload(index: int = 0) -> PagePayload:
+    """Minimal in-memory page payload for submission tests."""
+    return PagePayload(
+        index=index,
+        image_name=f"page_{index + 1:04d}_pre_processed.jpg",
+        base64="aGVsbG8=",
+        sha256="deadbeef",
+        width=10,
+        height=10,
+        byte_size=5,
+        effective_dpi=300,
+        source_file="C:/somewhere/source.pdf",
+        page_index=index,
+    )
 
 # ---------------------------------------------------------------------------
 # _load_system_prompt
@@ -114,7 +131,7 @@ class TestSubmitBatch:
         self, mock_supports, tmp_path: Path
     ) -> None:
         result = await submit_batch(
-            image_files=[tmp_path / "img.png"],
+            payloads=[_make_payload()],
             temp_jsonl_path=tmp_path / "temp.jsonl",
             parent_folder=tmp_path,
             source_name="test",
@@ -142,13 +159,11 @@ class TestSubmitBatch:
 
         jsonl_path = tmp_path / "temp.jsonl"
         jsonl_path.write_text("", encoding="utf-8")
-        img = tmp_path / "img.png"
-        img.write_bytes(b"")
 
         user_config = MagicMock()
         user_config.selected_schema_path = None
         result = await submit_batch(
-            image_files=[img],
+            payloads=[_make_payload()],
             temp_jsonl_path=jsonl_path,
             parent_folder=tmp_path,
             source_name="test",
@@ -179,13 +194,11 @@ class TestSubmitBatch:
 
         jsonl_path = tmp_path / "temp.jsonl"
         jsonl_path.write_text("", encoding="utf-8")
-        img = tmp_path / "img.png"
-        img.write_bytes(b"")
 
         user_config = MagicMock()
         user_config.selected_schema_path = None
         result = await submit_batch(
-            image_files=[img],
+            payloads=[_make_payload()],
             temp_jsonl_path=jsonl_path,
             parent_folder=tmp_path,
             source_name="test",

@@ -78,6 +78,8 @@ class ImageEntry:
     pre_processed_image: str | None
     custom_id: str | None
     page_number: int | None = None
+    source_file: str | None = None
+    page_index: int | None = None
 
 
 @dataclass
@@ -136,6 +138,7 @@ def collect_image_entries_from_jsonl(temp_jsonl_path: Path | None) -> list[Image
     Returns a list of ImageEntry sorted by order_index.
     """
     entries: dict[int, ImageEntry] = {}
+    run_source_file: str | None = None
     if temp_jsonl_path is None or not temp_jsonl_path.exists():
         return []
 
@@ -148,6 +151,16 @@ def collect_image_entries_from_jsonl(temp_jsonl_path: Path | None) -> list[Image
                 try:
                     obj = json.loads(line)
                 except Exception:
+                    continue
+
+                # Run-level provenance (streaming pipeline): remember the
+                # source file as a fallback for entries without one.
+                if "file_provenance" in obj and isinstance(
+                    obj["file_provenance"], dict
+                ):
+                    src = obj["file_provenance"].get("source_file")
+                    if src:
+                        run_source_file = str(src)
                     continue
 
                 # Preferred: image_metadata
@@ -164,6 +177,11 @@ def collect_image_entries_from_jsonl(temp_jsonl_path: Path | None) -> list[Image
                             or None,
                             custom_id=str(meta.get("custom_id") or "").strip() or None,
                             page_number=meta.get("page_number"),
+                            source_file=str(meta.get("source_file") or "").strip()
+                            or None,
+                            page_index=meta.get("page_index")
+                            if isinstance(meta.get("page_index"), int)
+                            else None,
                         )
                     continue
 
@@ -202,6 +220,11 @@ def collect_image_entries_from_jsonl(temp_jsonl_path: Path | None) -> list[Image
                                 or None,
                                 custom_id=None,
                                 page_number=None,
+                                source_file=str(obj.get("source_file") or "").strip()
+                                or None,
+                                page_index=obj.get("page_index")
+                                if isinstance(obj.get("page_index"), int)
+                                else None,
                             ),
                         )
                     except Exception:
@@ -209,6 +232,12 @@ def collect_image_entries_from_jsonl(temp_jsonl_path: Path | None) -> list[Image
 
     except Exception as e:
         logger.error("Error reading JSONL %s: %s", temp_jsonl_path, e)
+
+    # Fall back to the run-level source file for entries lacking one
+    if run_source_file:
+        for entry in entries.values():
+            if entry.source_file is None:
+                entry.source_file = run_source_file
 
     return [entries[k] for k in sorted(entries.keys())]
 
@@ -361,10 +390,12 @@ def read_final_lines(final_txt_path: Path) -> list[str]:
 class RepairTarget:
     order_index: int
     image_name: str
-    image_path: Path
+    image_path: Path | None
     custom_id: str | None
     line_index: int
     page_number: int | None = None
+    image_base64: str | None = None
+    mime_type: str | None = None
 
 
 def _load_configs() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
@@ -375,15 +406,79 @@ def _load_configs() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     return paths, model, image_proc
 
 
+def _rerender_payload_for_entry(
+    entry: ImageEntry,
+    model_config: dict[str, Any],
+) -> Any | None:
+    """Re-render a page/image in memory from its recorded source file.
+
+    Used when no preprocessed image exists on disk (the streaming pipeline
+    never writes one). Returns a PagePayload or None.
+    """
+    from modules.images.page_stream import (
+        load_image_payload,
+        parse_pdf_page_index,
+        render_single_pdf_page_payload,
+        resolve_image_settings,
+    )
+
+    if not entry.source_file:
+        return None
+    source = Path(entry.source_file)
+    if not source.exists():
+        logger.warning("Recorded source file missing: %s", source)
+        return None
+
+    tm = model_config.get("transcription_model", {})
+    img_cfg, model_type, target_dpi, max_pixels = resolve_image_settings(
+        tm.get("provider", "openai"), tm.get("name", "")
+    )
+
+    try:
+        if source.suffix.lower() == ".pdf":
+            page_index = entry.page_index
+            if page_index is None:
+                page_index = parse_pdf_page_index(entry.image_name)
+            if page_index is None and entry.order_index >= 0:
+                page_index = entry.order_index
+            if page_index is None:
+                return None
+            return render_single_pdf_page_payload(
+                source,
+                page_index,
+                target_dpi=target_dpi,
+                img_cfg=img_cfg,
+                model_type=model_type,
+                max_pixels=max_pixels,
+            )
+        return load_image_payload(
+            source,
+            max(0, entry.order_index),
+            img_cfg=img_cfg,
+            model_type=model_type,
+        )
+    except Exception as e:
+        logger.error(
+            "In-memory re-render failed for %s (%s): %s",
+            entry.image_name,
+            source.name,
+            e,
+        )
+        return None
+
+
 def _resolve_repair_targets(
     job: Job,
     image_entries: list[ImageEntry],
     failure_indices: list[int],
     final_lines: list[str],
+    model_config: dict[str, Any] | None = None,
 ) -> list[RepairTarget]:
     """Resolve failure line indices to concrete RepairTarget objects.
 
-    Shared between sync and batch repair modes.
+    Shared between sync and batch repair modes. Resolution order: existing
+    preprocessed/source image file on disk, then in-memory re-render from
+    the source recorded by the streaming pipeline.
     """
     name_to_entry: dict[str, ImageEntry] = {e.image_name: e for e in image_entries}
     targets: list[RepairTarget] = []
@@ -394,10 +489,13 @@ def _resolve_repair_targets(
 
         resolved_path: Path | None = None
         resolved_order_index: int = -1
+        rerendered: Any | None = None
 
         if entry:
             resolved_path = resolve_image_path(job.parent_folder, entry, job.identifier)
             resolved_order_index = entry.order_index
+            if resolved_path is None and model_config is not None:
+                rerendered = _rerender_payload_for_entry(entry, model_config)
         else:
             if image_name:
                 for sub in ("preprocessed_images", "preprocessed_images_tesseract"):
@@ -418,7 +516,7 @@ def _resolve_repair_targets(
                                 resolved_path = cand
                                 break
 
-        if resolved_path is None or not resolved_path.exists():
+        if rerendered is None and (resolved_path is None or not resolved_path.exists()):
             logger.warning(
                 "Could not resolve image for failure line %s (%s); skipping.",
                 idx,
@@ -435,11 +533,14 @@ def _resolve_repair_targets(
         targets.append(
             RepairTarget(
                 order_index=resolved_order_index,
-                image_name=image_name or resolved_path.name,
+                image_name=image_name
+                or (resolved_path.name if resolved_path else "[unknown]"),
                 image_path=resolved_path,
                 custom_id=None,
                 line_index=idx,
                 page_number=pn,
+                image_base64=rerendered.base64 if rerendered else None,
+                mime_type=rerendered.mime_type if rerendered else None,
             )
         )
 
@@ -468,7 +569,9 @@ async def _repair_sync_mode(
 ) -> None:
     from modules.llm import transcribe_image_with_llm
 
-    targets = _resolve_repair_targets(job, image_entries, failure_indices, final_lines)
+    targets = _resolve_repair_targets(
+        job, image_entries, failure_indices, final_lines, model_config
+    )
 
     # Always record a session entry, even with zero targets
     write_repair_jsonl_line(
@@ -492,15 +595,24 @@ async def _repair_sync_mode(
     )
 
     async def worker(
-        img_path: Path, line_index: int, image_name: str, transcriber: Any
+        target: RepairTarget, transcriber: Any
     ) -> tuple[int, str, dict[str, Any]]:
         try:
-            raw = await transcribe_image_with_llm(img_path, transcriber)
-            text = extract_transcribed_text(raw, image_name)
-            return line_index, text, raw
+            if target.image_base64:
+                raw = await transcriber.transcribe_image_from_base64(
+                    target.image_base64, target.mime_type or "image/jpeg"
+                )
+            elif target.image_path is not None:
+                raw = await transcribe_image_with_llm(target.image_path, transcriber)
+            else:
+                raise ValueError(
+                    f"No image data for repair target {target.image_name}"
+                )
+            text = extract_transcribed_text(raw, target.image_name)
+            return target.line_index, text, raw
         except Exception as e:
-            logger.error("Sync repair failed for %s: %s", image_name, e)
-            return line_index, "[transcription error]", {}
+            logger.error("Sync repair failed for %s: %s", target.image_name, e)
+            return target.line_index, "[transcription error]", {}
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -558,7 +670,7 @@ async def _repair_sync_mode(
             async with write_lock:
                 write_repair_jsonl_line(repair_jsonl_path, record)
 
-        args_list = [(t.image_path, t.line_index, t.image_name, trans) for t in targets]
+        args_list = [(t, trans) for t in targets]
 
         results = await run_concurrent_transcription_tasks(
             worker,
@@ -678,8 +790,14 @@ async def _repair_batch_mode(
     schema_path: Path | None = None,
     additional_context_path: Path | None = None,
 ) -> None:
-    targets = _resolve_repair_targets(job, image_entries, failure_indices, final_lines)
-    images_for_batch: list[Path] = [t.image_path for t in targets]
+    targets = _resolve_repair_targets(
+        job, image_entries, failure_indices, final_lines, model_config
+    )
+    # Items are file paths when the image exists on disk, otherwise the
+    # re-rendered in-memory target (carrying base64 + mime type).
+    images_for_batch: list[Any] = [
+        t.image_path if t.image_path is not None else t for t in targets
+    ]
 
     # Always write a session record (even if zero targets)
     repairs_dir = job.parent_folder / "repairs"

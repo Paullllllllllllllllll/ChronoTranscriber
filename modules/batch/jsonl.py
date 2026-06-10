@@ -126,7 +126,12 @@ def extract_transcription_records(
         List of transcription records with image_name and text_chunk.
     """
     # Filter out metadata records
-    METADATA_KEYS = ("batch_session", "image_metadata", "batch_tracking")
+    METADATA_KEYS = (
+        "batch_session",
+        "image_metadata",
+        "batch_tracking",
+        "file_provenance",
+    )
     transcription_records = []
 
     for record in records:

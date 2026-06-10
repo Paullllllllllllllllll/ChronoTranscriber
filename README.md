@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.6.0
+# ChronoTranscriber v1.7.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -575,6 +575,38 @@ The suite contains 1,250+ tests (unit and integration) covering all
 modules, providers, batch backends, and CLI parsers.
 
 ## Changelog
+
+### v1.7.0 (2026-06-10)
+
+- Streaming in-memory image pipeline for all GPT paths (synchronous and
+  batch, PDFs and image folders). Pages are rendered, preprocessed, and
+  base64-encoded fully in memory; the `preprocessed_images/` folder is
+  no longer written for GPT runs (Tesseract is unchanged). Peak memory
+  is one raw page plus the payloads in flight.
+- Page-level resume and page-range slicing are now applied BEFORE any
+  rendering, so resuming a mostly-complete PDF no longer re-renders
+  every page. Virtual image names keep the historical
+  `*_pre_processed.jpg` pattern, so old partial JSONLs resume cleanly.
+- Reproducibility provenance: each transcription record carries
+  `image_provenance` (SHA-256 of the sent JPEG bytes, dimensions, byte
+  size, effective DPI) plus `source_file`/`page_index`, and each run
+  writes a `file_provenance` record (source SHA-256, PyMuPDF/Pillow
+  versions, image-config snapshot).
+- Repair gains an in-memory re-render fallback: when no preprocessed
+  image exists on disk, failed pages are re-rendered from the recorded
+  source PDF page or source image and repaired from base64 (sync and
+  batch modes).
+- Final output for streaming runs is regenerated from the complete
+  JSONL, so pages completed in earlier (resumed) runs are included;
+  `order_index` is now the absolute page index, fixing page renumbering
+  under page ranges and resume.
+- `max_pixels_per_page` default lowered from 150,000,000 to 24,000,000,
+  bounding the worst-case raw page to roughly 72 MB RGB while staying
+  2.3x above the 10.24 MP `original_max_pixels` send cap.
+- Removed the now-dead disk pipeline: `PDFProcessor.process_images` /
+  `extract_images`, `ImageProcessor.process_image` /
+  `process_and_save_images` / `process_images_multiprocessing`.
+  `keep_preprocessed_images` now affects only Tesseract folders.
 
 ### v1.6.0 (2026-05-30)
 

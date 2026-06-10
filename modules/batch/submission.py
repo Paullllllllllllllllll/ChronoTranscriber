@@ -22,28 +22,33 @@ from modules.infra.logger import setup_logger
 from modules.ui import print_error, print_info, print_success, print_warning
 
 if TYPE_CHECKING:
+    from modules.images.page_stream import PagePayload
     from modules.transcribe.user_config import UserConfiguration
 
 logger = setup_logger(__name__)
 
 
 async def submit_batch(
-    image_files: list[Path],
+    payloads: list[PagePayload],
     temp_jsonl_path: Path,
     parent_folder: Path,
     source_name: str,
     model_config: dict[str, Any],
     user_config: UserConfiguration,
+    file_provenance: dict[str, Any] | None = None,
 ) -> BatchHandle | None:
     """Submit a batch using the provider-agnostic batch backend.
 
     Args:
-        image_files: List of image paths to process.
+        payloads: In-memory page payloads (base64 JPEG + provenance) to
+            process; no preprocessed image files exist on disk.
         temp_jsonl_path: Path to the temp JSONL file for tracking.
         parent_folder: Parent folder for debug artifacts.
         source_name: Name of the source (PDF or folder name).
         model_config: Model configuration dictionary.
         user_config: Current user configuration.
+        file_provenance: Optional file-level provenance record to persist
+            in the temp JSONL.
 
     Returns:
         BatchHandle if submission successful, None otherwise.
@@ -59,7 +64,7 @@ async def submit_batch(
         )
         return None
 
-    total_images = len(image_files)
+    total_images = len(payloads)
     chunk_size = get_batch_chunk_size()
     expected_batches = math.ceil(total_images / max(1, chunk_size))
 
@@ -85,40 +90,47 @@ async def submit_batch(
                 )
                 + "\n"
             )
+            if file_provenance is not None:
+                await f.write(json.dumps(file_provenance) + "\n")
     except Exception as e:
         logger.warning(
             "Could not write early batch_session marker: %s: %s", type(e).__name__, e
         )
 
-    # Record image metadata
+    # Record image metadata (no preprocessed files exist; carry the source
+    # reference and per-page provenance so repair can re-render).
     try:
         async with aiofiles.open(temp_jsonl_path, "a", encoding="utf-8") as f:
-            for idx, img_path in enumerate(image_files):
+            for pos, payload in enumerate(payloads):
                 image_record = {
                     "image_metadata": {
-                        "pre_processed_image": str(img_path),
-                        "image_name": img_path.name,
-                        "order_index": idx,
-                        "custom_id": f"req-{idx + 1}",
+                        "pre_processed_image": None,
+                        "image_name": payload.image_name,
+                        "order_index": payload.index,
+                        "custom_id": f"req-{pos + 1}",
+                        "source_file": payload.source_file,
+                        "page_index": payload.page_index,
+                        "image_provenance": payload.provenance(),
                     }
                 }
                 await f.write(json.dumps(image_record) + "\n")
     except Exception as e:
         logger.warning("Failed writing image_metadata before batch submit: %s", e)
 
-    # Build batch requests
+    # Build batch requests from in-memory payloads
     batch_requests = [
         BatchRequest(
-            custom_id=f"req-{idx + 1}",
-            image_path=img_path,
-            order_index=idx,
+            custom_id=f"req-{pos + 1}",
+            image_base64=payload.base64,
+            mime_type=payload.mime_type,
+            order_index=payload.index,
             image_info={
-                "image_name": img_path.name,
-                "order_index": idx,
-                "page_number": idx + 1,
+                "image_name": payload.image_name,
+                "order_index": payload.index,
+                "page_number": payload.index + 1,
             },
         )
-        for idx, img_path in enumerate(image_files)
+        for pos, payload in enumerate(payloads)
     ]
 
     # Load system prompt

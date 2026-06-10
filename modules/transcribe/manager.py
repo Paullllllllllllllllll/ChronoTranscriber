@@ -5,6 +5,7 @@ import asyncio
 import datetime
 import json
 import shutil
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,16 @@ from modules.batch.submission import submit_batch
 from modules.documents.epub import EPUBProcessor
 from modules.documents.mobi import MOBIProcessor
 from modules.documents.pdf import PDFProcessor, native_extract_pdf_text
+from modules.images.page_stream import (
+    PagePayload,
+    compute_folder_skip_names,
+    compute_pdf_skip_indices,
+    folder_image_name,
+    list_folder_images,
+    resolve_image_settings,
+    stream_folder_payloads,
+    stream_pdf_payloads,
+)
 from modules.images.pipeline import ImageProcessor
 from modules.images.tesseract_runtime import (
     configure_tesseract_executable,
@@ -28,7 +39,12 @@ from modules.infra.paths import (
 )
 from modules.infra.token_budget import check_and_wait_for_token_limit
 from modules.postprocess.writer import write_transcription_output
-from modules.transcribe.pipeline import run_transcription_pipeline
+from modules.transcribe.pipeline import (
+    build_file_provenance,
+    run_streaming_transcription_pipeline,
+    run_transcription_pipeline,
+    write_output_from_jsonl,
+)
 from modules.transcribe.resume import ResumeChecker
 from modules.transcribe.user_config import UserConfiguration
 from modules.ui import print_error, print_info, print_success, print_warning
@@ -244,22 +260,24 @@ class WorkflowManager:
 
     async def _submit_batch_with_backend(
         self,
-        image_files: list[Path],
+        payloads: list[PagePayload],
         temp_jsonl_path: Path,
         parent_folder: Path,
         source_name: str,
+        file_provenance: dict[str, Any] | None = None,
     ) -> Any | None:
         """Submit a batch using the provider-agnostic batch backend.
 
         Delegates to :func:`modules.batch.submission.submit_batch`.
         """
         return await submit_batch(
-            image_files=image_files,
+            payloads=payloads,
             temp_jsonl_path=temp_jsonl_path,
             parent_folder=parent_folder,
             source_name=source_name,
             model_config=self.model_config,
             user_config=self.user_config,
+            file_provenance=file_provenance,
         )
 
     def _log_token_usage(self, phase: str, idx: int = 0, total: int = 0) -> None:
@@ -533,28 +551,25 @@ class WorkflowManager:
 
     async def _handle_batch_submission(
         self,
-        method: str,
-        image_files: list[Path],
+        payloads: list[PagePayload],
         temp_jsonl_path: Path,
         parent_folder: Path,
         source_stem: str,
-        preprocessed_folder: Path,
-        source_display_name: str,
+        file_provenance: dict[str, Any] | None = None,
     ) -> bool:
         """Try to submit a batch job; return True if submitted, False to fall
-        through."""
-        if method != "gpt" or not self.user_config.use_batch_processing:
+        through to synchronous processing."""
+        if not self.user_config.use_batch_processing:
             return False
         handle = await self._submit_batch_with_backend(
-            image_files,
+            payloads,
             temp_jsonl_path,
             parent_folder,
             source_stem,
+            file_provenance=file_provenance,
         )
         if handle is None:
             return False
-        self._cleanup_preprocessed(preprocessed_folder, source_display_name)
-        self._transient_tracker.mark_preprocessed_complete(preprocessed_folder)
         self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
         return True
 
@@ -589,6 +604,160 @@ class WorkflowManager:
                 f"Preserving {temp_jsonl_path.name} for batch tracking"
                 f" (required for retrieval)"
             )
+
+    async def _process_gpt_streaming(
+        self,
+        *,
+        source_path: Path,
+        source_name: str,
+        source_stem: str,
+        is_folder: bool,
+        total_units: int,
+        page_indices: list[int] | None,
+        parent_folder: Path,
+        temp_jsonl_path: Path,
+        output_txt_path: Path,
+        transcriber: Any | None,
+    ) -> None:
+        """Shared GPT streaming flow for PDFs and image folders.
+
+        Applies the page-level resume skip-set and page slice BEFORE any
+        rendering, then feeds the in-memory payload producer into either
+        batch submission or the synchronous streaming pipeline.
+        """
+        output_format = getattr(self.user_config, "output_format", "txt") or "txt"
+
+        # Overwrite mode: clear the stale JSONL before computing the skip-set.
+        if self.resume_mode == "overwrite" and temp_jsonl_path.exists():
+            temp_jsonl_path.write_text("", encoding="utf-8")
+            logger.info(f"Cleared stale JSONL cache: {temp_jsonl_path.name}")
+
+        tm = self.model_config.get("transcription_model", {})
+        provider = tm.get("provider", "openai")
+        model_name = tm.get("name", "")
+        img_cfg, model_type, target_dpi, max_pixels = resolve_image_settings(
+            provider, model_name
+        )
+
+        all_indices = (
+            page_indices if page_indices is not None else list(range(total_units))
+        )
+
+        # Page-level resume: subtract already-transcribed pages BEFORE
+        # rendering anything.
+        if is_folder:
+            files = list_folder_images(source_path)
+            skip_names = (
+                compute_folder_skip_names(temp_jsonl_path)
+                if self.resume_mode != "overwrite"
+                else set()
+            )
+            needed = [
+                i
+                for i in all_indices
+                if 0 <= i < len(files)
+                and folder_image_name(files[i]) not in skip_names
+                and files[i].name not in skip_names
+            ]
+        else:
+            skip_indices = (
+                compute_pdf_skip_indices(temp_jsonl_path)
+                if self.resume_mode != "overwrite"
+                else set()
+            )
+            needed = [
+                i for i in all_indices if 0 <= i < total_units and i not in skip_indices
+            ]
+
+        skipped = len(all_indices) - len(needed)
+        if skipped > 0:
+            print_info(
+                f"Skipping {skipped} already-processed page(s) (found in JSONL)"
+            )
+            logger.info(
+                f"Skipped {skipped} pages already in {temp_jsonl_path.name}"
+            )
+
+        if not needed:
+            print_info(
+                "All pages already processed. Regenerating output file from JSONL..."
+            )
+            write_output_from_jsonl(
+                temp_jsonl_path,
+                output_txt_path,
+                self.postprocessing_config,
+                output_format=output_format,
+            )
+            self._cleanup_temp_jsonl(temp_jsonl_path, "gpt")
+            self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
+            return
+
+        if is_folder:
+            print_info(
+                f"Streaming {len(needed)} image(s) with in-memory preprocessing..."
+            )
+            payload_source: AsyncIterator[PagePayload] = stream_folder_payloads(
+                source_path,
+                img_cfg=img_cfg,
+                model_type=model_type,
+                page_indices=needed,
+            )
+        else:
+            print_info(
+                f"Streaming {len(needed)} page(s) at {target_dpi} DPI"
+                f" with in-memory preprocessing..."
+            )
+            payload_source = stream_pdf_payloads(
+                source_path,
+                target_dpi=target_dpi,
+                img_cfg=img_cfg,
+                model_type=model_type,
+                max_pixels=max_pixels,
+                page_indices=needed,
+            )
+
+        file_provenance = build_file_provenance(
+            source_path, img_cfg, model_type, max_pixels
+        )
+
+        # Batch mode: materialize compact payloads (raw pages are freed per
+        # page by the producer), then submit via the batch backend.
+        if self.user_config.use_batch_processing:
+            payloads = [p async for p in payload_source]
+            if await self._handle_batch_submission(
+                payloads,
+                temp_jsonl_path,
+                parent_folder,
+                source_stem,
+                file_provenance=file_provenance,
+            ):
+                return
+
+            async def _replay() -> AsyncIterator[PagePayload]:
+                for p in payloads:
+                    yield p
+
+            payload_source = _replay()
+            print_info("Falling back to synchronous processing...")
+
+        print_info(f"Starting gpt transcription for {len(needed)} images...")
+        await run_streaming_transcription_pipeline(
+            payload_source,
+            transcriber,
+            temp_jsonl_path,
+            output_txt_path,
+            source_name,
+            self.concurrency_config,
+            self.postprocessing_config,
+            is_folder=is_folder,
+            output_format=output_format,
+            file_provenance=file_provenance,
+        )
+        print_success(
+            f"Saved transcription for '{source_name}' -> {output_txt_path.name}"
+        )
+        self._cleanup_temp_jsonl(temp_jsonl_path, "gpt")
+        self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
 
     async def process_single_pdf(self, pdf_path: Path, transcriber: Any | None) -> None:
         """
@@ -724,7 +893,7 @@ class WorkflowManager:
             self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
             return
 
-        # Non-native PDF: Extract images
+        # Non-native PDF: Tesseract keeps the file-based pipeline
         if method == "tesseract":
             # Use separate folder and pipeline for Tesseract
             preprocessed_folder = parent_folder / "preprocessed_images_tesseract"
@@ -740,65 +909,52 @@ class WorkflowManager:
             processed_image_files = await pdf_processor.process_images_for_tesseract(
                 preprocessed_folder, target_dpi, page_indices=page_indices
             )
-        else:
-            preprocessed_folder = parent_folder / "preprocessed_images"
-            preprocessed_folder.mkdir(exist_ok=True)
-            self._transient_tracker.register_preprocessed_folder(
-                preprocessed_folder, pdf_path.name
-            )
-            target_dpi = self._resolve_target_dpi(method)
-            # Get provider and model name from model config for
-            # provider-specific preprocessing
-            tm = self.model_config.get("transcription_model", {})
-            provider = tm.get("provider", "openai")
-            model_name = tm.get("name", "")
+            print_info(f"Extracted {len(processed_image_files)} page images from PDF.")
             print_info(
-                f"Extracting and processing images from PDF with {target_dpi} DPI..."
-            )
-            processed_image_files = await pdf_processor.process_images(
-                preprocessed_folder,
-                target_dpi,
-                provider=provider,
-                model_name=model_name,
-                page_indices=page_indices,
+                f"Starting {method} transcription for"
+                f" {len(processed_image_files)} images..."
             )
 
-        # Rely on extraction order; order_index will follow the list order
-        print_info(f"Extracted {len(processed_image_files)} page images from PDF.")
+            await self._process_images_with_method(
+                processed_image_files,
+                method,
+                transcriber,
+                temp_jsonl_path,
+                output_txt_path,
+                pdf_path.name,
+            )
 
-        # Handle GPT batch mode (multi-provider via batch backends)
-        if await self._handle_batch_submission(
-            method,
-            processed_image_files,
-            temp_jsonl_path,
-            parent_folder,
-            pdf_path.stem,
-            preprocessed_folder,
-            pdf_path.name,
-        ):
+            self._cleanup_preprocessed(preprocessed_folder, pdf_path.name)
+            print_success(
+                f"Saved transcription for PDF '{pdf_path.name}'"
+                f" -> {output_txt_path.name}"
+            )
+            self._cleanup_temp_jsonl(temp_jsonl_path, method)
+            # Mark transient files as complete (successfully processed)
+            self._transient_tracker.mark_preprocessed_complete(preprocessed_folder)
+            self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
             return
 
-        # Synchronous processing for GPT or Tesseract
-        n_imgs = len(processed_image_files)
-        print_info(f"Starting {method} transcription for {n_imgs} images...")
+        # GPT method: pages are rendered, preprocessed, and encoded fully in
+        # memory (no preprocessed_images folder is written).
+        if pdf_processor.doc is None:
+            pdf_processor.open_pdf()
+        assert pdf_processor.doc is not None
+        total_pages = pdf_processor.doc.page_count
+        pdf_processor.close_pdf()
 
-        await self._process_images_with_method(
-            processed_image_files,
-            method,
-            transcriber,
-            temp_jsonl_path,
-            output_txt_path,
-            pdf_path.name,
+        await self._process_gpt_streaming(
+            source_path=pdf_path,
+            source_name=pdf_path.name,
+            source_stem=pdf_path.stem,
+            is_folder=False,
+            total_units=total_pages,
+            page_indices=page_indices,
+            parent_folder=parent_folder,
+            temp_jsonl_path=temp_jsonl_path,
+            output_txt_path=output_txt_path,
+            transcriber=transcriber,
         )
-
-        self._cleanup_preprocessed(preprocessed_folder, pdf_path.name)
-        print_success(
-            f"Saved transcription for PDF '{pdf_path.name}' -> {output_txt_path.name}"
-        )
-        self._cleanup_temp_jsonl(temp_jsonl_path, method)
-        # Mark transient files as complete (successfully processed)
-        self._transient_tracker.mark_preprocessed_complete(preprocessed_folder)
-        self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
 
     async def process_single_image_folder(
         self, folder: Path, transcriber: Any | None
@@ -834,7 +990,7 @@ class WorkflowManager:
         # Determine output directory and prepare working folder
         if self.use_input_as_output:
             # Working files go in a hash-suffixed subdirectory next to the image folder
-            parent_folder, preprocessed_folder, temp_jsonl_path, _ = (
+            parent_folder, _preprocessed_folder, temp_jsonl_path, _ = (
                 ImageProcessor.prepare_image_folder(folder, folder.parent)
             )
             # Final .txt goes directly next to the image folder (one level up)
@@ -850,8 +1006,6 @@ class WorkflowManager:
             output_txt_path = mirror_dir / create_safe_filename(
                 folder.name, ext, mirror_dir
             )
-            preprocessed_folder = mirror_dir / "preprocessed_images"
-            preprocessed_folder.mkdir(exist_ok=True)
             temp_jsonl_name = create_safe_filename(folder.name, ".jsonl", mirror_dir)
             temp_jsonl_path = mirror_dir / temp_jsonl_name
             if not temp_jsonl_path.exists():
@@ -859,7 +1013,7 @@ class WorkflowManager:
             parent_folder = mirror_dir
         else:
             rel_key = _relative_key(folder, self.input_root)
-            parent_folder, preprocessed_folder, temp_jsonl_path, output_txt_path = (
+            parent_folder, _preprocessed_folder, temp_jsonl_path, output_txt_path = (
                 ImageProcessor.prepare_image_folder(
                     folder, self.image_output_dir, relative_key=rel_key
                 )
@@ -871,9 +1025,6 @@ class WorkflowManager:
 
         # Register transient files for cleanup on interruption
         self._transient_tracker.register_jsonl(temp_jsonl_path, method)
-        self._transient_tracker.register_preprocessed_folder(
-            preprocessed_folder, folder.name
-        )
 
         # Resolve page range for image folders (indices into sorted file list)
         page_indices = None
@@ -903,12 +1054,8 @@ class WorkflowManager:
         if method == "tesseract" and not self._ensure_tesseract_available():
             return
 
-        # Process images directly from source folder to preprocessed folder
+        # Tesseract keeps the file-based pipeline
         if method == "tesseract":
-            # Tesseract uses a different preprocessed folder
-            self._transient_tracker.mark_preprocessed_complete(
-                preprocessed_folder
-            )  # Clear initial registration
             preprocessed_folder = parent_folder / "preprocessed_images_tesseract"
             preprocessed_folder.mkdir(exist_ok=True)
             self._transient_tracker.register_preprocessed_folder(
@@ -918,68 +1065,62 @@ class WorkflowManager:
             processed_files = ImageProcessor.process_and_save_images_for_tesseract(
                 folder, preprocessed_folder, page_indices=page_indices
             )
-        else:
-            # Get provider and model name from model config for
-            # provider-specific preprocessing
-            tm = self.model_config.get("transcription_model", {})
-            provider = tm.get("provider", "openai")
-            model_name = tm.get("name", "")
-            print_info(f"Processing images from folder for {provider.upper()}...")
-            try:
-                processed_files = ImageProcessor.process_and_save_images(
-                    folder,
-                    preprocessed_folder,
-                    provider=provider,
-                    model_name=model_name,
-                    page_indices=page_indices,
-                )
-            except RuntimeError as e:
-                print_error(f"Skipping folder '{folder.name}': {e}")
+
+            if not processed_files:
+                print_warning(f"No images found or processed in {folder}.")
                 return
 
-        if not processed_files:
+            # Deterministic ordering for folders: sort by filename
+            processed_files.sort(key=lambda x: x.name.lower())
+
+            print_info(
+                f"Starting {method} transcription for"
+                f" {len(processed_files)} images..."
+            )
+            await self._process_images_with_method(
+                processed_files,
+                method,
+                transcriber,
+                temp_jsonl_path,
+                output_txt_path,
+                folder.name,
+                is_folder=True,
+            )
+
+            self._cleanup_preprocessed(preprocessed_folder, f"folder '{folder.name}'")
+            print_success(
+                f"Transcription completed for folder '{folder.name}'"
+                f" -> {output_txt_path.name}"
+            )
+            self._cleanup_temp_jsonl(temp_jsonl_path, method)
+            # Mark transient files as complete (successfully processed)
+            self._transient_tracker.mark_preprocessed_complete(preprocessed_folder)
+            self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
+            return
+
+        # GPT method: source images are preprocessed and encoded fully in
+        # memory (no preprocessed_images folder is written).
+        total_images = len(list_folder_images(folder))
+        if total_images == 0:
             print_warning(f"No images found or processed in {folder}.")
             return
 
-        # Deterministic ordering for folders: sort by filename
-        processed_files.sort(key=lambda x: x.name.lower())
-
-        # Handle batch mode for GPT (multi-provider via batch backends)
-        if await self._handle_batch_submission(
-            method,
-            processed_files,
-            temp_jsonl_path,
-            parent_folder,
-            folder.name,
-            preprocessed_folder,
-            f"folder '{folder.name}'",
-        ):
+        try:
+            await self._process_gpt_streaming(
+                source_path=folder,
+                source_name=folder.name,
+                source_stem=folder.name,
+                is_folder=True,
+                total_units=total_images,
+                page_indices=page_indices,
+                parent_folder=parent_folder,
+                temp_jsonl_path=temp_jsonl_path,
+                output_txt_path=output_txt_path,
+                transcriber=transcriber,
+            )
+        except RuntimeError as e:
+            print_error(f"Skipping folder '{folder.name}': {e}")
             return
-
-        # Synchronous processing (non-batch GPT or Tesseract)
-        print_info(
-            f"Starting {method} transcription for {len(processed_files)} images..."
-        )
-
-        await self._process_images_with_method(
-            processed_files,
-            method,
-            transcriber,
-            temp_jsonl_path,
-            output_txt_path,
-            folder.name,
-            is_folder=True,
-        )
-
-        self._cleanup_preprocessed(preprocessed_folder, f"folder '{folder.name}'")
-        print_success(
-            f"Transcription completed for folder '{folder.name}'"
-            f" -> {output_txt_path.name}"
-        )
-        self._cleanup_temp_jsonl(temp_jsonl_path, method)
-        # Mark transient files as complete (successfully processed)
-        self._transient_tracker.mark_preprocessed_complete(preprocessed_folder)
-        self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
 
     async def _process_images_with_method(
         self,

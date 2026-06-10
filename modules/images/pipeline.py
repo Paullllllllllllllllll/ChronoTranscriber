@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import subprocess
 import tempfile
 from pathlib import Path
@@ -13,10 +14,6 @@ from deskew import determine_skew
 from PIL import Image, ImageOps
 from skimage.filters import threshold_sauvola
 
-from modules.config.capabilities.detection import (
-    detect_model_type,
-    get_image_config_section_name,
-)
 from modules.config.constants import SUPPORTED_IMAGE_EXTENSIONS
 from modules.config.service import get_config_service
 from modules.infra.logger import setup_logger
@@ -26,51 +23,16 @@ from modules.infra.paths import create_safe_directory_name, create_safe_filename
 logger = setup_logger(__name__)
 
 IMAGE_FAILURE_RATE_THRESHOLD = 0.5
-_JP2_WARNING_EMITTED = False
 
 
 class ImageProcessor:
-    def __init__(
-        self, image_path: Path, provider: str = "openai", model_name: str = ""
-    ) -> None:
-        """Initialize ImageProcessor with provider-specific config.
+    """Static image-preprocessing toolbox.
 
-        Args:
-            image_path: Path to the image file
-            provider: Provider name (openai, google, anthropic, openrouter)
-                or 'tesseract'
-            model_name: Model name for detecting underlying model type when
-                using OpenRouter (e.g., 'google/gemini-2.5-flash' uses Google
-                config even via OpenRouter)
-        """
-        if image_path.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
-            logger.error(f"Unsupported image format: {image_path.suffix}")
-            raise ValueError(f"Unsupported image format: {image_path.suffix}")
-        self.image_path = image_path
-        self.provider = provider.lower()
-        self.model_name = model_name.lower() if model_name else ""
-
-        # Detect underlying model type from model name (for OpenRouter passthrough)
-        self.model_type = detect_model_type(self.provider, self.model_name)
-
-        # Full config dict (contains 'image_processing' and 'ocr' sections)
-        self.image_config = get_config_service().get_image_processing_config()
-
-        # Get provider-specific config section
-        section_name = get_image_config_section_name(self.model_type)
-        self.img_cfg = self.image_config.get(section_name, {})
-
-    def convert_to_grayscale(self, image: Image.Image) -> Image.Image:
-        """
-        Convert the image to grayscale if enabled.
-        Returns:
-            Image.Image: The grayscale image.
-        """
-        if self.img_cfg.get("grayscale_conversion", True):
-            if image.mode == "L":
-                return image
-            return ImageOps.grayscale(image)
-        return image
+    Provider-bound preprocessing happens fully in memory via
+    :meth:`process_pil` (used by the streaming pipeline in
+    ``modules.images.page_stream``); the remaining methods cover folder
+    preparation, the JP2 FFmpeg fallback, and the Tesseract pipeline.
+    """
 
     @staticmethod
     def resize_for_detail(
@@ -179,157 +141,63 @@ class ImageProcessor:
             final_img.paste(resized_img, (paste_x, paste_y))
             return final_img
 
-    def handle_transparency(self, image: Image.Image) -> Image.Image:
+    @staticmethod
+    def resolve_detail(img_cfg: dict[str, Any], model_type: str) -> str:
+        """Resolve the effective detail/resolution setting for a provider.
+
+        Google uses ``media_resolution``, Anthropic keys off ``resize_profile``,
+        and OpenAI-compatible providers use ``llm_detail``.
         """
-        Handle transparency by pasting the image onto a white background.
+        if model_type == "google":
+            return str(img_cfg.get("media_resolution", "high") or "high")
+        if model_type == "anthropic":
+            return str(img_cfg.get("resize_profile", "auto") or "auto")
+        return str(img_cfg.get("llm_detail", "high") or "high")
+
+    @staticmethod
+    def process_pil(
+        img: Image.Image,
+        img_cfg: dict[str, Any],
+        model_type: str = "openai",
+    ) -> tuple[bytes, int, int]:
+        """Preprocess a PIL image fully in memory and return JPEG bytes.
+
+        Applies the same transform chain as the path-based pipeline:
+        transparency flattening, optional grayscale conversion,
+        provider-specific resizing, mode coercion, and JPEG encoding at the
+        configured quality.
+
+        Args:
+            img: Source PIL image.
+            img_cfg: Provider-specific image-processing config section.
+            model_type: 'openai', 'google', 'anthropic', or 'custom'.
+
         Returns:
-            Image.Image: The processed image.
+            Tuple of (jpeg_bytes, width, height) of the encoded image.
         """
-        if self.img_cfg.get("handle_transparency", True) and (
-            image.mode in ("RGBA", "LA")
-            or (image.mode == "P" and "transparency" in image.info)
+        detail = ImageProcessor.resolve_detail(img_cfg, model_type)
+
+        if img_cfg.get("handle_transparency", True) and (
+            img.mode in ("RGBA", "LA")
+            or (img.mode == "P" and "transparency" in img.info)
         ):
-            background = Image.new("RGB", image.size, (255, 255, 255))
-            background.paste(image, mask=image.split()[-1])
-            return background
-        return image
+            background = Image.new("RGB", img.size, (255, 255, 255))
+            background.paste(img, mask=img.split()[-1])
+            img = background
 
-    def process_image(self, output_path: Path) -> str:
-        """
-        Process the image and save it to the given output path with compression.
-        Returns:
-            str: A message indicating the outcome.
-        """
-        try:
-            img: Image.Image
-            with Image.open(self.image_path) as img:
-                if self.model_type == "google":
-                    detail = self.img_cfg.get("media_resolution", "high") or "high"
-                elif self.model_type == "anthropic":
-                    detail = self.img_cfg.get("resize_profile", "auto") or "auto"
-                else:
-                    detail = self.img_cfg.get("llm_detail", "high") or "high"
+        if img_cfg.get("grayscale_conversion", True) and img.mode != "L":
+            img = ImageOps.grayscale(img)
 
-                if getattr(img, "format", None) == "JPEG":
-                    try:
-                        desired_mode = (
-                            "L"
-                            if self.img_cfg.get("grayscale_conversion", True)
-                            else "RGB"
-                        )
-                        w, h = img.size
-                        detail_norm = (detail or "high").lower()
-                        if detail_norm == "low":
-                            max_side = int(self.img_cfg.get("low_max_side_px", 512))
-                            if max(w, h) > max_side:
-                                img.draft(desired_mode, (max_side, max_side))
-                        elif detail_norm == "original":
-                            max_side = int(
-                                self.img_cfg.get("original_max_side_px", 6000)
-                            )
-                            if max(w, h) > max_side:
-                                img.draft(desired_mode, (max_side, max_side))
-                        elif self.model_type == "anthropic":
-                            max_side = int(self.img_cfg.get("high_max_side_px", 1568))
-                            if max(w, h) > max_side:
-                                img.draft(desired_mode, (max_side, max_side))
-                        else:
-                            box = self.img_cfg.get("high_target_box", [768, 1536])
-                            try:
-                                target_width = int(box[0])
-                                target_height = int(box[1])
-                            except Exception:
-                                target_width, target_height = 768, 1536
-                            scale = min(
-                                target_width / float(w), target_height / float(h)
-                            )
-                            if scale < 1.0:
-                                img.draft(desired_mode, (target_width, target_height))
-                    except (OSError, ValueError) as exc:
-                        # draft() is a best-effort decode-time optimization; on
-                        # failure we still fall through to the full resize path.
-                        logger.debug(
-                            "JPEG draft fast-path skipped for %s: %s",
-                            self.image_path,
-                            exc,
-                        )
+        img = ImageProcessor.resize_for_detail(img, detail, img_cfg, model_type)
 
-                img = self.handle_transparency(img)
-                img = self.convert_to_grayscale(img)
-                img = ImageProcessor.resize_for_detail(
-                    img, detail, self.img_cfg, self.model_type
-                )
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
 
-                if img.mode not in ("RGB", "L"):
-                    img = img.convert("RGB")
-
-                # Force output to JPEG with configurable quality
-                # (regardless of extension). Create a new path with .jpg extension.
-                jpg_output_path = output_path.with_suffix(".jpg")
-                jpeg_quality = int(self.img_cfg.get("jpeg_quality", 95))
-                img.save(jpg_output_path, format="JPEG", quality=jpeg_quality)
-                logger.debug(
-                    "Saved processed image %s size=%s quality=%d detail=%s",
-                    jpg_output_path.name,
-                    img.size,
-                    jpeg_quality,
-                    detail,
-                )
-            return f"Processed and saved: {jpg_output_path.name}"
-        except Exception as e:
-            global _JP2_WARNING_EMITTED
-            if isinstance(e, OSError) and self.image_path.suffix.lower() in {
-                ".jp2",
-                ".j2k",
-            }:
-                if not _JP2_WARNING_EMITTED:
-                    logger.warning(
-                        "JPEG2000 (.jp2/.j2k) decoding failed with "
-                        "Pillow/openjpeg (%s). "
-                        "This is likely a sub-8-bit (bilevel) JP2 file "
-                        "unsupported by openjpeg. "
-                        "Attempting FFmpeg fallback.",
-                        e,
-                    )
-                    _JP2_WARNING_EMITTED = True
-                # Recompute detail level (it may not be bound if
-                # Image.open() itself failed)
-                if self.model_type == "google":
-                    _detail = self.img_cfg.get("media_resolution", "high") or "high"
-                elif self.model_type == "anthropic":
-                    _detail = self.img_cfg.get("resize_profile", "auto") or "auto"
-                else:
-                    _detail = self.img_cfg.get("llm_detail", "high") or "high"
-                try:
-                    ffmpeg_img = ImageProcessor._decode_with_ffmpeg(self.image_path)
-                    ffmpeg_img = self.handle_transparency(ffmpeg_img)
-                    ffmpeg_img = self.convert_to_grayscale(ffmpeg_img)
-                    ffmpeg_img = ImageProcessor.resize_for_detail(
-                        ffmpeg_img, _detail, self.img_cfg, self.model_type
-                    )
-                    if ffmpeg_img.mode not in ("RGB", "L"):
-                        ffmpeg_img = ffmpeg_img.convert("RGB")
-                    jpg_output_path = output_path.with_suffix(".jpg")
-                    jpeg_quality = int(self.img_cfg.get("jpeg_quality", 95))
-                    ffmpeg_img.save(
-                        jpg_output_path, format="JPEG", quality=jpeg_quality
-                    )
-                    logger.debug(
-                        "Saved FFmpeg-decoded image %s size=%s quality=%d detail=%s",
-                        jpg_output_path.name,
-                        ffmpeg_img.size,
-                        jpeg_quality,
-                        _detail,
-                    )
-                    return f"Processed and saved (via FFmpeg): {jpg_output_path.name}"
-                except Exception as ffmpeg_err:
-                    logger.error(
-                        "FFmpeg fallback also failed for %s: %s",
-                        self.image_path.name,
-                        ffmpeg_err,
-                    )
-            logger.error(f"Error processing image {self.image_path.name}: {e}")
-            return f"Failed to process {self.image_path.name}: {e}"
+        jpeg_quality = int(img_cfg.get("jpeg_quality", 95))
+        buffer = io.BytesIO()
+        img.save(buffer, format="JPEG", quality=jpeg_quality)
+        width, height = img.size
+        return buffer.getvalue(), width, height
 
     # --- Static Methods for Folder-Level Processing ---
 
@@ -344,7 +212,9 @@ class ImageProcessor:
 
         Returns a tuple of:
           - parent_folder: The directory for outputs related to this folder.
-          - preprocessed_folder: Where preprocessed images will be stored.
+          - preprocessed_folder: Where preprocessed images would be stored
+            (path only; created lazily by the Tesseract pipeline — the GPT
+            pipeline preprocesses fully in memory).
           - temp_jsonl_path: File for recording transcription logs.
           - output_txt_path: Final transcription text file.
         """
@@ -355,9 +225,9 @@ class ImageProcessor:
         parent_folder = image_output_dir / safe_dir_name
         parent_folder.mkdir(parents=True, exist_ok=True)
 
-        # Create preprocessed images subfolder
+        # Path of the (Tesseract-only) preprocessed images subfolder;
+        # not created here.
         preprocessed_folder = parent_folder / "preprocessed_images"
-        preprocessed_folder.mkdir(exist_ok=True)
 
         # Create safe filenames (truncated with hash if needed,
         # considering full path length).
@@ -371,129 +241,6 @@ class ImageProcessor:
         output_txt_path = parent_folder / output_txt_name
 
         return parent_folder, preprocessed_folder, temp_jsonl_path, output_txt_path
-
-    @staticmethod
-    def process_images_multiprocessing(
-        image_paths: list[Path],
-        output_paths: list[Path],
-        provider: str = "openai",
-        model_name: str = "",
-    ) -> list[str | None]:
-        """
-        Process images using multiprocessing.
-
-        Parameters:
-            image_paths (List[Path]): List of source image paths.
-            output_paths (List[Path]): List of destination paths for processed images.
-            provider (str): Provider name for config selection.
-            model_name (str): Model name for detecting underlying model type.
-
-        Returns:
-            List[Optional[str]]: Processing results for each image.
-        """
-        # Load concurrency settings
-        conc = get_config_service().get_concurrency_config()
-        img_conc = conc.get("concurrency", {}).get("image_processing", {})
-        processes = int(img_conc.get("concurrency_limit", 12))
-
-        # Create args list with provider and model_name for each image
-        args_list = [
-            (img_path, out_path, provider, model_name)
-            for img_path, out_path in zip(image_paths, output_paths, strict=False)
-        ]
-        results = run_multiprocessing_tasks(
-            ImageProcessor._process_image_task, args_list, processes=processes
-        )
-        return results
-
-    @staticmethod
-    def _process_image_task(
-        img_path: Path, out_path: Path, provider: str, model_name: str
-    ) -> str:
-        """
-        Helper task to process a single image and save it to out_path.
-
-        Parameters:
-            img_path: Source image path.
-            out_path: Destination path for processed image.
-            provider: Provider name for config selection.
-            model_name: Model name for detecting underlying model type.
-
-        Returns:
-            str: A status message.
-        """
-        processor = ImageProcessor(img_path, provider=provider, model_name=model_name)
-        return processor.process_image(out_path)
-
-    @staticmethod
-    def process_and_save_images(
-        source_folder: Path,
-        preprocessed_folder: Path,
-        provider: str = "openai",
-        model_name: str = "",
-        page_indices: list[int] | None = None,
-    ) -> list[Path]:
-        """
-        Reads images from source folder, processes them, and saves directly to
-        preprocessed folder. Eliminates the need for intermediate raw image
-        storage.
-
-        Parameters:
-            source_folder (Path): Path to the source folder containing original images.
-            preprocessed_folder (Path): Path to save processed images.
-            provider (str): Provider name for config selection.
-            model_name (str): Model name for detecting underlying model type.
-            page_indices (Optional[List[int]]): Optional 0-based indices into the sorted
-                image list.  If None, all images are processed.
-
-        Returns:
-            List[Path]: List of processed image paths.
-        """
-        image_files: list[Path] = [
-            p
-            for p in source_folder.iterdir()
-            if p.is_file() and p.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
-        ]
-
-        if not image_files:
-            return []
-
-        image_files.sort(key=lambda p: p.name.lower())
-
-        # Apply page-range filter
-        if page_indices is not None:
-            image_files = [
-                image_files[i] for i in page_indices if 0 <= i < len(image_files)
-            ]
-
-        # Create list of output paths
-        output_paths = [
-            preprocessed_folder / f"{img.stem}_pre_processed.jpg" for img in image_files
-        ]
-
-        # Process all images at once using multiprocessing with provider info
-        ImageProcessor.process_images_multiprocessing(
-            image_files, output_paths, provider, model_name
-        )
-
-        # Return all processed image paths that exist
-        successful_outputs = [p for p in output_paths if p.exists()]
-
-        n_total = len(output_paths)
-        n_ok = len(successful_outputs)
-        n_failed = n_total - n_ok
-
-        if (
-            n_total > 1
-            and n_failed >= 2
-            and (n_failed / n_total) >= IMAGE_FAILURE_RATE_THRESHOLD
-        ):
-            raise RuntimeError(
-                f"Image preprocessing failed for {n_failed}/{n_total} images in "
-                f"'{source_folder.name}'. Check format support and file integrity."
-            )
-
-        return successful_outputs
 
     # ================== FFmpeg fallback decoding ==================
 

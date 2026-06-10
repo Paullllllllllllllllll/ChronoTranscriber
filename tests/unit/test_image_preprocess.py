@@ -1,9 +1,9 @@
 """Unit tests for modules.images.pipeline and modules.images.encoding.
 
-Covers ``encode_image_to_data_url``, the in-place image transforms on
-``ImageProcessor`` (grayscale, transparency flattening, resize-for-detail),
-the Tesseract-path numpy helpers (``_pil_to_np``, ``_deskew``,
-``_ensure_grayscale``), and the folder preparation helper.
+Covers ``encode_image_to_data_url``, ``encode_bytes_to_base64``, the
+in-memory preprocessing chain (``process_pil``/``resolve_detail``/
+``resize_for_detail``), the Tesseract-path numpy helpers (``_pil_to_np``,
+``_deskew``, ``_ensure_grayscale``), and the folder preparation helper.
 
 All PIL images are constructed in-memory; numpy arrays are small; no real
 OCR or FFmpeg process is invoked.
@@ -12,6 +12,7 @@ OCR or FFmpeg process is invoked.
 from __future__ import annotations
 
 import base64
+import io
 from pathlib import Path
 
 import numpy as np
@@ -21,7 +22,7 @@ from PIL import Image
 # Priming import to avoid a circular-import chain when this module is the
 # first to touch modules.images.
 import modules.transcribe.dual_mode  # noqa: F401
-from modules.images.encoding import encode_image_to_data_url
+from modules.images.encoding import encode_bytes_to_base64, encode_image_to_data_url
 from modules.images.pipeline import ImageProcessor
 
 # ---------------------------------------------------------------------------
@@ -63,61 +64,102 @@ class TestEncodeImageToDataURL:
 
 
 # ---------------------------------------------------------------------------
-# ImageProcessor instance methods: convert_to_grayscale / handle_transparency
+# encode_bytes_to_base64
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def image_processor(tmp_path: Path) -> ImageProcessor:
-    """Build an ImageProcessor instance backed by a tiny PNG file."""
-    img_path = tmp_path / "source.png"
-    Image.new("RGB", (4, 4), (255, 255, 255)).save(img_path, format="PNG")
-    return ImageProcessor(img_path, provider="openai")
-
-
-class TestConvertToGrayscale:
+class TestEncodeBytesToBase64:
     @pytest.mark.unit
-    def test_rgb_becomes_L(self, image_processor: ImageProcessor) -> None:
-        rgb = Image.new("RGB", (4, 4), (128, 128, 128))
-        # Force grayscale_conversion on (defaults to True but keep explicit)
-        image_processor.img_cfg["grayscale_conversion"] = True
-        out = image_processor.convert_to_grayscale(rgb)
-        assert out.mode == "L"
+    def test_round_trip(self) -> None:
+        data = b"\xff\xd8\xff\xe0binary jpeg-ish bytes"
+        encoded = encode_bytes_to_base64(data)
+        assert base64.b64decode(encoded) == data
 
+
+# ---------------------------------------------------------------------------
+# ImageProcessor.resolve_detail / process_pil (in-memory chain)
+# ---------------------------------------------------------------------------
+
+
+class TestResolveDetail:
     @pytest.mark.unit
-    def test_already_L_returns_same_object(
-        self, image_processor: ImageProcessor
-    ) -> None:
-        gray = Image.new("L", (4, 4), 128)
-        image_processor.img_cfg["grayscale_conversion"] = True
-        out = image_processor.convert_to_grayscale(gray)
-        assert out is gray  # short-circuit returns the input
+    def test_google_uses_media_resolution(self) -> None:
+        cfg = {"media_resolution": "medium", "llm_detail": "high"}
+        assert ImageProcessor.resolve_detail(cfg, "google") == "medium"
 
     @pytest.mark.unit
-    def test_disabled_returns_input_unchanged(
-        self, image_processor: ImageProcessor
-    ) -> None:
-        rgb = Image.new("RGB", (4, 4), (10, 20, 30))
-        image_processor.img_cfg["grayscale_conversion"] = False
-        out = image_processor.convert_to_grayscale(rgb)
-        assert out is rgb
-        assert out.mode == "RGB"
-
-
-class TestHandleTransparency:
-    @pytest.mark.unit
-    def test_rgba_flattened_to_rgb(self, image_processor: ImageProcessor) -> None:
-        rgba = Image.new("RGBA", (4, 4), (255, 0, 0, 128))
-        image_processor.img_cfg["handle_transparency"] = True
-        out = image_processor.handle_transparency(rgba)
-        assert out.mode == "RGB"
+    def test_anthropic_uses_resize_profile(self) -> None:
+        cfg = {"resize_profile": "high", "llm_detail": "low"}
+        assert ImageProcessor.resolve_detail(cfg, "anthropic") == "high"
 
     @pytest.mark.unit
-    def test_rgb_input_unchanged(self, image_processor: ImageProcessor) -> None:
-        rgb = Image.new("RGB", (4, 4), (10, 20, 30))
-        image_processor.img_cfg["handle_transparency"] = True
-        out = image_processor.handle_transparency(rgb)
-        assert out is rgb
+    def test_openai_uses_llm_detail(self) -> None:
+        cfg = {"llm_detail": "original"}
+        assert ImageProcessor.resolve_detail(cfg, "openai") == "original"
+
+    @pytest.mark.unit
+    def test_defaults(self) -> None:
+        assert ImageProcessor.resolve_detail({}, "openai") == "high"
+        assert ImageProcessor.resolve_detail({}, "anthropic") == "auto"
+        assert ImageProcessor.resolve_detail({}, "google") == "high"
+
+
+class TestProcessPil:
+    @pytest.mark.unit
+    def test_returns_jpeg_bytes_and_size(self) -> None:
+        img = Image.new("RGB", (40, 20), (128, 128, 128))
+        cfg = {"grayscale_conversion": True, "resize_profile": "none"}
+        data, width, height = ImageProcessor.process_pil(img, cfg, "openai")
+        assert data[:3] == b"\xff\xd8\xff"  # JPEG magic
+        assert (width, height) == (40, 20)
+        with Image.open(io.BytesIO(data)) as out:
+            assert out.mode == "L"  # grayscale applied
+            assert out.size == (40, 20)
+
+    @pytest.mark.unit
+    def test_transparency_flattened(self) -> None:
+        rgba = Image.new("RGBA", (8, 8), (255, 0, 0, 128))
+        cfg = {
+            "handle_transparency": True,
+            "grayscale_conversion": False,
+            "resize_profile": "none",
+        }
+        data, _w, _h = ImageProcessor.process_pil(rgba, cfg, "openai")
+        with Image.open(io.BytesIO(data)) as out:
+            assert out.mode == "RGB"
+
+    @pytest.mark.unit
+    def test_grayscale_disabled_keeps_rgb(self) -> None:
+        img = Image.new("RGB", (8, 8), (10, 20, 30))
+        cfg = {"grayscale_conversion": False, "resize_profile": "none"}
+        data, _w, _h = ImageProcessor.process_pil(img, cfg, "openai")
+        with Image.open(io.BytesIO(data)) as out:
+            assert out.mode == "RGB"
+
+    @pytest.mark.unit
+    def test_resize_applied_via_detail(self) -> None:
+        img = Image.new("RGB", (3000, 1500), (0, 0, 0))
+        cfg = {
+            "grayscale_conversion": False,
+            "llm_detail": "high",
+            "high_target_box": [768, 1536],
+            "resize_profile": "auto",
+        }
+        _data, width, height = ImageProcessor.process_pil(img, cfg, "openai")
+        assert (width, height) == (768, 1536)
+
+    @pytest.mark.unit
+    def test_original_detail_caps_pixels(self) -> None:
+        img = Image.new("RGB", (4000, 4000), (0, 0, 0))
+        cfg = {
+            "grayscale_conversion": True,
+            "llm_detail": "original",
+            "original_max_side_px": 6000,
+            "original_max_pixels": 1_000_000,
+            "resize_profile": "auto",
+        }
+        _data, width, height = ImageProcessor.process_pil(img, cfg, "openai")
+        assert width * height <= 1_000_000
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +285,9 @@ class TestPrepareImageFolder:
 
         assert parent.exists() and parent.is_dir()
         assert parent.parent == out_dir
-        assert preprocessed.exists() and preprocessed.is_dir()
+        # The preprocessed folder is Tesseract-only and created lazily;
+        # prepare_image_folder returns the path without creating it.
+        assert not preprocessed.exists()
         assert preprocessed.parent == parent
         assert preprocessed.name == "preprocessed_images"
         assert temp_jsonl.exists()  # touched into existence

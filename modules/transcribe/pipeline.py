@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import hashlib
 import json
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -19,8 +21,12 @@ from modules.batch.jsonl import (
     get_processed_image_names,
     read_jsonl_records,
 )
+from modules.images.page_stream import PagePayload
 from modules.images.tesseract_runtime import perform_ocr
-from modules.infra.concurrency import run_concurrent_transcription_tasks
+from modules.infra.concurrency import (
+    run_concurrent_transcription_tasks,
+    run_streaming_transcription_tasks,
+)
 from modules.infra.logger import setup_logger
 from modules.llm import transcribe_image_with_llm
 from modules.llm.response_parsing import extract_transcribed_text
@@ -95,8 +101,13 @@ def _build_jsonl_record(
     method: str,
     is_folder: bool,
     transcriber: Any | None,
+    payload: PagePayload | None = None,
 ) -> dict[str, Any] | None:
     """Build a JSONL record dict from a transcription result tuple.
+
+    When ``payload`` is given (streaming pipeline), no preprocessed image
+    file exists on disk: ``pre_processed_image`` is None and the record
+    carries the source reference and per-page provenance instead.
 
     Returns None if the result should be skipped (no text).
     """
@@ -110,13 +121,18 @@ def _build_jsonl_record(
     source_key = "folder_name" if is_folder else "file_name"
     record: dict[str, Any] = {
         source_key: source_name,
-        "pre_processed_image": img_path_str,
+        "pre_processed_image": None if payload is not None else img_path_str,
         "image_name": image_name,
         "timestamp": datetime.datetime.now().isoformat(),
         "method": method,
         "order_index": order_index,
         "text_chunk": text_chunk,
     }
+
+    if payload is not None:
+        record["source_file"] = payload.source_file
+        record["page_index"] = payload.page_index
+        record["image_provenance"] = payload.provenance()
 
     # Include raw_response and request_context only for GPT
     if method == "gpt" and raw_response is not None and transcriber is not None:
@@ -150,6 +166,186 @@ def _build_jsonl_record(
             )
 
     return record
+
+
+async def transcribe_payload(
+    payload: PagePayload,
+    transcriber: Any,
+) -> tuple[Any, str, str | None, dict[str, Any] | None, int]:
+    """Transcribe one in-memory page payload via the LLM provider.
+
+    Returns the same 5-tuple shape as :func:`transcribe_single_image`, with
+    the payload itself in the first slot (so JSONL writers can access
+    provenance) and the absolute page index as ``order_index``.
+    """
+    image_name = payload.image_name
+    try:
+        result = await transcriber.transcribe_image_from_base64(
+            payload.base64, payload.mime_type
+        )
+        logger.debug(f"LLM response for {image_name}: {result}")
+        try:
+            final_text: str | None = extract_transcribed_text(result, image_name)
+        except Exception as e:
+            logger.error(
+                "Error extracting transcription for %s: %s."
+                " Marking as transcription error.",
+                image_name,
+                e,
+            )
+            final_text = f"[transcription error: {image_name}]"
+        return (payload, image_name, final_text, result, payload.index)
+    except Exception as e:
+        logger.exception(f"Error transcribing {image_name}: {e}")
+        return (
+            payload,
+            image_name,
+            f"[transcription error: {image_name}]",
+            None,
+            payload.index,
+        )
+
+
+def _compute_file_sha256(path: Path) -> str | None:
+    """SHA-256 of a file via streamed read (sources can be ~1 GB)."""
+    try:
+        digest = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError as e:
+        logger.warning("Could not hash source file %s: %s", path, e)
+        return None
+
+
+def build_file_provenance(
+    source_file: Path,
+    img_cfg: dict[str, Any],
+    model_type: str,
+    max_pixels: int,
+) -> dict[str, Any]:
+    """File-level reproducibility record for one streaming run."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    import PIL
+
+    try:
+        pymupdf_version = version("pymupdf")
+    except PackageNotFoundError:
+        pymupdf_version = None
+
+    return {
+        "file_provenance": {
+            "source_file": str(source_file),
+            "source_sha256": _compute_file_sha256(source_file)
+            if source_file.is_file()
+            else None,
+            "pymupdf_version": pymupdf_version,
+            "pillow_version": PIL.__version__,
+            "model_type": model_type,
+            "image_config": {
+                "target_dpi": img_cfg.get("target_dpi"),
+                "max_pixels_per_page": max_pixels,
+                "resize_profile": img_cfg.get("resize_profile"),
+                "llm_detail": img_cfg.get("llm_detail"),
+                "media_resolution": img_cfg.get("media_resolution"),
+                "jpeg_quality": img_cfg.get("jpeg_quality"),
+                "grayscale_conversion": img_cfg.get("grayscale_conversion"),
+            },
+            "timestamp": datetime.datetime.now().isoformat(),
+        }
+    }
+
+
+async def run_streaming_transcription_pipeline(
+    payload_source: AsyncIterator[PagePayload],
+    transcriber: Any,
+    temp_jsonl_path: Path,
+    output_txt_path: Path,
+    source_name: str,
+    concurrency_config: dict[str, Any],
+    postprocessing_config: dict[str, Any],
+    is_folder: bool = False,
+    output_format: str = "txt",
+    file_provenance: dict[str, Any] | None = None,
+) -> None:
+    """Execute the in-memory streaming transcription pipeline (GPT method).
+
+    A bounded producer-consumer pool transcribes payloads as they are
+    rendered; each result is streamed to the temp JSONL immediately. The
+    final output is regenerated from the complete JSONL, so resumed pages
+    from earlier runs are included.
+
+    Resume filtering happens BEFORE rendering (the caller passes a
+    producer that already excludes completed pages).
+    """
+    transcription_conf = concurrency_config.get("concurrency", {}).get(
+        "transcription", {}
+    )
+    concurrency_limit = transcription_conf.get("concurrency_limit", 20)
+    delay_between_tasks = transcription_conf.get("delay_between_tasks", 0)
+
+    write_lock = asyncio.Lock()
+    async with aiofiles.open(temp_jsonl_path, "a", encoding="utf-8") as jfile:
+        if file_provenance is not None:
+            await jfile.write(json.dumps(file_provenance) + "\n")
+            await jfile.flush()
+
+        async def handle(payload: PagePayload) -> Any:
+            return await transcribe_payload(payload, transcriber)
+
+        async def on_result_write(result_tuple: Any) -> None:
+            if not result_tuple or len(result_tuple) < 5:
+                return
+            payload = result_tuple[0]
+            record = _build_jsonl_record(
+                (
+                    payload.source_file,
+                    result_tuple[1],
+                    result_tuple[2],
+                    result_tuple[3],
+                    result_tuple[4],
+                ),
+                source_name,
+                "gpt",
+                is_folder,
+                transcriber,
+                payload=payload,
+            )
+            if record is None:
+                return
+            async with write_lock:
+                await jfile.write(json.dumps(record) + "\n")
+                await jfile.flush()
+
+        try:
+            print_info(f"Processing with concurrency limit of {concurrency_limit}...")
+            await run_streaming_transcription_tasks(
+                payload_source,
+                handle,
+                concurrency_limit,
+                delay_between_tasks,
+                on_result=on_result_write,
+            )
+        except Exception as e:
+            # Producer failures (e.g. the render failure-rate guard) must
+            # propagate so the item is counted as failed; results already
+            # written to the JSONL survive for a later resume.
+            logger.exception(
+                f"Error in streaming transcription for {source_name}: {e}"
+            )
+            print_error(f"Streaming transcription error for {source_name}.")
+            raise
+
+    # Regenerate the combined output from the full JSONL so pages completed
+    # in earlier (resumed) runs are included alongside this run's results.
+    write_output_from_jsonl(
+        temp_jsonl_path,
+        output_txt_path,
+        postprocessing_config,
+        output_format=output_format,
+    )
 
 
 async def run_transcription_pipeline(

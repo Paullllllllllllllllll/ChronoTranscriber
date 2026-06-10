@@ -34,6 +34,15 @@ def encode_image_to_base64(image_path: Path) -> tuple[str, str]:
     return data, mime_type
 
 
+def encode_bytes_to_base64(data: bytes) -> str:
+    """Encode raw image bytes to a base64 string.
+
+    Used by the in-memory streaming pipeline, where payloads are always
+    JPEG-encoded (mime type ``image/jpeg``).
+    """
+    return base64.b64encode(data).decode("utf-8")
+
+
 def encode_image_to_data_url(image_path: Path) -> str:
     """Encode an image file as a data URL.
 

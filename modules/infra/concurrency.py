@@ -1,17 +1,20 @@
 """Concurrency utilities for async task management.
 
-Provides semaphore-based concurrency control for async operations.
+Provides semaphore-based concurrency control for async operations and a
+bounded producer-consumer runner for streaming pipelines.
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from modules.infra.logger import setup_logger
 
 logger = setup_logger(__name__)
+
+_SENTINEL: Any = object()
 
 
 async def run_concurrent_transcription_tasks(
@@ -57,4 +60,80 @@ async def run_concurrent_transcription_tasks(
 
     tasks = [asyncio.create_task(worker(args)) for args in args_list]
     results = await asyncio.gather(*tasks, return_exceptions=False)
+    return results
+
+
+async def run_streaming_transcription_tasks(
+    producer: AsyncIterator[Any],
+    handler: Callable[[Any], Awaitable[Any]],
+    concurrency_limit: int = 20,
+    delay: float = 0,
+    on_result: Callable[[Any], Awaitable[None]] | None = None,
+) -> list[Any]:
+    """Consume an async producer with a bounded queue and worker pool.
+
+    A single producer task fills an ``asyncio.Queue`` bounded to
+    ``2 * concurrency_limit`` items; exactly ``concurrency_limit`` workers
+    pull items and run ``handler`` on each. The worker count is the
+    concurrency cap, so no extra semaphore is needed.
+
+    A producer exception is captured, the workers are drained via
+    sentinels, and the exception is re-raised after all workers finish —
+    results produced up to that point are processed normally (and streamed
+    to ``on_result``), so partial progress is preserved by the caller's
+    JSONL writes.
+
+    Args:
+        producer: Async iterator yielding work items (e.g. PagePayloads).
+        handler: Async function applied to each item; its return value is
+            collected and streamed to ``on_result``.
+        concurrency_limit: Number of worker tasks (default: 20).
+        delay: Delay in seconds before each handler call (default: 0).
+        on_result: Optional async callback invoked per result as soon as it
+            is ready.
+
+    Returns:
+        Unordered list of handler results (failed items return None).
+    """
+    workers_n = max(1, int(concurrency_limit))
+    queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=2 * workers_n)
+    producer_error: list[BaseException] = []
+    results: list[Any] = []
+
+    async def produce() -> None:
+        try:
+            async for item in producer:
+                await queue.put(item)
+        except BaseException as e:  # noqa: BLE001 - re-raised after drain
+            producer_error.append(e)
+        finally:
+            for _ in range(workers_n):
+                await queue.put(_SENTINEL)
+
+    async def work() -> None:
+        while True:
+            item = await queue.get()
+            if item is _SENTINEL:
+                return
+            if delay > 0:
+                await asyncio.sleep(delay)
+            try:
+                result = await handler(item)
+            except Exception as e:
+                logger.error(f"Streaming transcription task failed: {e}")
+                results.append(None)
+                continue
+            results.append(result)
+            if on_result is not None:
+                try:
+                    await on_result(result)
+                except Exception as cb_exc:
+                    logger.error(f"on_result callback failed: {cb_exc}")
+
+    producer_task = asyncio.create_task(produce())
+    worker_tasks = [asyncio.create_task(work()) for _ in range(workers_n)]
+    await asyncio.gather(producer_task, *worker_tasks)
+
+    if producer_error:
+        raise producer_error[0]
     return results

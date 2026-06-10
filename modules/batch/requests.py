@@ -431,8 +431,25 @@ def submit_batch(batch_file_path: Path) -> Batch:
         raise
 
 
+def _item_to_data_url_and_name(item: Any) -> tuple[str, str]:
+    """Resolve a batch item to (data_url, image_name).
+
+    Accepts a ``Path`` to an image file, or any in-memory object carrying
+    base64 data (``image_base64``/``base64``), ``mime_type``, and
+    ``image_name`` attributes (e.g. RepairTarget, PagePayload).
+    """
+    if isinstance(item, Path):
+        return encode_image_to_data_url(item), item.name
+    b64 = getattr(item, "image_base64", None) or getattr(item, "base64", None)
+    mime = getattr(item, "mime_type", None) or "image/jpeg"
+    name = getattr(item, "image_name", "") or "[in-memory]"
+    if not b64:
+        raise ValueError(f"Batch item for {name} has no image data")
+    return f"data:{mime};base64,{b64}", name
+
+
 def process_batch_transcription(
-    image_files: list[Path],
+    image_files: list[Path | Any],
     prompt_text: str,  # kept for signature parity
     model_config: dict[str, Any],
     *,
@@ -442,6 +459,9 @@ def process_batch_transcription(
 ) -> tuple[list[Any], list[dict[str, Any]]]:
     """
     Prepare and submit batched image transcriptions using the Responses API.
+
+    Items may be image file paths or in-memory objects with base64 data
+    (see :func:`_item_to_data_url_and_name`).
 
     Returns
     -------
@@ -480,13 +500,13 @@ def process_batch_transcription(
                 global_idx = chunk_start + idx
                 custom_id = f"req-{global_idx + 1}"
                 pos = chunk_start + idx + 1
+                data_url, image_name = _item_to_data_url_and_name(image_file)
                 print(
-                    f"[INFO] Encoding image {pos}/{total_images}: {image_file.name}",
+                    f"[INFO] Encoding image {pos}/{total_images}: {image_name}",
                     end="\r",
                 )
-                data_url = encode_image_to_data_url(image_file)
                 image_info = {
-                    "image_name": image_file.name,
+                    "image_name": image_name,
                     "order_index": global_idx,
                     "page_number": global_idx + 1,
                 }
@@ -503,8 +523,13 @@ def process_batch_transcription(
                 metadata_records.append(metadata_record)
                 all_metadata_records.append(metadata_record)
             except Exception as exc:
-                logger.error("Error processing image %s: %s", image_file, exc)
-                print_error(f"Failed to process image {image_file.name}: {exc}")
+                item_name = (
+                    image_file.name
+                    if isinstance(image_file, Path)
+                    else getattr(image_file, "image_name", str(image_file))
+                )
+                logger.error("Error processing image %s: %s", item_name, exc)
+                print_error(f"Failed to process image {item_name}: {exc}")
 
         print_info(f"Creating batch files for chunk {chunk_start // chunk_size + 1}...")
 

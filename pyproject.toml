@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chronotranscriber"
-version = "1.6.0"
+version = "1.7.0"
 description = "LLM-assisted document transcription tool for researchers and archivists"
 readme = "README.md"
 license = "MIT"

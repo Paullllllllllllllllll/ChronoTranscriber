@@ -605,9 +605,7 @@ async def _repair_sync_mode(
             elif target.image_path is not None:
                 raw = await transcribe_image_with_llm(target.image_path, transcriber)
             else:
-                raise ValueError(
-                    f"No image data for repair target {target.image_name}"
-                )
+                raise ValueError(f"No image data for repair target {target.image_name}")
             text = extract_transcribed_text(raw, target.image_name)
             return target.line_index, text, raw
         except Exception as e:

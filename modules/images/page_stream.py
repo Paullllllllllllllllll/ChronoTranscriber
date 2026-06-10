@@ -272,15 +272,9 @@ def _load_image_payload(
         )
 
 
-def _raise_if_failure_rate_excessive(
-    source_name: str, total: int, failed: int
-) -> None:
+def _raise_if_failure_rate_excessive(source_name: str, total: int, failed: int) -> None:
     """Raise when too many pages failed, mirroring the legacy disk pipeline."""
-    if (
-        total > 1
-        and failed >= 2
-        and (failed / total) >= IMAGE_FAILURE_RATE_THRESHOLD
-    ):
+    if total > 1 and failed >= 2 and (failed / total) >= IMAGE_FAILURE_RATE_THRESHOLD:
         raise RuntimeError(
             f"Page preprocessing failed for {failed}/{total} pages in "
             f"'{source_name}'. Check the source for corruption or unsupported "
@@ -310,9 +304,7 @@ async def stream_pdf_payloads(
     needed: list[int] = []
     with fitz.open(pdf_path) as doc:
         total_pages = doc.page_count
-        indices = (
-            page_indices if page_indices is not None else list(range(total_pages))
-        )
+        indices = page_indices if page_indices is not None else list(range(total_pages))
         needed = [i for i in indices if 0 <= i < total_pages and i not in skip]
         for page_index in needed:
             try:

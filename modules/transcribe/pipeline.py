@@ -332,9 +332,7 @@ async def run_streaming_transcription_pipeline(
             # Producer failures (e.g. the render failure-rate guard) must
             # propagate so the item is counted as failed; results already
             # written to the JSONL survive for a later resume.
-            logger.exception(
-                f"Error in streaming transcription for {source_name}: {e}"
-            )
+            logger.exception(f"Error in streaming transcription for {source_name}: {e}")
             print_error(f"Streaming transcription error for {source_name}.")
             raise
 

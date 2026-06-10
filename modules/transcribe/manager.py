@@ -671,12 +671,8 @@ class WorkflowManager:
 
         skipped = len(all_indices) - len(needed)
         if skipped > 0:
-            print_info(
-                f"Skipping {skipped} already-processed page(s) (found in JSONL)"
-            )
-            logger.info(
-                f"Skipped {skipped} pages already in {temp_jsonl_path.name}"
-            )
+            print_info(f"Skipping {skipped} already-processed page(s) (found in JSONL)")
+            logger.info(f"Skipped {skipped} pages already in {temp_jsonl_path.name}")
 
         if not needed:
             print_info(
@@ -1074,8 +1070,7 @@ class WorkflowManager:
             processed_files.sort(key=lambda x: x.name.lower())
 
             print_info(
-                f"Starting {method} transcription for"
-                f" {len(processed_files)} images..."
+                f"Starting {method} transcription for {len(processed_files)} images..."
             )
             await self._process_images_with_method(
                 processed_files,

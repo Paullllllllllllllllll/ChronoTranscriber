@@ -576,7 +576,7 @@ modules, providers, batch backends, and CLI parsers.
 
 ## Changelog
 
-### v1.8.0 (20 Juni 2026)
+### v1.8.0 (2026-06-20)
 
 - Refreshed dependencies under the conservative, majors-gated policy. Added
   httpx>=0.28 as an explicit runtime dependency, since

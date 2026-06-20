@@ -281,6 +281,25 @@ class GoogleBatchBackend(BatchBackend):
             error_message=error_message,
         )
 
+    @staticmethod
+    def _apply_json_content(result_item: BatchResultItem) -> None:
+        """Parse ``result_item.content`` as JSON in place when possible.
+
+        Stores the decoded dict on ``parsed_output`` and, when present,
+        replaces ``content`` with its ``transcribed_text`` field. Leaves the
+        item untouched when the content is empty or not valid JSON.
+        """
+        if not result_item.content:
+            return
+        try:
+            parsed = json.loads(result_item.content)
+        except json.JSONDecodeError:
+            return
+        if isinstance(parsed, dict):
+            result_item.parsed_output = parsed
+            if "transcribed_text" in parsed:
+                result_item.content = parsed["transcribed_text"]
+
     def download_results(self, handle: BatchHandle) -> Iterator[BatchResultItem]:
         """Download and parse Google batch results."""
         client = self._get_client()
@@ -338,15 +357,7 @@ class GoogleBatchBackend(BatchBackend):
                     result_item.content = "".join(text_parts)
 
                 # Try to parse as JSON
-                if result_item.content:
-                    try:
-                        parsed = json.loads(result_item.content)
-                        if isinstance(parsed, dict):
-                            result_item.parsed_output = parsed
-                            if "transcribed_text" in parsed:
-                                result_item.content = parsed["transcribed_text"]
-                    except json.JSONDecodeError:
-                        pass
+                self._apply_json_content(result_item)
 
                 # Extract usage
                 usage = response.get("usageMetadata", {})
@@ -388,15 +399,7 @@ class GoogleBatchBackend(BatchBackend):
                         result_item.content = str(response)
 
                     # Try to parse as JSON
-                    if result_item.content:
-                        try:
-                            parsed = json.loads(result_item.content)
-                            if isinstance(parsed, dict):
-                                result_item.parsed_output = parsed
-                                if "transcribed_text" in parsed:
-                                    result_item.content = parsed["transcribed_text"]
-                        except json.JSONDecodeError:
-                            pass
+                    self._apply_json_content(result_item)
 
                 yield result_item
 

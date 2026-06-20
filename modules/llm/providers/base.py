@@ -55,6 +55,18 @@ class OutputTokensTruncatedError(Exception):
         )
 
 
+def _load_retry_config() -> dict[str, Any]:
+    """Return the ``concurrency.transcription.retry`` config block.
+
+    Shared lookup for all retry-related loaders below; returns an empty dict
+    when any level of the config is missing so callers can apply their own
+    defaults via ``.get``.
+    """
+    conc_cfg = get_config_service().get_concurrency_config() or {}
+    trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get("transcription", {}) or {}
+    return trans_cfg.get("retry", {}) or {}
+
+
 def load_max_retries() -> int:
     """Load max retries from concurrency_config.yaml.
 
@@ -62,12 +74,7 @@ def load_max_retries() -> int:
     LangChain handles retry logic internally with exponential backoff.
     """
     try:
-        conc_cfg = get_config_service().get_concurrency_config() or {}
-        trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get(
-            "transcription", {}
-        ) or {}
-        retry_cfg = trans_cfg.get("retry", {}) or {}
-        attempts = int(retry_cfg.get("attempts", 5))
+        attempts = int(_load_retry_config().get("attempts", 5))
         return max(1, attempts)
     except (KeyError, AttributeError, TypeError, ValueError) as e:
         logger.debug("Could not load max_retries from config, using default: %s", e)
@@ -83,12 +90,7 @@ def load_max_validation_retries() -> int:
     infrastructure problems.
     """
     try:
-        conc_cfg = get_config_service().get_concurrency_config() or {}
-        trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get(
-            "transcription", {}
-        ) or {}
-        retry_cfg = trans_cfg.get("retry", {}) or {}
-        attempts = int(retry_cfg.get("validation_attempts", 3))
+        attempts = int(_load_retry_config().get("validation_attempts", 3))
         return max(1, attempts)
     except (KeyError, AttributeError, TypeError, ValueError) as e:
         logger.debug(
@@ -105,12 +107,7 @@ def load_min_input_tokens() -> int:
     Defaults to 500.  Set to 0 to disable the check.
     """
     try:
-        conc_cfg = get_config_service().get_concurrency_config() or {}
-        trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get(
-            "transcription", {}
-        ) or {}
-        retry_cfg = trans_cfg.get("retry", {}) or {}
-        value = int(retry_cfg.get("min_input_tokens", 500))
+        value = int(_load_retry_config().get("min_input_tokens", 500))
         return max(0, value)
     except (KeyError, AttributeError, TypeError, ValueError) as e:
         logger.debug(
@@ -649,12 +646,7 @@ class BaseProvider(ABC):
     def _get_content_quality_config(self) -> dict[str, Any]:
         """Load content quality validator config from concurrency_config.yaml."""
         try:
-            conc_cfg = get_config_service().get_concurrency_config() or {}
-            trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get(
-                "transcription", {}
-            ) or {}
-            retry_cfg = trans_cfg.get("retry", {}) or {}
-            return retry_cfg.get("content_quality", {}) or {}
+            return _load_retry_config().get("content_quality", {}) or {}
         except (KeyError, AttributeError, TypeError) as e:
             logger.debug("Could not load content_quality config, using defaults: %s", e)
             return {}

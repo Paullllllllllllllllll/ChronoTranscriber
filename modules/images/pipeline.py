@@ -35,6 +35,21 @@ class ImageProcessor:
     """
 
     @staticmethod
+    def _cap_longest_side(image: Image.Image, max_side: int) -> Image.Image:
+        """Downscale *image* so its longest side does not exceed *max_side*.
+
+        Returns the image unchanged when it already fits; otherwise resizes
+        with LANCZOS resampling, preserving aspect ratio.
+        """
+        w, h = image.size
+        longest = max(w, h)
+        if longest <= max_side:
+            return image
+        scale = max_side / float(longest)
+        new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
+        return image.resize(new_size, Image.Resampling.LANCZOS)
+
+    @staticmethod
     def resize_for_detail(
         image: Image.Image,
         detail: str,
@@ -73,13 +88,7 @@ class ImageProcessor:
         # Low detail: cap longest side (same for all providers)
         if detail_norm == "low":
             max_side = int(img_cfg.get("low_max_side_px", 512))
-            w, h = image.size
-            longest = max(w, h)
-            if longest <= max_side:
-                return image
-            scale = max_side / float(longest)
-            new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
-            return image.resize(new_size, Image.Resampling.LANCZOS)
+            return ImageProcessor._cap_longest_side(image, max_side)
 
         # Original detail (GPT-5.4+): cap to max side / max pixels, no padding
         if detail_norm == "original":
@@ -104,13 +113,7 @@ class ImageProcessor:
         if model_type == "anthropic":
             # Anthropic: cap longest side to high_max_side_px (no padding)
             max_side = int(img_cfg.get("high_max_side_px", 1568))
-            w, h = image.size
-            longest = max(w, h)
-            if longest <= max_side:
-                return image
-            scale = max_side / float(longest)
-            new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
-            return image.resize(new_size, Image.Resampling.LANCZOS)
+            return ImageProcessor._cap_longest_side(image, max_side)
         else:
             # OpenAI/Google: fit into box and pad with white
             box = img_cfg.get("high_target_box", [768, 1536])

@@ -31,6 +31,18 @@ from modules.ui.batch_display import (
 )
 
 
+def _extract_batch_id_and_status(b: object) -> tuple[str | None, str]:
+    """Return the (batch_id, lowercased status) for an SDK batch object.
+
+    Normalizes the batch shape via ``sdk_to_dict`` and falls back to direct
+    attribute access so both dict-like and object-like SDK results work.
+    """
+    bd = sdk_to_dict(b)
+    batch_id = bd.get("id") or getattr(b, "id", None)
+    status = (str(bd.get("status") or getattr(b, "status", "") or "")).lower()
+    return batch_id, status
+
+
 class CancelBatchesScript(DualModeScript):
     """Script to cancel all non-terminal batch jobs."""
 
@@ -83,10 +95,7 @@ class CancelBatchesScript(DualModeScript):
 
         print_info("Processing cancellations...")
         for b in batches:
-            # normalize shape
-            bd = sdk_to_dict(b)
-            batch_id = bd.get("id") or getattr(b, "id", None)
-            status = (str(bd.get("status") or getattr(b, "status", "") or "")).lower()
+            batch_id, status = _extract_batch_id_and_status(b)
             if not batch_id:
                 continue
 
@@ -137,11 +146,7 @@ class CancelBatchesScript(DualModeScript):
             # Filter to non-terminal batches
             batch_ids_to_cancel = []
             for b in batches:
-                bd = sdk_to_dict(b)
-                batch_id = bd.get("id") or getattr(b, "id", None)
-                status = (
-                    str(bd.get("status") or getattr(b, "status", "") or "")
-                ).lower()
+                batch_id, status = _extract_batch_id_and_status(b)
                 if batch_id and status not in TERMINAL_BATCH_STATUSES:
                     batch_ids_to_cancel.append(batch_id)
 

@@ -431,6 +431,33 @@ def submit_batch(batch_file_path: Path) -> Batch:
         raise
 
 
+def _submit_and_cleanup_batch_file(
+    batch_file: Path, batch_index: int, batch_responses: list[Any]
+) -> bool:
+    """Submit one batch file, record its response, and delete the temp file.
+
+    Appends the API response to *batch_responses* on success. Always attempts
+    to remove the temporary JSONL file afterwards. Returns ``True`` when the
+    submission succeeded, ``False`` otherwise.
+    """
+    submitted = False
+    try:
+        response = submit_batch(batch_file)
+        print_success(
+            f"Successfully submitted batch {batch_index} with ID: {response.id}"
+        )
+        batch_responses.append(response)
+        submitted = True
+    except Exception as exc:
+        logger.error("Error submitting batch file %s: %s", batch_file, exc)
+        print_error(f"Failed to submit batch file {batch_file}: {exc}")
+    try:
+        batch_file.unlink()
+    except OSError:
+        logger.warning("Could not delete temporary batch file: %s", batch_file)
+    return submitted
+
+
 def _item_to_data_url_and_name(item: Any) -> tuple[str, str]:
     """Resolve a batch item to (data_url, image_name).
 
@@ -544,24 +571,10 @@ def process_batch_transcription(
                 batch_file = Path(f"batch_requests_part_{batch_index}.jsonl")
                 write_batch_file(current_lines, batch_file)
                 attempted_parts += 1
-                try:
-                    response = submit_batch(batch_file)
-                    batch_id = response.id
-                    print_success(
-                        f"Successfully submitted batch {batch_index}"
-                        f" with ID: {batch_id}"
-                    )
-                    batch_responses.append(response)
+                if _submit_and_cleanup_batch_file(
+                    batch_file, batch_index, batch_responses
+                ):
                     submitted_parts += 1
-                except Exception as exc:
-                    logger.error("Error submitting batch file %s: %s", batch_file, exc)
-                    print_error(f"Failed to submit batch file {batch_file}: {exc}")
-                try:
-                    batch_file.unlink()
-                except OSError:
-                    logger.warning(
-                        "Could not delete temporary batch file: %s", batch_file
-                    )
 
                 batch_index += 1
                 current_lines = []
@@ -577,21 +590,8 @@ def process_batch_transcription(
             batch_file = Path(f"batch_requests_part_{batch_index}.jsonl")
             write_batch_file(current_lines, batch_file)
             attempted_parts += 1
-            try:
-                response = submit_batch(batch_file)
-                batch_id = response.id
-                print_success(
-                    f"Successfully submitted batch {batch_index} with ID: {batch_id}"
-                )
-                batch_responses.append(response)
+            if _submit_and_cleanup_batch_file(batch_file, batch_index, batch_responses):
                 submitted_parts += 1
-            except Exception as exc:
-                logger.error("Error submitting batch file %s: %s", batch_file, exc)
-                print_error(f"Failed to submit batch file {batch_file}: {exc}")
-            try:
-                batch_file.unlink()
-            except OSError:
-                logger.warning("Could not delete temporary batch file: %s", batch_file)
             batch_index += 1
     total_parts = attempted_parts
     if submitted_parts == total_parts and total_parts > 0:

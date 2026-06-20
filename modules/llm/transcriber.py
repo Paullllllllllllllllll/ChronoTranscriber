@@ -338,6 +338,25 @@ class LangChainTranscriber:
         """Get the underlying provider instance."""
         return self._provider
 
+    def _transcribe_kwargs(self) -> dict[str, Any]:
+        """Return the shared keyword arguments for the provider transcribe calls.
+
+        Both :meth:`transcribe_image` and :meth:`transcribe_image_from_base64`
+        forward this identical block of prompt, schema, and context settings to
+        the underlying provider.
+        """
+        return {
+            "system_prompt": self.system_prompt_text,
+            "user_instruction": self._user_instruction,
+            "json_schema": self.full_schema_obj,
+            "image_detail": self.image_detail,
+            "media_resolution": self.media_resolution,
+            "context_image_base64": self._context_image_base64,
+            "context_image_mime_type": self._context_image_mime_type,
+            "context_image_detail": self.image_detail,
+            "context_image_instruction": self._context_image_instruction,
+        }
+
     async def transcribe_image(self, image_path: Path) -> dict[str, Any]:
         """Transcribe an image file.
 
@@ -350,15 +369,7 @@ class LangChainTranscriber:
         """
         result = await self._provider.transcribe_image(
             image_path,
-            system_prompt=self.system_prompt_text,
-            user_instruction=self._user_instruction,
-            json_schema=self.full_schema_obj,
-            image_detail=self.image_detail,
-            media_resolution=self.media_resolution,
-            context_image_base64=self._context_image_base64,
-            context_image_mime_type=self._context_image_mime_type,
-            context_image_detail=self.image_detail,
-            context_image_instruction=self._context_image_instruction,
+            **self._transcribe_kwargs(),
         )
 
         # Convert TranscriptionResult to dict format expected by existing code
@@ -381,15 +392,7 @@ class LangChainTranscriber:
         result = await self._provider.transcribe_image_from_base64(
             image_base64=image_base64,
             mime_type=mime_type,
-            system_prompt=self.system_prompt_text,
-            user_instruction=self._user_instruction,
-            json_schema=self.full_schema_obj,
-            image_detail=self.image_detail,
-            media_resolution=self.media_resolution,
-            context_image_base64=self._context_image_base64,
-            context_image_mime_type=self._context_image_mime_type,
-            context_image_detail=self.image_detail,
-            context_image_instruction=self._context_image_instruction,
+            **self._transcribe_kwargs(),
         )
 
         return self._result_to_dict(result)

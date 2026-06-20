@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.8.0
+# ChronoTranscriber v1.9.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -575,6 +575,20 @@ The suite contains 1,250+ tests (unit and integration) covering all
 modules, providers, batch backends, and CLI parsers.
 
 ## Changelog
+
+- **v1.9.0** (20 June 2026) -- Consolidated six within-module duplication
+  clusters behind new private helpers, leaving every public interface and
+  runtime behavior unchanged. In modules/llm/providers/base.py the three
+  retry-config loaders and the content-quality config getter now share a single
+  _load_retry_config helper. main/cancel_batches.py extracts the repeated batch
+  id/status normalization into _extract_batch_id_and_status.
+  modules/batch/requests.py folds the two identical submit-and-cleanup blocks
+  into _submit_and_cleanup_batch_file. modules/images/pipeline.py shares its
+  longest-side downscale logic via _cap_longest_side.
+  modules/batch/backends/google_backend.py routes both JSONL and inline result
+  branches through _apply_json_content. modules/llm/transcriber.py centralizes
+  the common provider transcribe keyword arguments in _transcribe_kwargs. The
+  empty confirmed dead-code list left nothing to remove.
 
 ### v1.8.0 (2026-06-20)
 

@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.7.0
+# ChronoTranscriber v1.8.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -575,6 +575,23 @@ The suite contains 1,250+ tests (unit and integration) covering all
 modules, providers, batch backends, and CLI parsers.
 
 ## Changelog
+
+### v1.8.0 (20 Juni 2026)
+
+- Refreshed dependencies under the conservative, majors-gated policy. Added
+  httpx>=0.28 as an explicit runtime dependency, since
+  modules/llm/providers/base.py imports it directly for the connection and
+  timeout exceptions in its retry logic while it was previously only
+  transitive. Upgraded the LangChain stack (langchain-core to 1.4.8,
+  langchain-openai to 1.3.2, langchain-anthropic to 1.4.6, langchain-google-genai
+  to 4.2.5), the direct SDKs openai (2.43.0) and anthropic (0.111.0), plus
+  deskew (1.6.1), numpy (2.4.6), and lxml (6.1.1) on the runtime side. In the
+  dev and eval groups, raised ruff (0.15.18), pytest (9.1.1), pytest-asyncio
+  (1.4.0), coverage (7.14.1), the type stubs for aiofiles and PyYAML, pandas
+  (3.0.3), and matplotlib (3.11.0). Held two major bumps: google-genai stays on
+  1.73.1 (2.9.0 withheld) and mypy stays on 1.20.2 (2.1.0 withheld), as each had
+  no within-major release available. No dependencies were removed, since the
+  deptry unused flags are all package-versus-module name-mapping false positives.
 
 ### v1.7.0 (2026-06-10)
 

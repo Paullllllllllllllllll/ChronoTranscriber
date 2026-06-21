@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.9.0
+# ChronoTranscriber v1.10.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -575,6 +575,13 @@ The suite contains 1,250+ tests (unit and integration) covering all
 modules, providers, batch backends, and CLI parsers.
 
 ## Changelog
+
+- **v1.10.0** (21 June 2026) -- Adopted the google-genai 2.x SDK major.
+    Raised the runtime pin from `google-genai>=1.73` to `google-genai>=2` and
+    refreshed the lockfile (`google-genai` 1.73.1 -> 2.9.0;
+    `langchain-google-genai` unchanged). The Google batch backend imports clean
+    and all 1,279 tests pass. Live Google batch API calls are not exercised by
+    the test suite; validate a real Google run before relying on it.
 
 - **v1.9.0** (20 June 2026) -- Consolidated six within-module duplication
   clusters behind new private helpers, leaving every public interface and

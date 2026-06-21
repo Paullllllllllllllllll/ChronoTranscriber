@@ -120,3 +120,21 @@ ignore = []
 [tool.ruff.format]
 quote-style = "double"
 docstring-code-format = false
+
+[tool.deptry]
+# Treat the dev and eval extras as development dependencies (pytest, mypy, ruff,
+# type stubs, and the eval-only pandas/matplotlib/jupyter are not imported in the
+# shipped source tree).
+pep621_dev_dependency_groups = ["dev", "eval"]
+# eval/ and tests/ carry analysis-only imports that are intentionally undeclared.
+extend_exclude = ["eval", "tests"]
+
+[tool.deptry.package_module_name_map]
+# Distributions whose import name differs from the package name; declaring these
+# keeps scans accurate even when deptry runs outside the project venv.
+google-genai = ["google"]
+PyYAML = ["yaml"]
+PyMuPDF = ["fitz"]
+pillow = ["PIL"]
+opencv-python = ["cv2"]
+scikit-image = ["skimage"]

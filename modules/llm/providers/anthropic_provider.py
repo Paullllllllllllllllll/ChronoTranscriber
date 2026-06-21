@@ -257,7 +257,7 @@ class AnthropicProvider(BaseProvider):
 
         messages = [
             system_message,
-            HumanMessage(content=human_content),
+            HumanMessage(content=human_content),  # type: ignore[arg-type]
         ]
 
         # Native structured outputs (no function calling)

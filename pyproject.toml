@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chronotranscriber"
-version = "1.10.0"
+version = "1.11.0"
 description = "LLM-assisted document transcription tool for researchers and archivists"
 readme = "README.md"
 license = "MIT"
@@ -59,7 +59,7 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4",
     "pytest-cov>=7.0",
-    "mypy>=1.20",
+    "mypy>=2.1",
     "ruff>=0.15.18",
     "types-aiofiles",
     "types-PyYAML",
@@ -103,6 +103,21 @@ disallow_untyped_defs = true
 ignore_missing_imports = true
 strict_optional = true
 show_error_codes = true
+# main/ has no __init__.py (its entry-point scripts are run directly), so a bare
+# "mypy ." otherwise sees main/*.py twice (as top-level and as main.*). Pin the
+# package base to the project root so each file resolves to a single module name.
+explicit_package_bases = true
+namespace_packages = true
+mypy_path = "."
+# Type-check the shipped source (main + modules) only; tests/ and eval/ carry
+# analysis-only code with intentionally loose typing.
+exclude = [
+    '^\.venv/',
+    '^tests/',
+    '^eval/',
+    '^staging/',
+    '^htmlcov/',
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["modules", "main"]

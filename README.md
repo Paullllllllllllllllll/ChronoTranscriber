@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.10.0
+# ChronoTranscriber v1.11.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -575,6 +575,14 @@ The suite contains 1,250+ tests (unit and integration) covering all
 modules, providers, batch backends, and CLI parsers.
 
 ## Changelog
+
+- **v1.11.0** (21 June 2026) -- Adopted mypy 2.x for static type checking and made
+    `mypy .` runnable. Raised the dev pin to `mypy>=2.1`; fixed the config so the
+    `__init__.py`-less `main/` no longer resolves twice (`explicit_package_bases`,
+    `namespace_packages`, `mypy_path`, and an `exclude` scoping checks to source).
+    Added one missing return annotation and three targeted `arg-type` ignores for
+    the langchain `HumanMessage` content stub. The source type-checks clean under
+    mypy 2.1.0 and all 1,279 tests pass.
 
 - **v1.10.0** (21 June 2026) -- Adopted the google-genai 2.x SDK major.
     Raised the runtime pin from `google-genai>=1.73` to `google-genai>=2` and

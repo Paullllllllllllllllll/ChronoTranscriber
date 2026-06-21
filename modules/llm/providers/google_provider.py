@@ -165,7 +165,7 @@ class GoogleProvider(BaseProvider):
 
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=human_content),
+            HumanMessage(content=human_content),  # type: ignore[arg-type]
         ]
 
         # Use structured output if schema provided

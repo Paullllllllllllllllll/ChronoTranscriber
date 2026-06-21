@@ -6,6 +6,8 @@ and batch-display formatters. Contains no domain state; the transcription
 ``UserConfiguration`` lives in ``modules.transcribe.user_config``.
 """
 
+from typing import Any
+
 from .batch_display import (
     display_batch_cancellation_results,
     display_batch_processing_progress,
@@ -71,7 +73,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     if name == "WorkflowUI":
         from .workflows import WorkflowUI
 

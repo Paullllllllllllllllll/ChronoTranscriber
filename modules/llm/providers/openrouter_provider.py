@@ -293,7 +293,7 @@ class OpenRouterProvider(BaseProvider):
 
         messages = [
             system_message,
-            HumanMessage(content=human_content),
+            HumanMessage(content=human_content),  # type: ignore[arg-type]
         ]
 
         # Use structured output if schema provided and supported

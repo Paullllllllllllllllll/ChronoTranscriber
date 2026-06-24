@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.11.0
+# ChronoTranscriber v1.12.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -583,6 +583,18 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v1.12.0** (24 June 2026) -- The daily token limit is now enforced at the
+    page level, not just between files. When the limit is enabled, the
+    synchronous (GPT) streaming pipeline reserves a self-calibrating estimate
+    of per-page token usage before each page, so concurrent workers cannot
+    collectively overshoot; once the budget is exhausted mid-file it drains
+    in-flight pages, waits for the daily reset, and re-streams the still-pending
+    pages from the JSONL resume record. Configured concurrency and per-task
+    delay are unchanged when budget is plentiful. Batch mode is now fully exempt
+    from token limiting (it is pre-priced and submitted whole). Two optional
+    `daily_token_limit` settings tune the estimate (`chunk_estimate_seed`,
+    `estimate_smoothing`). All 1287 tests pass.
 
 - **v1.11.0** (21 June 2026) -- Adopted mypy 2.x for static type checking and made
     `mypy .` runnable. Raised the dev pin to `mypy>=2.1`; fixed the config so the

@@ -61,6 +61,8 @@ class DailyTokenTracker:
         daily_limit: int,
         enabled: bool = True,
         state_file: Path | None = None,
+        chunk_estimate_seed: int = 25_000,
+        estimate_smoothing: float = 0.3,
     ) -> None:
         self.daily_limit = daily_limit
         self.enabled = enabled
@@ -69,6 +71,16 @@ class DailyTokenTracker:
         self._lock = threading.Lock()
         self._current_date: str = ""  # Format: YYYY-MM-DD
         self._tokens_used_today: int = 0
+
+        # Page-level reservation state (in-memory only; transient per run).
+        # _tokens_reserved is headroom claimed by in-flight calls that have not
+        # yet committed actual usage via add_tokens(); the admission check in
+        # try_reserve() subtracts both committed and reserved tokens so that
+        # concurrent workers cannot collectively overshoot the daily limit.
+        self._tokens_reserved: int = 0
+        self._seed: int = max(1, int(chunk_estimate_seed))
+        self._alpha: float = min(1.0, max(0.0, float(estimate_smoothing)))
+        self._ewma: float = float(self._seed)
 
         self._load_state()
 
@@ -184,12 +196,54 @@ class DailyTokenTracker:
         with self._lock:
             self._check_and_reset_if_new_day()
             self._tokens_used_today += tokens
+            # Update the rolling per-call estimate used by try_reserve().
+            self._ewma = self._alpha * tokens + (1.0 - self._alpha) * self._ewma
             self._save_state()
 
             logger.debug(
                 f"Added {tokens:,} tokens. "
                 f"Daily total: {self._tokens_used_today:,}/{self.daily_limit:,}"
             )
+
+    def try_reserve(self, estimate: int | None = None) -> int | None:
+        """Reserve estimated tokens for one page before launching it.
+
+        The estimate is the larger of the caller-supplied hint and the rolling
+        EWMA of observed per-call usage, so the reservation tracks reality and
+        never drops below the average. Image pages have no cheap pre-count, so
+        callers typically pass no hint and rely on the EWMA.
+
+        Returns the reserved amount, ``0`` when limiting is disabled (admit
+        freely, nothing to release), or ``None`` when the remaining budget
+        cannot cover the estimate (caller should stop admitting new work). A
+        non-zero reservation must be matched by a later :meth:`release` of the
+        same amount once the call completes.
+        """
+        if not self.enabled:
+            return 0
+
+        with self._lock:
+            self._check_and_reset_if_new_day()
+            est = max(int(estimate or 0), max(1, round(self._ewma)))
+            available = (
+                self.daily_limit - self._tokens_used_today - self._tokens_reserved
+            )
+            if est > available:
+                return None
+            self._tokens_reserved += est
+            return est
+
+    def release(self, amount: int) -> None:
+        """Release a reservation made by :meth:`try_reserve` after the call.
+
+        Actual usage is committed separately via :meth:`add_tokens`; releasing
+        only frees the transient headroom the reservation was holding.
+        """
+        if not self.enabled or amount <= 0:
+            return
+
+        with self._lock:
+            self._tokens_reserved = max(0, self._tokens_reserved - amount)
 
     def get_tokens_used_today(self) -> int:
         with self._lock:
@@ -275,10 +329,16 @@ def get_token_tracker() -> DailyTokenTracker:
                 enabled = bool(token_cfg.get("enabled", False))
                 _daily_tokens_raw = token_cfg.get("daily_tokens", 10_000_000)
                 daily_limit = int(str(_daily_tokens_raw).replace("_", ""))
+                seed = int(
+                    str(token_cfg.get("chunk_estimate_seed", 25_000)).replace("_", "")
+                )
+                smoothing = float(token_cfg.get("estimate_smoothing", 0.3))
 
                 _tracker_instance = DailyTokenTracker(
                     daily_limit=daily_limit,
                     enabled=enabled,
+                    chunk_estimate_seed=seed,
+                    estimate_smoothing=smoothing,
                 )
 
     return _tracker_instance

@@ -269,6 +269,8 @@ async def run_streaming_transcription_pipeline(
     is_folder: bool = False,
     output_format: str = "txt",
     file_provenance: dict[str, Any] | None = None,
+    tracker: Any = None,
+    exhausted: asyncio.Event | None = None,
 ) -> None:
     """Execute the in-memory streaming transcription pipeline (GPT method).
 
@@ -327,6 +329,8 @@ async def run_streaming_transcription_pipeline(
                 concurrency_limit,
                 delay_between_tasks,
                 on_result=on_result_write,
+                tracker=tracker,
+                exhausted=exhausted,
             )
         except Exception as e:
             # Producer failures (e.g. the render failure-rate guard) must

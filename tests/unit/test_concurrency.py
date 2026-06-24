@@ -6,7 +6,11 @@ import asyncio
 
 import pytest
 
-from modules.infra.concurrency import run_concurrent_transcription_tasks
+from modules.infra.concurrency import (
+    run_concurrent_transcription_tasks,
+    run_streaming_transcription_tasks,
+)
+from modules.infra.token_budget import DailyTokenTracker
 
 
 @pytest.mark.asyncio
@@ -114,3 +118,77 @@ class TestRunConcurrentTranscriptionTasks:
             delayed_identity, args_list, concurrency_limit=5
         )
         assert results == [0, 1, 2]
+
+
+@pytest.mark.asyncio
+class TestStreamingBudgetGate:
+    """The chunk/page-level token-budget gate on the streaming runner."""
+
+    async def test_defers_pages_when_budget_exhausted(self, tmp_path) -> None:
+        tracker = DailyTokenTracker(
+            daily_limit=100,
+            enabled=True,
+            state_file=tmp_path / "s.json",
+            chunk_estimate_seed=10,
+            estimate_smoothing=0.3,
+        )
+        exhausted = asyncio.Event()
+        n = 8
+        processed: list[int] = []
+
+        async def producer():
+            for i in range(n):
+                yield i
+
+        async def handler(item):
+            # Commit tokens as the real provider layer would after each call.
+            tracker.add_tokens(30)
+            return item
+
+        async def on_result(result):
+            processed.append(result)
+
+        await run_streaming_transcription_tasks(
+            producer(),
+            handler,
+            concurrency_limit=1,
+            delay=0,
+            on_result=on_result,
+            tracker=tracker,
+            exhausted=exhausted,
+        )
+
+        # The budget was hit, so only some pages were processed; the rest were
+        # deferred and left no on_result record (the resume path re-runs them).
+        assert exhausted.is_set()
+        assert 0 < len(processed) < n
+
+    async def test_disabled_tracker_processes_all(self, tmp_path) -> None:
+        tracker = DailyTokenTracker(
+            daily_limit=0, enabled=False, state_file=tmp_path / "s.json"
+        )
+        exhausted = asyncio.Event()
+        processed: list[int] = []
+
+        async def producer():
+            for i in range(5):
+                yield i
+
+        async def handler(item):
+            tracker.add_tokens(9999)  # ignored: tracker disabled
+            return item
+
+        async def on_result(result):
+            processed.append(result)
+
+        await run_streaming_transcription_tasks(
+            producer(),
+            handler,
+            concurrency_limit=2,
+            on_result=on_result,
+            tracker=tracker,
+            exhausted=exhausted,
+        )
+
+        assert not exhausted.is_set()
+        assert sorted(processed) == [0, 1, 2, 3, 4]

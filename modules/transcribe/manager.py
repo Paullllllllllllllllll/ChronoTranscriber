@@ -37,7 +37,10 @@ from modules.infra.paths import (
     create_safe_filename,
     mirror_output_path,
 )
-from modules.infra.token_budget import check_and_wait_for_token_limit
+from modules.infra.token_budget import (
+    check_and_wait_for_token_limit,
+    get_token_tracker,
+)
 from modules.postprocess.writer import write_transcription_output
 from modules.transcribe.pipeline import (
     build_file_provenance,
@@ -353,9 +356,11 @@ class WorkflowManager:
         interrupted = False
         try:
             for idx, item in enumerate(selected, 1):
-                # Check token limit before starting each new item (only for GPT method)
+                # Check token limit before starting each new item (GPT method
+                # only; batch mode is exempt from token limiting entirely).
                 if (
                     self.user_config.transcription_method == "gpt"
+                    and not self.user_config.use_batch_processing
                     and not await check_and_wait_for_token_limit(
                         self.concurrency_config
                     )
@@ -643,31 +648,60 @@ class WorkflowManager:
             page_indices if page_indices is not None else list(range(total_units))
         )
 
-        # Page-level resume: subtract already-transcribed pages BEFORE
-        # rendering anything.
-        if is_folder:
-            files = list_folder_images(source_path)
-            skip_names = (
-                compute_folder_skip_names(temp_jsonl_path)
-                if self.resume_mode != "overwrite"
-                else set()
-            )
-            needed = [
-                i
-                for i in all_indices
-                if 0 <= i < len(files)
-                and folder_image_name(files[i]) not in skip_names
-                and files[i].name not in skip_names
-            ]
-        else:
+        def compute_needed(first_pass: bool) -> list[int]:
+            """Page indices not yet recorded in the temp JSONL.
+
+            Recomputed each pass so a budget re-pass sees pages completed by
+            the previous pass. On the first pass in overwrite mode the JSONL was
+            already cleared, so the skip-set is empty; later passes always read
+            the live JSONL to skip what this run has written so far.
+            """
+            use_skip = (not first_pass) or self.resume_mode != "overwrite"
+            if is_folder:
+                files = list_folder_images(source_path)
+                skip_names = (
+                    compute_folder_skip_names(temp_jsonl_path) if use_skip else set()
+                )
+                return [
+                    i
+                    for i in all_indices
+                    if 0 <= i < len(files)
+                    and folder_image_name(files[i]) not in skip_names
+                    and files[i].name not in skip_names
+                ]
             skip_indices = (
-                compute_pdf_skip_indices(temp_jsonl_path)
-                if self.resume_mode != "overwrite"
-                else set()
+                compute_pdf_skip_indices(temp_jsonl_path) if use_skip else set()
             )
-            needed = [
+            return [
                 i for i in all_indices if 0 <= i < total_units and i not in skip_indices
             ]
+
+        def build_source(indices: list[int]) -> AsyncIterator[PagePayload]:
+            """Build a fresh streaming page source over the given indices.
+
+            Rebuilt each pass: the in-memory producer is a one-shot async
+            iterator, so a budget re-pass needs a new source over the still-
+            pending pages.
+            """
+            if is_folder:
+                return stream_folder_payloads(
+                    source_path,
+                    img_cfg=img_cfg,
+                    model_type=model_type,
+                    page_indices=indices,
+                )
+            return stream_pdf_payloads(
+                source_path,
+                target_dpi=target_dpi,
+                img_cfg=img_cfg,
+                model_type=model_type,
+                max_pixels=max_pixels,
+                page_indices=indices,
+            )
+
+        # Page-level resume: subtract already-transcribed pages BEFORE
+        # rendering anything.
+        needed = compute_needed(first_pass=True)
 
         skipped = len(all_indices) - len(needed)
         if skipped > 0:
@@ -688,38 +722,18 @@ class WorkflowManager:
             self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
             return
 
-        if is_folder:
-            print_info(
-                f"Streaming {len(needed)} image(s) with in-memory preprocessing..."
-            )
-            payload_source: AsyncIterator[PagePayload] = stream_folder_payloads(
-                source_path,
-                img_cfg=img_cfg,
-                model_type=model_type,
-                page_indices=needed,
-            )
-        else:
-            print_info(
-                f"Streaming {len(needed)} page(s) at {target_dpi} DPI"
-                f" with in-memory preprocessing..."
-            )
-            payload_source = stream_pdf_payloads(
-                source_path,
-                target_dpi=target_dpi,
-                img_cfg=img_cfg,
-                model_type=model_type,
-                max_pixels=max_pixels,
-                page_indices=needed,
-            )
-
         file_provenance = build_file_provenance(
             source_path, img_cfg, model_type, max_pixels
         )
 
         # Batch mode: materialize compact payloads (raw pages are freed per
-        # page by the producer), then submit via the batch backend.
+        # page by the producer), then submit via the batch backend. Batch is
+        # exempt from token limiting (it is pre-priced and submitted whole).
         if self.user_config.use_batch_processing:
-            payloads = [p async for p in payload_source]
+            print_info(
+                f"Streaming {len(needed)} page(s) with in-memory preprocessing..."
+            )
+            payloads = [p async for p in build_source(needed)]
             if await self._handle_batch_submission(
                 payloads,
                 temp_jsonl_path,
@@ -728,32 +742,78 @@ class WorkflowManager:
                 file_provenance=file_provenance,
             ):
                 return
-
-            async def _replay() -> AsyncIterator[PagePayload]:
-                for p in payloads:
-                    yield p
-
-            payload_source = _replay()
             print_info("Falling back to synchronous processing...")
 
+        # Synchronous streaming with a chunk/page-level token-budget loop. Each
+        # pass admits pages until the daily budget is exhausted, then drains,
+        # waits for the daily reset, and re-passes over the still-pending pages
+        # (a fresh source rebuilt over the recomputed skip-set).
         print_info(f"Starting gpt transcription for {len(needed)} images...")
-        await run_streaming_transcription_pipeline(
-            payload_source,
-            transcriber,
-            temp_jsonl_path,
-            output_txt_path,
-            source_name,
-            self.concurrency_config,
-            self.postprocessing_config,
-            is_folder=is_folder,
-            output_format=output_format,
-            file_provenance=file_provenance,
-        )
-        print_success(
-            f"Saved transcription for '{source_name}' -> {output_txt_path.name}"
-        )
-        self._cleanup_temp_jsonl(temp_jsonl_path, "gpt")
-        self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
+        tracker = get_token_tracker()
+        first_provenance: dict[str, Any] | None = file_provenance
+        completed_fully = True
+        stalled_resets = 0
+        while True:
+            exhausted = asyncio.Event()
+            await run_streaming_transcription_pipeline(
+                build_source(needed),
+                transcriber,
+                temp_jsonl_path,
+                output_txt_path,
+                source_name,
+                self.concurrency_config,
+                self.postprocessing_config,
+                is_folder=is_folder,
+                output_format=output_format,
+                file_provenance=first_provenance,
+                tracker=tracker,
+                exhausted=exhausted,
+            )
+            if not exhausted.is_set():
+                break
+
+            # Provenance is written once, on the first pass.
+            first_provenance = None
+            before = len(needed)
+            needed = compute_needed(first_pass=False)
+            made_progress = len(needed) < before
+            if not needed:
+                break
+
+            print_warning(
+                f"Daily token budget reached; {len(needed)} page(s) deferred. "
+                f"Waiting for daily reset..."
+            )
+            if not await check_and_wait_for_token_limit(self.concurrency_config):
+                completed_fully = False
+                break
+
+            # Safeguard: if even a full day's reset yields no progress twice
+            # running, a single page exceeds the entire daily budget; stop.
+            if not made_progress:
+                stalled_resets += 1
+                if stalled_resets >= 2:
+                    print_warning(
+                        "A single page appears to exceed the entire daily token "
+                        "budget; stopping. Raise daily_tokens to process the "
+                        "remaining pages."
+                    )
+                    completed_fully = False
+                    break
+            else:
+                stalled_resets = 0
+
+        if completed_fully:
+            print_success(
+                f"Saved transcription for '{source_name}' -> {output_txt_path.name}"
+            )
+            self._cleanup_temp_jsonl(temp_jsonl_path, "gpt")
+            self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
+        else:
+            print_info(
+                f"Partial transcription for '{source_name}'. Remaining pages will "
+                f"resume on the next run."
+            )
 
     async def process_single_pdf(self, pdf_path: Path, transcriber: Any | None) -> None:
         """

@@ -23,6 +23,8 @@ async def run_concurrent_transcription_tasks(
     concurrency_limit: int = 20,
     delay: float = 0,
     on_result: Callable[[Any], Awaitable[None]] | None = None,
+    tracker: Any = None,
+    exhausted: asyncio.Event | None = None,
 ) -> list[Any]:
     """
     Run async function concurrently over argument tuples with concurrency control.
@@ -33,6 +35,12 @@ async def run_concurrent_transcription_tasks(
         concurrency_limit: Maximum number of concurrent tasks (default: 20).
         delay: Delay in seconds between task starts (default: 0).
         on_result: Optional async callback to process each result immediately.
+        tracker: Optional token tracker; when given, each task reserves an
+            estimated cost before running and releases it after, so the daily
+            budget is enforced per task. ``None`` disables the gate.
+        exhausted: Optional event set when the budget is exhausted; tasks not
+            yet started then defer (return None without running), letting the
+            caller drain, wait for the daily reset, and re-pass.
 
     Returns:
         List of results from all task executions.
@@ -41,9 +49,18 @@ async def run_concurrent_transcription_tasks(
 
     async def worker(args: tuple[Any, ...]) -> Any:
         async with semaphore:
-            if delay > 0:
-                await asyncio.sleep(delay)
+            if exhausted is not None and exhausted.is_set():
+                return None  # budget exhausted: defer (re-processed next pass)
+            reserved = None
+            if tracker is not None:
+                reserved = tracker.try_reserve()
+                if reserved is None:
+                    if exhausted is not None:
+                        exhausted.set()
+                    return None
             try:
+                if delay > 0:
+                    await asyncio.sleep(delay)
                 result = await corofunc(*args)
                 # Stream the result to the callback as soon as it is ready
                 if on_result is not None:
@@ -57,6 +74,9 @@ async def run_concurrent_transcription_tasks(
             except Exception as e:
                 logger.error(f"Transcription task failed with arguments {args}: {e}")
                 return None
+            finally:
+                if reserved:
+                    tracker.release(reserved)
 
     tasks = [asyncio.create_task(worker(args)) for args in args_list]
     results = await asyncio.gather(*tasks, return_exceptions=False)
@@ -69,6 +89,8 @@ async def run_streaming_transcription_tasks(
     concurrency_limit: int = 20,
     delay: float = 0,
     on_result: Callable[[Any], Awaitable[None]] | None = None,
+    tracker: Any = None,
+    exhausted: asyncio.Event | None = None,
 ) -> list[Any]:
     """Consume an async producer with a bounded queue and worker pool.
 
@@ -103,6 +125,10 @@ async def run_streaming_transcription_tasks(
     async def produce() -> None:
         try:
             async for item in producer:
+                # Stop rendering new pages once the budget is exhausted; the
+                # remaining items are re-rendered on the next pass.
+                if exhausted is not None and exhausted.is_set():
+                    break
                 await queue.put(item)
         except BaseException as e:  # noqa: BLE001 - re-raised after drain
             producer_error.append(e)
@@ -115,20 +141,35 @@ async def run_streaming_transcription_tasks(
             item = await queue.get()
             if item is _SENTINEL:
                 return
-            if delay > 0:
-                await asyncio.sleep(delay)
-            try:
-                result = await handler(item)
-            except Exception as e:
-                logger.error(f"Streaming transcription task failed: {e}")
-                results.append(None)
+            # Budget gate: skip (defer) items once exhausted so they leave no
+            # JSONL record and are re-processed after the daily reset.
+            if exhausted is not None and exhausted.is_set():
                 continue
-            results.append(result)
-            if on_result is not None:
+            reserved = None
+            if tracker is not None:
+                reserved = tracker.try_reserve()
+                if reserved is None:
+                    if exhausted is not None:
+                        exhausted.set()
+                    continue
+            try:
+                if delay > 0:
+                    await asyncio.sleep(delay)
                 try:
-                    await on_result(result)
-                except Exception as cb_exc:
-                    logger.error(f"on_result callback failed: {cb_exc}")
+                    result = await handler(item)
+                except Exception as e:
+                    logger.error(f"Streaming transcription task failed: {e}")
+                    results.append(None)
+                    continue
+                results.append(result)
+                if on_result is not None:
+                    try:
+                        await on_result(result)
+                    except Exception as cb_exc:
+                        logger.error(f"on_result callback failed: {cb_exc}")
+            finally:
+                if reserved:
+                    tracker.release(reserved)
 
     producer_task = asyncio.create_task(produce())
     worker_tasks = [asyncio.create_task(work()) for _ in range(workers_n)]

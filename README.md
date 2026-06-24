@@ -574,6 +574,14 @@ uv run python -m pytest -v
 The suite contains 1,250+ tests (unit and integration) covering all
 modules, providers, batch backends, and CLI parsers.
 
+## Versioning
+
+This project follows semantic versioning (`MAJOR.MINOR.PATCH`). The version in
+`pyproject.toml` is the single source of truth; it is mirrored in the title
+heading above and tagged in git as `vX.Y.Z`. The commit history was squashed to
+a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
+v1.0.0 do not exist.
+
 ## Changelog
 
 - **v1.11.0** (21 June 2026) -- Adopted mypy 2.x for static type checking and made
@@ -591,200 +599,146 @@ modules, providers, batch backends, and CLI parsers.
     and all 1,279 tests pass. Live Google batch API calls are not exercised by
     the test suite; validate a real Google run before relying on it.
 
-- **v1.9.0** (20 June 2026) -- Consolidated six within-module duplication
-  clusters behind new private helpers, leaving every public interface and
-  runtime behavior unchanged. In modules/llm/providers/base.py the three
-  retry-config loaders and the content-quality config getter now share a single
-  _load_retry_config helper. main/cancel_batches.py extracts the repeated batch
-  id/status normalization into _extract_batch_id_and_status.
-  modules/batch/requests.py folds the two identical submit-and-cleanup blocks
-  into _submit_and_cleanup_batch_file. modules/images/pipeline.py shares its
-  longest-side downscale logic via _cap_longest_side.
-  modules/batch/backends/google_backend.py routes both JSONL and inline result
-  branches through _apply_json_content. modules/llm/transcriber.py centralizes
-  the common provider transcribe keyword arguments in _transcribe_kwargs. The
-  empty confirmed dead-code list left nothing to remove.
+- **v1.9.0** (20 June 2026) -- Consolidated six within-module duplication clusters
+    behind new private helpers, leaving every public interface and runtime behavior
+    unchanged. In `modules/llm/providers/base.py` the three retry-config loaders
+    and the content-quality config getter now share a single `_load_retry_config`
+    helper. `main/cancel_batches.py` extracts the repeated batch id/status
+    normalization into `_extract_batch_id_and_status`.
+    `modules/batch/requests.py` folds the two identical submit-and-cleanup blocks
+    into `_submit_and_cleanup_batch_file`. `modules/images/pipeline.py` shares its
+    longest-side downscale logic via `_cap_longest_side`.
+    `modules/batch/backends/google_backend.py` routes both JSONL and inline result
+    branches through `_apply_json_content`. `modules/llm/transcriber.py`
+    centralizes the common provider transcribe keyword arguments in
+    `_transcribe_kwargs`. The empty confirmed dead-code list left nothing to remove.
 
-### v1.8.0 (2026-06-20)
+- **v1.8.0** (20 June 2026) -- Refreshed dependencies under the conservative,
+    majors-gated policy. Added `httpx>=0.28` as an explicit runtime dependency,
+    since `modules/llm/providers/base.py` imports it directly for the connection
+    and timeout exceptions in its retry logic while it was previously only
+    transitive. Upgraded the LangChain stack (`langchain-core` to 1.4.8,
+    `langchain-openai` to 1.3.2, `langchain-anthropic` to 1.4.6,
+    `langchain-google-genai` to 4.2.5), the direct SDKs `openai` (2.43.0) and
+    `anthropic` (0.111.0), plus `deskew` (1.6.1), `numpy` (2.4.6), and `lxml`
+    (6.1.1) on the runtime side. In the dev and eval groups, raised `ruff`
+    (0.15.18), `pytest` (9.1.1), `pytest-asyncio` (1.4.0), `coverage` (7.14.1),
+    the type stubs for aiofiles and PyYAML, `pandas` (3.0.3), and `matplotlib`
+    (3.11.0). Held two major bumps: `google-genai` stays on 1.73.1 (2.9.0
+    withheld) and `mypy` stays on 1.20.2 (2.1.0 withheld), as each had no
+    within-major release available. No dependencies were removed, since the deptry
+    unused flags are all package-versus-module name-mapping false positives.
 
-- Refreshed dependencies under the conservative, majors-gated policy. Added
-  httpx>=0.28 as an explicit runtime dependency, since
-  modules/llm/providers/base.py imports it directly for the connection and
-  timeout exceptions in its retry logic while it was previously only
-  transitive. Upgraded the LangChain stack (langchain-core to 1.4.8,
-  langchain-openai to 1.3.2, langchain-anthropic to 1.4.6, langchain-google-genai
-  to 4.2.5), the direct SDKs openai (2.43.0) and anthropic (0.111.0), plus
-  deskew (1.6.1), numpy (2.4.6), and lxml (6.1.1) on the runtime side. In the
-  dev and eval groups, raised ruff (0.15.18), pytest (9.1.1), pytest-asyncio
-  (1.4.0), coverage (7.14.1), the type stubs for aiofiles and PyYAML, pandas
-  (3.0.3), and matplotlib (3.11.0). Held two major bumps: google-genai stays on
-  1.73.1 (2.9.0 withheld) and mypy stays on 1.20.2 (2.1.0 withheld), as each had
-  no within-major release available. No dependencies were removed, since the
-  deptry unused flags are all package-versus-module name-mapping false positives.
+- **v1.7.0** (10 June 2026) -- Introduced a streaming in-memory image pipeline for
+    all GPT paths (synchronous and batch, PDFs and image folders): pages are
+    rendered, preprocessed, and base64-encoded fully in memory, and the
+    `preprocessed_images/` folder is no longer written for GPT runs (Tesseract is
+    unchanged), with peak memory being one raw page plus the payloads in flight.
+    Page-level resume and page-range slicing are now applied before any rendering,
+    so resuming a mostly-complete PDF no longer re-renders every page; virtual
+    image names keep the historical `*_pre_processed.jpg` pattern so old partial
+    JSONLs resume cleanly. Reproducibility provenance was added: each transcription
+    record carries `image_provenance` (SHA-256 of the sent JPEG bytes, dimensions,
+    byte size, effective DPI) plus `source_file`/`page_index`, and each run writes
+    a `file_provenance` record (source SHA-256, PyMuPDF/Pillow versions,
+    image-config snapshot). Repair gains an in-memory re-render fallback: when no
+    preprocessed image exists on disk, failed pages are re-rendered from the
+    recorded source PDF page or source image and repaired from base64 (sync and
+    batch modes). Final output for streaming runs is regenerated from the complete
+    JSONL so pages completed in earlier resumed runs are included; `order_index` is
+    now the absolute page index, fixing page renumbering under page ranges and
+    resume. `max_pixels_per_page` default was lowered from 150,000,000 to
+    24,000,000, bounding the worst-case raw page to roughly 72 MB RGB while
+    staying 2.3x above the 10.24 MP `original_max_pixels` send cap. The now-dead
+    disk pipeline was removed: `PDFProcessor.process_images` / `extract_images`,
+    `ImageProcessor.process_image` / `process_and_save_images` /
+    `process_images_multiprocessing`; `keep_preprocessed_images` now affects only
+    Tesseract folders.
 
-### v1.7.0 (2026-06-10)
+- **v1.6.0** (30 May 2026) -- Correctness fixes from a full code review: the
+    completion summary now reports real success/failure counts,
+    `process_selected_items` returns a `ProcessingSummary`, failed items are no
+    longer also counted as processed, and interactive mode stops hardcoding zero
+    failures. Both PDF extraction paths now raise when the per-page failure rate
+    exceeds the existing image threshold instead of silently returning a short,
+    possibly page-misaligned image list. The interactive resume preview now passes
+    `output_format` and the resolved output directories to `ResumeChecker` so skip
+    counts are accurate for `md`/`json` output rather than always assuming `.txt`.
+    The Anthropic batch backend now uses the capability registry
+    (`detect_capabilities`) to decide whether to send `temperature`, replacing
+    brittle model-name substring matching that drifted from the sync providers.
+    Failures are no longer silently swallowed: provider `_invoke_llm` handlers log
+    full tracebacks, the JSONL diagnostic-context builder logs instead of passing,
+    the JPEG draft fast-path and Tesseract checks use narrowed exceptions, and the
+    token-state retry backoff is honored instead of skipped inside a running event
+    loop. `parse_indices` rejects negative/open-ended tokens with a clear message
+    instead of a confusing range-parse error. Dead-code and duplication cleanup:
+    removed the unused `ru_*` aliases and pass-through wrappers in batch repair,
+    consolidated the three per-backend image-encoding helpers onto the shared
+    `modules.images.encoding` functions, extracted the duplicated EPUB and MOBI
+    text-normalization helper into `modules.documents._text`, and removed a dead
+    `media_resolution` expression in the Google provider.
 
-- Streaming in-memory image pipeline for all GPT paths (synchronous and
-  batch, PDFs and image folders). Pages are rendered, preprocessed, and
-  base64-encoded fully in memory; the `preprocessed_images/` folder is
-  no longer written for GPT runs (Tesseract is unchanged). Peak memory
-  is one raw page plus the payloads in flight.
-- Page-level resume and page-range slicing are now applied BEFORE any
-  rendering, so resuming a mostly-complete PDF no longer re-renders
-  every page. Virtual image names keep the historical
-  `*_pre_processed.jpg` pattern, so old partial JSONLs resume cleanly.
-- Reproducibility provenance: each transcription record carries
-  `image_provenance` (SHA-256 of the sent JPEG bytes, dimensions, byte
-  size, effective DPI) plus `source_file`/`page_index`, and each run
-  writes a `file_provenance` record (source SHA-256, PyMuPDF/Pillow
-  versions, image-config snapshot).
-- Repair gains an in-memory re-render fallback: when no preprocessed
-  image exists on disk, failed pages are re-rendered from the recorded
-  source PDF page or source image and repaired from base64 (sync and
-  batch modes).
-- Final output for streaming runs is regenerated from the complete
-  JSONL, so pages completed in earlier (resumed) runs are included;
-  `order_index` is now the absolute page index, fixing page renumbering
-  under page ranges and resume.
-- `max_pixels_per_page` default lowered from 150,000,000 to 24,000,000,
-  bounding the worst-case raw page to roughly 72 MB RGB while staying
-  2.3x above the 10.24 MP `original_max_pixels` send cap.
-- Removed the now-dead disk pipeline: `PDFProcessor.process_images` /
-  `extract_images`, `ImageProcessor.process_image` /
-  `process_and_save_images` / `process_images_multiprocessing`.
-  `keep_preprocessed_images` now affects only Tesseract folders.
+- **v1.5.0** (21 May 2026) -- Added configurable `user_instruction` and
+    `context_image_instruction` keys under `transcription_model` in
+    `model_config.yaml`; when set to an empty string the text block is omitted
+    entirely from the user message, sending image-only input, which is required for
+    models like `churro-3B` (Qwen2.5-VL fine-tune) that expect no accompanying
+    text. Both sync and batch paths respect the new keys across all five providers
+    (OpenAI, Anthropic, Google, OpenRouter, Custom) and all four batch backends.
+    Fixed pre-existing test failures in `TestCacheTokenExtraction` where the mock
+    provider's content quality validator received a MagicMock config instead of a
+    dict, triggering false hallucination-loop detection on short test content.
 
-### v1.6.0 (2026-05-30)
+- **v1.4.0** (20 May 2026) -- Added `--output-mode {hash,mirror}` CLI flag: mirror
+    mode replicates the input directory hierarchy under the output root, preserving
+    edition/page structure for downstream consumers. Fixed a hash collision in
+    non-colocated output mode: the directory hash now incorporates the full
+    relative path from the input root instead of just the leaf folder name,
+    preventing overwrites when multiple editions share page numbers. The resume
+    checker supports both mirror mode and relative-path-aware hash lookups.
 
-- Correctness fixes from a full code review. The completion summary
-  now reports real success/failure counts: `process_selected_items`
-  returns a `ProcessingSummary`, failed items are no longer also
-  counted as processed, and interactive mode stops hardcoding zero
-  failures.
-- Surface partial PDF page-render failures. Both PDF extraction paths
-  now raise when the per-page failure rate exceeds the existing image
-  threshold instead of silently returning a short, possibly
-  page-misaligned image list.
-- The interactive resume preview now passes `output_format` and the
-  resolved output directories to `ResumeChecker`, so skip counts are
-  accurate for `md`/`json` output rather than always assuming `.txt`.
-- The Anthropic batch backend now uses the capability registry
-  (`detect_capabilities`) to decide whether to send `temperature`,
-  replacing brittle model-name substring matching that drifted from
-  the sync providers.
-- Failures are no longer silently swallowed: provider `_invoke_llm`
-  handlers log full tracebacks, the JSONL diagnostic-context builder
-  logs instead of passing, the JPEG draft fast-path and Tesseract
-  checks use narrowed exceptions, and the token-state retry backoff
-  is honored instead of skipped inside a running event loop.
-- `parse_indices` rejects negative/open-ended tokens with a clear
-  message instead of a confusing range-parse error.
-- Dead-code and duplication cleanup: removed the unused `ru_*` aliases
-  and pass-through wrappers in batch repair, consolidated the three
-  per-backend image-encoding helpers onto the shared
-  `modules.images.encoding` functions, extracted the duplicated EPUB
-  and MOBI text-normalization helper into `modules.documents._text`,
-  and removed a dead `media_resolution` expression in the Google
-  provider.
+- **v1.3.1** (19 May 2026) -- Dependency refresh from an environment-wide CVE audit:
+    bumped `langchain-core` 1.3.2 -> 1.4.0 (RCE on deserialization); `langsmith`
+    0.7.36 -> 0.8.5 (unsafe deserialization; full fix to 1.0.x deferred pending
+    upstream constraint relaxation); `pillow` 12.1.1 -> 12.2.0 (FITS GZIP
+    decompression bomb); `jupyterlab` 4.5.6 -> 4.5.7 and `notebook` 7.5.5 ->
+    7.5.6 (one-click command execution chain); `jupyter-server` 2.17.0 -> 2.18.2
+    (persistent cookie secret); `urllib3` 2.6.3 -> 2.7.0 (audit-surface
+    consolidation); `deskew` downgraded 1.6.0 -> 1.5.3 as a side effect of
+    relaxing the `pillow<12.2` peer constraint. Fixed
+    `tests/integration/test_live_api.py` scripted-input drift introduced by
+    v1.3.0: inserted one response for the new `configure_additional_context_image`
+    prompt so the `GPT_PDF_RESPONSES` sequence matches the post-v1.3.0 workflow.
 
-### v1.5.0 (2026-05-21)
+- **v1.3.0** (5 May 2026) -- Added context image support: a reference image (title
+    page, table of contents, column headers) can now be included alongside each
+    page image to improve transcription quality, using the same hierarchical
+    resolution as text context (`{name}_transcr_context_image.{ext}` convention).
+    Added a `--context-image` CLI flag to override the context image path and an
+    interactive wizard prompt for context image selection. Supported on the OpenAI
+    provider (sync and batch paths); other providers accept the parameter for
+    interface compatibility.
 
-- Add configurable `user_instruction` and
-  `context_image_instruction` keys under `transcription_model`
-  in `model_config.yaml`. When set to an empty string, the
-  text block is omitted entirely from the user message, sending
-  image-only input. Required for models like `churro-3B`
-  (Qwen2.5-VL fine-tune) that expect no accompanying text.
-  Both sync and batch paths respect the new keys across all
-  five providers (OpenAI, Anthropic, Google, OpenRouter,
-  Custom) and all four batch backends.
-- Fix pre-existing test failures in `TestCacheTokenExtraction`
-  where the mock provider's content quality validator received
-  a MagicMock config instead of a dict, triggering false
-  hallucination-loop detection on short test content.
+- **v1.2.1** (5 May 2026) -- Fixed a circular import cycle between
+    `modules.documents`, `modules.images`, `modules.ui`, and `modules.transcribe`
+    that prevented startup: `WorkflowUI` is now lazily imported in
+    `modules.ui.__init__` and the `AutoSelector` import in `config_builder.py` is
+    deferred to function scope. Fixed test-induced directory pollution:
+    `WorkflowManager` integration tests now provide `tmp_path`-based `file_paths`
+    instead of relying on relative-path defaults that created `epubs_out`,
+    `images_out`, `mobis_out`, `pdfs_out` in the project root.
 
-### v1.4.0 (2026-05-20)
+- **v1.2.0** (4 May 2026) -- Applied ruff linter and formatter across entire
+    codebase.
 
-- Add `--output-mode {hash,mirror}` CLI flag: mirror mode
-  replicates the input directory hierarchy under the output
-  root, preserving edition/page structure for downstream
-  consumers.
-- Fix hash collision in non-colocated output mode: the
-  directory hash now incorporates the full relative path
-  from the input root instead of just the leaf folder name,
-  preventing overwrites when multiple editions share page
-  numbers.
-- Resume checker supports both mirror mode and
-  relative-path-aware hash lookups.
+- **v1.1.0** (4 May 2026) -- Version bump consolidating post-baseline development.
 
-### v1.3.1 (2026-05-19)
+- **v1.0.1** (25 April 2026) -- Migrated to `pyproject.toml` and updated
+    dependencies; fixed test artifacts polluting the project root (initial pass).
 
-- Dependency refresh from environment-wide CVE audit: bump
-  `langchain-core` 1.3.2 -> 1.4.0 (RCE on deserialization);
-  `langsmith` 0.7.36 -> 0.8.5 (unsafe deserialization; full
-  fix to 1.0.x deferred pending upstream constraint
-  relaxation); `pillow` 12.1.1 -> 12.2.0 (FITS GZIP
-  decompression bomb); `jupyterlab` 4.5.6 -> 4.5.7 and
-  `notebook` 7.5.5 -> 7.5.6 (one-click command execution
-  chain); `jupyter-server` 2.17.0 -> 2.18.2 (persistent
-  cookie secret); `urllib3` 2.6.3 -> 2.7.0
-  (audit-surface consolidation). `deskew` downgraded 1.6.0
-  -> 1.5.3 as a side effect of relaxing the `pillow<12.2`
-  peer constraint.
-- Fix `tests/integration/test_live_api.py` scripted-input
-  drift introduced by v1.3.0: insert one response for the
-  new `configure_additional_context_image` prompt so the
-  `GPT_PDF_RESPONSES` sequence matches the post-v1.3.0
-  workflow.
-
-### v1.3.0 (2026-05-05)
-
-- Added context image support: include a reference image (title
-  page, table of contents, column headers) alongside each page
-  image to improve transcription quality. Uses the same hierarchical
-  resolution as text context
-  (`{name}_transcr_context_image.{ext}` convention).
-- New `--context-image` CLI flag to override context image path.
-- Interactive wizard prompt for context image selection.
-- Supported on the OpenAI provider (sync and batch paths); other
-  providers accept the parameter for interface compatibility.
-
-### v1.2.1 (2026-05-05)
-
-- Fixed circular import cycle between `modules.documents`,
-  `modules.images`, `modules.ui`, and `modules.transcribe` that
-  prevented startup. `WorkflowUI` is now lazily imported in
-  `modules.ui.__init__`; `AutoSelector` import in
-  `config_builder.py` deferred to function scope.
-- Fixed test-induced directory pollution: `WorkflowManager`
-  integration tests now provide `tmp_path`-based `file_paths`
-  instead of relying on relative-path defaults that created
-  `epubs_out`, `images_out`, `mobis_out`, `pdfs_out` in the
-  project root.
-
-### v1.2.0 (2026-05-04)
-
-- Applied ruff linter and formatter across entire codebase.
-
-### v1.1.0 (2026-05-04)
-
-- Version bump consolidating post-baseline development.
-
-### v1.0.1 (2026-04-25)
-
-- Migrated to `pyproject.toml` and updated dependencies.
-- Fixed test artifacts polluting project root (initial pass).
-
-### v1.0.0 (2026-04-25)
-
-- Repository baseline: squashed history into single commit.
-
-## Versioning
-
-This project uses semantic versioning. The commit history was
-squashed to a single baseline commit at v1.0.0 on 25 April 2026.
-All prior development history was consolidated; version numbers
-before v1.0.0 do not exist.
+- **v1.0.0** (25 April 2026) -- Repository baseline: squashed history into single
+    commit.
 
 ## License
 

@@ -8,5 +8,3 @@ Provides core functionality for document transcription, including:
 - User interface components
 - Infrastructure utilities
 """
-
-__version__ = "1.1.0"

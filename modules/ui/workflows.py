@@ -165,20 +165,22 @@ class WorkflowUI:
         import os
 
         from modules.config.service import get_config_service
+        from modules.llm.providers.factory import (
+            ProviderType,
+            resolve_api_key_env_var,
+        )
 
         config_service = get_config_service()
         model_config = config_service.get_model_config()
         provider = model_config.get("transcription_model", {}).get("provider", "openai")
 
-        # Map provider to environment variable
-        provider_env_vars = {
-            "openai": "OPENAI_API_KEY",
-            "anthropic": "ANTHROPIC_API_KEY",
-            "google": "GOOGLE_API_KEY",
-            "openrouter": "OPENROUTER_API_KEY",
-        }
-
-        env_var = provider_env_vars.get(provider, "OPENAI_API_KEY")
+        # Resolve the env var name via the central resolver so an optional
+        # api_keys_config.yaml remap is honored; default to OPENAI_API_KEY.
+        try:
+            provider_type = ProviderType(str(provider).lower())
+        except ValueError:
+            provider_type = ProviderType.OPENAI
+        env_var = resolve_api_key_env_var(provider_type) or "OPENAI_API_KEY"
         api_key = os.getenv(env_var)
 
         if not api_key:

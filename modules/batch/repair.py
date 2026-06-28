@@ -612,9 +612,15 @@ async def _repair_sync_mode(
             logger.error("Sync repair failed for %s: %s", target.image_name, e)
             return target.line_index, "[transcription error]", {}
 
-    api_key = os.getenv("OPENAI_API_KEY")
+    from modules.llm.providers.factory import (
+        ProviderType,
+        resolve_api_key_env_var,
+    )
+
+    env_var = resolve_api_key_env_var(ProviderType.OPENAI) or "OPENAI_API_KEY"
+    api_key = os.getenv(env_var)
     if not api_key:
-        print_error("[ERROR] OPENAI_API_KEY is required for GPT repair. Aborting.")
+        print_error(f"[ERROR] {env_var} is required for GPT repair. Aborting.")
         return
 
     model_name = model_config.get("transcription_model", {}).get(

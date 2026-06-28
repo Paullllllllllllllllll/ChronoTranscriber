@@ -43,7 +43,13 @@ class GoogleBatchBackend(BatchBackend):
         if self._client is None:
             from google import genai
 
-            self._client = genai.Client()
+            from modules.llm.providers.factory import (
+                ProviderType,
+                resolve_api_key_optional,
+            )
+
+            api_key = resolve_api_key_optional(ProviderType.GOOGLE)
+            self._client = genai.Client(api_key=api_key) if api_key else genai.Client()
         return self._client
 
     @property

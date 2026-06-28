@@ -253,8 +253,14 @@ def diagnose_api_issues() -> None:
     """Print quick diagnostics for API key presence and SDK connectivity."""
     print_info("\n=== API Issue Diagnostics ===")
 
-    # Check API key
-    api_key = os.environ.get("OPENAI_API_KEY")
+    # Check API key (honors the optional api_keys_config.yaml remap)
+    from modules.llm.providers.factory import (
+        ProviderType,
+        resolve_api_key_env_var,
+    )
+
+    env_var = resolve_api_key_env_var(ProviderType.OPENAI) or "OPENAI_API_KEY"
+    api_key = os.environ.get(env_var)
     if not api_key:
         print_error("No OpenAI API key found in environment variables")
     else:

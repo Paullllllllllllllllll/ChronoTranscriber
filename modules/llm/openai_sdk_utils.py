@@ -118,11 +118,30 @@ def coerce_file_id(candidate: Any) -> str | None:
     return None
 
 
+def _openai_api_key_env_var() -> str:
+    """Resolve the env var name for the OpenAI key, honoring the optional remap.
+
+    Falls back to ``OPENAI_API_KEY`` when the optional mapping is absent or the
+    resolver is unavailable, preserving the pre-existing behavior.
+    """
+    try:
+        from modules.llm.providers.factory import (
+            ProviderType,
+            resolve_api_key_env_var,
+        )
+
+        return resolve_api_key_env_var(ProviderType.OPENAI) or "OPENAI_API_KEY"
+    except Exception:
+        return "OPENAI_API_KEY"
+
+
 def get_openai_client(api_key: str | None = None) -> Any:
     """Get configured OpenAI client.
 
     Args:
-        api_key: Optional API key. If None, uses OPENAI_API_KEY environment variable.
+        api_key: Optional API key. If None, reads the env var configured for the
+            OpenAI provider (``OPENAI_API_KEY`` by default; remappable via the
+            optional ``api_keys_config.yaml``).
 
     Returns:
         Configured OpenAI client.
@@ -132,12 +151,14 @@ def get_openai_client(api_key: str | None = None) -> Any:
     """
     from openai import OpenAI
 
+    env_var = _openai_api_key_env_var()
+
     if api_key is None:
-        api_key = os.environ.get("OPENAI_API_KEY")
+        api_key = os.environ.get(env_var)
 
     if not api_key:
         raise ValueError(
-            "OpenAI API key not found. Set OPENAI_API_KEY environment variable "
+            f"OpenAI API key not found. Set {env_var} environment variable "
             "or pass api_key parameter."
         )
 
@@ -145,9 +166,11 @@ def get_openai_client(api_key: str | None = None) -> Any:
 
 
 def validate_api_key() -> bool:
-    """Check if OpenAI API key is available.
+    """Check if the OpenAI API key is available.
+
+    Honors the optional ``api_keys_config.yaml`` remap of the OpenAI env var.
 
     Returns:
         True if API key is set, False otherwise.
     """
-    return bool(os.environ.get("OPENAI_API_KEY"))
+    return bool(os.environ.get(_openai_api_key_env_var()))

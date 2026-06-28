@@ -87,6 +87,7 @@ DEFAULT_CONFIG_PATH = CONFIG_DIR / "model_config.yaml"
 DEFAULT_PATHS_CONFIG_PATH = CONFIG_DIR / "paths_config.yaml"
 DEFAULT_CONCURRENCY_CONFIG_PATH = CONFIG_DIR / "concurrency_config.yaml"
 DEFAULT_IMAGE_PROCESSING_CONFIG_PATH = CONFIG_DIR / "image_processing_config.yaml"
+DEFAULT_API_KEYS_CONFIG_PATH = CONFIG_DIR / "api_keys_config.yaml"
 
 
 @dataclass(slots=True)
@@ -117,6 +118,7 @@ class ConfigLoader:
         self._paths: dict[str, Any] | None = None
         self._concurrency: dict[str, Any] | None = None
         self._image_processing: dict[str, Any] | None = None
+        self._api_keys: dict[str, Any] | None = None
 
     @staticmethod
     def _load_yaml_file(path: Path) -> dict[str, Any]:
@@ -205,6 +207,20 @@ class ConfigLoader:
                 DEFAULT_IMAGE_PROCESSING_CONFIG_PATH
             )
         return self._image_processing.copy()
+
+    def get_api_keys_config(self) -> dict[str, Any]:
+        """Load and return the optional API-keys env-var mapping (cached).
+
+        Maps each provider name to the environment variable that holds its API
+        key. The file is entirely optional: when it is absent an empty dict is
+        returned and callers fall back to the hardcoded default env var names.
+        """
+        if self._api_keys is None:
+            if DEFAULT_API_KEYS_CONFIG_PATH.exists():
+                self._api_keys = self._load_yaml_file(DEFAULT_API_KEYS_CONFIG_PATH)
+            else:
+                self._api_keys = {}
+        return self._api_keys.copy()
 
     # -------- Internal helpers for path normalization --------
 

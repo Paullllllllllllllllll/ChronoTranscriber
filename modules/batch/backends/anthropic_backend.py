@@ -43,7 +43,17 @@ class AnthropicBatchBackend(BatchBackend):
         if self._client is None:
             import anthropic
 
-            self._client = anthropic.Anthropic()
+            from modules.llm.providers.factory import (
+                ProviderType,
+                resolve_api_key_optional,
+            )
+
+            api_key = resolve_api_key_optional(ProviderType.ANTHROPIC)
+            self._client = (
+                anthropic.Anthropic(api_key=api_key)
+                if api_key
+                else anthropic.Anthropic()
+            )
         return self._client
 
     @property

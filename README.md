@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.12.0
+# ChronoTranscriber v1.13.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -278,9 +278,9 @@ Run `python main/unified_transcriber.py --help` for the full list.
 
 ## Configuration
 
-ChronoTranscriber uses four YAML files in `config/`. The config
-directory can be overridden via the `CHRONO_CONFIG_DIR` environment
-variable.
+ChronoTranscriber uses four YAML files in `config/`, plus one optional
+fifth file (`api_keys_config.yaml`). The config directory can be
+overridden via the `CHRONO_CONFIG_DIR` environment variable.
 
 ### 1. Model Configuration (`model_config.yaml`)
 
@@ -358,6 +358,25 @@ Controls concurrency limits, retry strategy (network and
 validation/quality retries share separate budgets), content-quality
 validators with configurable thresholds, service tier, batch chunk
 size, and daily token budgets.
+
+### 5. API Keys Configuration (Optional) (`api_keys_config.yaml`)
+
+```yaml
+openai: OPENAI_API_KEY
+anthropic: ANTHROPIC_API_KEY
+google: GOOGLE_API_KEY
+openrouter: OPENROUTER_API_KEY
+```
+
+Maps each provider to the name of the environment variable holding its
+API key, letting you swap keys between runs by editing one file (for
+example `openai: OPENAI_API_KEY_2`) instead of changing the environment.
+The values are environment variable names, never the secret keys
+themselves. This file is entirely optional and backward-compatible: when
+it is absent, or when a provider entry is omitted, the default env var
+name shown above applies. The remap is honored everywhere a key is read,
+including batch mode. The custom provider's env var name is configured
+separately via `custom_endpoint.api_key_env_var` in `model_config.yaml`.
 
 ### Context Resolution
 
@@ -583,6 +602,15 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v1.13.0** (28 June 2026) -- Add optional `api_keys_config.yaml` for
+    per-provider API-key environment-variable remapping. Each provider can be
+    pointed at a custom env var name (for example `openai: OPENAI_API_KEY_2`) to
+    swap keys between runs by editing one file; a missing file or omitted
+    provider entry falls back to the existing default env var name, so behavior
+    is unchanged for current setups. The remap is honored uniformly across the
+    sync pipeline, the wizard validation gate, repair, diagnostics, and the
+    batch backends, so it applies in batch mode too.
 
 - **v1.12.0** (24 June 2026) -- The daily token limit is now enforced at the
     page level, not just between files. When the limit is enabled, the

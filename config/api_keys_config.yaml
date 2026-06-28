@@ -1,0 +1,27 @@
+# =============================================================================
+# API Keys Configuration (OPTIONAL)
+# =============================================================================
+# Maps each LLM provider to the NAME of the environment variable that holds its
+# API key. This lets you swap keys between runs by editing one file instead of
+# changing the environment -- for example, point OpenAI at a second key by
+# setting "openai: OPENAI_API_KEY_2" and exporting OPENAI_API_KEY_2.
+#
+# This entire file is OPTIONAL and fully backward-compatible:
+#   - If the file is missing, the defaults below apply.
+#   - If a provider entry is omitted, that provider falls back to its default.
+# The values are environment variable NAMES, never the secret keys themselves.
+#
+# The remap is honored everywhere a key is read, including batch mode.
+#
+# Used by:
+#   - modules/llm/providers/factory.py (central API-key resolver)
+#   - modules/config/config_loader.py (optional loader, returns {} if absent)
+#
+# Note: the custom provider's env var name is configured separately via
+# transcription_model.custom_endpoint.api_key_env_var in model_config.yaml.
+# =============================================================================
+
+openai: OPENAI_API_KEY
+anthropic: ANTHROPIC_API_KEY
+google: GOOGLE_API_KEY
+openrouter: OPENROUTER_API_KEY

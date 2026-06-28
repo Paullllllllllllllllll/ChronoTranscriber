@@ -166,7 +166,13 @@ class OpenAIBatchBackend(BatchBackend):
         if self._client is None:
             from openai import OpenAI
 
-            self._client = OpenAI()
+            from modules.llm.providers.factory import (
+                ProviderType,
+                resolve_api_key_optional,
+            )
+
+            api_key = resolve_api_key_optional(ProviderType.OPENAI)
+            self._client = OpenAI(api_key=api_key) if api_key else OpenAI()
         return self._client
 
     @property

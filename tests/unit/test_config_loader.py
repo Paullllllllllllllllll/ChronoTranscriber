@@ -293,6 +293,60 @@ class TestConfigLoader:
         assert result == ""
 
 
+class TestGetApiKeysConfig:
+    """Tests for the optional API-keys env-var mapping loader."""
+
+    @pytest.mark.unit
+    def test_returns_empty_when_file_absent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing api_keys_config.yaml returns {} (backward-compatible)."""
+        import modules.config.config_loader as cl
+
+        missing = tmp_path / "api_keys_config.yaml"
+        monkeypatch.setattr(cl, "DEFAULT_API_KEYS_CONFIG_PATH", missing)
+
+        loader = cl.ConfigLoader()
+        assert loader.get_api_keys_config() == {}
+
+    @pytest.mark.unit
+    def test_returns_mapping_when_present(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Present api_keys_config.yaml is parsed into the mapping."""
+        import modules.config.config_loader as cl
+
+        cfg = tmp_path / "api_keys_config.yaml"
+        cfg.write_text(
+            "openai: OPENAI_API_KEY_2\nanthropic: ANTHROPIC_API_KEY\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(cl, "DEFAULT_API_KEYS_CONFIG_PATH", cfg)
+
+        loader = cl.ConfigLoader()
+        result = loader.get_api_keys_config()
+        assert result == {
+            "openai": "OPENAI_API_KEY_2",
+            "anthropic": "ANTHROPIC_API_KEY",
+        }
+
+    @pytest.mark.unit
+    def test_returns_copy(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Returned mapping is a copy; mutating it does not affect the cache."""
+        import modules.config.config_loader as cl
+
+        cfg = tmp_path / "api_keys_config.yaml"
+        cfg.write_text("openai: OPENAI_API_KEY\n", encoding="utf-8")
+        monkeypatch.setattr(cl, "DEFAULT_API_KEYS_CONFIG_PATH", cfg)
+
+        loader = cl.ConfigLoader()
+        first = loader.get_api_keys_config()
+        first["openai"] = "mutated"
+        assert loader.get_api_keys_config()["openai"] == "OPENAI_API_KEY"
+
+
 class TestNormalizePathsConfig:
     """Tests for _normalize_paths_config method."""
 

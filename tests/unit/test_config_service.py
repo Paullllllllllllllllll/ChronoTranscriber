@@ -11,6 +11,7 @@ import pytest
 
 from modules.config.service import (
     ConfigService,
+    get_api_keys_config,
     get_concurrency_config,
     get_config_service,
     get_image_processing_config,
@@ -122,6 +123,36 @@ class TestConfigServiceMethods:
             result = service.get_image_processing_config()
 
             assert isinstance(result, dict)
+
+    @pytest.mark.unit
+    def test_get_api_keys_config_returns_mapping(self) -> None:
+        """Test get_api_keys_config returns the loader's mapping."""
+        with patch("modules.config.service.ConfigLoader") as mock_loader_cls:
+            mock_loader = MagicMock()
+            mock_loader.get_api_keys_config.return_value = {
+                "openai": "OPENAI_API_KEY_2"
+            }
+            mock_loader_cls.return_value = mock_loader
+
+            service = ConfigService()
+            service.load()
+            result = service.get_api_keys_config()
+
+            assert result == {"openai": "OPENAI_API_KEY_2"}
+
+    @pytest.mark.unit
+    def test_get_api_keys_config_empty_when_absent(self) -> None:
+        """Test get_api_keys_config returns {} when the optional file is absent."""
+        with patch("modules.config.service.ConfigLoader") as mock_loader_cls:
+            mock_loader = MagicMock()
+            mock_loader.get_api_keys_config.return_value = {}
+            mock_loader_cls.return_value = mock_loader
+
+            service = ConfigService()
+            service.load()
+            result = service.get_api_keys_config()
+
+            assert result == {}
 
     @pytest.mark.unit
     def test_configs_are_copies(self) -> None:
@@ -244,3 +275,15 @@ class TestConvenienceFunctions:
             result = get_image_processing_config()
 
             assert result == {"img": "func"}
+
+    @pytest.mark.unit
+    def test_get_api_keys_config_function(self) -> None:
+        """Test get_api_keys_config convenience function."""
+        with patch("modules.config.service.ConfigLoader") as mock_loader_cls:
+            mock_loader = MagicMock()
+            mock_loader.get_api_keys_config.return_value = {"openai": "OPENAI_API_KEY"}
+            mock_loader_cls.return_value = mock_loader
+
+            result = get_api_keys_config()
+
+            assert result == {"openai": "OPENAI_API_KEY"}

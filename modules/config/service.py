@@ -39,6 +39,7 @@ class ConfigService:
         self._paths_config: dict[str, Any] | None = None
         self._concurrency_config: dict[str, Any] | None = None
         self._image_processing_config: dict[str, Any] | None = None
+        self._api_keys_config: dict[str, Any] | None = None
         self._initialized = True
 
     def load(self, config_path: Path | None = None) -> None:
@@ -55,6 +56,7 @@ class ConfigService:
             self._paths_config = None
             self._concurrency_config = None
             self._image_processing_config = None
+            self._api_keys_config = None
 
     def _ensure_loaded(self) -> None:
         """Ensure configuration is loaded, loading with defaults if necessary."""
@@ -118,6 +120,20 @@ class ConfigService:
             if self._image_processing_config
             else {}
         )
+
+    def get_api_keys_config(self) -> dict[str, Any]:
+        """Get the optional API-keys env-var mapping (cached).
+
+        Returns:
+            Mapping of provider name to the environment variable holding its
+            API key. Empty dict when the optional file is absent.
+        """
+        self._ensure_loaded()
+        if self._api_keys_config is None:
+            with self._lock:
+                if self._api_keys_config is None and self._loader is not None:
+                    self._api_keys_config = self._loader.get_api_keys_config()
+        return self._api_keys_config.copy() if self._api_keys_config else {}
 
     def get_prompt_caching_config(self) -> dict[str, Any]:
         """Get prompt caching configuration from concurrency config.
@@ -188,6 +204,16 @@ def get_image_processing_config() -> dict[str, Any]:
         Image processing configuration dictionary.
     """
     return get_config_service().get_image_processing_config()
+
+
+def get_api_keys_config() -> dict[str, Any]:
+    """Get the optional API-keys env-var mapping.
+
+    Returns:
+        Mapping of provider name to the environment variable holding its API
+        key. Empty dict when the optional file is absent.
+    """
+    return get_config_service().get_api_keys_config()
 
 
 def get_prompt_caching_config() -> dict[str, Any]:

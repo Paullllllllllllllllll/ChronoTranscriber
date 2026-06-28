@@ -60,6 +60,46 @@ def _import_provider_class(provider_type: ProviderType) -> type[BaseProvider]:
     return cast(type[BaseProvider], getattr(module, class_name))
 
 
+def resolve_api_key_env_var(provider_type: ProviderType) -> str | None:
+    """Resolve the environment variable name holding a provider's API key.
+
+    Consults the optional ``api_keys_config.yaml`` mapping for a per-provider
+    override and falls back to the hardcoded default when no override is set.
+    Returns ``None`` when no default exists (e.g. the custom provider, whose
+    env var name is configured separately in ``model_config.yaml``).
+
+    The lookup never raises: any failure to load the optional mapping yields the
+    hardcoded default, preserving the pre-existing behavior.
+    """
+    default = _API_KEY_ENV_VARS.get(provider_type)
+    try:
+        from modules.config.service import get_config_service
+
+        overrides = get_config_service().get_api_keys_config() or {}
+        override = overrides.get(provider_type.value)
+        if isinstance(override, str) and override.strip():
+            return override.strip()
+    except Exception as e:  # pragma: no cover - defensive; fall back to default
+        logger.debug(f"Could not load api_keys_config override: {e}")
+    return default
+
+
+def resolve_api_key_optional(
+    provider_type: ProviderType,
+    api_key: str | None = None,
+) -> str | None:
+    """Resolve a provider's API key, returning ``None`` instead of raising.
+
+    Thin non-raising wrapper around :func:`get_api_key_for_provider` for call
+    sites (e.g. batch backends) that prefer to fall back to SDK-default key
+    discovery when no key can be resolved.
+    """
+    try:
+        return get_api_key_for_provider(provider_type, api_key)
+    except ValueError:
+        return None
+
+
 def get_available_providers() -> list[ProviderType]:
     """Return list of provider types that have API keys configured."""
     available = []
@@ -103,7 +143,7 @@ def get_api_key_for_provider(
     if api_key:
         return api_key
 
-    env_var = _API_KEY_ENV_VARS.get(provider_type)
+    env_var = resolve_api_key_env_var(provider_type)
     if env_var:
         key = os.environ.get(env_var)
         if key:

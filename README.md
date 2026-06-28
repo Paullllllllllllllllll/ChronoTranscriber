@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.13.0
+# ChronoTranscriber v1.14.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -186,8 +186,22 @@ export OPENAI_API_KEY="your_key_here"
 ```
 
 For persistent configuration, add to system environment variables or
-shell profile. Edit `config/paths_config.yaml` to set input/output
-directories.
+shell profile.
+
+**Configure your settings (optional for a quick start):**
+
+The `config/` directory ships with scrubbed `*.example.yaml` templates.
+On a fresh clone, the loader reads those templates automatically and
+prints a one-line notice. To set your own paths and model:
+
+```bash
+cp config/model_config.example.yaml config/model_config.yaml
+cp config/paths_config.example.yaml config/paths_config.yaml
+# edit both files
+```
+
+The real `*.yaml` files are gitignored and never pushed; only the
+`*.example.yaml` templates are tracked.
 
 ## Quick Start
 
@@ -281,6 +295,18 @@ Run `python main/unified_transcriber.py --help` for the full list.
 ChronoTranscriber uses four YAML files in `config/`, plus one optional
 fifth file (`api_keys_config.yaml`). The config directory can be
 overridden via the `CHRONO_CONFIG_DIR` environment variable.
+
+**Example/real split.** Every config file has a tracked, scrubbed
+`<name>.example.yaml` sibling. The loader resolves config in this order:
+
+1. Load `<name>.yaml` if present (your private settings, gitignored).
+2. Fall back to `<name>.example.yaml` with a one-line INFO notice
+   telling you to copy and customize the file.
+3. Raise a clear error if neither file exists.
+
+A fresh clone therefore runs with sane defaults instead of crashing.
+Copy the example files to their real names only when you need to
+override the defaults.
 
 ### 1. Model Configuration (`model_config.yaml`)
 
@@ -602,6 +628,18 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v1.14.0** (28 June 2026) -- Ship scrubbed `*.example.yaml` config templates
+    with conservative OpenAI defaults and a real->example loader fallback, so a
+    fresh clone runs with clear guidance instead of crashing on missing config.
+    Each of the five config files now has a tracked `<name>.example.yaml` sibling
+    in `config/`; the real `*.yaml` files remain gitignored. The loader tries the
+    real file first, falls back to the example with a one-line INFO notice if it is
+    absent, and raises a clear error only when neither file exists. The
+    `api_keys_config` loader retains its non-raising behavior (returns `{}` when
+    both files are absent). The `.gitignore` pattern is updated from `/config/` to
+    `/config/*` plus `!/config/*.example.yaml` so examples are tracked while real
+    configs stay private.
 
 - **v1.13.0** (28 June 2026) -- Add optional `api_keys_config.yaml` for
     per-provider API-key environment-variable remapping. Each provider can be

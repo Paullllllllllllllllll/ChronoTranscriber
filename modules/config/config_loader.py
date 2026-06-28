@@ -8,12 +8,15 @@ image_processing_config.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+_log = logging.getLogger(__name__)
 
 from modules.config.capabilities import ensure_image_support
 from modules.config.constants import DOCUMENT_CATEGORIES
@@ -123,7 +126,18 @@ class ConfigLoader:
     @staticmethod
     def _load_yaml_file(path: Path) -> dict[str, Any]:
         if not path.exists():
-            raise FileNotFoundError(f"Missing configuration file: {path}")
+            example = path.with_name(path.stem + ".example" + path.suffix)
+            if example.exists():
+                _log.info(
+                    "Config '%s' not found; using bundled defaults from '%s'. "
+                    "Copy it to '%s' and edit it to set your own values.",
+                    path.name,
+                    example.name,
+                    path.name,
+                )
+                path = example
+            else:
+                raise FileNotFoundError(f"Missing configuration file: {path}")
         try:
             with path.open("r", encoding="utf-8") as f:
                 return yaml.safe_load(f) or {}
@@ -140,10 +154,7 @@ class ConfigLoader:
         """
         Load YAML configuration into memory.
         """
-        if not self.config_path.exists():
-            raise FileNotFoundError(f"Missing configuration file: {self.config_path}")
-        with self.config_path.open("r", encoding="utf-8") as f:
-            self._raw = yaml.safe_load(f) or {}
+        self._raw = self._load_yaml_file(self.config_path)
 
         # Validate environment API key presence if relevant
         if "OPENAI_API_KEY" not in os.environ:
@@ -214,11 +225,13 @@ class ConfigLoader:
         Maps each provider name to the environment variable that holds its API
         key. The file is entirely optional: when it is absent an empty dict is
         returned and callers fall back to the hardcoded default env var names.
+        Falls back to the bundled .example.yaml if the real file is absent;
+        returns {} if neither file exists.
         """
         if self._api_keys is None:
-            if DEFAULT_API_KEYS_CONFIG_PATH.exists():
+            try:
                 self._api_keys = self._load_yaml_file(DEFAULT_API_KEYS_CONFIG_PATH)
-            else:
+            except FileNotFoundError:
                 self._api_keys = {}
         return self._api_keys.copy()
 

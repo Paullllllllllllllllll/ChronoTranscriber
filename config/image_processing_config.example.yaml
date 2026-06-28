@@ -1,0 +1,200 @@
+# =============================================================================
+# Image Processing Configuration (EXAMPLE TEMPLATE)
+# =============================================================================
+# This file ships as a scrubbed public template. A fresh clone uses it
+# automatically if image_processing_config.yaml is absent (the loader logs
+# a notice). To customize: copy this file to image_processing_config.yaml
+# and edit it.
+#
+# Used by:
+#   - modules/processing/image_utils.py (image preprocessing pipelines)
+#   - modules/processing/pdf_utils.py (PDF page image extraction)
+#   - modules/processing/tesseract_utils.py (Tesseract OCR settings)
+#   - modules/llm/batch/batching.py (llm_detail for batch requests)
+#   - modules/core/workflow.py (target_dpi, postprocessing)
+#   - modules/operations/batch/check.py (postprocessing on batch results)
+# =============================================================================
+
+
+# Maximum pixel count per rendered page before automatic DPI reduction.
+# When a page would exceed this budget at target_dpi, DPI is scaled down just
+# enough to stay within the limit. Set to 0 to disable.
+# Default 24_000_000 (24 MP) bounds the worst-case raw page in memory to
+# ~72 MB RGB while staying 2.3x above the 10.24 MP original_max_pixels send
+# cap, so the image actually sent to the API is unaffected.
+max_pixels_per_page: 24000000
+
+# =============================================================================
+# 1. OpenAI API Image Processing
+# =============================================================================
+# Settings for preprocessing images before sending to OpenAI's vision models.
+# Applies to synchronous transcription and Batch API.
+api_image_processing:
+  target_dpi: 300  # DPI for rendering/extracting images before API processing.
+  grayscale_conversion: true  # Convert color images to grayscale to reduce noise.
+  handle_transparency: true  # Flatten images with alpha onto white background.
+  # Controls the fidelity of images sent to the OpenAI Responses API.
+  # Values:
+  # - original: full-fidelity (up to 6000px / 10.24M pixels), GPT-5.4+ only
+  # - high: uses tiling approach (170 tokens per 512x512 tile), better for fine details
+  # - low: 512x512 resize, 85 tokens per image, faster/cheaper
+  # - auto: omit the parameter and let the model decide
+  # Token cost: low=85 tokens; high=85 + (170 x number of 512px tiles)
+  llm_detail: original
+
+  # JPEG compression quality (1-100) when saving processed images for API use.
+  jpeg_quality: 100
+
+  # Resizing behavior prior to sending to the API.
+  # Values:
+  # - auto: choose a resizing strategy based on llm_detail
+  # - none: do not resize (only transparency/grayscale steps applied)
+  # Note: any other value currently behaves like 'auto' (resizing enabled).
+  resize_profile: high
+
+  # Parameters for resizing profiles
+  # For low detail, cap the longest side to this many pixels (preserve aspect ratio)
+  low_max_side_px: 512
+  # For high detail, fit into this box (width, height) with padding as needed
+  high_target_box: [768, 1536]
+  # For original detail (GPT-5.4+), cap to API maximum dimensions
+  original_max_side_px: 6000
+  original_max_pixels: 10240000  # 10.24M pixels
+
+# =============================================================================
+# 2. Google Gemini API Image Processing
+# =============================================================================
+# Settings for preprocessing images before sending to Google's Gemini models.
+# Google uses media_resolution instead of OpenAI's detail parameter.
+google_image_processing:
+  target_dpi: 300  # DPI for rendering/extracting images before API processing.
+  grayscale_conversion: true  # Convert color images to grayscale to reduce noise.
+  handle_transparency: true  # Flatten images with alpha onto white background.
+
+  # Controls the resolution of images sent to Google Gemini API.
+  # Values (Gemini 3 token counts per image):
+  # - ultra_high: 2240 tokens - Highest quality
+  # - high: 1120 tokens - Recommended for OCR/dense documents
+  # - medium: 560 tokens - Balanced quality/cost
+  # - low: 280 tokens - Minimal tokens, fast/cheap
+  # - auto: MEDIA_RESOLUTION_UNSPECIFIED - Default
+  media_resolution: high
+
+  # JPEG compression quality (1-100) when saving processed images for API use.
+  jpeg_quality: 100
+
+  # Resizing behavior prior to sending to the API.
+  resize_profile: high
+
+  # Parameters for resizing profiles
+  low_max_side_px: 512
+  high_target_box: [768, 1536]
+
+# =============================================================================
+# 3. Anthropic Claude API Image Processing
+# =============================================================================
+# Settings for preprocessing images before sending to Anthropic's Claude models.
+#
+# Anthropic guidelines:
+#   - Recommended: long edge <= 1568px, <= 1.15 megapixels for optimal latency
+#   - Minimum: 200px on any edge
+#   - Maximum: 8000x8000px (or 2000x2000 if >20 images in one request)
+#   - Token calculation: tokens = (width x height) / 750
+anthropic_image_processing:
+  target_dpi: 300  # DPI for rendering/extracting images before API processing.
+  grayscale_conversion: true  # Convert color images to grayscale to reduce noise.
+  handle_transparency: true  # Flatten images with alpha onto white background.
+
+  # JPEG compression quality (1-100) when saving processed images for API use.
+  jpeg_quality: 100
+
+  # Resizing behavior prior to sending to the API.
+  # Best practice: pre-resize to <=1568px to avoid server-side resizing latency.
+  resize_profile: auto
+
+  # Parameters for resizing profiles
+  low_max_side_px: 512
+  high_max_side_px: 1568
+
+# =============================================================================
+# 4. Tesseract OCR Image Processing
+# =============================================================================
+# Settings for preprocessing images before local Tesseract OCR.
+# Includes engine configuration, binary path, and preprocessing pipeline.
+tesseract_image_processing:
+  # Resolution for page rendering and image saving; DPI metadata is embedded if enabled.
+  target_dpi: 300
+
+  # OCR engine settings and optional binary location
+  ocr:
+    tesseract_config: "--oem 3 --psm 6"  # '--oem 3' default engine; '--psm 6' uniform block
+    tesseract_cmd: ''  # Absolute path to tesseract.exe on Windows; '' uses PATH
+
+  # Preprocessing pipeline exclusively for Tesseract
+  preprocessing:
+    flatten_alpha: true            # Remove/flatten transparency to white background
+    grayscale: true                # Convert to grayscale before thresholding
+    invert_to_dark_on_light: auto  # auto|always|never -> ensure dark text on light bg
+    deskew: true                   # Detect and correct page skew
+    denoise: median                # none|median|bilateral
+    binarization: sauvola          # sauvola|adaptive|otsu
+    sauvola_window: 25             # odd window size for Sauvola
+    sauvola_k: 0.2                 # Sauvola k parameter
+    morphology: none               # none|open|close|erode|dilate
+    morph_kernel: 3                # odd kernel size for morphology
+    border_px: 10                  # add a white border to avoid cropping text near edges
+    output_format: png             # png|tiff (lossless)
+    preserve_resolution: true      # do not resize/box-fit for Tesseract
+    embed_dpi_metadata: true       # embed DPI metadata in output files
+
+# =============================================================================
+# 5. Post-Processing Settings
+# =============================================================================
+# Applied to final transcription text before writing to file. Cleans up OCR
+# artifacts, normalizes whitespace, and optionally wraps long lines while
+# preserving Markdown formatting and semantic content.
+#
+# Used by:
+#   - modules/processing/postprocess.py (postprocess_transcription function)
+#   - modules/core/workflow.py (after transcription completes)
+#   - modules/operations/batch/check.py (after batch results retrieved)
+# =============================================================================
+
+postprocessing:
+  # Master toggle. When false, transcription output is written as-is.
+  enabled: true
+
+  # Merge hyphenated line breaks (e.g., "politi-\nche" -> "politiche").
+  merge_hyphenation: false
+
+  # Collapse 3+ internal spaces between words down to exactly 2 spaces.
+  collapse_internal_spaces: true
+
+  # Maximum consecutive blank lines to keep. Extras are removed.
+  max_blank_lines: 2
+
+  # Tab expansion width. Tabs become spaces for consistent formatting.
+  tab_size: 4
+
+  # Line wrapping for long lines. Breaks at word boundaries, preserves indentation.
+  wrap_lines: true
+
+  # Auto-compute wrap width from average line length of text blocks.
+  auto_wrap: false
+
+  # Explicit wrap width (characters). Only used when wrap_lines=true and auto_wrap=false.
+  wrap_width: 120
+
+# =============================================================================
+# Custom Endpoint Image Processing
+# =============================================================================
+# Aggressive preprocessing for self-hosted models with small context windows
+# (e.g., 8,192 tokens). Produces compact images to stay within token budget.
+# Adjust these values based on your endpoint's context window size.
+custom_image_processing:
+  grayscale_conversion: false
+  handle_transparency: true
+  jpeg_quality: 90
+  llm_detail: high
+  low_max_side_px: 2500
+  high_target_box: [2500, 2500]

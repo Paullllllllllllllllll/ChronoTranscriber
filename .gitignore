@@ -31,8 +31,10 @@ eval/reports/eval_results_*.csv
 eval/reports/eval_results_*.md
 eval/reports/eval_chart_*.png
 
-# User-specific configuration (runtime values vary per machine)
-/config/
+# User-specific configuration (runtime values vary per machine).
+# Real config files are gitignored; scrubbed *.example.yaml templates are tracked.
+/config/*
+!/config/*.example.yaml
 
 # IDE and cache
 .idea/

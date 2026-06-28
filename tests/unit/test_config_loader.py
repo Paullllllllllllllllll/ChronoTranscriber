@@ -347,6 +347,81 @@ class TestGetApiKeysConfig:
         assert loader.get_api_keys_config()["openai"] == "OPENAI_API_KEY"
 
 
+class TestLoadYamlFileFallback:
+    """Tests for the .example.yaml fallback in _load_yaml_file."""
+
+    @pytest.mark.unit
+    def test_falls_back_to_example_when_real_missing(self, temp_dir: Path) -> None:
+        """When the real file is absent, the .example.yaml is loaded."""
+        from modules.config.config_loader import ConfigLoader
+
+        example = temp_dir / "model_config.example.yaml"
+        example.write_text("key: from_example\n", encoding="utf-8")
+
+        result = ConfigLoader._load_yaml_file(temp_dir / "model_config.yaml")
+        assert result == {"key": "from_example"}
+
+    @pytest.mark.unit
+    def test_raises_when_both_real_and_example_missing(self, temp_dir: Path) -> None:
+        """When neither file exists, FileNotFoundError names the real file."""
+        from modules.config.config_loader import ConfigLoader
+
+        with pytest.raises(FileNotFoundError, match="model_config.yaml"):
+            ConfigLoader._load_yaml_file(temp_dir / "model_config.yaml")
+
+    @pytest.mark.unit
+    def test_real_file_takes_precedence_over_example(self, temp_dir: Path) -> None:
+        """When the real file exists, the example is ignored."""
+        from modules.config.config_loader import ConfigLoader
+
+        real = temp_dir / "model_config.yaml"
+        real.write_text("key: from_real\n", encoding="utf-8")
+        example = temp_dir / "model_config.example.yaml"
+        example.write_text("key: from_example\n", encoding="utf-8")
+
+        result = ConfigLoader._load_yaml_file(real)
+        assert result == {"key": "from_real"}
+
+
+class TestGetApiKeysConfigFallback:
+    """Tests for the .example.yaml fallback in get_api_keys_config."""
+
+    @pytest.mark.unit
+    def test_falls_back_to_example_when_real_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """api_keys loader uses the example when the real file is absent."""
+        import modules.config.config_loader as cl
+
+        real = tmp_path / "api_keys_config.yaml"
+        example = tmp_path / "api_keys_config.example.yaml"
+        example.write_text(
+            "openai: OPENAI_API_KEY\nanthropic: ANTHROPIC_API_KEY\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(cl, "DEFAULT_API_KEYS_CONFIG_PATH", real)
+
+        loader = cl.ConfigLoader()
+        result = loader.get_api_keys_config()
+        assert result == {
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+        }
+
+    @pytest.mark.unit
+    def test_returns_empty_when_both_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """api_keys loader returns {} when neither real nor example exists."""
+        import modules.config.config_loader as cl
+
+        missing = tmp_path / "api_keys_config.yaml"
+        monkeypatch.setattr(cl, "DEFAULT_API_KEYS_CONFIG_PATH", missing)
+
+        loader = cl.ConfigLoader()
+        assert loader.get_api_keys_config() == {}
+
+
 class TestNormalizePathsConfig:
     """Tests for _normalize_paths_config method."""
 

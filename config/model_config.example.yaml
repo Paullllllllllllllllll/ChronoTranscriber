@@ -1,0 +1,34 @@
+# =============================================================================
+# Model Configuration (EXAMPLE TEMPLATE)
+# =============================================================================
+# This file ships as a scrubbed public template. A fresh clone uses it
+# automatically if model_config.yaml is absent (the loader logs a notice).
+# To customize: copy this file to model_config.yaml and edit it.
+#
+# Used by:
+#   - modules/llm/transcriber.py (LangChain-based multi-provider transcription)
+#   - modules/llm/providers/*.py (provider-specific implementations)
+#   - modules/llm/batch/batching.py (OpenAI Batch API transcription)
+#   - modules/config/config_loader.py (model validation at startup)
+#
+# API Keys (environment variables):
+#   - OpenAI:      OPENAI_API_KEY
+#   - Anthropic:   ANTHROPIC_API_KEY
+#   - Google:      GOOGLE_API_KEY
+#   - OpenRouter:  OPENROUTER_API_KEY
+#   - Custom:      set api_key_env_var in the custom_endpoint block
+# =============================================================================
+
+transcription_model:
+  provider: openai
+  name: gpt-5.4-mini
+  max_output_tokens: 128000
+  expects_image_inputs: true
+  reasoning:
+    effort: medium
+  text:
+    verbosity: medium
+  temperature: 1
+  top_p: 1.0
+  frequency_penalty: 0.01
+  presence_penalty: 0.01

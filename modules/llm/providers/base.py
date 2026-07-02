@@ -608,39 +608,9 @@ class BaseProvider(ABC):
                 "transcription_not_possible", False
             )
 
-        # Content quality validation (catches hallucination loops, truncation,
-        # system-prompt bleed, and excessive line repetition).
-        # Raises ContentQualityError → retried by _ainvoke_with_retry.
-        transcription_text = None
-        skip_quality = False
-
-        if result.parsed_output and isinstance(result.parsed_output, dict):
-            transcription_text = result.parsed_output.get("transcription")
-            skip_quality = (
-                result.no_transcribable_text or result.transcription_not_possible
-            )
-        elif result.content:
-            stripped = result.content.strip()
-            if stripped in (
-                "[No transcribable text]",
-                "[Transcription not possible]",
-            ):
-                skip_quality = True
-            else:
-                transcription_text = stripped
-
-        if transcription_text and not skip_quality:
-            cq_config = self._get_content_quality_config()
-            if cq_config.get("enabled", True):
-                from modules.llm.quality import validate_content_quality
-
-                validate_content_quality(
-                    transcription_text=transcription_text,
-                    no_transcribable_text=False,
-                    transcription_not_possible=False,
-                    config=cq_config,
-                )
-
+        # Content-quality validation is applied inside _ainvoke_with_retry so it
+        # shares the validation retry budget (B11); it is NOT re-run here, so an
+        # exhausted budget keeps the last attempt's text instead of raising.
         return result
 
     def _get_content_quality_config(self) -> dict[str, Any]:
@@ -650,6 +620,46 @@ class BaseProvider(ABC):
         except (KeyError, AttributeError, TypeError) as e:
             logger.debug("Could not load content_quality config, using defaults: %s", e)
             return {}
+
+    def _validate_result_content_quality(self, response: Any) -> None:
+        """Validate the transcription text of a raw response, if enabled.
+
+        Extracts the transcription text from *response* and runs the
+        content-quality validators. Raises ``ContentQualityError`` on failure so
+        the caller's retry loop can retry against the validation budget (B11).
+        A no-op when content-quality validation is disabled (the shipped
+        default) or the page carries a no-text/not-possible flag.
+        """
+        cq_config = self._get_content_quality_config()
+        if not cq_config.get("enabled", False):
+            return
+
+        content, parsed_output, _ = self._extract_content(response)
+
+        transcription_text: str | None = None
+        skip_quality = False
+        if parsed_output and isinstance(parsed_output, dict):
+            transcription_text = parsed_output.get("transcription")
+            skip_quality = bool(
+                parsed_output.get("no_transcribable_text")
+                or parsed_output.get("transcription_not_possible")
+            )
+        elif content:
+            stripped = content.strip()
+            if stripped in ("[No transcribable text]", "[Transcription not possible]"):
+                skip_quality = True
+            else:
+                transcription_text = stripped
+
+        if transcription_text and not skip_quality:
+            from modules.llm.quality import validate_content_quality
+
+            validate_content_quality(
+                transcription_text=transcription_text,
+                no_transcribable_text=False,
+                transcription_not_possible=False,
+                config=cq_config,
+            )
 
     def _build_disabled_params(self) -> dict[str, Any] | None:
         """Build disabled_params dict based on model capabilities.
@@ -858,65 +868,97 @@ class BaseProvider(ABC):
                 return True
             return False
 
-        async for attempt in tenacity.AsyncRetrying(
-            retry=tenacity.retry_if_exception(_should_retry),
-            wait=tenacity.wait_exponential_jitter(initial=2, max=60),
-            stop=tenacity.stop_after_attempt(max_attempts),
-            before_sleep=tenacity.before_sleep_log(logger, logging.WARNING),
-            reraise=True,
-        ):
-            with attempt:
-                result = await llm.ainvoke(messages, **invoke_kwargs)
-                # Detect max_output_tokens truncation before checking
-                # parsing errors — retrying a truncated response is
-                # pointless and wastes tokens + time.
-                if isinstance(result, dict):
-                    raw_msg = result.get("raw")
-                    if raw_msg is not None:
-                        meta = getattr(raw_msg, "response_metadata", {}) or {}
-                        incomplete = meta.get("incomplete_details") or {}
-                        if incomplete.get("reason") == "max_output_tokens":
-                            usage = getattr(raw_msg, "usage_metadata", {}) or {}
-                            out_tok = usage.get("output_tokens", 0)
-                            out_detail = usage.get("output_token_details", {}) or {}
-                            reasoning_tok = out_detail.get(
-                                "flex_reasoning",
-                                out_detail.get("reasoning", 0),
-                            )
-                            discarded = self._extract_total_tokens(result)
-                            if discarded > 0:
-                                self._track_token_usage(discarded, 0, 0)
-                            raise OutputTokensTruncatedError(out_tok, reasoning_tok)
-                # Detect silent parsing failures from
-                # with_structured_output(include_raw=True).
-                if isinstance(result, dict) and result.get("parsing_error") is not None:
-                    logger.warning(
-                        "Structured output parsing failed silently, "
-                        "re-raising for retry: %s",
-                        str(result["parsing_error"])[:200],
+        last_result: Any = None
+        try:
+            async for attempt in tenacity.AsyncRetrying(
+                retry=tenacity.retry_if_exception(_should_retry),
+                wait=tenacity.wait_exponential_jitter(initial=2, max=60),
+                stop=tenacity.stop_after_attempt(max_attempts),
+                before_sleep=tenacity.before_sleep_log(logger, logging.WARNING),
+                reraise=True,
+            ):
+                with attempt:
+                    result = await self._ainvoke_once(
+                        llm, messages, min_input_tokens, **invoke_kwargs
                     )
-                    discarded_tokens = self._extract_total_tokens(result)
-                    if discarded_tokens > 0:
-                        self._track_token_usage(discarded_tokens, 0, 0)
-                        logger.debug(
-                            "Tracked %d tokens from discarded retry (parsing failure)",
-                            discarded_tokens,
-                        )
-                    raise result["parsing_error"]
-                # Check for suspiciously low input tokens (image dropped).
-                if min_input_tokens > 0:
-                    actual = self._extract_input_tokens(result)
-                    if 0 < actual < min_input_tokens:
-                        discarded_tokens = self._extract_total_tokens(result)
-                        if discarded_tokens > 0:
-                            self._track_token_usage(discarded_tokens, 0, 0)
-                            logger.debug(
-                                "Tracked %d tokens from discarded retry "
-                                "(input below threshold)",
-                                discarded_tokens,
-                            )
-                        raise InputTokensBelowThresholdError(actual, min_input_tokens)
-                return result
+                    last_result = result
+                    # Content-quality validation shares the validation retry
+                    # budget; on the final attempt _should_retry returns False
+                    # and the error propagates to the except below (B11).
+                    self._validate_result_content_quality(result)
+                    return result
+        except ContentQualityError:
+            logger.warning(
+                "Content-quality retry budget exhausted; keeping the last "
+                "attempt's text rather than discarding the page."
+            )
+            if last_result is not None:
+                return last_result
+            raise
+        # Unreachable: the retry loop always returns or raises.
+        raise RuntimeError("retry loop exited without a result")
+
+    async def _ainvoke_once(
+        self,
+        llm: Any,
+        messages: list[Any],
+        min_input_tokens: int,
+        **invoke_kwargs: Any,
+    ) -> Any:
+        """Single guarded ainvoke: truncation, parsing, and input-token checks.
+
+        Extracted from the retry loop so content-quality validation can run
+        against the same result within the retried callable (B11).
+        """
+        result = await llm.ainvoke(messages, **invoke_kwargs)
+        # Detect max_output_tokens truncation before checking parsing errors —
+        # retrying a truncated response is pointless and wastes tokens + time.
+        if isinstance(result, dict):
+            raw_msg = result.get("raw")
+            if raw_msg is not None:
+                meta = getattr(raw_msg, "response_metadata", {}) or {}
+                incomplete = meta.get("incomplete_details") or {}
+                if incomplete.get("reason") == "max_output_tokens":
+                    usage = getattr(raw_msg, "usage_metadata", {}) or {}
+                    out_tok = usage.get("output_tokens", 0)
+                    out_detail = usage.get("output_token_details", {}) or {}
+                    reasoning_tok = out_detail.get(
+                        "flex_reasoning",
+                        out_detail.get("reasoning", 0),
+                    )
+                    discarded = self._extract_total_tokens(result)
+                    if discarded > 0:
+                        self._track_token_usage(discarded, 0, 0)
+                    raise OutputTokensTruncatedError(out_tok, reasoning_tok)
+        # Detect silent parsing failures from
+        # with_structured_output(include_raw=True).
+        if isinstance(result, dict) and result.get("parsing_error") is not None:
+            logger.warning(
+                "Structured output parsing failed silently, re-raising for retry: %s",
+                str(result["parsing_error"])[:200],
+            )
+            discarded_tokens = self._extract_total_tokens(result)
+            if discarded_tokens > 0:
+                self._track_token_usage(discarded_tokens, 0, 0)
+                logger.debug(
+                    "Tracked %d tokens from discarded retry (parsing failure)",
+                    discarded_tokens,
+                )
+            raise result["parsing_error"]
+        # Check for suspiciously low input tokens (image dropped).
+        if min_input_tokens > 0:
+            actual = self._extract_input_tokens(result)
+            if 0 < actual < min_input_tokens:
+                discarded_tokens = self._extract_total_tokens(result)
+                if discarded_tokens > 0:
+                    self._track_token_usage(discarded_tokens, 0, 0)
+                    logger.debug(
+                        "Tracked %d tokens from discarded retry "
+                        "(input below threshold)",
+                        discarded_tokens,
+                    )
+                raise InputTokensBelowThresholdError(actual, min_input_tokens)
+        return result
 
     async def __aenter__(self) -> BaseProvider:
         """Async context manager entry."""

@@ -51,18 +51,46 @@ class _DualModeBase:
         self.image_processing_config = self.config_service.get_image_processing_config()
 
     def _detect_mode(self) -> bool:
-        """Detect execution mode from configuration.
+        """Detect execution mode from CLI flags then configuration.
+
+        ``--non-interactive`` / ``--interactive`` on the command line override
+        the config-file ``interactive_mode`` so an agent can drive the tool
+        without editing gitignored YAML (CLI agent contract).
 
         Returns:
             True if interactive mode, False for CLI mode.
         """
+        argv = sys.argv[1:]
+        if "--non-interactive" in argv:
+            return False
+        if "--interactive" in argv:
+            return True
         return bool(self.paths_config.get("general", {}).get("interactive_mode", True))
 
+    def _guard_interactive_tty(self) -> None:
+        """Exit with code 2 if interactive mode is selected without a TTY.
+
+        Previously an interactive prompt on a non-TTY stdin hit EOF and the tool
+        exited 0 (fake success). An agent invocation must fail loudly instead
+        (CLI agent contract).
+        """
+        try:
+            is_tty = bool(sys.stdin) and sys.stdin.isatty()
+        except (ValueError, AttributeError):
+            is_tty = False
+        if not is_tty:
+            print_error(
+                "Interactive mode requires an interactive terminal (TTY). "
+                "Re-run with --non-interactive (and CLI arguments), or set "
+                "general.interactive_mode: false in paths_config.yaml."
+            )
+            sys.exit(2)
+
     def _handle_interrupt(self) -> None:
-        """Handle keyboard interrupt gracefully."""
+        """Handle keyboard interrupt gracefully (exit code 130)."""
         print_info("\nOperation cancelled by user.")
         self.logger.info(f"{self.script_name} cancelled by user")
-        sys.exit(0)
+        sys.exit(130)
 
     def _handle_error(self, error: Exception) -> None:
         """Handle unexpected errors gracefully.
@@ -137,6 +165,7 @@ class DualModeScript(_DualModeBase, ABC):
             self.is_interactive = self._detect_mode()
 
             if self.is_interactive:
+                self._guard_interactive_tty()
                 self.logger.info(f"Starting {self.script_name} (Interactive Mode)")
                 self.run_interactive()
             else:
@@ -195,6 +224,7 @@ class AsyncDualModeScript(_DualModeBase, ABC):
             self.is_interactive = self._detect_mode()
 
             if self.is_interactive:
+                self._guard_interactive_tty()
                 self.logger.info(f"Starting {self.script_name} (Interactive Mode)")
                 await self.run_interactive()
             else:

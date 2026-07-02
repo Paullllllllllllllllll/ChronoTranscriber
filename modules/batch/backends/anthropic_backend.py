@@ -224,7 +224,12 @@ class AnthropicBatchBackend(BatchBackend):
         if processing_status == "in_progress":
             status = BatchStatus.IN_PROGRESS
         elif processing_status == "ended":
-            if errored == total:
+            # Guard against empty request_counts (total == 0), which would make
+            # every ``x == total`` comparison true and mislabel a finished batch
+            # as FAILED (B20).
+            if total <= 0:
+                status = BatchStatus.COMPLETED
+            elif errored == total:
                 status = BatchStatus.FAILED
             elif canceled == total:
                 status = BatchStatus.CANCELLED

@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.14.0
+# ChronoTranscriber v1.15.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -284,11 +284,38 @@ python main/repair_transcriptions.py \
 --output-format FORMAT     txt | md | json
 --pages RANGE              e.g., '3-7', 'first:5', '1,3,5-8'
 --resume / --force         Skip vs overwrite existing output
+--retry-errors             Re-process pages left as '[transcription error]'
+--sync-fallback            On batch-submit failure, fall back to sync (default off)
 --files FILE ...           Process specific files
 --recursive                Recurse into subdirectories
+--interactive / --non-interactive   Override the config-file mode
+--dry-run                  Report planned actions; no API calls or writes
+--json                     Emit a machine-readable JSON summary line on stdout
 ```
 
 Run `python main/unified_transcriber.py --help` for the full list.
+
+### Exit Codes and Automation
+
+All primary entry points follow a uniform CLI agent contract:
+
+- `0` full success; `1` one or more items failed or partial; `2` usage or
+  configuration error; `130` interrupted by the user.
+- `--json` prints one JSON summary line on stdout (items total / processed /
+  failed) for machine consumption.
+- In interactive mode without a TTY the tool exits `2` with a clear message
+  rather than hanging or reporting a false success; drive it with
+  `--non-interactive` plus CLI arguments instead.
+- `check_batches` exits non-zero when a batch reached a terminal failure;
+  `cancel_batches` exits non-zero when any cancellation failed.
+
+### Batch Submission Splitting
+
+Batch jobs are automatically split into parts under each provider's request-count
+and byte limits, so a large book is never submitted as one oversized batch. Every
+part's id is recorded for retrieval. A failed submission exits non-zero rather
+than silently reprocessing the whole job synchronously at full price; pass
+`--sync-fallback` to opt into the old fall-back behavior.
 
 ## Configuration
 
@@ -510,8 +537,12 @@ python main/postprocess_transcriptions.py \
 ### Daily Token Budget
 
 Enable in `concurrency_config.yaml` to cap daily API usage. Tracks
-total tokens per call, resets at local midnight. Add
-`.chronotranscriber_token_state.json` to `.gitignore`.
+total tokens per call, resets at local midnight. The counter is persisted
+under a user-level state directory (`~/.chronotranscriber/token_state.json`
+by default), so it is shared across runs regardless of the working
+directory. Override the location with `general.state_dir` in
+`paths_config.yaml`; a legacy per-directory
+`.chronotranscriber_token_state.json` is adopted once if present.
 
 ## Architecture
 
@@ -628,6 +659,30 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v1.15.0** (2 July 2026) -- Hardening release closing the silent-page-loss
+    and batch-integrity defects found in a full production audit. OpenAI batch
+    error files are now always parsed and reconciled against the submitted
+    custom_id map, so failed pages surface as explicit `[transcription error]`
+    placeholders instead of vanishing from final outputs; expired and cancelled
+    batches are treated as terminal instead of polling forever; batch repair
+    correlates results by request index rather than position. The Tesseract
+    pipeline gains the absolute-page-order and regenerate-from-JSONL resume
+    semantics the GPT streaming path received in v1.7.0, image folders sort
+    naturally (`page_2` before `page_10`) via one shared key, and temp JSONLs
+    carry a resume-format version that refuses incompatible pre-fix artifacts.
+    Oversized batch submissions are split into provider-limited parts, and the
+    silent full-price synchronous fallback is now opt-in via `--sync-fallback`.
+    Content-quality validators no longer flag the schema's own `![Image: ...]`
+    markers, run inside the retry loop, and default to the conservative example
+    thresholds. All entry points adopt an agent-friendly CLI contract: exit
+    codes 0/1/2/130, a `--json` run summary, `--dry-run`, `--interactive`/
+    `--non-interactive` overrides, a non-TTY guard, and a `--retry-errors`
+    resume mode. Token-budget state moves to a user-level directory
+    (configurable via `general.state_dir`) with one-time legacy adoption; EXIF
+    orientation, palette-PNG transparency, embedded DPI after downscaling, and
+    EPUB spine ordering are fixed; JSON artifacts write `ensure_ascii=False`;
+    the ruff backlog is cleared.
 
 - **v1.14.0** (28 June 2026) -- Ship scrubbed `*.example.yaml` config templates
     with conservative OpenAI defaults and a real->example loader fallback, so a

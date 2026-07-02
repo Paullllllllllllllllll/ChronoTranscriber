@@ -9,6 +9,7 @@ Supports two modes:
 
 from __future__ import annotations
 
+import json
 import sys
 from copy import deepcopy
 from pathlib import Path
@@ -192,7 +193,7 @@ async def process_auto_mode(
     model_config: dict[str, Any],
     concurrency_config: dict[str, Any],
     image_processing_config: dict[str, Any],
-) -> None:
+) -> ProcessingSummary:
     """Process documents in auto mode with per-file method decisions.
 
     Args:
@@ -205,10 +206,11 @@ async def process_auto_mode(
 
     print_info("AUTO MODE", "Processing files with automatic method selection...")
 
+    summary = ProcessingSummary()
     decisions = user_config.auto_decisions or []
     if not decisions:
         print_warning("No auto mode decisions available. Nothing to process.")
-        return
+        return summary
 
     selected = user_config.selected_items or []
     output_dir = selected[0] if selected else Path.cwd()  # Default output directory
@@ -242,6 +244,7 @@ async def process_auto_mode(
             "auto"  # per-item routing in process_selected_items
         )
         temp_config.page_range = user_config.page_range
+        temp_config.retry_errors = user_config.retry_errors
 
         # Create workflow manager
         workflow_manager = WorkflowManager(
@@ -274,11 +277,18 @@ async def process_auto_mode(
                 user_config, model_config
             ) as t:
                 transcriber = t
-                await workflow_manager.process_selected_items(transcriber)
+                group_summary = await workflow_manager.process_selected_items(
+                    transcriber
+                )
         else:
-            await workflow_manager.process_selected_items()
+            group_summary = await workflow_manager.process_selected_items()
+
+        summary.processed += group_summary.processed
+        summary.failed += group_summary.failed
+        summary.total += group_summary.total
 
     print_success("Auto mode processing complete!")
+    return summary
 
 
 async def process_documents(
@@ -380,12 +390,71 @@ async def transcribe_interactive() -> None:
         )
 
 
-async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> None:
+def _emit_json_summary(summary: ProcessingSummary, *, dry_run: bool = False) -> None:
+    """Print a single machine-readable JSON summary line on stdout."""
+    payload = {
+        "tool": "chronotranscriber",
+        "dry_run": dry_run,
+        "items_total": summary.total,
+        "items_processed": summary.processed,
+        "items_failed": summary.failed,
+        "exit_code": 0 if summary.failed == 0 else 1,
+    }
+    print(json.dumps(payload, ensure_ascii=False))
+
+
+def _dry_run_report(
+    user_config: UserConfiguration,
+    paths_config: dict[str, Any],
+) -> ProcessingSummary:
+    """Report discovery + resume classification without any API calls.
+
+    Returns a ProcessingSummary whose ``total`` is the number of items that
+    would be processed after resume filtering.
+    """
+    if user_config.processing_type == "auto":
+        decisions = user_config.auto_decisions or []
+        planned = len(decisions)
+        print_info(f"[DRY RUN] Auto mode: {planned} file(s) would be processed.")
+        return ProcessingSummary(processed=0, failed=0, total=planned)
+
+    from modules.infra.paths import PathConfig
+    from modules.transcribe.resume import ResumeChecker
+
+    pc = PathConfig.from_paths_config(paths_config)
+    checker = ResumeChecker(
+        resume_mode=user_config.resume_mode,
+        paths_config=paths_config,
+        use_input_as_output=pc.use_input_as_output,
+        pdf_output_dir=pc.pdf_output_dir,
+        image_output_dir=pc.image_output_dir,
+        epub_output_dir=pc.epub_output_dir,
+        mobi_output_dir=pc.mobi_output_dir,
+        output_format=user_config.output_format,
+        output_mode=user_config.output_mode,
+        input_root=user_config.input_root,
+        retry_errors=user_config.retry_errors,
+    )
+    items = list(user_config.selected_items or [])
+    to_process, skipped = checker.filter_items(items, user_config.processing_type or "")
+    print_info(
+        f"[DRY RUN] {len(items)} discovered; {len(to_process)} would be processed, "
+        f"{len(skipped)} skipped (already complete)."
+    )
+    for item in to_process:
+        print_info(f"[DRY RUN]   would process: {item.name}")
+    return ProcessingSummary(processed=0, failed=0, total=len(to_process))
+
+
+async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> int:
     """Handle CLI mode transcription workflow.
 
     Args:
         args: Parsed command-line arguments
         paths_config: Paths configuration dictionary
+
+    Returns:
+        Process exit code: 0 = success, 1 = one or more items failed.
     """
     # Load additional configurations
     config_service = get_config_service()
@@ -444,9 +513,18 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> None:
         else:
             print_info("Additional context: None")
 
+    json_summary = bool(getattr(args, "json_summary", False))
+
+    # Dry run: discovery + resume classification only, no API calls / side effects.
+    if getattr(args, "dry_run", False):
+        summary = _dry_run_report(user_config, effective_paths_config)
+        if json_summary:
+            _emit_json_summary(summary, dry_run=True)
+        return 0
+
     # Process documents
     if user_config.processing_type == "auto":
-        await process_auto_mode(
+        summary = await process_auto_mode(
             user_config,
             effective_paths_config,
             effective_model_config,
@@ -454,7 +532,7 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> None:
             config_service.get_image_processing_config(),
         )
     else:
-        await process_documents(
+        summary = await process_documents(
             user_config,
             effective_paths_config,
             effective_model_config,
@@ -462,7 +540,19 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> None:
             config_service.get_image_processing_config(),
         )
 
-    print_success("Processing complete!")
+    if summary.failed:
+        print_warning(
+            f"Processing complete with {summary.failed} failure(s) "
+            f"of {summary.total} item(s)."
+        )
+    else:
+        print_success("Processing complete!")
+
+    if json_summary:
+        _emit_json_summary(summary)
+
+    # Exit code 1 when any item failed/partial (CLI agent contract).
+    return 1 if summary.failed else 0
 
 
 class UnifiedTranscriberScript(AsyncDualModeScript):
@@ -480,12 +570,19 @@ class UnifiedTranscriberScript(AsyncDualModeScript):
         await transcribe_interactive()
 
     async def run_cli(self, args: Any) -> None:
-        """Run transcription in CLI mode."""
+        """Run transcription in CLI mode.
+
+        Exit codes: 0 = success; 1 = one or more items failed/partial;
+        2 = usage/config error (CLI agent contract).
+        """
         try:
-            await transcribe_cli(args, self.paths_config)
+            code = await transcribe_cli(args, self.paths_config)
         except ValueError as e:
+            # Usage / configuration error.
             print_error(f"Invalid arguments: {e}")
-            sys.exit(1)
+            sys.exit(2)
+        if code:
+            sys.exit(code)
 
 
 def main() -> None:

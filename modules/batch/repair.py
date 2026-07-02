@@ -53,6 +53,69 @@ from modules.ui import (
 logger = setup_logger(__name__)
 
 
+def _parse_req_index(custom_id: str) -> int | None:
+    """Parse the 0-based index from a ``req-<n>`` custom_id, or None.
+
+    The batch request builder assigns ``req-<n>`` where ``n`` is the 1-based
+    position in the submitted image list, which equals the position in the
+    repair ``targets`` list. Parsing it lets repair correlate results to
+    targets by identity rather than by fragile positional order (B7).
+    """
+    if custom_id.startswith("req-"):
+        try:
+            idx = int(custom_id.split("-", 1)[1]) - 1
+        except (ValueError, IndexError):
+            return None
+        return idx if idx >= 0 else None
+    return None
+
+
+def _correlate_repair_targets(
+    targets: list[Any],
+    metadata_records: list[dict[str, Any]],
+) -> tuple[dict[str, int], dict[str, int], dict[str, str]]:
+    """Map each submitted custom_id to its target by the custom_id's index.
+
+    Correlation is by the index encoded in ``req-<n>`` (position in the
+    submitted image list == position in ``targets``), NOT by positional zip: a
+    zip shifts every pair after any image whose metadata record was skipped
+    because it failed to encode, patching repaired text onto the wrong page
+    (B7). Returns (order_index, line_index, image_name) maps keyed by custom_id.
+    """
+    order_by_custom: dict[str, int] = {}
+    line_index_by_custom: dict[str, int] = {}
+    image_name_by_custom: dict[str, str] = {}
+
+    if len(metadata_records) != len(targets):
+        # Tripwire: some images did not produce a request (encode failure).
+        logger.warning(
+            "Repair correlation: %d metadata record(s) for %d target(s); "
+            "correlating by custom_id index.",
+            len(metadata_records),
+            len(targets),
+        )
+
+    for rec in metadata_records:
+        br = rec.get("batch_request", {})
+        cid = br.get("custom_id")
+        if not isinstance(cid, str):
+            continue
+        idx = _parse_req_index(cid)
+        if idx is None or not (0 <= idx < len(targets)):
+            logger.warning(
+                "Repair correlation: custom_id %r has no matching target; "
+                "skipping to avoid mis-patching a page.",
+                cid,
+            )
+            continue
+        t = targets[idx]
+        order_by_custom[cid] = t.order_index
+        line_index_by_custom[cid] = t.line_index
+        image_name_by_custom[cid] = t.image_name
+
+    return order_by_custom, line_index_by_custom, image_name_by_custom
+
+
 # ---------------------------------------------------------------------------
 # Utilities (formerly modules/operations/repair/utils.py)
 # ---------------------------------------------------------------------------
@@ -915,19 +978,9 @@ async def _repair_batch_mode(
         if isinstance(custom_id, str) and transcription_text is not None:
             fixed_text_by_custom[custom_id] = transcription_text
 
-    # IMPORTANT: Map custom_id back to the selected target, including
-    # both original order_index and the selected line_index.
-    order_by_custom: dict[str, int] = {}
-    line_index_by_custom: dict[str, int] = {}
-    image_name_by_custom: dict[str, str] = {}
-
-    for t, rec in zip(targets, metadata_records, strict=False):
-        br = rec.get("batch_request", {})
-        cid = br.get("custom_id")
-        if isinstance(cid, str):
-            order_by_custom[cid] = t.order_index
-            line_index_by_custom[cid] = t.line_index
-            image_name_by_custom[cid] = t.image_name
+    order_by_custom, line_index_by_custom, image_name_by_custom = (
+        _correlate_repair_targets(targets, metadata_records)
+    )
 
     # Write parsed repair responses and patch final lines
     for cid, text in fixed_text_by_custom.items():

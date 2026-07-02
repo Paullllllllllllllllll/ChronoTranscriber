@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 import ebooklib
 from ebooklib import epub
@@ -82,7 +83,7 @@ class EPUBProcessor:
             entry[0].strip() for entry in author_entries if entry and entry[0].strip()
         ]
 
-        all_items = list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
+        all_items = self._ordered_documents(book)
 
         # Apply section filter
         if section_indices is not None:
@@ -105,6 +106,38 @@ class EPUBProcessor:
                 )
 
         return EPUBTextExtraction(title=title, authors=authors, sections=sections)
+
+    @staticmethod
+    def _ordered_documents(book: Any) -> list[Any]:
+        """Return content documents in spine (reading) order.
+
+        The manifest order (``get_items_of_type(ITEM_DOCUMENT)``) is not the
+        reading order and includes nav/cover documents; iterate the spine
+        instead and drop navigation/cover/toc items (B17). Falls back to
+        manifest order when the book exposes no usable spine.
+        """
+        spine = getattr(book, "spine", None)
+        get_by_id = getattr(book, "get_item_with_id", None)
+        ordered: list[Any] = []
+        if spine and callable(get_by_id):
+            for entry in spine:
+                idref = entry[0] if isinstance(entry, (tuple, list)) else entry
+                item = get_by_id(idref)
+                if item is None:
+                    continue
+                get_type = getattr(item, "get_type", None)
+                if callable(get_type) and get_type() != ebooklib.ITEM_DOCUMENT:
+                    continue
+                name = ""
+                get_name = getattr(item, "get_name", None)
+                if callable(get_name):
+                    name = (get_name() or "").lower()
+                if any(k in name for k in ("nav", "toc", "cover")):
+                    continue
+                ordered.append(item)
+        if ordered:
+            return ordered
+        return list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
 
     def prepare_output_folder(self, epub_output_dir: Path) -> tuple[Path, Path]:
         """Prepare a deterministic output folder and text file path for this EPUB."""

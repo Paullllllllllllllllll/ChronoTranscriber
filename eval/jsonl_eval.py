@@ -8,11 +8,12 @@ ground truth for CER/WER computation.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 
 @dataclass
@@ -21,10 +22,10 @@ class PageTranscription:
 
     page_index: int
     image_name: str
-    transcription: Optional[str]
+    transcription: str | None
     no_transcribable_text: bool = False
     transcription_not_possible: bool = False
-    custom_id: Optional[str] = None
+    custom_id: str | None = None
 
     def has_text(self) -> bool:
         """Check if page has valid transcription text."""
@@ -40,10 +41,10 @@ class DocumentTranscriptions:
     """Container for all page transcriptions from a document."""
 
     source_name: str
-    pages: List[PageTranscription] = field(default_factory=list)
-    method: Optional[str] = None
+    pages: list[PageTranscription] = field(default_factory=list)
+    method: str | None = None
 
-    def get_page(self, index: int) -> Optional[PageTranscription]:
+    def get_page(self, index: int) -> PageTranscription | None:
         """Get page by index."""
         for page in self.pages:
             if page.page_index == index:
@@ -94,7 +95,7 @@ def parse_transcription_jsonl(jsonl_path: Path) -> DocumentTranscriptions:
                 continue
 
     # Build image metadata index for ordering
-    image_metadata: Dict[str, Dict[str, Any]] = {}
+    image_metadata: dict[str, dict[str, Any]] = {}
     for record in records:
         if "image_metadata" in record:
             meta = record["image_metadata"]
@@ -115,7 +116,11 @@ def parse_transcription_jsonl(jsonl_path: Path) -> DocumentTranscriptions:
         # Skip metadata-only records
         if "batch_session" in record or "batch_tracking" in record:
             continue
-        if "image_metadata" in record and "transcription" not in record and "text_chunk" not in record:
+        if (
+            "image_metadata" in record
+            and "transcription" not in record
+            and "text_chunk" not in record
+        ):
             continue
 
         # Extract transcription text
@@ -129,15 +134,15 @@ def parse_transcription_jsonl(jsonl_path: Path) -> DocumentTranscriptions:
                 if "transcription" in body:
                     transcription = body["transcription"]
 
-        # Skip if no transcription found
+        # Skip content records that carry no transcription and no status flag.
         if (
             transcription is None
             and "no_transcribable_text" not in record
             and "transcription_not_possible" not in record
+            and "file_name" not in record
+            and "pre_processed_image" not in record
         ):
-            # Check if this is a content record without transcription
-            if "file_name" not in record and "pre_processed_image" not in record:
-                continue
+            continue
 
         # Determine page index and image name
         image_name = ""
@@ -152,7 +157,9 @@ def parse_transcription_jsonl(jsonl_path: Path) -> DocumentTranscriptions:
             image_name = record.get("image_name", "")
             if not image_name:
                 image_name = record.get("pre_processed_image", "")
-                if isinstance(image_name, str) and ("/" in image_name or "\\" in image_name):
+                if isinstance(image_name, str) and (
+                    "/" in image_name or "\\" in image_name
+                ):
                     image_name = Path(image_name).name
             if not image_name:
                 image_name = record.get("file_name", "")
@@ -179,7 +186,7 @@ def parse_transcription_jsonl(jsonl_path: Path) -> DocumentTranscriptions:
     return result
 
 
-def find_jsonl_file(base_dir: Path, source_name: str) -> Optional[Path]:
+def find_jsonl_file(base_dir: Path, source_name: str) -> Path | None:
     """
     Find the JSONL file for a given source in a directory.
 
@@ -234,7 +241,7 @@ def load_page_transcriptions(
     category: str,
     model_name: str,
     source_name: str,
-) -> Optional[DocumentTranscriptions]:
+) -> DocumentTranscriptions | None:
     """
     Load page-level transcriptions from model output.
 
@@ -260,7 +267,7 @@ def load_ground_truth_pages(
     ground_truth_dir: Path,
     category: str,
     source_name: str,
-) -> Optional[DocumentTranscriptions]:
+) -> DocumentTranscriptions | None:
     """
     Load page-level ground truth transcriptions.
 
@@ -286,7 +293,7 @@ def load_ground_truth_pages(
 def align_pages(
     hypothesis: DocumentTranscriptions,
     reference: DocumentTranscriptions,
-) -> List[Tuple[Optional[PageTranscription], Optional[PageTranscription]]]:
+) -> list[tuple[PageTranscription | None, PageTranscription | None]]:
     """
     Align hypothesis pages with reference pages by index.
 
@@ -367,7 +374,7 @@ def export_pages_to_editable_txt(
 
 def import_pages_from_editable_txt(
     txt_path: Path,
-    original_doc: Optional[DocumentTranscriptions] = None,
+    original_doc: DocumentTranscriptions | None = None,
 ) -> DocumentTranscriptions:
     """
     Import page transcriptions from an edited text file.
@@ -397,7 +404,7 @@ def import_pages_from_editable_txt(
         result.method = original_doc.method
 
     # Build lookup from image_name to original page
-    image_name_to_page: Dict[str, PageTranscription] = {}
+    image_name_to_page: dict[str, PageTranscription] = {}
     if original_doc:
         for p in original_doc.pages:
             if p.image_name:
@@ -408,19 +415,13 @@ def import_pages_from_editable_txt(
     while i < len(parts):
         marker_text = parts[i].strip()
 
-        if i + 1 < len(parts):
-            text = parts[i + 1].strip()
-        else:
-            text = ""
+        text = parts[i + 1].strip() if i + 1 < len(parts) else ""
 
         # Handle special markers
         no_text = text == "[NO TRANSCRIBABLE TEXT]"
         not_possible = text == "[TRANSCRIPTION NOT POSSIBLE]"
 
-        if no_text or not_possible:
-            transcription = None
-        else:
-            transcription = text if text else None
+        transcription = None if (no_text or not_possible) else (text or None)
 
         # Try to find matching page from original doc by image name
         image_name = marker_text
@@ -434,10 +435,8 @@ def import_pages_from_editable_txt(
         elif original_doc:
             # Legacy format: try parsing as page number
             if marker_text.startswith("page_"):
-                try:
+                with contextlib.suppress(ValueError):
                     page_index = int(marker_text.replace("page_", "")) - 1
-                except ValueError:
-                    pass
             elif marker_text.isdigit():
                 page_index = int(marker_text) - 1
             # Try to get metadata from original by index

@@ -16,6 +16,83 @@ from modules.infra.logger import setup_logger
 logger = setup_logger(__name__)
 
 
+# Resume-artifact format version. Temp JSONLs written by the transcription
+# pipeline carry a marker record so a later resume can refuse artifacts written
+# by an incompatible version instead of silently mis-ordering or dropping pages.
+RESUME_FORMAT_VERSION = 1
+_RESUME_MARKER_KEY = "resume_format"
+
+# Keys that identify non-transcription (metadata/marker) JSONL records.
+METADATA_KEYS = (
+    "batch_session",
+    "image_metadata",
+    "batch_tracking",
+    "file_provenance",
+    _RESUME_MARKER_KEY,
+)
+
+
+class ResumeFormatError(RuntimeError):
+    """Raised when a resume artifact lacks a compatible format-version marker."""
+
+
+def resume_marker_record() -> dict[str, Any]:
+    """Return the resume-format marker record for the current version."""
+    return {_RESUME_MARKER_KEY: {"version": RESUME_FORMAT_VERSION}}
+
+
+def _record_is_transcription(record: dict[str, Any]) -> bool:
+    """True when a JSONL record carries a page transcription (not metadata)."""
+    if any(k in record for k in METADATA_KEYS):
+        return False
+    return bool(record.get("image_name")) and record.get("text_chunk") is not None
+
+
+def read_resume_version(records: list[dict[str, Any]]) -> int | None:
+    """Return the resume-format version marked in *records*, or None."""
+    for record in records:
+        marker = record.get(_RESUME_MARKER_KEY)
+        if isinstance(marker, dict):
+            version = marker.get("version")
+            if isinstance(version, int):
+                return version
+    return None
+
+
+def ensure_resume_marker(jsonl_path: Path) -> None:
+    """Append the current resume-format marker if the file lacks one.
+
+    Written lazily before the first result is streamed so fresh artifacts are
+    always versioned; a no-op when a marker is already present.
+    """
+    records = read_jsonl_records(jsonl_path)
+    if read_resume_version(records) is not None:
+        return
+    write_jsonl_record(jsonl_path, resume_marker_record())
+
+
+def verify_resume_compatible(jsonl_path: Path) -> None:
+    """Refuse to resume an artifact written by an incompatible version.
+
+    Only enforced when the artifact already contains page transcriptions to
+    resume: an unversioned artifact carrying prior results would otherwise be
+    re-ordered/merged under assumptions that no longer hold (see decision 1).
+    Fresh or marker-only files pass through untouched.
+    """
+    records = read_jsonl_records(jsonl_path)
+    if not any(_record_is_transcription(r) for r in records):
+        return
+    version = read_resume_version(records)
+    if version != RESUME_FORMAT_VERSION:
+        found = "none" if version is None else str(version)
+        raise ResumeFormatError(
+            f"Resume artifact {jsonl_path.name} has format version {found}, but "
+            f"this version of ChronoTranscriber writes version "
+            f"{RESUME_FORMAT_VERSION}. Re-run from scratch (use --force/overwrite) "
+            f"or finish the job with the version that created it."
+        )
+
+
 @dataclass
 class ImageMetadata:
     """Metadata for an image in a batch or repair operation."""
@@ -62,7 +139,7 @@ def write_jsonl_record(jsonl_path: Path, record: dict[str, Any]) -> None:
         record: Dictionary to write as JSON line.
     """
     with jsonl_path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record) + "\n")
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def extract_image_metadata(records: list[dict[str, Any]]) -> list[ImageMetadata]:
@@ -125,13 +202,7 @@ def extract_transcription_records(
     Returns:
         List of transcription records with image_name and text_chunk.
     """
-    # Filter out metadata records
-    METADATA_KEYS = (
-        "batch_session",
-        "image_metadata",
-        "batch_tracking",
-        "file_provenance",
-    )
+    # Filter out metadata records (METADATA_KEYS defined at module level).
     transcription_records = []
 
     for record in records:
@@ -152,11 +223,23 @@ def extract_transcription_records(
     return transcription_records
 
 
-def get_processed_image_names(jsonl_path: Path) -> set[str]:
+def _is_error_placeholder(text: Any) -> bool:
+    """True when a transcription text is a ``[transcription error ...]`` marker."""
+    return isinstance(text, str) and text.lstrip().lower().startswith(
+        "[transcription error"
+    )
+
+
+def get_processed_image_names(
+    jsonl_path: Path, *, exclude_errors: bool = False
+) -> set[str]:
     """Get set of image names that have been successfully processed.
 
     Args:
         jsonl_path: Path to JSONL file.
+        exclude_errors: When True, image names whose latest transcription is a
+            ``[transcription error]`` placeholder are omitted, so ``--retry-errors``
+            re-processes them (decision 13).
 
     Returns:
         Set of image names with valid transcriptions.
@@ -165,7 +248,14 @@ def get_processed_image_names(jsonl_path: Path) -> set[str]:
         return set()
 
     records = read_jsonl_records(jsonl_path)
-    transcriptions = extract_transcription_records(records, deduplicate=False)
+    # Deduplicate so the *latest* record per image decides its error status.
+    transcriptions = extract_transcription_records(records, deduplicate=exclude_errors)
+    if exclude_errors:
+        return {
+            r["image_name"]
+            for r in transcriptions
+            if not _is_error_placeholder(r.get("text_chunk"))
+        }
     return {r["image_name"] for r in transcriptions}
 
 

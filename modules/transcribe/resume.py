@@ -73,10 +73,15 @@ class ResumeChecker:
         output_format: str = "txt",
         output_mode: str = "hash",
         input_root: Path | None = None,
+        retry_errors: bool = False,
     ) -> None:
         self.resume_mode = resume_mode
         self.paths_config = paths_config
         self.use_input_as_output = use_input_as_output
+        # When True, an otherwise-complete output that still contains
+        # "[transcription error]" placeholders is reported PARTIAL so the item
+        # is re-entered and its error pages retried (decision 13).
+        self.retry_errors = retry_errors
         self.output_format = output_format
         self._output_ext = f".{output_format}" if output_format != "txt" else ".txt"
         self.output_mode = output_mode
@@ -95,6 +100,27 @@ class ResumeChecker:
         self.mobi_output_dir = mobi_output_dir or Path(
             fp.get("MOBIs", {}).get("output", "mobis_out")
         )
+
+    def _output_complete_state(self, item: Path, output_path: Path) -> ProcessingState:
+        """COMPLETE, unless --retry-errors and the output has error placeholders.
+
+        In that case the item is reported PARTIAL so it is re-entered and the
+        page-level resume (with ``exclude_errors``) retries just the failed
+        pages.
+        """
+        if not self.retry_errors:
+            return ProcessingState.COMPLETE
+        try:
+            text = output_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ProcessingState.COMPLETE
+        if "[transcription error" in text.lower():
+            logger.info(
+                "Retry-errors: %s contains error placeholders; marking PARTIAL.",
+                output_path.name,
+            )
+            return ProcessingState.PARTIAL
+        return ProcessingState.COMPLETE
 
     # ------------------------------------------------------------------
     # Public API
@@ -227,7 +253,7 @@ class ResumeChecker:
             if out_path.exists() and out_path.stat().st_size > 0:
                 return ResumeResult(
                     item=item,
-                    state=ProcessingState.COMPLETE,
+                    state=self._output_complete_state(item, out_path),
                     output_path=out_path,
                     reason=f"output exists: {out_path.name}",
                 )
@@ -261,7 +287,7 @@ class ResumeChecker:
         if txt_path_in_dir.exists() and txt_path_in_dir.stat().st_size > 0:
             return ResumeResult(
                 item=item,
-                state=ProcessingState.COMPLETE,
+                state=self._output_complete_state(item, txt_path_in_dir),
                 output_path=txt_path_in_dir,
                 reason=f"output exists: {txt_path_in_dir.name}",
             )
@@ -339,7 +365,7 @@ class ResumeChecker:
         if txt_path.exists() and txt_path.stat().st_size > 0:
             return ResumeResult(
                 item=item,
-                state=ProcessingState.COMPLETE,
+                state=self._output_complete_state(item, txt_path),
                 output_path=txt_path,
                 reason=f"mirror output exists: {txt_path.name}",
             )

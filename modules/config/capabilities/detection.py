@@ -5,6 +5,8 @@ used throughout the codebase.
 
 from __future__ import annotations
 
+import logging
+
 from modules.config.capabilities.registry import (
     _MODEL_REGISTRY,
     _OPENAI_REASONING_BASE,
@@ -13,6 +15,11 @@ from modules.config.capabilities.registry import (
     ProviderType,
     _build_caps,
 )
+
+# Use the stdlib logger directly: modules.infra.logger imports
+# modules.config.config_loader, which imports this package, so importing the
+# project logger here would create a circular import.
+logger = logging.getLogger(__name__)
 
 
 def _norm(name: str) -> str:
@@ -237,6 +244,16 @@ def detect_capabilities(model_name: str) -> Capabilities:
         return _build_caps(model_name, "openrouter", _OPENROUTER_BASE, {})
 
     # --- Fallback: conservative text-only -----------------------------------
+    # Name the consequence: an unknown model resolves to a text-only profile
+    # (supports_image_input=False), so vision transcription would silently send
+    # no image. Warn so the operator can add the model to the registry (B13).
+    logger.warning(
+        "Model %r is not in the capability registry; falling back to a "
+        "conservative text-only profile (no image input, no image detail). "
+        "Add it to modules/config/capabilities/registry.py if it supports "
+        "vision.",
+        model_name,
+    )
     return Capabilities(
         model=model_name,
         family="unknown",

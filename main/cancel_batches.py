@@ -187,6 +187,8 @@ class CancelBatchesScript(DualModeScript):
         print_success(f"Successfully cancelled: {success_count}")
         if fail_count > 0:
             print_error(f"Failed to cancel: {fail_count}")
+            # CLI agent contract: non-zero exit when any cancellation failed.
+            sys.exit(1)
 
 
 def main() -> None:

@@ -57,10 +57,9 @@ class PDFProcessor:
         """
         try:
             with fitz.open(self.pdf_path) as doc:
-                parts: list[str] = []
-                for page in doc:
-                    parts.append(page.get_text())
-                return bool("".join(parts).strip())
+                # any() short-circuits: one page with text is enough to classify
+                # the PDF as searchable; no need to read every page.
+                return any(page.get_text().strip() for page in doc)
         except Exception as e:
             logger.error(f"Error checking if PDF is native: {self.pdf_path}, {e}")
             return False
@@ -226,7 +225,11 @@ class PDFProcessor:
                 img, tess_cfg
             )
             if embed_dpi:
-                processed_img.save(out_path, dpi=(target_dpi, target_dpi))
+                # Embed the DPI the page was actually rendered at, not the
+                # requested target: a max-pixels downscale lowers the effective
+                # DPI, and tagging the target would misreport it to Tesseract
+                # (B15).
+                processed_img.save(out_path, dpi=(effective_dpi, effective_dpi))
             else:
                 processed_img.save(out_path)
             return True

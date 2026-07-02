@@ -36,6 +36,7 @@ from modules.infra.paths import (
     PathConfig,
     create_safe_filename,
     mirror_output_path,
+    natural_sort_key,
 )
 from modules.infra.token_budget import (
     check_and_wait_for_token_limit,
@@ -219,6 +220,7 @@ class WorkflowManager:
             output_format=self.output_format,
             output_mode=self.output_mode,
             input_root=self.input_root,
+            retry_errors=getattr(user_config, "retry_errors", False),
         )
 
         # When resume mode is active, preserve JSONL files so page-level
@@ -563,16 +565,33 @@ class WorkflowManager:
         file_provenance: dict[str, Any] | None = None,
     ) -> bool:
         """Try to submit a batch job; return True if submitted, False to fall
-        through to synchronous processing."""
+        through to synchronous processing.
+
+        A genuine submission failure raises ``BatchSubmissionError`` unless the
+        user opted into ``--sync-fallback``; propagating it makes the item count
+        as failed (non-zero exit) rather than silently reprocessing the whole
+        book at full synchronous price (decision 5).
+        """
         if not self.user_config.use_batch_processing:
             return False
-        handle = await self._submit_batch_with_backend(
-            payloads,
-            temp_jsonl_path,
-            parent_folder,
-            source_stem,
-            file_provenance=file_provenance,
-        )
+        from modules.batch.submission import BatchSubmissionError
+
+        try:
+            handle = await self._submit_batch_with_backend(
+                payloads,
+                temp_jsonl_path,
+                parent_folder,
+                source_stem,
+                file_provenance=file_provenance,
+            )
+        except BatchSubmissionError:
+            if getattr(self.user_config, "sync_fallback", False):
+                print_warning(
+                    f"Batch submission failed for '{source_stem}'; falling back to "
+                    f"synchronous processing (--sync-fallback enabled)."
+                )
+                return False
+            raise
         if handle is None:
             return False
         self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
@@ -657,10 +676,15 @@ class WorkflowManager:
             the live JSONL to skip what this run has written so far.
             """
             use_skip = (not first_pass) or self.resume_mode != "overwrite"
+            retry_errors = getattr(self.user_config, "retry_errors", False)
             if is_folder:
                 files = list_folder_images(source_path)
                 skip_names = (
-                    compute_folder_skip_names(temp_jsonl_path) if use_skip else set()
+                    compute_folder_skip_names(
+                        temp_jsonl_path, exclude_errors=retry_errors
+                    )
+                    if use_skip
+                    else set()
                 )
                 return [
                     i
@@ -670,7 +694,9 @@ class WorkflowManager:
                     and files[i].name not in skip_names
                 ]
             skip_indices = (
-                compute_pdf_skip_indices(temp_jsonl_path) if use_skip else set()
+                compute_pdf_skip_indices(temp_jsonl_path, exclude_errors=retry_errors)
+                if use_skip
+                else set()
             )
             return [
                 i for i in all_indices if 0 <= i < total_units and i not in skip_indices
@@ -698,6 +724,13 @@ class WorkflowManager:
                 max_pixels=max_pixels,
                 page_indices=indices,
             )
+
+        # Refuse to resume an artifact written by an incompatible resume
+        # format (decision 1); overwrite mode already cleared it above.
+        if self.resume_mode != "overwrite":
+            from modules.batch.jsonl import verify_resume_compatible
+
+            verify_resume_compatible(temp_jsonl_path)
 
         # Page-level resume: subtract already-transcribed pages BEFORE
         # rendering anything.
@@ -1126,8 +1159,8 @@ class WorkflowManager:
                 print_warning(f"No images found or processed in {folder}.")
                 return
 
-            # Deterministic ordering for folders: sort by filename
-            processed_files.sort(key=lambda x: x.name.lower())
+            # Deterministic natural ordering for folders (B5).
+            processed_files.sort(key=lambda x: natural_sort_key(x.name))
 
             print_info(
                 f"Starting {method} transcription for {len(processed_files)} images..."
@@ -1205,4 +1238,5 @@ class WorkflowManager:
             is_folder=is_folder,
             resume_mode=self.resume_mode,
             output_format=output_format,
+            retry_errors=getattr(self.user_config, "retry_errors", False),
         )

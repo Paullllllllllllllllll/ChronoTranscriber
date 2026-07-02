@@ -239,9 +239,17 @@ def _check_openai_batch_status(
 
         if status == "completed":
             completed_count += 1
-        elif status == "failed":
+        elif status in ("failed", "expired", "cancelled", "canceled"):
+            # Terminal non-success states. Previously expired/cancelled fell
+            # into the else branch and were reported as "not yet completed"
+            # forever (B6); they never progress, so classify them as failed.
             failed_count += 1
             all_completed = False
+            logger.warning(
+                "Batch %s reached terminal state '%s'; it will not complete.",
+                batch_id,
+                status,
+            )
         else:
             all_completed = False
             logger.info(f"Batch {batch_id} has status '{status}' - not yet completed.")

@@ -528,7 +528,7 @@ class TestOpenAIProviderContextImage:
         assert len(captured_messages) == 2
         human_msg = captured_messages[1]
         content = human_msg.content
-        # Expect 4 blocks: text "Context image:", ctx image, text instruction, page image
+        # Expect 4 blocks: "Context image:" text, ctx image, instruction, page image
         assert len(content) == 4
         assert content[0]["type"] == "text"
         assert content[0]["text"] == "Context image:"

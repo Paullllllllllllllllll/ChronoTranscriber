@@ -17,9 +17,11 @@ from typing import Any
 import aiofiles
 
 from modules.batch.jsonl import (
+    ensure_resume_marker,
     extract_transcription_records,
     get_processed_image_names,
     read_jsonl_records,
+    verify_resume_compatible,
 )
 from modules.images.page_stream import PagePayload
 from modules.images.tesseract_runtime import perform_ocr
@@ -288,10 +290,13 @@ async def run_streaming_transcription_pipeline(
     concurrency_limit = transcription_conf.get("concurrency_limit", 20)
     delay_between_tasks = transcription_conf.get("delay_between_tasks", 0)
 
+    # Version the resume artifact before any streamed write (decision 1).
+    ensure_resume_marker(temp_jsonl_path)
+
     write_lock = asyncio.Lock()
     async with aiofiles.open(temp_jsonl_path, "a", encoding="utf-8") as jfile:
         if file_provenance is not None:
-            await jfile.write(json.dumps(file_provenance) + "\n")
+            await jfile.write(json.dumps(file_provenance, ensure_ascii=False) + "\n")
             await jfile.flush()
 
         async def handle(payload: PagePayload) -> Any:
@@ -318,7 +323,7 @@ async def run_streaming_transcription_pipeline(
             if record is None:
                 return
             async with write_lock:
-                await jfile.write(json.dumps(record) + "\n")
+                await jfile.write(json.dumps(record, ensure_ascii=False) + "\n")
                 await jfile.flush()
 
         try:
@@ -363,6 +368,7 @@ async def run_transcription_pipeline(
     is_folder: bool = False,
     resume_mode: str = "skip",
     output_format: str = "txt",
+    retry_errors: bool = False,
 ) -> None:
     """Execute the full image transcription pipeline.
 
@@ -383,6 +389,13 @@ async def run_transcription_pipeline(
         resume_mode: ``"skip"`` to reuse cached JSONL results; ``"overwrite"``
             to clear the JSONL and reprocess all images from scratch.
     """
+    # Absolute page ordering: index each image by its position in the FULL
+    # sorted list BEFORE any resume filtering, so a resumed run keeps the same
+    # order_index it would have had on a single pass (see B2). Assigning the
+    # index by position in the *filtered* list collides run-2 indices with
+    # run-1's and scrambles the merged output.
+    absolute_index = {img.name: idx for idx, img in enumerate(image_files)}
+
     if resume_mode == "overwrite":
         # Clear stale JSONL so old results do not mix with the new run.
         if temp_jsonl_path.exists():
@@ -392,8 +405,12 @@ async def run_transcription_pipeline(
         # Page-level resume: skip images already recorded in the JSONL.
         # This is the second layer of resume filtering; the first (item-level)
         # layer in WorkflowManager.process_selected_items() skips items whose
-        # final output file already exists.
-        already_processed = get_processed_image_names(temp_jsonl_path)
+        # final output file already exists. Refuse artifacts written by an
+        # incompatible resume format (decision 1).
+        verify_resume_compatible(temp_jsonl_path)
+        already_processed = get_processed_image_names(
+            temp_jsonl_path, exclude_errors=retry_errors
+        )
         if already_processed:
             original_count = len(image_files)
             image_files = [
@@ -427,14 +444,13 @@ async def run_transcription_pipeline(
         .get("ocr", {})
         .get("tesseract_config", "--oem 3 --psm 6")
     )
-    all_image_names = {img.name: idx for idx, img in enumerate(image_files)}
     args_list = [
         (
             img,
             transcriber if method == "gpt" else None,
             method,
             tesseract_cfg,
-            all_image_names[img.name],
+            absolute_index[img.name],
         )
         for img in image_files
     ]
@@ -444,6 +460,9 @@ async def run_transcription_pipeline(
     )
     concurrency_limit = transcription_conf.get("concurrency_limit", 20)
     delay_between_tasks = transcription_conf.get("delay_between_tasks", 0)
+
+    # Version the resume artifact before the first streamed write (decision 1).
+    ensure_resume_marker(temp_jsonl_path)
 
     # Streaming JSONL writes as results arrive
     write_lock = asyncio.Lock()
@@ -456,12 +475,12 @@ async def run_transcription_pipeline(
             if record is None:
                 return
             async with write_lock:
-                await jfile.write(json.dumps(record) + "\n")
+                await jfile.write(json.dumps(record, ensure_ascii=False) + "\n")
                 await jfile.flush()
 
         try:
             print_info(f"Processing with concurrency limit of {concurrency_limit}...")
-            results = await run_concurrent_transcription_tasks(
+            await run_concurrent_transcription_tasks(
                 transcribe_single_image,
                 args_list,
                 concurrency_limit,
@@ -473,35 +492,21 @@ async def run_transcription_pipeline(
                 f"Error running concurrent transcription tasks for {source_name}: {e}"
             )
             print_error(f"Concurrency error for {source_name}.")
-            return
+            # Propagate so the item is counted as failed rather than silently
+            # succeeding with a partial output (B9). Results already streamed to
+            # the JSONL survive for a later resume.
+            raise
 
-    # Combine transcription text in page order with unified page headers
-    try:
-        ordered = sorted(
-            [r for r in results if r and r[2] is not None], key=lambda r: r[4]
-        )
-        pages: list[dict[str, Any]] = []
-        for _p, image_name, text_chunk, _raw, order_index in ordered:
-            page_number = int(order_index) + 1 if isinstance(order_index, int) else None
-            pages.append(
-                {
-                    "text": text_chunk,
-                    "page_number": page_number,
-                    "image_name": image_name,
-                }
-            )
-        write_transcription_output(
-            pages,
-            output_txt_path,
-            output_format=output_format,
-            postprocess=True,
-            postprocessing_config=postprocessing_config,
-        )
-    except Exception as e:
-        logger.exception(
-            f"Error writing combined transcription output for {source_name}: {e}"
-        )
-        print_error(f"Failed to write combined output for {source_name}.")
+    # Regenerate the combined output from the FULL JSONL (this run's results
+    # plus any completed in earlier resumed runs), ordered by absolute
+    # order_index. Writing only from this run's `results` would drop pages
+    # transcribed on a previous run and scramble page order (B2).
+    write_output_from_jsonl(
+        temp_jsonl_path,
+        output_txt_path,
+        postprocessing_config,
+        output_format=output_format,
+    )
 
 
 def write_output_from_jsonl(

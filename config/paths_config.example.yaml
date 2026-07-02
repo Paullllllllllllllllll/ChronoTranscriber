@@ -42,6 +42,16 @@ general:
   input_paths_is_output_path: false
 
   # -------------------------------------------------------------------------
+  # State Directory
+  # -------------------------------------------------------------------------
+  # Directory for cross-run state such as the daily token-budget counter.
+  # Leave unset to use the user-level default (~/.chronotranscriber/). Set an
+  # explicit path to share or relocate state (e.g. '/srv/chrono/state').
+  # A legacy per-CWD .chronotranscriber_token_state.json is adopted once if
+  # present and the resolved state file does not yet exist.
+  # state_dir: ''
+
+  # -------------------------------------------------------------------------
   # Output Format
   # -------------------------------------------------------------------------
   # Default output file format: 'txt', 'md', or 'json'.

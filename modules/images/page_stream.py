@@ -18,12 +18,13 @@ from pathlib import Path
 from typing import Any
 
 import fitz
-from PIL import Image
+from PIL import Image, ImageOps
 
 from modules.config.constants import SUPPORTED_IMAGE_EXTENSIONS
 from modules.images.encoding import encode_bytes_to_base64
 from modules.images.pipeline import IMAGE_FAILURE_RATE_THRESHOLD, ImageProcessor
 from modules.infra.logger import setup_logger
+from modules.infra.paths import natural_sort_key
 
 logger = setup_logger(__name__)
 
@@ -91,7 +92,7 @@ def list_folder_images(folder: Path) -> list[Path]:
         for p in folder.iterdir()
         if p.is_file() and p.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
     ]
-    files.sort(key=lambda p: p.name.lower())
+    files.sort(key=lambda p: natural_sort_key(p.name))
     return files
 
 
@@ -117,23 +118,27 @@ def resolve_image_settings(
     return img_cfg, model_type, target_dpi, max_pixels
 
 
-def compute_pdf_skip_indices(jsonl_path: Path) -> set[int]:
+def compute_pdf_skip_indices(
+    jsonl_path: Path, *, exclude_errors: bool = False
+) -> set[int]:
     """0-based page indices already transcribed according to the temp JSONL."""
     from modules.batch.jsonl import get_processed_image_names
 
     skip: set[int] = set()
-    for name in get_processed_image_names(jsonl_path):
+    for name in get_processed_image_names(jsonl_path, exclude_errors=exclude_errors):
         m = _PDF_PAGE_NAME_RE.match(name)
         if m:
             skip.add(int(m.group(1)) - 1)
     return skip
 
 
-def compute_folder_skip_names(jsonl_path: Path) -> set[str]:
+def compute_folder_skip_names(
+    jsonl_path: Path, *, exclude_errors: bool = False
+) -> set[str]:
     """Image names already transcribed according to the temp JSONL."""
     from modules.batch.jsonl import get_processed_image_names
 
-    return get_processed_image_names(jsonl_path)
+    return get_processed_image_names(jsonl_path, exclude_errors=exclude_errors)
 
 
 def _payload_from_pil(
@@ -242,8 +247,11 @@ def _load_image_payload(
     try:
         with Image.open(image_path) as img:
             _apply_jpeg_draft(img, img_cfg, model_type)
+            # Honor EXIF orientation so camera JPEGs are not processed sideways
+            # (B14). exif_transpose returns a new upright image (or the original).
+            oriented = ImageOps.exif_transpose(img) or img
             return _payload_from_pil(
-                img,
+                oriented,
                 index=index,
                 image_name=folder_image_name(image_path),
                 img_cfg=img_cfg,
@@ -273,12 +281,30 @@ def _load_image_payload(
 
 
 def _raise_if_failure_rate_excessive(source_name: str, total: int, failed: int) -> None:
-    """Raise when too many pages failed, mirroring the legacy disk pipeline."""
+    """Raise when too many pages failed, mirroring the legacy disk pipeline.
+
+    Below the excessive-failure threshold, failed pages are skipped rather than
+    raised; surface a WARNING so a partial output is never mistaken for a
+    complete one (B8).
+    """
     if total > 1 and failed >= 2 and (failed / total) >= IMAGE_FAILURE_RATE_THRESHOLD:
         raise RuntimeError(
             f"Page preprocessing failed for {failed}/{total} pages in "
             f"'{source_name}'. Check the source for corruption or unsupported "
             f"formats."
+        )
+    if failed > 0:
+        from modules.ui import print_warning
+
+        logger.warning(
+            "Skipped %d of %d page(s) in '%s' that failed to render/preprocess.",
+            failed,
+            total,
+            source_name,
+        )
+        print_warning(
+            f"Skipped {failed} of {total} page(s) in '{source_name}' that failed "
+            f"to render/preprocess; the output will be missing those pages."
         )
 
 

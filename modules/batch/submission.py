@@ -27,6 +27,54 @@ if TYPE_CHECKING:
 
 logger = setup_logger(__name__)
 
+# Per-request byte overhead estimate (prompt, schema, JSON envelope) added to
+# the base64 image size when packing chunks under the provider byte limit.
+_REQUEST_OVERHEAD_BYTES = 8 * 1024
+
+
+class BatchSubmissionError(RuntimeError):
+    """Raised when one or more batch parts could not be submitted.
+
+    Distinguished from an unsupported provider (which returns ``None``) so the
+    workflow can honor the opt-in ``--sync-fallback`` policy: a genuine
+    submission failure must not silently fall back to full-price sync
+    processing (decision 5).
+    """
+
+
+def _estimate_request_bytes(req: BatchRequest) -> int:
+    """Rough serialized size of one batch request for byte-based chunking."""
+    b64 = req.image_base64 or ""
+    return len(b64.encode("utf-8")) + _REQUEST_OVERHEAD_BYTES
+
+
+def _chunk_batch_requests(
+    requests: list[BatchRequest],
+    max_count: int,
+    max_bytes: int,
+) -> list[list[BatchRequest]]:
+    """Split *requests* into parts under the provider count/byte limits.
+
+    A single request larger than *max_bytes* is placed in its own part (it
+    cannot be split further); the backend surfaces any hard rejection.
+    """
+    max_count = max(1, max_count)
+    max_bytes = max(1, max_bytes)
+    chunks: list[list[BatchRequest]] = []
+    current: list[BatchRequest] = []
+    current_bytes = 0
+    for req in requests:
+        est = _estimate_request_bytes(req)
+        if current and (len(current) >= max_count or current_bytes + est > max_bytes):
+            chunks.append(current)
+            current = []
+            current_bytes = 0
+        current.append(req)
+        current_bytes += est
+    if current:
+        chunks.append(current)
+    return chunks
+
 
 async def submit_batch(
     payloads: list[PagePayload],
@@ -142,59 +190,99 @@ async def submit_batch(
     # Resolve context image
     ctx_image_url = _resolve_context_image(user_config, parent_folder)
 
-    # Submit via backend
-    try:
-        backend = get_batch_backend(provider)
-        handle = await asyncio.to_thread(
-            backend.submit_batch,
-            batch_requests,
-            tm,
-            system_prompt=system_prompt,
-            schema_path=user_config.selected_schema_path,
-            additional_context=additional_context,
-            context_image_url=ctx_image_url,
-        )
-    except Exception as e:
-        logger.exception(f"Batch submission failed for {source_name}: {e}")
-        print_error(
-            f"Batch submission failed for {source_name}. "
-            f"Falling back to synchronous processing."
-        )
-        return None
+    # Split into provider-limited parts so a large book is not submitted as one
+    # oversized batch that the backend rejects, silently forcing a full-price
+    # synchronous fallback (B3, decision 5). The downstream reader already
+    # supports multiple batch ids per temp file.
+    backend = get_batch_backend(provider)
+    parts = _chunk_batch_requests(
+        batch_requests, backend.max_batch_size, backend.max_batch_bytes
+    )
+    logger.info(
+        "[Batch] Split %d requests into %d part(s) for %s "
+        "(limits: %d requests / %d bytes)",
+        len(batch_requests),
+        len(parts),
+        source_name,
+        backend.max_batch_size,
+        backend.max_batch_bytes,
+    )
 
-    # Write tracking record with provider info
-    try:
-        async with aiofiles.open(temp_jsonl_path, "a", encoding="utf-8") as f:
-            tracking_record = {
-                "batch_tracking": {
-                    "batch_id": handle.batch_id,
-                    "provider": handle.provider,
-                    "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
-                    "metadata": handle.metadata,
+    handles: list[BatchHandle] = []
+    failures = 0
+    for part_index, part in enumerate(parts, 1):
+        try:
+            handle = await asyncio.to_thread(
+                backend.submit_batch,
+                part,
+                tm,
+                system_prompt=system_prompt,
+                schema_path=user_config.selected_schema_path,
+                additional_context=additional_context,
+                context_image_url=ctx_image_url,
+            )
+        except Exception as e:
+            failures += 1
+            logger.exception(
+                "Batch part %d/%d submission failed for %s: %s",
+                part_index,
+                len(parts),
+                source_name,
+                e,
+            )
+            print_error(
+                f"Batch part {part_index}/{len(parts)} submission failed"
+                f" for {source_name}: {e}"
+            )
+            continue
+
+        handles.append(handle)
+        # Persist each part's id immediately so a crash mid-submission still
+        # leaves a recoverable record.
+        try:
+            async with aiofiles.open(temp_jsonl_path, "a", encoding="utf-8") as f:
+                tracking_record = {
+                    "batch_tracking": {
+                        "batch_id": handle.batch_id,
+                        "provider": handle.provider,
+                        "part": part_index,
+                        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+                        "metadata": handle.metadata,
+                    }
                 }
-            }
-            await f.write(json.dumps(tracking_record) + "\n")
-    except Exception as e:
-        logger.warning(
-            "Post-submission tracking write failed for %s: %s", source_name, e
-        )
+                await f.write(json.dumps(tracking_record, ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.warning(
+                "Post-submission tracking write failed for %s: %s", source_name, e
+            )
 
-    # Write debug artifact
+    # Write debug artifact recording every submitted part id (recovery aid).
     try:
         debug_payload = {
             "source": source_name,
             "provider": provider,
             "submitted_at": datetime.datetime.now(datetime.UTC).isoformat(),
             "expected_batches": int(expected_batches),
-            "batch_ids": [handle.batch_id],
+            "submitted_parts": len(handles),
+            "batch_ids": [h.batch_id for h in handles],
             "total_images": int(total_images),
             "chunk_size": int(chunk_size),
         }
         debug_path = parent_folder / f"{source_name}_batch_submission_debug.json"
-        debug_path.write_text(json.dumps(debug_payload, indent=2), encoding="utf-8")
+        debug_path.write_text(
+            json.dumps(debug_payload, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
     except Exception as e:
         logger.warning(
             "Failed to write batch submission debug artifact for %s: %s", source_name, e
+        )
+
+    if failures or not handles:
+        # A partial/total submission failure must not be papered over with a
+        # silent full-price sync fallback (decision 5); signal the caller.
+        raise BatchSubmissionError(
+            f"{failures} of {len(parts)} batch part(s) failed to submit for "
+            f"{source_name}; {len(handles)} part(s) were submitted."
         )
 
     # Mark submitted
@@ -213,13 +301,13 @@ async def submit_batch(
             e,
         )
 
-    print_success(f"Batch submitted for '{source_name}'.")
+    print_success(f"Batch submitted for '{source_name}' in {len(handles)} part(s).")
     print_info(
         "The batch will be processed asynchronously."
         " Use 'check_batches.py' to monitor status."
     )
 
-    return handle
+    return handles[0]
 
 
 def _load_system_prompt() -> str:

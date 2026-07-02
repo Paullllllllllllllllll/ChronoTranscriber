@@ -444,3 +444,58 @@ class TestBackupFileExtensions:
         backup = backup_file(original)
         assert backup.name.endswith(".md")
         assert ".bak." in backup.name
+
+
+class TestCorrelateRepairTargets:
+    """B7: repair results must correlate to targets by custom_id index,
+    not by fragile positional zip, so a skipped (failed-to-encode) metadata
+    record does not shift repaired text onto the wrong page."""
+
+    @pytest.mark.unit
+    def test_skipped_metadata_record_does_not_shift_pages(self) -> None:
+        from modules.batch.repair import RepairTarget, _correlate_repair_targets
+
+        # Three targets on distinct output lines / pages.
+        targets = [
+            RepairTarget(
+                order_index=10,
+                image_name="p10.jpg",
+                image_path=None,
+                custom_id="req-1",
+                line_index=100,
+            ),
+            RepairTarget(
+                order_index=20,
+                image_name="p20.jpg",
+                image_path=None,
+                custom_id="req-2",
+                line_index=200,
+            ),
+            RepairTarget(
+                order_index=30,
+                image_name="p30.jpg",
+                image_path=None,
+                custom_id="req-3",
+                line_index=300,
+            ),
+        ]
+        # The middle image (req-2) failed to encode, so its metadata record is
+        # absent. A positional zip would pair req-3 with targets[1] (page 20).
+        metadata_records = [
+            {"batch_request": {"custom_id": "req-1", "image_info": {}}},
+            {"batch_request": {"custom_id": "req-3", "image_info": {}}},
+        ]
+
+        order_map, line_map, name_map = _correlate_repair_targets(
+            targets, metadata_records
+        )
+
+        # req-3 must resolve to the THIRD target (page 30, line 300), not the
+        # second.
+        assert order_map["req-3"] == 30
+        assert line_map["req-3"] == 300
+        assert name_map["req-3"] == "p30.jpg"
+        # req-1 unchanged.
+        assert line_map["req-1"] == 100
+        # req-2 was never submitted, so it has no mapping.
+        assert "req-2" not in line_map

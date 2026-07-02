@@ -68,20 +68,25 @@ def process_all_batches(
     client: OpenAI,
     postprocessing_config: dict[str, Any] | None = None,
     output_format: str = "txt",
-) -> None:
+) -> bool:
     """Finalize all completed batch jobs for a given root folder.
 
     Scans for ``.jsonl`` files (both legacy ``*_transcription.jsonl`` and new format),
     retrieves batch summaries, safeguards ordering using custom_id metadata, and writes
     a final ``.txt`` output when all parts are available.
+
+    Returns:
+        True if any batch reached a terminal failure (failed/expired/cancelled),
+        so callers can surface a non-zero exit code (CLI agent contract).
     """
+    had_failure = False
     print_info(f"Scanning directory '{root_folder}' for temporary batch files...")
     # Search for both new format (*.jsonl) and legacy format (*_transcription.jsonl)
     temp_files = list(root_folder.rglob("*.jsonl"))
     if not temp_files:
         print_info(f"No temporary batch files found in {root_folder}.")
         logger.info(f"No temporary batch files found in {root_folder}.")
-        return
+        return had_failure
 
     # Retrieve all batches from OpenAI
     print_info("Retrieving list of submitted batches from OpenAI...")
@@ -93,7 +98,7 @@ def process_all_batches(
     except (OpenAIError, OSError, ValueError, TypeError) as e:
         print_error(f"Failed to retrieve batches from OpenAI: {e}")
         logger.exception(f"Error retrieving batches: {e}")
-        return
+        return True
 
     # Display batch summary (handles dicts or SDK objects)
     display_batch_summary(batches)
@@ -181,6 +186,7 @@ def process_all_batches(
 
         if not all_completed:
             if failed_count > 0:
+                had_failure = True
                 print_warning(
                     f"{failed_count} batches have failed."
                     f" Check the OpenAI dashboard for details."
@@ -234,19 +240,23 @@ def process_all_batches(
 
     print_info(f"Completed processing batches in directory: {root_folder}")
     logger.info(f"Batch results processing complete for directory: {root_folder}")
+    return had_failure
 
 
 def run_batch_finalization(
     run_diagnostics: bool = True,
     custom_directory: Path | None = None,
     output_format: str = "txt",
-) -> None:
+) -> bool:
     """High-level entrypoint used by the CLI to finalize batch results.
 
     Args:
         run_diagnostics: Whether to run API diagnostics before processing
         custom_directory: Optional custom directory to scan instead of config defaults
         output_format: Output file format (``"txt"``, ``"md"``, or ``"json"``)
+
+    Returns:
+        True if any scanned directory reported a terminal batch failure.
     """
     if custom_directory:
         # Use the specified directory instead of loading from config
@@ -266,13 +276,16 @@ def run_batch_finalization(
     if run_diagnostics:
         diagnose_api_issues()
 
+    had_failure = False
     for directory in scan_dirs:
-        process_all_batches(
+        if process_all_batches(
             directory,
             processing_settings,
             client,
             postprocessing_config,
             output_format=output_format,
-        )
+        ):
+            had_failure = True
     print_info("Batch results processing complete across all directories.")
     logger.info("Batch results processing complete across all directories.")
+    return had_failure

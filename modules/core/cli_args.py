@@ -10,6 +10,38 @@ import argparse
 from pathlib import Path
 
 
+def add_agent_contract_args(
+    parser: argparse.ArgumentParser, *, json_summary: bool = True
+) -> None:
+    """Add the shared CLI agent-contract flags to *parser*.
+
+    ``--interactive`` / ``--non-interactive`` override the config-file mode so
+    an agent never has to edit gitignored YAML to drive the tool; ``--json``
+    requests a final machine-readable summary line on stdout.
+    """
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--interactive",
+        action="store_true",
+        default=None,
+        help="Force the interactive wizard, overriding interactive_mode in config.",
+    )
+    mode_group.add_argument(
+        "--non-interactive",
+        dest="non_interactive",
+        action="store_true",
+        default=None,
+        help="Force non-interactive CLI mode, overriding interactive_mode in config.",
+    )
+    if json_summary:
+        parser.add_argument(
+            "--json",
+            dest="json_summary",
+            action="store_true",
+            help="Emit a machine-readable JSON summary line on stdout at the end.",
+        )
+
+
 def create_transcriber_parser() -> argparse.ArgumentParser:
     """Create argument parser for unified_transcriber.py in CLI mode.
 
@@ -90,6 +122,15 @@ Examples:
         help=(
             "Use batch processing (only for GPT method)."
             " More cost-effective for large jobs."
+        ),
+    )
+
+    parser.add_argument(
+        "--sync-fallback",
+        action="store_true",
+        help=(
+            "If a batch submission fails, fall back to synchronous (full-price)"
+            " processing instead of exiting with an error. Default: off."
         ),
     )
 
@@ -232,6 +273,26 @@ Examples:
         ),
     )
 
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Discover items and report the planned actions (resume/skip counts)"
+            " without making any API calls or writing output."
+        ),
+    )
+
+    parser.add_argument(
+        "--retry-errors",
+        action="store_true",
+        help=(
+            "On resume, re-process pages whose previous output is a"
+            " '[transcription error]' placeholder. Default: errors count as done."
+        ),
+    )
+
+    add_agent_contract_args(parser)
+
     return parser
 
 
@@ -316,6 +377,8 @@ Examples:
         ),
     )
 
+    add_agent_contract_args(parser)
+
     return parser
 
 
@@ -364,6 +427,8 @@ Examples:
         ),
     )
 
+    add_agent_contract_args(parser)
+
     return parser
 
 
@@ -403,6 +468,8 @@ Examples:
         action="store_true",
         help="Skip confirmation prompt (use with caution).",
     )
+
+    add_agent_contract_args(parser)
 
     return parser
 
@@ -533,6 +600,8 @@ Examples:
         action="store_true",
         help="Use settings from paths_config.yaml postprocessing section as base.",
     )
+
+    add_agent_contract_args(parser)
 
     return parser
 

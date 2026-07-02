@@ -193,6 +193,9 @@ def create_config_from_cli_args(
     else:
         config.resume_mode = config_resume_default
 
+    # Retry error placeholders on resume (default off; decision 13)
+    config.retry_errors = bool(getattr(args, "retry_errors", False))
+
     # Output format: CLI flag takes precedence; fall back to paths_config
     config_default = paths_config.get("general", {}).get("output_format", "txt")
     config.output_format = getattr(args, "output_format", None) or config_default
@@ -253,6 +256,7 @@ def create_config_from_cli_args(
                 output_format=config.output_format,
                 output_mode=config.output_mode,
                 input_root=config.input_root,
+                retry_errors=config.retry_errors,
             )
             total_before = len(decisions)
             decisions = [
@@ -296,6 +300,7 @@ def create_config_from_cli_args(
 
     if args.method == "gpt":
         config.use_batch_processing = args.batch
+        config.sync_fallback = bool(getattr(args, "sync_fallback", False))
 
         _resolve_schema(args.schema, config)
         _resolve_context(args.context, config)

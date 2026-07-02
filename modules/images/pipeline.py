@@ -18,7 +18,11 @@ from modules.config.constants import SUPPORTED_IMAGE_EXTENSIONS
 from modules.config.service import get_config_service
 from modules.infra.logger import setup_logger
 from modules.infra.multiprocessing_utils import run_multiprocessing_tasks
-from modules.infra.paths import create_safe_directory_name, create_safe_filename
+from modules.infra.paths import (
+    create_safe_directory_name,
+    create_safe_filename,
+    natural_sort_key,
+)
 
 logger = setup_logger(__name__)
 
@@ -184,8 +188,12 @@ class ImageProcessor:
             img.mode in ("RGBA", "LA")
             or (img.mode == "P" and "transparency" in img.info)
         ):
-            background = Image.new("RGB", img.size, (255, 255, 255))
-            background.paste(img, mask=img.split()[-1])
+            # Convert to RGBA first so the mask is the real alpha channel. For
+            # mode "P", img.split()[-1] is the palette-index channel, not alpha,
+            # which would flatten with the wrong mask (B16).
+            rgba = img.convert("RGBA")
+            background = Image.new("RGB", rgba.size, (255, 255, 255))
+            background.paste(rgba, mask=rgba.split()[-1])
             img = background
 
         if img_cfg.get("grayscale_conversion", True) and img.mode != "L":
@@ -296,14 +304,14 @@ class ImageProcessor:
 
     @staticmethod
     def _pil_to_np(image: Image.Image) -> np.ndarray:
-        if image.mode == "RGBA":
-            # Flatten alpha onto white
-            background = Image.new("RGB", image.size, (255, 255, 255))
-            background.paste(image, mask=image.split()[-1])
-            image = background
-        elif image.mode == "P" and "transparency" in image.info:
-            background = Image.new("RGB", image.size, (255, 255, 255))
-            background.paste(image, mask=image.split()[-1])
+        if image.mode in ("RGBA", "LA") or (
+            image.mode == "P" and "transparency" in image.info
+        ):
+            # Convert to RGBA first so the flatten mask is the true alpha channel
+            # (for mode "P", split()[-1] would be the palette index, not alpha) (B16).
+            rgba = image.convert("RGBA")
+            background = Image.new("RGB", rgba.size, (255, 255, 255))
+            background.paste(rgba, mask=rgba.split()[-1])
             image = background
         if image.mode == "RGB":
             arr = np.array(image)
@@ -507,8 +515,8 @@ class ImageProcessor:
         if not image_files:
             return []
 
-        # Deterministic ordering by filename
-        image_files.sort(key=lambda p: p.name)
+        # Deterministic natural ordering by filename (B5): page_2 before page_10.
+        image_files.sort(key=lambda p: natural_sort_key(p.name))
 
         # Apply page-range filter
         if page_indices is not None:
@@ -551,7 +559,11 @@ class ImageProcessor:
         """Worker: open, preprocess with Tesseract pipeline, and save losslessly."""
         try:
             with Image.open(img_path) as im:
-                processed_img, diag = ImageProcessor.preprocess_for_tesseract(im, cfg)
+                # Honor EXIF orientation before preprocessing (B14).
+                oriented = ImageOps.exif_transpose(im) or im
+                processed_img, diag = ImageProcessor.preprocess_for_tesseract(
+                    oriented, cfg
+                )
                 if embed_dpi:
                     processed_img.save(out_path, dpi=(target_dpi, target_dpi))
                 else:

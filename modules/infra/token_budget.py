@@ -30,10 +30,56 @@ from modules.ui import print_info, print_success, print_warning
 
 logger = setup_logger(__name__)
 
-_TOKEN_TRACKER_FILE = Path.cwd() / ".chronotranscriber_token_state.json"
+# Legacy location (pre-v1.15): a per-CWD dotfile. Kept only for one-time
+# adoption so a run started from the old directory does not lose today's count.
+_LEGACY_TOKEN_TRACKER_FILE = Path.cwd() / ".chronotranscriber_token_state.json"
+_TOKEN_STATE_FILENAME = "token_state.json"
 
 _tracker_instance: DailyTokenTracker | None = None
 _tracker_lock = threading.Lock()
+
+
+def _default_state_dir() -> Path:
+    """User-level state directory: ``~/.chronotranscriber`` (decision 4)."""
+    return Path.home() / ".chronotranscriber"
+
+
+def resolve_token_state_file() -> Path:
+    """Resolve the token-state file path.
+
+    Order (decision 4): ``paths_config.general.state_dir`` override, else the
+    user-level ``~/.chronotranscriber/`` directory. The previous per-CWD dotfile
+    is adopted once when the resolved file does not yet exist, so today's running
+    total survives the move.
+    """
+    state_dir: Path | None = None
+    try:
+        general = get_config_service().get_paths_config().get("general", {})
+        override = general.get("state_dir")
+        # Only honor a real string path; a mocked config (tests) can yield a
+        # truthy non-string that would create a junk directory.
+        if isinstance(override, str) and override.strip():
+            state_dir = Path(override).expanduser()
+    except (KeyError, AttributeError, TypeError, OSError):
+        state_dir = None
+    if state_dir is None:
+        state_dir = _default_state_dir()
+
+    state_file = state_dir / _TOKEN_STATE_FILENAME
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        if not state_file.exists() and _LEGACY_TOKEN_TRACKER_FILE.exists():
+            import shutil
+
+            shutil.copy2(_LEGACY_TOKEN_TRACKER_FILE, state_file)
+            logger.info(
+                "Adopted legacy token-state file %s -> %s",
+                _LEGACY_TOKEN_TRACKER_FILE,
+                state_file,
+            )
+    except OSError as e:
+        logger.warning("Could not prepare token-state dir %s: %s", state_dir, e)
+    return state_file
 
 
 def _blocking_retry_sleep(seconds: float) -> None:
@@ -66,7 +112,7 @@ class DailyTokenTracker:
     ) -> None:
         self.daily_limit = daily_limit
         self.enabled = enabled
-        self.state_file = state_file or _TOKEN_TRACKER_FILE
+        self.state_file = state_file or resolve_token_state_file()
 
         self._lock = threading.Lock()
         self._current_date: str = ""  # Format: YYYY-MM-DD
@@ -337,6 +383,7 @@ def get_token_tracker() -> DailyTokenTracker:
                 _tracker_instance = DailyTokenTracker(
                     daily_limit=daily_limit,
                     enabled=enabled,
+                    state_file=resolve_token_state_file(),
                     chunk_estimate_seed=seed,
                     estimate_smoothing=smoothing,
                 )

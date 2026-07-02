@@ -1113,12 +1113,18 @@ class TestInteractiveMode:
         original_ui_input = prompts_mod.ui_input
         prompts_mod.ui_input = _InputFeeder(responses)
         try:
+            from unittest.mock import patch as _patch
+
             from main.unified_transcriber import (
                 UnifiedTranscriberScript,
             )
 
             script = UnifiedTranscriberScript()
-            script.execute()
+            # Interactive input is simulated via _InputFeeder, so satisfy the
+            # non-TTY guard (which otherwise exits 2 outside a real terminal).
+            with _patch("modules.transcribe.dual_mode.sys.stdin") as _m_stdin:
+                _m_stdin.isatty.return_value = True
+                script.execute()
         except SystemExit as exc:
             if exc.code not in (None, 0):
                 raise

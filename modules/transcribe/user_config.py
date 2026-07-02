@@ -45,6 +45,9 @@ class UserConfiguration:
     processing_type: str | None = None
     transcription_method: str | None = None
     use_batch_processing: bool = False
+    # When a batch submission fails, fall back to (full-price) synchronous
+    # processing only if the user opted in; default off (decision 5).
+    sync_fallback: bool = False
     selected_items: list[Path] | None = None
     process_all: bool = False
     selected_schema_name: str | None = None
@@ -57,6 +60,9 @@ class UserConfiguration:
     auto_decisions: list[Any] | None = None
     auto_selector: AutoSelector | None = None
     resume_mode: str = "skip"
+    # When True, pages whose prior output is a "[transcription error]"
+    # placeholder are re-processed on resume (decision 13). Default: off.
+    retry_errors: bool = False
     page_range: PageRange | None = None
     output_format: str = "txt"
     output_mode: str = "hash"

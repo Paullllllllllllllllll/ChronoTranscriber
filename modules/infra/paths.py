@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import platform
+import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -26,6 +27,21 @@ from modules.config.constants import DOCUMENT_CATEGORIES
 from modules.infra.logger import setup_logger
 
 logger = setup_logger(__name__)
+
+_NATURAL_SORT_RE = re.compile(r"(\d+)")
+
+
+def natural_sort_key(name: str) -> list[object]:
+    """Return a case-insensitive natural-sort key for a file name.
+
+    Splits digit runs so that ``page_2`` sorts before ``page_10`` (lexicographic
+    sorting would place ``page_10`` before ``page_2``). Shared by both the GPT
+    folder producer and the Tesseract preprocessing step so page indices refer
+    to the same file under either method, even for unpadded, mixed-case folders
+    (B5).
+    """
+    parts = _NATURAL_SORT_RE.split(name.lower())
+    return [int(p) if p.isdigit() else p for p in parts]
 
 
 # ---------------------------------------------------------------------------

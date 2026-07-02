@@ -14,6 +14,7 @@ the temp JSONL file.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -281,3 +282,109 @@ class TestFinalizeBatchOutput:
         assert kwargs["output_format"] == "md"
         assert kwargs["postprocess"] is True
         assert kwargs["postprocessing_config"] == pp_cfg
+
+
+# ---------------------------------------------------------------------------
+# _download_and_parse_openai_results — error-file + reconciliation (B1)
+# ---------------------------------------------------------------------------
+
+
+class _FakeContent:
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def read(self) -> bytes:
+        return self._data
+
+
+class _FakeFiles:
+    def __init__(self, mapping: dict[str, bytes]) -> None:
+        self._mapping = mapping
+
+    def content(self, file_id: str) -> _FakeContent:
+        return _FakeContent(self._mapping[file_id])
+
+
+class _FakeBatches:
+    def retrieve(self, batch_id: str) -> object:  # pragma: no cover - not used
+        raise AssertionError("retrieve should not be called when output present")
+
+
+class _FakeClient:
+    def __init__(self, mapping: dict[str, bytes]) -> None:
+        self.files = _FakeFiles(mapping)
+        self.batches = _FakeBatches()
+
+
+class TestOpenAIErrorFileReconciliation:
+    @pytest.mark.unit
+    def test_error_file_and_missing_pages_yield_placeholders(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for name in ("print_info", "print_warning", "print_error", "print_success"):
+            monkeypatch.setattr(batch_results, name, MagicMock())
+        monkeypatch.setattr(
+            batch_results, "print_transcription_item_error", MagicMock()
+        )
+
+        out_content = (
+            json.dumps(
+                {
+                    "custom_id": "req-1",
+                    "response": {
+                        "status_code": 200,
+                        "body": {"transcription": "Page one"},
+                    },
+                }
+            )
+            + "\n"
+        ).encode("utf-8")
+        err_content = (
+            json.dumps(
+                {
+                    "custom_id": "req-2",
+                    "response": {
+                        "status_code": 400,
+                        "body": {
+                            "error": {"message": "bad image", "code": "invalid_request"}
+                        },
+                    },
+                }
+            )
+            + "\n"
+        ).encode("utf-8")
+
+        client = _FakeClient({"out1": out_content, "err1": err_content})
+        batch_dict = {
+            "batch_x": {
+                "id": "batch_x",
+                "output_file_id": "out1",
+                "error_file_id": "err1",
+            }
+        }
+        custom_id_map = {
+            "req-1": {"image_name": "p1.jpg", "page_number": 1, "order_index": 0},
+            "req-2": {"image_name": "p2.jpg", "page_number": 2, "order_index": 1},
+            "req-3": {"image_name": "p3.jpg", "page_number": 3, "order_index": 2},
+        }
+        batch_order = {"req-1": 0, "req-2": 1, "req-3": 2}
+
+        entries, all_completed = batch_results._download_and_parse_openai_results(
+            {"batch_x"},
+            batch_dict,
+            client,  # type: ignore[arg-type]
+            custom_id_map,
+            batch_order,
+            tmp_path / "job.jsonl",
+        )
+
+        assert all_completed is True
+        by_id = {e.get("custom_id"): e for e in entries}
+        # Successful page survives.
+        assert by_id["req-1"]["transcription"] == "Page one"
+        # Error-file page emits a placeholder instead of vanishing.
+        assert by_id["req-2"].get("error") is True
+        assert "[transcription error" in by_id["req-2"]["transcription"]
+        # Page missing from BOTH output and error files is reconciled.
+        assert by_id["req-3"].get("error") is True
+        assert "[transcription error" in by_id["req-3"]["transcription"]

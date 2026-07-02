@@ -284,6 +284,159 @@ def _process_non_openai_batch(
             logger.warning(f"Could not delete temp file {temp_file.name}: {e}")
 
 
+def _resolve_error_file_id(batch: dict[str, Any]) -> str | None:
+    """Resolve an OpenAI batch's error file id across known field shapes."""
+    for key in (
+        "error_file_id",
+        "error_file",
+        "errors_file_id",
+        "error_file_ids",
+    ):
+        error_file_id = coerce_file_id(batch.get(key))
+        if error_file_id:
+            return error_file_id
+    return None
+
+
+def _save_error_file(
+    client: OpenAI,
+    error_file_id: str,
+    batch_id: str,
+    temp_file: Path,
+) -> str | None:
+    """Download an OpenAI batch error file to disk; return its text or None."""
+    try:
+        resp = client.files.content(error_file_id)
+        err_bytes = resp.read()
+    except (OpenAIError, OSError, ValueError, TypeError) as e:
+        logger.warning("Could not download error_file_id for %s: %s", batch_id, e)
+        return None
+
+    try:
+        err_text = (
+            err_bytes.decode("utf-8")
+            if isinstance(err_bytes, (bytes, bytearray))
+            else str(err_bytes)
+        )
+    except (UnicodeDecodeError, ValueError):
+        logger.debug("Could not decode error bytes as UTF-8, falling back to str()")
+        err_text = str(err_bytes)
+
+    # Short, path-safe filename to avoid MAX_PATH issues on Windows
+    short_batch_id = batch_id.replace("batch_", "")[:16]
+    errors_path = temp_file.parent / f"errors_{short_batch_id}.jsonl"
+    try:
+        errors_path.parent.mkdir(parents=True, exist_ok=True)
+        with errors_path.open("w", encoding="utf-8") as ef:
+            ef.write(err_text)
+        print_info(f"Saved error details for batch {batch_id} to {errors_path.name}")
+        logger.info("Saved error file for %s -> %s", batch_id, errors_path)
+    except OSError as e:
+        logger.warning("Could not persist error file for %s: %s", batch_id, e)
+    return err_text
+
+
+def _parse_error_file_entries(
+    err_text: str,
+    custom_id_map: dict[str, Any],
+    batch_order: dict[str, Any],
+    seen: set[str],
+) -> list[dict[str, Any]]:
+    """Build placeholder transcription entries from an OpenAI error-file body.
+
+    Each error line names a ``custom_id`` whose page produced no output; we emit
+    a ``[transcription error]`` placeholder so the page survives into the final
+    output (and can be located by ``repair --errors-only``) instead of silently
+    vanishing (B1). Custom ids already present in *seen* are skipped.
+    """
+    entries: list[dict[str, Any]] = []
+    for line in err_text.strip().split("\n"):
+        if not line.strip():
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        custom_id = obj.get("custom_id")
+        if not custom_id or custom_id in seen:
+            continue
+        image_info = custom_id_map.get(custom_id, {})
+        image_name = image_info.get("image_name") or custom_id or "[unknown image]"
+        page_number = image_info.get("page_number")
+        err_obj = obj.get("error") or {}
+        resp_obj = obj.get("response")
+        if not err_obj and isinstance(resp_obj, dict):
+            body = resp_obj.get("body")
+            if isinstance(body, dict):
+                err_obj = body.get("error") or {}
+        err_code = None
+        err_message = None
+        if isinstance(err_obj, dict):
+            err_code = err_obj.get("code") or err_obj.get("type")
+            err_message = err_obj.get("message") or err_obj.get("error")
+        diag_text = "[transcription error"
+        if err_code:
+            diag_text += f"; code {err_code}"
+        if err_message:
+            diag_text += f"; {err_message}"
+        diag_text += "]"
+        print_transcription_item_error(
+            image_name=image_name,
+            page_number=page_number,
+            err_code=err_code,
+            err_message=err_message,
+        )
+        seen.add(custom_id)
+        entries.append(
+            {
+                "custom_id": custom_id,
+                "transcription": diag_text,
+                "order_info": batch_order.get(custom_id),
+                "image_info": image_info,
+                "error": True,
+                "error_details": {"code": err_code, "message": err_message},
+            }
+        )
+    return entries
+
+
+def _reconcile_missing_custom_ids(
+    custom_id_map: dict[str, Any],
+    batch_order: dict[str, Any],
+    seen: set[str],
+) -> list[dict[str, Any]]:
+    """Emit placeholders for expected custom_ids that produced no result at all.
+
+    Reconciles the delivered results against the ``image_metadata`` custom_id
+    map so a page dropped from both the output and error files still appears as
+    a ``[transcription error]`` placeholder in the final output (completeness
+    contract, decision 2).
+    """
+    entries: list[dict[str, Any]] = []
+    for custom_id, image_info in custom_id_map.items():
+        if custom_id in seen:
+            continue
+        image_name = (image_info or {}).get("image_name") or custom_id
+        page_number = (image_info or {}).get("page_number")
+        print_transcription_item_error(
+            image_name=image_name,
+            page_number=page_number,
+            err_message="no result returned by provider",
+        )
+        seen.add(custom_id)
+        entries.append(
+            {
+                "custom_id": custom_id,
+                "transcription": "[transcription error: no result returned]",
+                "order_info": batch_order.get(custom_id),
+                "image_info": image_info or {},
+                "error": True,
+                "error_details": {"code": "missing", "message": "no result returned"},
+            }
+        )
+    return entries
+
+
 def _download_and_parse_openai_results(
     batch_ids: set[str],
     batch_dict: dict[str, dict[str, Any]],
@@ -339,57 +492,30 @@ def _download_and_parse_openai_results(
                     break
 
         if not output_file_id:
-            # Try alternate diagnostics: error_file_id may contain per-request errors
-            error_file_id = None
-
-            for key in (
-                "error_file_id",
-                "error_file",
-                "errors_file_id",
-                "error_file_ids",
-            ):
-                error_file_id = coerce_file_id(batch.get(key))
-                if error_file_id:
-                    break
+            # No output at all: the whole batch's pages are error/missing.
+            # Parse the error file (if any) into placeholders so those pages
+            # are not silently dropped (B1); reconciliation below covers the
+            # rest.
+            error_file_id = _resolve_error_file_id(batch)
 
             print_error(
                 f"Batch {batch_id} is marked completed but no output_file_id"
-                f" was found. Skipping this batch."
+                f" was found. Emitting placeholders for its pages."
             )
             logger.warning("Batch %s completed without output_file_id.", batch_id)
 
             if error_file_id:
-                try:
-                    # Download error file from OpenAI
-                    resp = client.files.content(error_file_id)
-                    err_bytes = resp.read()
-                    # Short, path-safe filename to avoid MAX_PATH issues on Windows
-                    short_batch_id = batch_id.replace("batch_", "")[:16]
-                    errors_filename = f"errors_{short_batch_id}.jsonl"
-                    errors_path = temp_file.parent / errors_filename
-                    errors_path.parent.mkdir(parents=True, exist_ok=True)
-                    try:
-                        err_text = (
-                            err_bytes.decode("utf-8")
-                            if isinstance(err_bytes, (bytes, bytearray))
-                            else str(err_bytes)
+                err_text = _save_error_file(client, error_file_id, batch_id, temp_file)
+                if err_text:
+                    seen = {
+                        cid
+                        for cid in (e.get("custom_id") for e in all_transcriptions)
+                        if cid
+                    }
+                    all_transcriptions.extend(
+                        _parse_error_file_entries(
+                            err_text, custom_id_map, batch_order, seen
                         )
-                    except (UnicodeDecodeError, ValueError):
-                        logger.debug(
-                            "Could not decode error bytes as UTF-8,"
-                            " falling back to str()"
-                        )
-                        err_text = str(err_bytes)
-                    with errors_path.open("w", encoding="utf-8") as ef:
-                        ef.write(err_text)
-                    print_info(
-                        f"Saved error details for batch {batch_id}"
-                        f" to {errors_path.name}"
-                    )
-                    logger.info("Saved error file for %s -> %s", batch_id, errors_path)
-                except (OpenAIError, OSError, ValueError, TypeError) as e:
-                    logger.warning(
-                        "Could not download error_file_id for %s: %s", batch_id, e
                     )
 
             all_completed = False
@@ -579,6 +705,34 @@ def _download_and_parse_openai_results(
                 all_transcriptions.append(
                     {"transcription": transcription, "fallback_index": idx}
                 )
+
+        # A completed batch can carry BOTH an output file and an error file;
+        # parse the latter so pages routed to it are not silently dropped (B1).
+        error_file_id = _resolve_error_file_id(batch)
+        if error_file_id:
+            err_text = _save_error_file(client, error_file_id, batch_id, temp_file)
+            if err_text:
+                seen = {
+                    cid
+                    for cid in (e.get("custom_id") for e in all_transcriptions)
+                    if cid
+                }
+                all_transcriptions.extend(
+                    _parse_error_file_entries(
+                        err_text, custom_id_map, batch_order, seen
+                    )
+                )
+
+    # Completeness reconciliation: emit placeholders for any expected page
+    # (from the image_metadata custom_id map) that produced neither an output
+    # nor an error entry (decision 2). Skipped when a batch download failed
+    # outright (all_completed already False) so we do not mark genuinely
+    # pending pages as errors.
+    if all_completed and custom_id_map:
+        seen = {cid for cid in (e.get("custom_id") for e in all_transcriptions) if cid}
+        all_transcriptions.extend(
+            _reconcile_missing_custom_ids(custom_id_map, batch_order, seen)
+        )
 
     return all_transcriptions, all_completed
 

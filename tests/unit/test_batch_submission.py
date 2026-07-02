@@ -9,6 +9,7 @@ import pytest
 
 from modules.batch.backends.base import BatchHandle
 from modules.batch.submission import (
+    BatchSubmissionError,
     _load_system_prompt,
     _resolve_additional_context,
     submit_batch,
@@ -147,31 +148,37 @@ class TestSubmitBatch:
     @patch("modules.batch.submission._load_system_prompt", return_value="prompt")
     @patch("modules.batch.submission._resolve_additional_context", return_value=None)
     @patch("modules.batch.submission.get_batch_backend")
-    async def test_submission_failure_returns_none(
+    async def test_submission_failure_raises(
         self,
-        mock_backend,
+        mock_backend_fn,
         mock_ctx,
         mock_prompt,
         mock_chunk,
         mock_supports,
         tmp_path: Path,
     ) -> None:
-        mock_backend.return_value.submit_batch.side_effect = RuntimeError("fail")
+        # A genuine submission failure must raise (opt-in sync fallback,
+        # decision 5) rather than silently returning None.
+        mock_backend = MagicMock()
+        mock_backend.max_batch_size = 50
+        mock_backend.max_batch_bytes = 150 * 1024 * 1024
+        mock_backend.submit_batch.side_effect = RuntimeError("fail")
+        mock_backend_fn.return_value = mock_backend
 
         jsonl_path = tmp_path / "temp.jsonl"
         jsonl_path.write_text("", encoding="utf-8")
 
         user_config = MagicMock()
         user_config.selected_schema_path = None
-        result = await submit_batch(
-            payloads=[_make_payload()],
-            temp_jsonl_path=jsonl_path,
-            parent_folder=tmp_path,
-            source_name="test",
-            model_config={"transcription_model": {"provider": "openai"}},
-            user_config=user_config,
-        )
-        assert result is None
+        with pytest.raises(BatchSubmissionError):
+            await submit_batch(
+                payloads=[_make_payload()],
+                temp_jsonl_path=jsonl_path,
+                parent_folder=tmp_path,
+                source_name="test",
+                model_config={"transcription_model": {"provider": "openai"}},
+                user_config=user_config,
+            )
 
     @pytest.mark.asyncio
     @patch("modules.batch.submission.supports_batch", return_value=True)
@@ -190,6 +197,8 @@ class TestSubmitBatch:
     ) -> None:
         mock_handle = BatchHandle(batch_id="batch_123", provider="openai")
         mock_backend = MagicMock()
+        mock_backend.max_batch_size = 50
+        mock_backend.max_batch_bytes = 150 * 1024 * 1024
         mock_backend.submit_batch.return_value = mock_handle
         mock_backend_fn.return_value = mock_backend
 
@@ -208,3 +217,68 @@ class TestSubmitBatch:
         )
         assert result is not None
         assert result.batch_id == "batch_123"
+
+    @pytest.mark.asyncio
+    @patch("modules.batch.submission.supports_batch", return_value=True)
+    @patch("modules.batch.submission.get_batch_chunk_size", return_value=50)
+    @patch("modules.batch.submission._load_system_prompt", return_value="prompt")
+    @patch("modules.batch.submission._resolve_additional_context", return_value=None)
+    @patch("modules.batch.submission.get_batch_backend")
+    async def test_oversized_submission_is_split_into_parts(
+        self,
+        mock_backend_fn,
+        mock_ctx,
+        mock_prompt,
+        mock_chunk,
+        mock_supports,
+        tmp_path: Path,
+    ) -> None:
+        """B3: a payload set over the provider byte limit is chunked into
+        multiple backend batches (not submitted as one oversized batch that
+        would fail and force a full-price sync fallback)."""
+        import json as _json
+
+        # Byte limit small enough that each payload lands in its own part.
+        mock_backend = MagicMock()
+        mock_backend.max_batch_size = 1000  # count is not the limiting factor
+        mock_backend.max_batch_bytes = 10_000  # ~8 KB overhead => 1 req/part
+        mock_backend.submit_batch.side_effect = [
+            BatchHandle(batch_id=f"batch_{i}", provider="openai") for i in range(3)
+        ]
+        mock_backend_fn.return_value = mock_backend
+
+        jsonl_path = tmp_path / "temp.jsonl"
+        jsonl_path.write_text("", encoding="utf-8")
+
+        user_config = MagicMock()
+        user_config.selected_schema_path = None
+        payloads = [_make_payload(i) for i in range(3)]
+
+        result = await submit_batch(
+            payloads=payloads,
+            temp_jsonl_path=jsonl_path,
+            parent_folder=tmp_path,
+            source_name="bigbook",
+            model_config={"transcription_model": {"provider": "openai"}},
+            user_config=user_config,
+        )
+
+        # Three separate backend submissions, one per part.
+        assert mock_backend.submit_batch.call_count == 3
+        assert result is not None and result.batch_id == "batch_0"
+
+        # All three batch ids are persisted for the downstream reader.
+        tracked = []
+        for line in jsonl_path.read_text(encoding="utf-8").splitlines():
+            rec = _json.loads(line)
+            if "batch_tracking" in rec:
+                tracked.append(rec["batch_tracking"]["batch_id"])
+        assert sorted(tracked) == ["batch_0", "batch_1", "batch_2"]
+
+        # Debug artifact lists every submitted part id.
+        debug = _json.loads(
+            (tmp_path / "bigbook_batch_submission_debug.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert sorted(debug["batch_ids"]) == ["batch_0", "batch_1", "batch_2"]

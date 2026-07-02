@@ -18,8 +18,8 @@ import yaml
 
 _log = logging.getLogger(__name__)
 
-from modules.config.capabilities import ensure_image_support
-from modules.config.constants import DOCUMENT_CATEGORIES
+from modules.config.capabilities import ensure_image_support  # noqa: E402
+from modules.config.constants import DOCUMENT_CATEGORIES  # noqa: E402
 
 
 def _is_repo_root(candidate: Path) -> bool:

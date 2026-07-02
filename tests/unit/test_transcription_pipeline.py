@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -313,11 +314,20 @@ class TestRunTranscriptionPipeline:
         img.write_bytes(b"")
         output_path = tmp_path / "output.txt"
 
+        # The output is regenerated from the JSONL, so the fake concurrency
+        # runner must stream its result through ``on_result`` just as the real
+        # runner does; otherwise nothing is recorded to combine.
+        async def fake_runner(func, args_list, limit, delay, on_result=None):
+            results = [(str(img), "page.png", "text", None, 0)]
+            if on_result is not None:
+                for r in results:
+                    await on_result(r)
+            return results
+
         with (
             patch(
                 "modules.transcribe.pipeline.run_concurrent_transcription_tasks",
-                new_callable=AsyncMock,
-                return_value=[(str(img), "page.png", "text", None, 0)],
+                side_effect=fake_runner,
             ),
             patch(
                 "modules.postprocess.writer.postprocess_transcription",
@@ -336,5 +346,91 @@ class TestRunTranscriptionPipeline:
                 postprocessing_config={},
                 resume_mode="overwrite",
             )
-        # The old data should have been cleared
+        # The old data should have been cleared and the output regenerated
+        # from the streamed JSONL records.
         assert output_path.exists()
+        assert output_path.read_text(encoding="utf-8") == "final text"
+
+
+# ---------------------------------------------------------------------------
+# Tesseract resume regression (B2): a resumed run must keep prior pages and
+# preserve absolute page order.
+# ---------------------------------------------------------------------------
+
+
+class TestTesseractResumeRegression:
+    @pytest.mark.asyncio
+    async def test_resumed_run_preserves_prior_pages_and_order(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from modules.batch.jsonl import resume_marker_record, write_jsonl_record
+
+        names = ["page1.png", "page2.png", "page3.png"]
+        imgs: list[Path] = []
+        for n in names:
+            p = tmp_path / n
+            p.write_bytes(b"")
+            imgs.append(p)
+
+        jsonl_path = tmp_path / "temp.jsonl"
+        # Prior (run-1) resume artifact that already transcribed pages 0 and 2,
+        # carrying their absolute order_index values.
+        write_jsonl_record(jsonl_path, resume_marker_record())
+        write_jsonl_record(
+            jsonl_path,
+            {
+                "folder_name": "src",
+                "image_name": "page1.png",
+                "order_index": 0,
+                "text_chunk": "T1",
+                "method": "tesseract",
+            },
+        )
+        write_jsonl_record(
+            jsonl_path,
+            {
+                "folder_name": "src",
+                "image_name": "page3.png",
+                "order_index": 2,
+                "text_chunk": "T3",
+                "method": "tesseract",
+            },
+        )
+        output_path = tmp_path / "out.txt"
+
+        # Only the still-pending page (page2) is OCR'd on this resumed run.
+        monkeypatch.setattr(
+            "modules.transcribe.pipeline.perform_ocr", lambda path, cfg: "T2"
+        )
+
+        captured: dict[str, Any] = {}
+
+        def fake_writer(pages: Any, out: Path, **kw: Any) -> Path:
+            captured["pages"] = pages
+            Path(out).write_text("done", encoding="utf-8")
+            return Path(out)
+
+        monkeypatch.setattr(
+            "modules.transcribe.pipeline.write_transcription_output", fake_writer
+        )
+
+        await run_transcription_pipeline(
+            image_files=imgs,
+            method="tesseract",
+            transcriber=None,
+            temp_jsonl_path=jsonl_path,
+            output_txt_path=output_path,
+            source_name="src",
+            concurrency_config={
+                "concurrency": {"transcription": {"concurrency_limit": 2}}
+            },
+            image_processing_config={},
+            postprocessing_config={},
+            is_folder=True,
+        )
+
+        pages = captured["pages"]
+        # All three pages present, in absolute page order (not scrambled, not
+        # limited to this run's single page).
+        assert [p["text"] for p in pages] == ["T1", "T2", "T3"]
+        assert [p["page_number"] for p in pages] == [1, 2, 3]

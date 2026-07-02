@@ -57,7 +57,10 @@ _DEFAULT_MAX_REPEATED_SUBSTR_LEN = 30
 _DEFAULT_MAX_REPEATED_SUBSTR_COUNT = 15
 _DEFAULT_MIN_ALPHANUM_IN_SUBSTR = 15
 _DEFAULT_MAX_SINGLE_CHAR_REPEAT = 75
-_DEFAULT_MIN_TRANSCRIPTION_LENGTH = 50
+# Conservative default (aligned with the shipped example YAML): a length of 0
+# never flags truncation. Callers that want the aggressive behaviour set an
+# explicit ``min_transcription_length`` (B12).
+_DEFAULT_MIN_TRANSCRIPTION_LENGTH = 0
 _DEFAULT_MAX_LINE_REPEAT_COUNT = 18
 _DEFAULT_MIN_LINE_LENGTH_FOR_REPEAT = 10
 _DEFAULT_SYSTEM_PROMPT_BLEED_PATTERNS = [
@@ -68,6 +71,12 @@ _DEFAULT_SYSTEM_PROMPT_BLEED_PATTERNS = [
 _DEFAULT_BLEED_CHECK_CHARS = 200
 
 # ── Invalid-transcription-marker defaults ───────────────────────────────────
+# NOTE: ``"[image:"`` is intentionally absent — the shipped markdown schema
+# instructs the model to emit ``![Image: ...]`` for legitimate illustrations,
+# so a single-hit ``"[image:"`` literal would discard correctly transcribed
+# illustrated pages (B4). ``[unreadable]``/``[omitted]`` are handled by the
+# count-thresholded check below rather than as single-hit literals, since one
+# such marker is legitimate on a genuinely damaged page.
 _DEFAULT_ICON_DESCRIPTION_LITERALS = [
     "!icon:",
     "(icon)",
@@ -75,7 +84,6 @@ _DEFAULT_ICON_DESCRIPTION_LITERALS = [
     "[see image",
     "[see attached",
     "[image of",
-    "[image:",
     "[figure",
     "[picture",
     "(building icon)",
@@ -91,8 +99,12 @@ _DEFAULT_ICON_DESCRIPTION_LITERALS = [
     "(bib gourmand)",
     "[no visible",
     "[cannot transcribe",
-    "[omitted",
+]
+# Damaged-page markers that are legitimate in small numbers but indicate a
+# failed transcription when they flood the page (count-thresholded, B4).
+_DEFAULT_COUNT_THRESHOLDED_MARKERS = [
     "[unreadable",
+    "[omitted",
 ]
 _DEFAULT_GENERIC_PLACEHOLDER_PATTERNS = [
     "[icon]",
@@ -252,7 +264,9 @@ def detect_invalid_transcription_markers(
         return None
 
     marker_cfg = config.get("invalid_markers", {}) or {}
-    if not marker_cfg.get("enabled", True):
+    # Default OFF (aligned with the conservative example YAML); callers opt in
+    # explicitly (decision 17, B12).
+    if not marker_cfg.get("enabled", False):
         return None
 
     text_lower = text.lower()
@@ -265,21 +279,36 @@ def detect_invalid_transcription_markers(
             preview = pat[:40]
             return f"Icon description marker present: '{preview}'"
 
-    generic_patterns = marker_cfg.get(
-        "generic_placeholder_patterns",
-        _DEFAULT_GENERIC_PLACEHOLDER_PATTERNS,
-    )
     max_count = int(
         marker_cfg.get(
             "max_generic_placeholder_count",
             _DEFAULT_MAX_GENERIC_PLACEHOLDER_COUNT,
         )
     )
+
+    generic_patterns = marker_cfg.get(
+        "generic_placeholder_patterns",
+        _DEFAULT_GENERIC_PLACEHOLDER_PATTERNS,
+    )
     for pat in generic_patterns:
         n = text_lower.count(pat.lower())
         if n > max_count:
             return (
                 f"Generic placeholder '{pat}' repeated {n} times "
+                f"(threshold: {max_count})"
+            )
+
+    # Damaged-page markers: legitimate once, a failure signal when they flood
+    # the page (B4). Uses the same threshold as generic placeholders.
+    thresholded = marker_cfg.get(
+        "count_thresholded_markers",
+        _DEFAULT_COUNT_THRESHOLDED_MARKERS,
+    )
+    for pat in thresholded:
+        n = text_lower.count(pat.lower())
+        if n > max_count:
+            return (
+                f"Damaged-page marker '{pat}' repeated {n} times "
                 f"(threshold: {max_count})"
             )
 

@@ -123,7 +123,26 @@ class TestDualModeBaseHandleInterrupt:
         base = _DualModeBase("test")
         with pytest.raises(SystemExit) as exc_info:
             base._handle_interrupt()
-        assert exc_info.value.code == 0
+        # CLI agent contract: user interrupt exits 130.
+        assert exc_info.value.code == 130
+
+
+class TestDualModeBaseTtyGuard:
+    def test_interactive_without_tty_exits_2(self) -> None:
+        base = _DualModeBase("test")
+        with (
+            patch("modules.transcribe.dual_mode.sys.stdin") as m_stdin,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            m_stdin.isatty.return_value = False
+            base._guard_interactive_tty()
+        assert exc_info.value.code == 2
+
+    def test_interactive_with_tty_passes(self) -> None:
+        base = _DualModeBase("test")
+        with patch("modules.transcribe.dual_mode.sys.stdin") as m_stdin:
+            m_stdin.isatty.return_value = True
+            base._guard_interactive_tty()  # no raise
 
 
 class TestDualModeBaseHandleError:
@@ -168,10 +187,14 @@ class TestDualModeScriptExecuteInteractive:
         mock_config_service.get_paths_config.return_value = {
             "general": {"interactive_mode": True}
         }
-        with patch(
-            "modules.transcribe.dual_mode.get_config_service",
-            return_value=mock_config_service,
+        with (
+            patch(
+                "modules.transcribe.dual_mode.get_config_service",
+                return_value=mock_config_service,
+            ),
+            patch("modules.transcribe.dual_mode.sys.stdin") as m_stdin,
         ):
+            m_stdin.isatty.return_value = True
             script.execute()
         assert script.interactive_called is True
         assert script.cli_called is False
@@ -207,11 +230,13 @@ class TestDualModeScriptExecuteErrorHandling:
                 "modules.transcribe.dual_mode.get_config_service",
                 return_value=mock_config_service,
             ),
+            patch("modules.transcribe.dual_mode.sys.stdin") as m_stdin,
             patch.object(script, "run_interactive", side_effect=KeyboardInterrupt),
             pytest.raises(SystemExit) as exc_info,
         ):
+            m_stdin.isatty.return_value = True
             script.execute()
-        assert exc_info.value.code == 0
+        assert exc_info.value.code == 130
 
     def test_execute_handles_exception(self, mock_config_service: MagicMock) -> None:
         script = _SyncScript("test_sync")
@@ -223,9 +248,11 @@ class TestDualModeScriptExecuteErrorHandling:
                 "modules.transcribe.dual_mode.get_config_service",
                 return_value=mock_config_service,
             ),
+            patch("modules.transcribe.dual_mode.sys.stdin") as m_stdin,
             patch.object(script, "run_interactive", side_effect=ValueError("bad")),
             pytest.raises(SystemExit) as exc_info,
         ):
+            m_stdin.isatty.return_value = True
             script.execute()
         assert exc_info.value.code == 1
 
@@ -241,10 +268,14 @@ class TestAsyncDualModeScriptExecuteInteractive:
         mock_config_service.get_paths_config.return_value = {
             "general": {"interactive_mode": True}
         }
-        with patch(
-            "modules.transcribe.dual_mode.get_config_service",
-            return_value=mock_config_service,
+        with (
+            patch(
+                "modules.transcribe.dual_mode.get_config_service",
+                return_value=mock_config_service,
+            ),
+            patch("modules.transcribe.dual_mode.sys.stdin") as m_stdin,
         ):
+            m_stdin.isatty.return_value = True
             script.execute()
         assert script.interactive_called is True
         assert script.cli_called is False
@@ -283,11 +314,13 @@ class TestAsyncDualModeScriptExecuteErrorHandling:
                 "modules.transcribe.dual_mode.get_config_service",
                 return_value=mock_config_service,
             ),
+            patch("modules.transcribe.dual_mode.sys.stdin") as m_stdin,
             patch.object(script, "run_interactive", side_effect=raise_interrupt),
             pytest.raises(SystemExit) as exc_info,
         ):
+            m_stdin.isatty.return_value = True
             script.execute()
-        assert exc_info.value.code == 0
+        assert exc_info.value.code == 130
 
     def test_execute_handles_exception(self, mock_config_service: MagicMock) -> None:
         script = _AsyncScript("test_async")
@@ -303,8 +336,10 @@ class TestAsyncDualModeScriptExecuteErrorHandling:
                 "modules.transcribe.dual_mode.get_config_service",
                 return_value=mock_config_service,
             ),
+            patch("modules.transcribe.dual_mode.sys.stdin") as m_stdin,
             patch.object(script, "run_interactive", side_effect=raise_error),
             pytest.raises(SystemExit) as exc_info,
         ):
+            m_stdin.isatty.return_value = True
             script.execute()
         assert exc_info.value.code == 1

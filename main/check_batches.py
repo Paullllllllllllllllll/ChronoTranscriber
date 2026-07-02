@@ -42,7 +42,11 @@ class CheckBatchesScript(DualModeScript):
         run_batch_finalization(run_diagnostics=True)
 
     def run_cli(self, args: Namespace) -> None:
-        """Check batches in CLI mode with command-line arguments."""
+        """Check batches in CLI mode with command-line arguments.
+
+        Exits non-zero if any batch reached a terminal failure (CLI agent
+        contract).
+        """
         run_diagnostics = not args.no_diagnostics
         custom_directory = None
         config_default = self.paths_config.get("general", {}).get(
@@ -55,11 +59,13 @@ class CheckBatchesScript(DualModeScript):
             custom_directory = resolve_path(args.directory, Path.cwd())
             validate_input_path(custom_directory)
 
-        run_batch_finalization(
+        had_failure = run_batch_finalization(
             run_diagnostics=run_diagnostics,
             custom_directory=custom_directory,
             output_format=output_format,
         )
+        if had_failure:
+            sys.exit(1)
 
 
 def main() -> None:

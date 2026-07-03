@@ -16,10 +16,13 @@ Exports:
 from __future__ import annotations
 
 import asyncio
+import atexit
+import contextlib
 import json
 import os
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -34,6 +37,15 @@ logger = setup_logger(__name__)
 # adoption so a run started from the old directory does not lose today's count.
 _LEGACY_TOKEN_TRACKER_FILE = Path.cwd() / ".chronotranscriber_token_state.json"
 _TOKEN_STATE_FILENAME = "token_state.json"
+
+# Minimum seconds between on-disk state writes. add_tokens() fires per API call
+# (up to ~20/s under concurrency); without debouncing that rewrites the state
+# file that often, ON THE EVENT LOOP. In-memory counts stay exact; a background
+# daemon thread performs the throttled write off the loop, and an atexit flush
+# plus explicit flush() guarantee the last change is persisted.
+_STATE_WRITE_DEBOUNCE_S = 1.0
+# How often the background writer wakes to check for a pending, debounced write.
+_WRITER_POLL_INTERVAL_S = 0.5
 
 _tracker_instance: DailyTokenTracker | None = None
 _tracker_lock = threading.Lock()
@@ -85,12 +97,9 @@ def resolve_token_state_file() -> Path:
 def _blocking_retry_sleep(seconds: float) -> None:
     """Block briefly between synchronous state-save retries.
 
-    This is a short, deliberately blocking sleep (≤0.1 s, used only inside the
-    synchronous ``_save_state`` retry loop). The previous implementation made
-    it a no-op whenever an event loop was running, which silently turned the
-    transient-lock backoff into a tight busy-retry. Since ``_save_state``
-    performs blocking file I/O on the calling thread anyway, a brief blocking
-    sleep here is both correct and consistent.
+    A short, deliberately blocking sleep (<=0.1 s) used only inside the
+    ``_save_state`` retry loop, which runs on the background writer thread (or,
+    rarely, at day rollover / flush), never on the event loop.
     """
     time.sleep(seconds)
 
@@ -100,6 +109,11 @@ class DailyTokenTracker:
 
     Tracks token usage across API calls and enforces daily limits with
     automatic reset at midnight in the local timezone.
+
+    Disk persistence is debounced and performed off the event loop: ``add_tokens``
+    only marks state dirty in memory, and a background daemon thread writes the
+    throttled snapshot. ``flush`` and an ``atexit`` hook guarantee the final state
+    reaches disk.
     """
 
     def __init__(
@@ -117,6 +131,17 @@ class DailyTokenTracker:
         self._lock = threading.Lock()
         self._current_date: str = ""  # Format: YYYY-MM-DD
         self._tokens_used_today: int = 0
+
+        # Debounced off-loop write bookkeeping. add_tokens() only marks state
+        # dirty (the in-memory count stays exact); a lazily-started background
+        # daemon thread performs the throttled disk write so no I/O or sleep runs
+        # on the event loop. flush()/atexit guarantee the final state is
+        # persisted.
+        self._pending_write: bool = False
+        self._last_write_monotonic: float = 0.0
+        self._writer_thread: threading.Thread | None = None
+        self._writer_stop = threading.Event()
+        self._atexit_registered: bool = False
 
         # Page-level reservation state (in-memory only; transient per run).
         # _tokens_reserved is headroom claimed by in-flight calls that have not
@@ -177,7 +202,27 @@ class DailyTokenTracker:
             self._tokens_used_today = 0
 
     def _save_state(self) -> None:
-        temp_file = self.state_file.with_suffix(".tmp")
+        """Persist state to disk via a per-process-unique temp file + atomic
+        replace. Must be called under ``self._lock``.
+
+        The temp name embeds the pid and a short random token so concurrent
+        processes never collide on it (a fixed ``.tmp`` name previously let one
+        process's write clobber another's mid-flight). The ``replace()`` is
+        retried on transient Windows file locks (PermissionError) AND on a
+        FileNotFoundError from a lost replace() race (another process moved our
+        temp first); only after exhausting retries does it fall back to a direct
+        non-atomic write. The temp file is always removed in ``finally``.
+        """
+        # If the target directory is gone (e.g. a test temp dir torn down while
+        # the background writer was still polling), there is nothing we can do;
+        # clear the pending flag and skip silently rather than logging an error.
+        if not self.state_file.parent.exists():
+            self._pending_write = False
+            return
+
+        temp_file = self.state_file.with_name(
+            f"{self.state_file.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
+        )
         try:
             state = {
                 "date": self._current_date,
@@ -188,40 +233,122 @@ class DailyTokenTracker:
             with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(state, f, indent=2)
 
-            # Atomic replace with retry for transient Windows file locks
-            # (antivirus, indexer, etc.)
             max_retries = 3
             retry_delay = 0.1
             for attempt in range(max_retries):
                 try:
                     temp_file.replace(self.state_file)
+                    self._last_write_monotonic = time.monotonic()
+                    self._pending_write = False
                     return
-                except PermissionError:
+                except (PermissionError, FileNotFoundError) as exc:
                     if attempt < max_retries - 1:
                         logger.debug(
-                            f"Transient lock on {self.state_file}, "
-                            f"retrying in {retry_delay * 1000:.0f} ms "
-                            f"(attempt {attempt + 1}/{max_retries})"
+                            "Transient error replacing %s (%s), retrying in "
+                            "%.0f ms (attempt %d/%d)",
+                            self.state_file,
+                            type(exc).__name__,
+                            retry_delay * 1000,
+                            attempt + 1,
+                            max_retries,
                         )
                         _blocking_retry_sleep(retry_delay)
                     else:
                         logger.warning(
-                            f"Could not atomically replace "
-                            f"{self.state_file} after {max_retries} "
-                            f"attempts; falling back to direct write"
+                            "Could not atomically replace %s after %d attempts; "
+                            "falling back to direct write",
+                            self.state_file,
+                            max_retries,
                         )
                         with open(self.state_file, "w", encoding="utf-8") as f:
                             json.dump(state, f, indent=2)
+                        self._last_write_monotonic = time.monotonic()
+                        self._pending_write = False
 
         except Exception as e:
             logger.error(f"Error saving token state to {self.state_file}: {e}")
 
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 if temp_file.exists():
-                    os.remove(temp_file)
-            except OSError:
-                pass
+                    temp_file.unlink()
+
+    def _ensure_writer_thread(self) -> None:
+        """Start the background debounced-write thread once (call under lock).
+
+        Also registers the atexit flush lazily here (rather than in ``__init__``)
+        so only trackers that actually record usage register a hook; trackers
+        that merely answer queries in tests never accumulate one.
+        """
+        if not self._atexit_registered:
+            atexit.register(self._flush_on_exit)
+            self._atexit_registered = True
+        if self._writer_thread is not None:
+            return
+        thread = threading.Thread(
+            target=self._writer_loop,
+            name="token-budget-writer",
+            daemon=True,
+        )
+        self._writer_thread = thread
+        thread.start()
+
+    def _writer_loop(self) -> None:
+        """Daemon loop: persist a pending write once the debounce interval elapses.
+
+        Runs off the event loop so ``add_tokens`` never performs disk I/O on it.
+        Wakes every ``_WRITER_POLL_INTERVAL_S`` and, if a write is pending and at
+        least ``_STATE_WRITE_DEBOUNCE_S`` has passed since the last write, saves.
+        """
+        while not self._writer_stop.wait(_WRITER_POLL_INTERVAL_S):
+            with self._lock:
+                if self._pending_write and (
+                    time.monotonic() - self._last_write_monotonic
+                    >= _STATE_WRITE_DEBOUNCE_S
+                ):
+                    self._save_state()
+
+    def _flush_on_exit(self) -> None:
+        """atexit hook: stop the writer and persist any pending state.
+
+        Fully silent: skips the write when nothing is pending or the target
+        directory has gone (e.g. a test temp dir already removed), and swallows
+        any error so interpreter shutdown is never disrupted.
+        """
+        self._writer_stop.set()
+        try:
+            if not self._pending_write:
+                return
+            if not self.state_file.parent.exists():
+                return
+            with self._lock:
+                if self._pending_write:
+                    self._save_state()
+        except Exception:
+            pass
+
+    def flush(self) -> None:
+        """Force-persist any pending debounced state write."""
+        with self._lock:
+            if self._pending_write:
+                self._save_state()
+
+    def set_daily_limit(self, new_limit: int) -> None:
+        """Update the daily token limit at runtime.
+
+        Used by the wait loop so a user editing ``concurrency_config.yaml``
+        mid-wait (raising ``daily_token_limit.daily_tokens``) lifts the cap
+        without a restart. A no-op when the value is unchanged.
+        """
+        new_limit = int(new_limit)
+        with self._lock:
+            if new_limit != self.daily_limit:
+                logger.info(
+                    "Daily token limit updated: %s -> %s",
+                    f"{self.daily_limit:,}",
+                    f"{new_limit:,}",
+                )
+                self.daily_limit = new_limit
 
     def _check_and_reset_if_new_day(self) -> None:
         current_date = self._get_current_date_str()
@@ -233,6 +360,8 @@ class DailyTokenTracker:
             )
             self._current_date = current_date
             self._tokens_used_today = 0
+            # Persist the rollover immediately (rare event, once per day) so the
+            # reset survives even if the process exits before the next write.
             self._save_state()
 
     def add_tokens(self, tokens: int) -> None:
@@ -244,7 +373,10 @@ class DailyTokenTracker:
             self._tokens_used_today += tokens
             # Update the rolling per-call estimate used by try_reserve().
             self._ewma = self._alpha * tokens + (1.0 - self._alpha) * self._ewma
-            self._save_state()
+            # Mark dirty and let the background writer persist off the event
+            # loop; the in-memory count is already exact.
+            self._pending_write = True
+            self._ensure_writer_thread()
 
             logger.debug(
                 f"Added {tokens:,} tokens. "
@@ -391,6 +523,25 @@ def get_token_tracker() -> DailyTokenTracker:
     return _tracker_instance
 
 
+def _read_configured_daily_limit() -> int | None:
+    """Read the configured daily token limit fresh from disk.
+
+    Uses a throwaway ``ConfigLoader`` (its per-instance cache is empty) so a
+    mid-wait edit to ``concurrency_config.yaml`` raising
+    ``daily_token_limit.daily_tokens`` is observed without a restart. Returns
+    ``None`` when the value is absent or the config cannot be read, so callers
+    keep the current limit on failure.
+    """
+    from modules.config.config_loader import ConfigLoader
+
+    concurrency_config = ConfigLoader().get_concurrency_config() or {}
+    token_cfg = concurrency_config.get("daily_token_limit", {}) or {}
+    raw = token_cfg.get("daily_tokens")
+    if raw is None:
+        return None
+    return int(str(raw).replace("_", ""))
+
+
 async def check_and_wait_for_token_limit(
     concurrency_config: dict[str, Any],
 ) -> bool:
@@ -440,6 +591,16 @@ async def check_and_wait_for_token_limit(
             interval = min(sleep_interval, max(0, seconds_until_reset - elapsed))
             await asyncio.sleep(interval)
             elapsed += interval
+
+            # Live re-read of the configured daily limit: a user raising
+            # daily_token_limit.daily_tokens mid-wait lifts the cap without a
+            # restart. A read failure keeps the current limit (debug-logged).
+            try:
+                new_limit = _read_configured_daily_limit()
+                if new_limit is not None:
+                    token_tracker.set_daily_limit(new_limit)
+            except Exception as exc:
+                logger.debug("Could not refresh daily token limit during wait: %s", exc)
 
             if not token_tracker.is_limit_reached():
                 logger.info("Token limit has been reset. Resuming processing.")

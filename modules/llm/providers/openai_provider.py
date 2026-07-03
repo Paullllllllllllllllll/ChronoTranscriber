@@ -8,9 +8,11 @@ Supports all OpenAI models including:
 - o1, o3 reasoning models
 
 LangChain handles:
-- Retry logic with exponential backoff (max_retries parameter)
 - Token usage tracking (response_metadata)
 - Structured output parsing (with_structured_output)
+
+Retries are owned solely by BaseProvider._ainvoke_with_retry (tenacity); the SDK
+client is built with max_retries=0.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from modules.llm.providers.base import (
     OPENAI_TOKEN_MAPPING,
     BaseProvider,
     TranscriptionResult,
-    load_max_retries,
+    aclose_chat_model,
 )
 
 logger = setup_logger(__name__)
@@ -36,10 +38,11 @@ class OpenAIProvider(BaseProvider):
     """OpenAI LLM provider using LangChain.
 
     LangChain handles:
-    - Automatic retry with exponential backoff (via max_retries)
     - Token usage tracking (via response_metadata)
     - Structured output parsing (via with_structured_output)
     - Parameter filtering for unsupported models (via disabled_params)
+
+    Retries are owned solely by the tenacity loop in BaseProvider (max_retries=0).
     """
 
     def __init__(
@@ -75,7 +78,6 @@ class OpenAIProvider(BaseProvider):
         self.text_config = text_config
 
         self._capabilities = detect_capabilities(model)
-        max_retries = load_max_retries()
 
         # Build disabled_params for models that don't support certain features
         # LangChain will automatically filter these out before sending to API
@@ -83,16 +85,17 @@ class OpenAIProvider(BaseProvider):
 
         # Initialize LangChain ChatOpenAI with Responses API
         # LangChain handles:
-        # - Retry logic with exponential backoff (max_retries)
         # - Parameter filtering for unsupported models (disabled_params)
         # - Converting max_completion_tokens to correct API parameter for
         #   reasoning models
         # - Responses API routing (use_responses_api=True)
+        # max_retries=0 disables SDK-internal retries so the tenacity loop in
+        # BaseProvider._ainvoke_with_retry is the single retry authority.
         llm_kwargs = {
             "api_key": api_key,
             "model": model,
             "timeout": timeout,
-            "max_retries": max_retries,
+            "max_retries": 0,
             "disabled_params": disabled_params,
             "use_responses_api": True,
         }
@@ -314,5 +317,5 @@ class OpenAIProvider(BaseProvider):
             )
 
     async def close(self) -> None:
-        """Clean up resources - LangChain handles session cleanup internally."""
-        pass
+        """Dispose the underlying LangChain/SDK HTTP clients. Never raises."""
+        await aclose_chat_model(getattr(self, "_llm", None))

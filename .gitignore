@@ -42,3 +42,5 @@ __pycache__/
 logs/
 
 /eval/transcription_eval.ipynb
+# Local scratch area (ad-hoc tests, backups)
+scratch/

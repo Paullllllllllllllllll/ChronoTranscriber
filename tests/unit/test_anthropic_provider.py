@@ -147,10 +147,6 @@ class TestAnthropicProviderInit:
 
         with (
             patch("modules.llm.providers.anthropic_provider.ChatAnthropic"),
-            patch(
-                "modules.llm.providers.anthropic_provider.load_max_retries",
-                return_value=3,
-            ),
         ):
             provider = AnthropicProvider(
                 api_key="sk-ant-test",
@@ -166,10 +162,6 @@ class TestAnthropicProviderInit:
 
         with (
             patch("modules.llm.providers.anthropic_provider.ChatAnthropic"),
-            patch(
-                "modules.llm.providers.anthropic_provider.load_max_retries",
-                return_value=3,
-            ),
         ):
             provider = AnthropicProvider(
                 api_key="sk-ant-test",
@@ -190,10 +182,6 @@ class TestAnthropicProviderInit:
             patch(
                 "modules.llm.providers.anthropic_provider.ChatAnthropic",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
-            ),
-            patch(
-                "modules.llm.providers.anthropic_provider.load_max_retries",
-                return_value=3,
             ),
         ):
             AnthropicProvider(
@@ -218,10 +206,6 @@ class TestAnthropicProviderInit:
                 "modules.llm.providers.anthropic_provider.ChatAnthropic",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
             ),
-            patch(
-                "modules.llm.providers.anthropic_provider.load_max_retries",
-                return_value=3,
-            ),
         ):
             AnthropicProvider(
                 api_key="sk-ant-test",
@@ -242,10 +226,6 @@ class TestAnthropicProviderInit:
             patch(
                 "modules.llm.providers.anthropic_provider.ChatAnthropic",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
-            ),
-            patch(
-                "modules.llm.providers.anthropic_provider.load_max_retries",
-                return_value=3,
             ),
         ):
             AnthropicProvider(
@@ -268,10 +248,6 @@ class TestAnthropicProviderInit:
                 "modules.llm.providers.anthropic_provider.ChatAnthropic",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
             ),
-            patch(
-                "modules.llm.providers.anthropic_provider.load_max_retries",
-                return_value=3,
-            ),
         ):
             AnthropicProvider(
                 api_key="sk-ant-test",
@@ -293,10 +269,6 @@ class TestAnthropicProviderInit:
                 "modules.llm.providers.anthropic_provider.ChatAnthropic",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
             ),
-            patch(
-                "modules.llm.providers.anthropic_provider.load_max_retries",
-                return_value=3,
-            ),
         ):
             AnthropicProvider(
                 api_key="sk-ant-test",
@@ -316,10 +288,6 @@ class TestAnthropicProviderInit:
             patch(
                 "modules.llm.providers.anthropic_provider.ChatAnthropic",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
-            ),
-            patch(
-                "modules.llm.providers.anthropic_provider.load_max_retries",
-                return_value=3,
             ),
         ):
             AnthropicProvider(
@@ -342,10 +310,6 @@ class TestAnthropicProviderInit:
                 "modules.llm.providers.anthropic_provider.ChatAnthropic",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
             ),
-            patch(
-                "modules.llm.providers.anthropic_provider.load_max_retries",
-                return_value=3,
-            ),
         ):
             AnthropicProvider(
                 api_key="sk-ant-test",
@@ -366,10 +330,6 @@ class TestAnthropicProviderInit:
             patch(
                 "modules.llm.providers.anthropic_provider.ChatAnthropic",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
-            ),
-            patch(
-                "modules.llm.providers.anthropic_provider.load_max_retries",
-                return_value=3,
             ),
         ):
             AnthropicProvider(
@@ -392,10 +352,6 @@ class TestAnthropicProviderInit:
                 "modules.llm.providers.anthropic_provider.ChatAnthropic",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
             ),
-            patch(
-                "modules.llm.providers.anthropic_provider.load_max_retries",
-                return_value=3,
-            ),
         ):
             AnthropicProvider(
                 api_key="sk-ant-test",
@@ -413,10 +369,6 @@ class TestAnthropicProviderInit:
 
         with (
             patch("modules.llm.providers.anthropic_provider.ChatAnthropic"),
-            patch(
-                "modules.llm.providers.anthropic_provider.load_max_retries",
-                return_value=3,
-            ),
         ):
             provider = AnthropicProvider(
                 api_key="sk-ant-test",

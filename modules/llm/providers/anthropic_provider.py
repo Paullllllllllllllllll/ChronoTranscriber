@@ -8,9 +8,11 @@ Supports the full Claude model family via ChatAnthropic:
 - Claude 3.7 Sonnet, 3.5 (Sonnet, Haiku), 3 (Opus, Sonnet, Haiku)
 
 LangChain handles:
-- Retry logic with exponential backoff (max_retries parameter)
 - Token usage tracking (response_metadata)
 - Structured output parsing (with_structured_output)
+
+Retries are owned solely by BaseProvider._ainvoke_with_retry (tenacity); the SDK
+client is built with max_retries=0.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from modules.llm.providers.base import (
     ANTHROPIC_TOKEN_MAPPING,
     BaseProvider,
     TranscriptionResult,
-    load_max_retries,
+    aclose_chat_model,
 )
 
 logger = setup_logger(__name__)
@@ -115,7 +117,6 @@ class AnthropicProvider(BaseProvider):
         self.reasoning_config = reasoning_config
 
         self._capabilities = caps
-        max_retries = load_max_retries()
 
         # Build LangChain model kwargs
         model_kwargs: dict[str, Any] = {}
@@ -157,14 +158,15 @@ class AnthropicProvider(BaseProvider):
                     f"Using extended thinking (budget={budget}) for model {model}"
                 )
 
-        # Initialize LangChain ChatAnthropic
-        # LangChain handles retry logic with exponential backoff internally
+        # Initialize LangChain ChatAnthropic. max_retries=0 disables SDK-internal
+        # retries so the tenacity loop in BaseProvider._ainvoke_with_retry is the
+        # single retry authority.
         self._llm = ChatAnthropic(  # type: ignore[call-arg]
             api_key=api_key,  # type: ignore[arg-type]
             model=model,
             max_tokens=effective_max_tokens,
             timeout=timeout,
-            max_retries=max_retries,
+            max_retries=0,
             **model_kwargs,
         )
 
@@ -317,5 +319,5 @@ class AnthropicProvider(BaseProvider):
             )
 
     async def close(self) -> None:
-        """Clean up resources."""
-        pass
+        """Dispose the underlying LangChain/SDK HTTP clients. Never raises."""
+        await aclose_chat_model(getattr(self, "_llm", None))

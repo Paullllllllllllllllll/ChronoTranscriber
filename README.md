@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.15.0
+# ChronoTranscriber v1.16.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -659,6 +659,25 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v1.16.0** (3 July 2026) -- Concurrency and token-budget hardening.
+    Gate the synchronous repair path on the daily token budget with the same
+    drain/wait/re-pass behavior as the main pipeline; move token-state
+    persistence to a debounced background writer with per-process-unique
+    temp files and race-tolerant retries (no more disk I/O or sleeps on the
+    event loop); make the tenacity loop the single retry authority (SDK
+    retries disabled, status-code-first classification, HTTP `Retry-After`
+    honored, default 8 attempts with a 120 s cap); count Anthropic
+    prompt-cache creation and read tokens at full weight in the daily budget
+    and recover token usage from failed attempts; add a per-provider
+    multi-window rate limiter with adaptive backoff
+    (`modules/infra/rate_limit.py`, `concurrency.rate_limits`); run
+    Tesseract OCR off the event loop; replace eager task creation with
+    bounded lazy submission and make streaming failures cancel producer and
+    workers cleanly; re-read `daily_token_limit.daily_tokens` during the
+    wait-at-limit loop; implement real provider client teardown; document
+    `image_processing.concurrency_limit` and fix stale module references in
+    the example configs.
 
 - **v1.15.0** (2 July 2026) -- Hardening release closing the silent-page-loss
     and batch-integrity defects found in a full production audit. OpenAI batch

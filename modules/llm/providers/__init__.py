@@ -10,7 +10,8 @@ All providers support:
 - Structured outputs via JSON schema
 - Vision/multimodal inputs
 - Streaming responses
-- Retry logic with exponential backoff
+- Retry with exponential backoff owned by BaseProvider._ainvoke_with_retry
+  (tenacity); provider SDK clients are built with max_retries=0
 """
 
 from modules.llm.providers.base import (

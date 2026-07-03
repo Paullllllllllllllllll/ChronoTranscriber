@@ -6,11 +6,12 @@
 # To customize: copy this file to paths_config.yaml and set your paths.
 #
 # Used by:
-#   - modules/core/mode_selector.py (interactive_mode)
-#   - modules/core/workflow.py (output paths, temp file retention)
-#   - modules/core/auto_selector.py (auto_mode_* settings)
+#   - modules/core/cli_args.py, modules/transcribe/dual_mode.py (interactive_mode)
+#   - modules/transcribe/manager.py (output paths, temp file retention)
+#   - modules/documents/auto_selector.py (auto_mode_* settings)
 #   - modules/infra/logger.py (logs_dir)
-#   - modules/llm/batch/batching.py (optional prompt/schema overrides)
+#   - modules/infra/token_budget.py (general.state_dir)
+#   - modules/llm/transcriber.py (optional prompt/schema overrides)
 # =============================================================================
 
 general:

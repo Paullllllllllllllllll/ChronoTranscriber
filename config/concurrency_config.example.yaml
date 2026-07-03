@@ -6,10 +6,12 @@
 # To customize: copy this file to concurrency_config.yaml and edit it.
 #
 # Used by:
-#   - modules/core/workflow.py (concurrency_limit, delay_between_tasks)
-#   - modules/llm/batch/batching.py (service_tier, batch_chunk_size)
-#   - modules/llm/providers/*.py (retry.attempts)
-#   - modules/core/token_guard.py (daily_token_limit)
+#   - modules/transcribe/pipeline.py, modules/transcribe/manager.py
+#       (concurrency_limit, delay_between_tasks)
+#   - modules/batch/, modules/llm/transcriber.py (service_tier, batch_chunk_size)
+#   - modules/llm/providers/base.py (retry.* -> tenacity retry authority)
+#   - modules/infra/rate_limit.py (concurrency.rate_limits)
+#   - modules/infra/token_budget.py (daily_token_limit)
 # =============================================================================
 
 concurrency:
@@ -39,10 +41,15 @@ concurrency:
     request_timeout: 300
 
     # Retry configuration for transient API errors (429, 5xx, timeouts).
-    # LangChain handles exponential backoff internally; only 'attempts' is used.
+    # The tenacity loop in modules/llm/providers/base.py is the SINGLE retry
+    # authority: every provider builds its SDK client with max_retries=0, so
+    # these knobs no longer feed the SDK. Backoff is exponential with jitter,
+    # floored near 2 s and capped at 120 s; a server-sent Retry-After header
+    # raises the wait to at least that value (still capped at 120 s).
     retry:
-      # Maximum retry attempts before failing. LangChain applies exponential backoff.
-      attempts: 5
+      # Maximum transient (429 / 5xx / connection / timeout) retry attempts
+      # before failing.
+      attempts: 8
 
       # Maximum retry attempts for validation/parsing errors (model returns
       # unparseable structured output) AND for transient provider response-shape
@@ -114,6 +121,33 @@ concurrency:
           max_generic_placeholder_count: 3
           max_question_mark_ratio: 0.05
 
+  # ---------------------------------------------------------------------------
+  # Client-Side Rate Limits
+  # ---------------------------------------------------------------------------
+  # Multi-window sliding-log limiter with adaptive backoff. A per-provider
+  # limiter throttles synchronous transcription calls to stay under these
+  # windows BEFORE hitting the API, smoothing bursts that would otherwise trip
+  # provider 429s. Each entry is [max_requests, window_seconds]; add as many
+  # windows as you like (per-second / minute / hour). Omit the block entirely
+  # for permissive defaults (120/s, 15000/min, 15000/hr) -- effectively
+  # transparent for typical workloads. Batch submission/polling never passes
+  # through the limiter.
+  # Used by: modules/infra/rate_limit.py
+  rate_limits:
+    - [120, 1]       # up to 120 requests per second
+    - [15000, 60]    # up to 15,000 requests per minute
+    - [15000, 3600]  # up to 15,000 requests per hour
+
+  # ---------------------------------------------------------------------------
+  # Image Pre-Processing Concurrency
+  # ---------------------------------------------------------------------------
+  # Parallelism for CPU-bound page rendering / preprocessing (PDF rasterization
+  # and Tesseract preprocessing), separate from the LLM concurrency above.
+  # Used by: modules/documents/pdf.py, modules/images/pipeline.py
+  image_processing:
+    # Maximum pages preprocessed in parallel (default 4 when absent).
+    concurrency_limit: 4
+
 # =============================================================================
 # Prompt Caching
 # =============================================================================
@@ -150,9 +184,9 @@ prompt_caching:
 # cap. When the limit is reached, processing pauses until midnight reset.
 #
 # Used by:
-#   - modules/core/token_guard.py (limit enforcement)
-#   - modules/infra/token_tracker.py (usage tracking)
-#   - modules/core/workflow.py (check before each item)
+#   - modules/infra/token_budget.py (usage tracking, limit enforcement, and the
+#       async wait-for-reset loop)
+#   - modules/transcribe/manager.py, modules/batch/repair.py (drain/wait gate)
 # =============================================================================
 
 daily_token_limit:

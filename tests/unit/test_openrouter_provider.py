@@ -217,10 +217,9 @@ class TestComputeOpenrouterReasoningMaxTokens:
 
 
 class TestOpenRouterProviderInit:
-    @patch("modules.llm.providers.openrouter_provider.load_max_retries", return_value=3)
     @patch("modules.llm.providers.openrouter_provider.ChatOpenAI")
     def test_basic_initialization(
-        self, mock_chat: MagicMock, mock_retries: MagicMock
+        self, mock_chat: MagicMock
     ) -> None:
         provider = OpenRouterProvider(
             api_key="test-key",
@@ -234,44 +233,39 @@ class TestOpenRouterProviderInit:
         call_kwargs = mock_chat.call_args
         assert call_kwargs.kwargs["base_url"] == OPENROUTER_BASE_URL
 
-    @patch("modules.llm.providers.openrouter_provider.load_max_retries", return_value=3)
     @patch("modules.llm.providers.openrouter_provider.ChatOpenAI")
     def test_default_app_name(
-        self, mock_chat: MagicMock, mock_retries: MagicMock
+        self, mock_chat: MagicMock
     ) -> None:
         provider = OpenRouterProvider(api_key="k", model="m")
         assert provider.app_name == "ChronoTranscriber"
 
-    @patch("modules.llm.providers.openrouter_provider.load_max_retries", return_value=3)
     @patch("modules.llm.providers.openrouter_provider.ChatOpenAI")
     def test_custom_app_name(
-        self, mock_chat: MagicMock, mock_retries: MagicMock
+        self, mock_chat: MagicMock
     ) -> None:
         provider = OpenRouterProvider(api_key="k", model="m", app_name="MyApp")
         assert provider.app_name == "MyApp"
 
-    @patch("modules.llm.providers.openrouter_provider.load_max_retries", return_value=3)
     @patch("modules.llm.providers.openrouter_provider.ChatOpenAI")
     def test_get_capabilities_returns_object(
-        self, mock_chat: MagicMock, mock_retries: MagicMock
+        self, mock_chat: MagicMock
     ) -> None:
         provider = OpenRouterProvider(api_key="k", model="openai/gpt-4o")
         caps = provider.get_capabilities()
         assert caps is not None
 
-    @patch("modules.llm.providers.openrouter_provider.load_max_retries", return_value=3)
     @patch("modules.llm.providers.openrouter_provider.ChatOpenAI")
     def test_reasoning_config_stored(
-        self, mock_chat: MagicMock, mock_retries: MagicMock
+        self, mock_chat: MagicMock
     ) -> None:
         rc = {"effort": "high"}
         provider = OpenRouterProvider(api_key="k", model="m", reasoning_config=rc)
         assert provider.reasoning_config == rc
 
-    @patch("modules.llm.providers.openrouter_provider.load_max_retries", return_value=3)
     @patch("modules.llm.providers.openrouter_provider.ChatOpenAI")
     def test_headers_include_referer_and_title(
-        self, mock_chat: MagicMock, mock_retries: MagicMock
+        self, mock_chat: MagicMock
     ) -> None:
         OpenRouterProvider(
             api_key="k",
@@ -290,11 +284,10 @@ class TestOpenRouterProviderInit:
 
 
 class TestOpenRouterProviderReasoningConfig:
-    @patch("modules.llm.providers.openrouter_provider.load_max_retries", return_value=3)
     @patch("modules.llm.providers.openrouter_provider.ChatOpenAI")
     @patch("modules.llm.providers.openrouter_provider.detect_capabilities")
     def test_anthropic_model_maps_effort_to_max_tokens(
-        self, mock_caps: MagicMock, mock_chat: MagicMock, mock_retries: MagicMock
+        self, mock_caps: MagicMock, mock_chat: MagicMock
     ) -> None:
         caps = MagicMock()
         caps.supports_reasoning_effort = True
@@ -315,11 +308,10 @@ class TestOpenRouterProviderReasoningConfig:
         assert "max_tokens" in extra_body["reasoning"]
         assert "effort" not in extra_body["reasoning"]
 
-    @patch("modules.llm.providers.openrouter_provider.load_max_retries", return_value=3)
     @patch("modules.llm.providers.openrouter_provider.ChatOpenAI")
     @patch("modules.llm.providers.openrouter_provider.detect_capabilities")
     def test_deepseek_model_maps_effort_to_enabled_flag(
-        self, mock_caps: MagicMock, mock_chat: MagicMock, mock_retries: MagicMock
+        self, mock_caps: MagicMock, mock_chat: MagicMock
     ) -> None:
         caps = MagicMock()
         caps.supports_reasoning_effort = True
@@ -345,11 +337,10 @@ class TestOpenRouterProviderReasoningConfig:
 
 class TestOpenRouterProviderTranscribe:
     @pytest.mark.asyncio
-    @patch("modules.llm.providers.openrouter_provider.load_max_retries", return_value=3)
     @patch("modules.llm.providers.openrouter_provider.ChatOpenAI")
     @patch("modules.llm.providers.openrouter_provider.detect_capabilities")
     async def test_returns_error_for_non_vision_model(
-        self, mock_caps: MagicMock, mock_chat: MagicMock, mock_retries: MagicMock
+        self, mock_caps: MagicMock, mock_chat: MagicMock
     ) -> None:
         caps = MagicMock()
         caps.supports_image_input = False
@@ -365,11 +356,10 @@ class TestOpenRouterProviderTranscribe:
         assert "does not support vision" in result.error
 
     @pytest.mark.asyncio
-    @patch("modules.llm.providers.openrouter_provider.load_max_retries", return_value=3)
     @patch("modules.llm.providers.openrouter_provider.ChatOpenAI")
     @patch("modules.llm.providers.openrouter_provider.detect_capabilities")
     async def test_invokes_llm_for_vision_model(
-        self, mock_caps: MagicMock, mock_chat: MagicMock, mock_retries: MagicMock
+        self, mock_caps: MagicMock, mock_chat: MagicMock
     ) -> None:
         caps = MagicMock()
         caps.supports_image_input = True
@@ -401,11 +391,10 @@ class TestOpenRouterProviderTranscribe:
         mock_llm_instance.ainvoke.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("modules.llm.providers.openrouter_provider.load_max_retries", return_value=3)
     @patch("modules.llm.providers.openrouter_provider.ChatOpenAI")
     @patch("modules.llm.providers.openrouter_provider.detect_capabilities")
     async def test_invoke_exception_returns_error_result(
-        self, mock_caps: MagicMock, mock_chat: MagicMock, mock_retries: MagicMock
+        self, mock_caps: MagicMock, mock_chat: MagicMock
     ) -> None:
         caps = MagicMock()
         caps.supports_image_input = True
@@ -432,10 +421,9 @@ class TestOpenRouterProviderTranscribe:
 
 class TestOpenRouterProviderClose:
     @pytest.mark.asyncio
-    @patch("modules.llm.providers.openrouter_provider.load_max_retries", return_value=3)
     @patch("modules.llm.providers.openrouter_provider.ChatOpenAI")
     async def test_close_does_not_raise(
-        self, mock_chat: MagicMock, mock_retries: MagicMock
+        self, mock_chat: MagicMock
     ) -> None:
         provider = OpenRouterProvider(api_key="k", model="m")
         await provider.close()

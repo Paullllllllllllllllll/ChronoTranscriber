@@ -40,7 +40,7 @@ from modules.llm.providers.base import (
     OPENAI_TOKEN_MAPPING,
     BaseProvider,
     TranscriptionResult,
-    load_max_retries,
+    aclose_chat_model,
 )
 
 logger = setup_logger(__name__)
@@ -108,15 +108,15 @@ class CustomProvider(BaseProvider):
             max_output_tokens=max_tokens,
         )
 
-        max_retries = load_max_retries()
-
+        # max_retries=0 disables SDK-internal retries so the tenacity loop in
+        # BaseProvider._ainvoke_with_retry is the single retry authority.
         self._llm = ChatOpenAI(
             api_key=api_key,  # type: ignore[arg-type]
             model=model,
             base_url=base_url,
             max_tokens=max_tokens,  # type: ignore[call-arg]  # langchain-openai stubs omit max_tokens
             timeout=timeout,
-            max_retries=max_retries,
+            max_retries=0,
             temperature=temperature,
         )
 
@@ -254,5 +254,5 @@ class CustomProvider(BaseProvider):
             return TranscriptionResult(content="", error=str(e))
 
     async def close(self) -> None:
-        """Clean up resources."""
-        pass
+        """Dispose the underlying LangChain/SDK HTTP clients. Never raises."""
+        await aclose_chat_model(getattr(self, "_llm", None))

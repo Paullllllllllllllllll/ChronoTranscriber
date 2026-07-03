@@ -77,7 +77,11 @@ async def transcribe_single_image(
                 final_text = f"[transcription error: {image_name}]"
             return (str(img_path), image_name, final_text, result, order_index)
         elif method == "tesseract":
-            final_text = perform_ocr(img_path, tesseract_config)
+            # perform_ocr is blocking (subprocess + PIL); run it off the event
+            # loop so the gather pool actually overlaps OCR work.
+            final_text = await asyncio.to_thread(
+                perform_ocr, img_path, tesseract_config
+            )
         else:
             logger.error(
                 f"Unknown transcription method '{method}' for image {img_path.name}"

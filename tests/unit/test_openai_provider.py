@@ -89,9 +89,6 @@ class TestOpenAIProviderInit:
 
         with (
             patch("modules.llm.providers.openai_provider.ChatOpenAI"),
-            patch(
-                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
-            ),
         ):
             provider = OpenAIProvider(
                 api_key="sk-test",
@@ -108,9 +105,6 @@ class TestOpenAIProviderInit:
 
         with (
             patch("modules.llm.providers.openai_provider.ChatOpenAI"),
-            patch(
-                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
-            ),
         ):
             provider = OpenAIProvider(
                 api_key="sk-test",
@@ -131,9 +125,6 @@ class TestOpenAIProviderInit:
             patch(
                 "modules.llm.providers.openai_provider.ChatOpenAI",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
-            ),
-            patch(
-                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
             ),
         ):
             OpenAIProvider(
@@ -157,9 +148,6 @@ class TestOpenAIProviderInit:
                 "modules.llm.providers.openai_provider.ChatOpenAI",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
             ),
-            patch(
-                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
-            ),
         ):
             OpenAIProvider(
                 api_key="sk-test",
@@ -176,9 +164,6 @@ class TestOpenAIProviderInit:
 
         with (
             patch("modules.llm.providers.openai_provider.ChatOpenAI"),
-            patch(
-                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
-            ),
         ):
             provider = OpenAIProvider(api_key="sk-test", model="gpt-4o")
 
@@ -195,9 +180,6 @@ class TestOpenAIProviderInit:
             patch(
                 "modules.llm.providers.openai_provider.ChatOpenAI",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
-            ),
-            patch(
-                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
             ),
         ):
             OpenAIProvider(
@@ -220,9 +202,6 @@ class TestOpenAIProviderInit:
             patch(
                 "modules.llm.providers.openai_provider.ChatOpenAI",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
-            ),
-            patch(
-                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
             ),
         ):
             OpenAIProvider(
@@ -250,9 +229,6 @@ class TestOpenAIProviderInit:
             patch(
                 "modules.llm.providers.openai_provider.ChatOpenAI",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
-            ),
-            patch(
-                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
             ),
         ):
             OpenAIProvider(
@@ -282,9 +258,6 @@ class TestOpenAIProviderInit:
                 "modules.llm.providers.openai_provider.ChatOpenAI",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
             ),
-            patch(
-                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
-            ),
         ):
             OpenAIProvider(api_key="sk-test", model="gpt-4o")
 
@@ -310,9 +283,6 @@ class TestOpenAIProviderTextVerbosity:
 
         with (
             patch("modules.llm.providers.openai_provider.ChatOpenAI"),
-            patch(
-                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
-            ),
         ):
             provider = OpenAIProvider(
                 api_key="sk-test",
@@ -329,9 +299,6 @@ class TestOpenAIProviderTextVerbosity:
 
         with (
             patch("modules.llm.providers.openai_provider.ChatOpenAI"),
-            patch(
-                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
-            ),
         ):
             provider = OpenAIProvider(api_key="sk-test", model="gpt-4o")
 
@@ -348,9 +315,6 @@ class TestOpenAIProviderTextVerbosity:
             patch(
                 "modules.llm.providers.openai_provider.ChatOpenAI",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
-            ),
-            patch(
-                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
             ),
         ):
             OpenAIProvider(
@@ -373,9 +337,6 @@ class TestOpenAIProviderTextVerbosity:
                 "modules.llm.providers.openai_provider.ChatOpenAI",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
             ),
-            patch(
-                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
-            ),
         ):
             OpenAIProvider(
                 api_key="sk-test",
@@ -396,9 +357,6 @@ class TestOpenAIProviderTextVerbosity:
             patch(
                 "modules.llm.providers.openai_provider.ChatOpenAI",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
-            ),
-            patch(
-                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
             ),
         ):
             OpenAIProvider(
@@ -422,10 +380,6 @@ class TestOpenAIProviderTextVerbosity:
                     "modules.llm.providers.openai_provider.ChatOpenAI",
                     side_effect=lambda _c=captured, **kw: _c.update(kw) or MagicMock(),
                 ),
-                patch(
-                    "modules.llm.providers.openai_provider.load_max_retries",
-                    return_value=3,
-                ),
             ):
                 OpenAIProvider(
                     api_key="sk-test",
@@ -448,9 +402,6 @@ class TestOpenAIProviderInvokeLLM:
 
         with (
             patch("modules.llm.providers.openai_provider.ChatOpenAI"),
-            patch(
-                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
-            ),
         ):
             provider = OpenAIProvider(api_key="sk-test", model="gpt-4o")
 
@@ -486,10 +437,6 @@ class TestOpenAIProviderContextImage:
 
         with (
             patch("modules.llm.providers.openai_provider.ChatOpenAI"),
-            patch(
-                "modules.llm.providers.openai_provider.load_max_retries",
-                return_value=3,
-            ),
         ):
             return OpenAIProvider(api_key="sk-test", model="gpt-4o")
 

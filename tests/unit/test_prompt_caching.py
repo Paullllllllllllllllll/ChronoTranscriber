@@ -309,10 +309,6 @@ class TestAnthropicProviderCacheControl:
 
         with (
             patch("modules.llm.providers.anthropic_provider.ChatAnthropic"),
-            patch(
-                "modules.llm.providers.anthropic_provider.load_max_retries",
-                return_value=3,
-            ),
             patch("modules.llm.providers.base.get_config_service") as mock_cs,
         ):
             mock_cs.return_value.get_prompt_caching_config.return_value = caching_cfg
@@ -431,9 +427,6 @@ class TestOpenAIProviderCacheRetention:
                 "modules.llm.providers.openai_provider.ChatOpenAI",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
             ),
-            patch(
-                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
-            ),
             patch("modules.llm.providers.base.get_config_service") as mock_cs,
         ):
             mock_cs.return_value.get_prompt_caching_config.return_value = {
@@ -458,9 +451,6 @@ class TestOpenAIProviderCacheRetention:
                 "modules.llm.providers.openai_provider.ChatOpenAI",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
             ),
-            patch(
-                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
-            ),
             patch("modules.llm.providers.base.get_config_service") as mock_cs,
         ):
             mock_cs.return_value.get_prompt_caching_config.return_value = {
@@ -484,9 +474,6 @@ class TestOpenAIProviderCacheRetention:
             patch(
                 "modules.llm.providers.openai_provider.ChatOpenAI",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
-            ),
-            patch(
-                "modules.llm.providers.openai_provider.load_max_retries", return_value=3
             ),
             patch("modules.llm.providers.base.get_config_service") as mock_cs,
         ):
@@ -520,10 +507,6 @@ class TestOpenRouterProviderCacheControl:
             patch(
                 "modules.llm.providers.openrouter_provider.ChatOpenAI",
                 return_value=MagicMock(),
-            ),
-            patch(
-                "modules.llm.providers.openrouter_provider.load_max_retries",
-                return_value=3,
             ),
             patch("modules.llm.providers.base.get_config_service") as mock_cs,
         ):

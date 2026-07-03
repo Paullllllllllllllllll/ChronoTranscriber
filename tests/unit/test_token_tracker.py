@@ -79,6 +79,8 @@ class TestDailyTokenTracker:
         # First tracker
         tracker1 = DailyTokenTracker(daily_limit=100000, state_file=state_file)
         tracker1.add_tokens(25000)
+        # Disk writes are debounced off the event loop; flush to persist now.
+        tracker1.flush()
 
         # Second tracker should load state
         tracker2 = DailyTokenTracker(daily_limit=100000, state_file=state_file)
@@ -208,11 +210,12 @@ class TestSaveStateRetry:
                 raise PermissionError("WinError 5: Access Denied")
             return original_replace(self_path, target)
 
+        tracker._tokens_used_today = 500
         with (
             patch.object(Path, "replace", flaky_replace),
             patch("modules.infra.token_budget.time.sleep") as mock_sleep,
         ):
-            tracker.add_tokens(500)
+            tracker._save_state()
 
         assert call_count == 2
         mock_sleep.assert_called_once_with(0.1)
@@ -221,8 +224,34 @@ class TestSaveStateRetry:
             state = json.load(f)
         assert state["tokens_used"] == 500
 
-        temp_file = tracker.state_file.with_suffix(".tmp")
-        assert not temp_file.exists()
+        # No per-process temp file left behind.
+        assert list(tracker.state_file.parent.glob("*.tmp")) == []
+
+    @pytest.mark.unit
+    def test_retry_on_file_not_found_race(self, tracker) -> None:
+        """A FileNotFoundError from a lost replace() race is retried."""
+        original_replace = Path.replace
+        call_count = 0
+
+        def flaky_replace(self_path, target):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise FileNotFoundError("lost the replace race")
+            return original_replace(self_path, target)
+
+        tracker._tokens_used_today = 600
+        with (
+            patch.object(Path, "replace", flaky_replace),
+            patch("modules.infra.token_budget.time.sleep") as mock_sleep,
+        ):
+            tracker._save_state()
+
+        assert call_count == 2
+        mock_sleep.assert_called_once_with(0.1)
+        with open(tracker.state_file, encoding="utf-8") as f:
+            state = json.load(f)
+        assert state["tokens_used"] == 600
 
     @pytest.mark.unit
     def test_fallback_to_direct_write_after_all_retries_fail(self, tracker) -> None:
@@ -231,50 +260,115 @@ class TestSaveStateRetry:
         def always_fail(self_path, target):
             raise PermissionError("WinError 5: Access Denied")
 
+        tracker._tokens_used_today = 750
         with (
             patch.object(Path, "replace", always_fail),
             patch("modules.infra.token_budget.time.sleep"),
         ):
-            tracker.add_tokens(750)
+            tracker._save_state()
 
         with open(tracker.state_file, encoding="utf-8") as f:
             state = json.load(f)
         assert state["tokens_used"] == 750
 
-        temp_file = tracker.state_file.with_suffix(".tmp")
-        assert not temp_file.exists()
+        assert list(tracker.state_file.parent.glob("*.tmp")) == []
 
     @pytest.mark.unit
     def test_temp_file_cleaned_up_on_general_error(self, tracker) -> None:
-        """Temp file is removed by finally block on non-Permission errors."""
-        temp_file = tracker.state_file.with_suffix(".tmp")
+        """Temp file is removed by finally block on non-retryable errors."""
 
         def fail_replace(self_path, target):
-            raise FileNotFoundError("Target directory missing")
+            raise IsADirectoryError("target is a directory")
 
         with patch.object(Path, "replace", fail_replace):
             tracker._save_state()
 
-        assert not temp_file.exists()
+        assert list(tracker.state_file.parent.glob("*.tmp")) == []
 
     @pytest.mark.unit
-    def test_no_retry_on_non_permission_error(self, tracker) -> None:
-        """Non-PermissionError exceptions are not retried."""
+    def test_no_retry_on_unretryable_error(self, tracker) -> None:
+        """An error that is neither PermissionError nor FileNotFoundError is not
+        retried (it propagates to the outer handler on the first attempt)."""
         call_count = 0
 
-        def fail_with_fnf(self_path, target):
+        def fail_unretryable(self_path, target):
             nonlocal call_count
             call_count += 1
-            raise FileNotFoundError("Target directory missing")
+            raise IsADirectoryError("target is a directory")
 
         with (
-            patch.object(Path, "replace", fail_with_fnf),
+            patch.object(Path, "replace", fail_unretryable),
             patch("modules.infra.token_budget.time.sleep") as mock_sleep,
         ):
             tracker._save_state()
 
         assert call_count == 1
         mock_sleep.assert_not_called()
+
+    @pytest.mark.unit
+    def test_temp_file_name_is_per_process_unique(self, tracker) -> None:
+        """The temp file embeds the pid and a random token (no fixed .tmp)."""
+        import os
+        import re
+
+        original_replace = Path.replace
+        captured: dict[str, str] = {}
+
+        def capture_replace(self_path, target):
+            captured["name"] = self_path.name
+            return original_replace(self_path, target)
+
+        tracker._tokens_used_today = 10
+        with patch.object(Path, "replace", capture_replace):
+            tracker._save_state()
+
+        assert re.fullmatch(
+            rf"\.token_state\.json\.{os.getpid()}\.[0-9a-f]{{8}}\.tmp",
+            captured["name"],
+        )
+
+
+class TestDebouncedOffLoopWrites:
+    """Tests for the debounced, off-event-loop state persistence (B2)."""
+
+    @pytest.fixture
+    def tracker(self, temp_dir):
+        state_file = temp_dir / ".token_state.json"
+        return DailyTokenTracker(daily_limit=100000, state_file=state_file)
+
+    @pytest.mark.unit
+    def test_add_tokens_does_not_write_per_call(self, tracker) -> None:
+        """add_tokens marks state dirty but does not write on every call."""
+        with patch.object(tracker, "_save_state") as mock_save:
+            tracker.add_tokens(100)
+            tracker.add_tokens(200)
+            # No synchronous write happened on the (event-loop) calling thread.
+            assert mock_save.call_count == 0
+            assert tracker._pending_write is True
+        # Stop the background writer so it does not race later assertions.
+        tracker._writer_stop.set()
+        assert tracker.get_tokens_used_today() == 300
+
+    @pytest.mark.unit
+    def test_flush_persists_pending_write(self, tracker) -> None:
+        """flush() forces a pending debounced write to disk."""
+        tracker.add_tokens(1234)
+        tracker._writer_stop.set()  # prevent the daemon from writing first
+        tracker.flush()
+        with open(tracker.state_file, encoding="utf-8") as f:
+            state = json.load(f)
+        assert state["tokens_used"] == 1234
+        assert tracker._pending_write is False
+
+    @pytest.mark.unit
+    def test_flush_on_exit_persists_pending_write(self, tracker) -> None:
+        """The atexit hook persists any pending write."""
+        tracker.add_tokens(555)
+        tracker._writer_stop.clear()
+        tracker._flush_on_exit()
+        with open(tracker.state_file, encoding="utf-8") as f:
+            state = json.load(f)
+        assert state["tokens_used"] == 555
 
 
 class TestChunkReservation:
@@ -362,3 +456,44 @@ class TestChunkReservation:
         )
         assert t.try_reserve(5000) == 5000  # estimate above EWMA wins
         assert t.try_reserve(10) == 100  # estimate below EWMA floors at EWMA
+
+
+class TestLiveLimitReread:
+    """The wait loop re-reads daily_tokens so a mid-wait edit lifts the cap (B10)."""
+
+    @pytest.mark.unit
+    def test_set_daily_limit_updates_value(self, temp_dir: Path) -> None:
+        tracker = DailyTokenTracker(
+            daily_limit=100, enabled=True, state_file=temp_dir / "s.json"
+        )
+        tracker.set_daily_limit(500)
+        assert tracker.daily_limit == 500
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_wait_reread_lifts_cap_without_restart(
+        self, temp_dir: Path, monkeypatch
+    ) -> None:
+        from modules.infra import token_budget as tb
+
+        tracker = DailyTokenTracker(
+            daily_limit=100, enabled=True, state_file=temp_dir / "s.json"
+        )
+        tracker.add_tokens(100)  # limit reached
+        assert tracker.is_limit_reached()
+
+        monkeypatch.setattr(tb, "get_token_tracker", lambda: tracker)
+        # A mid-wait config edit raises the daily limit.
+        monkeypatch.setattr(tb, "_read_configured_daily_limit", lambda: 1000)
+
+        async def _fast_sleep(_seconds):
+            return None
+
+        monkeypatch.setattr(tb.asyncio, "sleep", _fast_sleep)
+
+        ok = await tb.check_and_wait_for_token_limit(
+            {"daily_token_limit": {"enabled": True}}
+        )
+        assert ok is True
+        # The re-read lifted the cap, so processing resumes with the new limit.
+        assert tracker.daily_limit == 1000

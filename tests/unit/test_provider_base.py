@@ -388,19 +388,19 @@ class TestLoadMaxRetries:
         assert result == 7
 
     @pytest.mark.unit
-    def test_defaults_to_5_when_missing(self) -> None:
-        """load_max_retries returns 5 when config key is absent."""
+    def test_defaults_to_8_when_missing(self) -> None:
+        """load_max_retries returns 8 when config key is absent."""
         from modules.llm.providers.base import load_max_retries
 
         with patch("modules.llm.providers.base.get_config_service") as mock_cs:
             mock_cs.return_value.get_concurrency_config.return_value = {}
             result = load_max_retries()
 
-        assert result == 5
+        assert result == 8
 
     @pytest.mark.unit
-    def test_returns_5_on_exception(self) -> None:
-        """load_max_retries returns 5 when config service raises an exception."""
+    def test_returns_8_on_exception(self) -> None:
+        """load_max_retries returns 8 when config service raises an exception."""
         from modules.llm.providers.base import load_max_retries
 
         with patch(
@@ -409,7 +409,7 @@ class TestLoadMaxRetries:
         ):
             result = load_max_retries()
 
-        assert result == 5
+        assert result == 8
 
     @pytest.mark.unit
     def test_minimum_is_1(self) -> None:

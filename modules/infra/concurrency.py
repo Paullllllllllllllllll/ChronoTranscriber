@@ -43,26 +43,47 @@ async def run_concurrent_transcription_tasks(
             caller drain, wait for the daily reset, and re-pass.
 
     Returns:
-        List of results from all task executions.
+        List of results from all task executions, one per input tuple in the
+        original order (``None`` for a failed or deferred task).
     """
-    semaphore = asyncio.Semaphore(concurrency_limit)
+    n = len(args_list)
+    results: list[Any] = [None] * n
+    if n == 0:
+        return results
 
-    async def worker(args: tuple[Any, ...]) -> Any:
-        async with semaphore:
+    # Bounded lazy submission: only ``workers_n`` Task objects exist at once,
+    # each pulling the next index off a queue, so a 900-item folder never
+    # materializes 900 tasks and cancellation stays prompt. Results are stored
+    # by index, preserving input order; workers swallow task exceptions (return
+    # None) per the existing contract.
+    index_queue: asyncio.Queue[int] = asyncio.Queue()
+    for i in range(n):
+        index_queue.put_nowait(i)
+    workers_n = max(1, min(int(concurrency_limit), n))
+
+    async def worker() -> None:
+        while True:
+            try:
+                i = index_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+            args = args_list[i]
             if exhausted is not None and exhausted.is_set():
-                return None  # budget exhausted: defer (re-processed next pass)
+                # Budget exhausted: defer (re-processed on the next pass).
+                continue
             reserved = None
             if tracker is not None:
                 reserved = tracker.try_reserve()
                 if reserved is None:
                     if exhausted is not None:
                         exhausted.set()
-                    return None
+                    continue
             try:
                 if delay > 0:
                     await asyncio.sleep(delay)
                 result = await corofunc(*args)
-                # Stream the result to the callback as soon as it is ready
+                results[i] = result
+                # Stream the result to the callback as soon as it is ready.
                 if on_result is not None:
                     try:
                         await on_result(result)
@@ -70,16 +91,22 @@ async def run_concurrent_transcription_tasks(
                         logger.error(
                             f"on_result callback failed for args {args}: {cb_exc}"
                         )
-                return result
             except Exception as e:
                 logger.error(f"Transcription task failed with arguments {args}: {e}")
-                return None
+                results[i] = None
             finally:
                 if reserved:
                     tracker.release(reserved)
 
-    tasks = [asyncio.create_task(worker(args)) for args in args_list]
-    results = await asyncio.gather(*tasks, return_exceptions=False)
+    worker_tasks = [asyncio.create_task(worker()) for _ in range(workers_n)]
+    try:
+        await asyncio.gather(*worker_tasks)
+    except BaseException:
+        # Cancel and drain the pool so no worker is orphaned on failure.
+        for task in worker_tasks:
+            task.cancel()
+        await asyncio.gather(*worker_tasks, return_exceptions=True)
+        raise
     return results
 
 
@@ -173,7 +200,17 @@ async def run_streaming_transcription_tasks(
 
     producer_task = asyncio.create_task(produce())
     worker_tasks = [asyncio.create_task(work()) for _ in range(workers_n)]
-    await asyncio.gather(producer_task, *worker_tasks)
+    all_tasks = [producer_task, *worker_tasks]
+    try:
+        await asyncio.gather(*all_tasks)
+    except BaseException:
+        # If the gather raises, cancel and await the producer and every worker
+        # (suppressing their CancelledError) so none is left orphaned before the
+        # exception propagates.
+        for task in all_tasks:
+            task.cancel()
+        await asyncio.gather(*all_tasks, return_exceptions=True)
+        raise
 
     if producer_error:
         raise producer_error[0]

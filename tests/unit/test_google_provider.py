@@ -143,10 +143,6 @@ class TestGoogleProviderInit:
 
         with (
             patch("modules.llm.providers.google_provider.ChatGoogleGenerativeAI"),
-            patch(
-                "modules.llm.providers.google_provider.load_max_retries",
-                return_value=3,
-            ),
         ):
             provider = GoogleProvider(
                 api_key="AIza-test",
@@ -162,10 +158,6 @@ class TestGoogleProviderInit:
 
         with (
             patch("modules.llm.providers.google_provider.ChatGoogleGenerativeAI"),
-            patch(
-                "modules.llm.providers.google_provider.load_max_retries",
-                return_value=3,
-            ),
         ):
             provider = GoogleProvider(
                 api_key="AIza-test",
@@ -186,9 +178,6 @@ class TestGoogleProviderInit:
             patch(
                 "modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
-            ),
-            patch(
-                "modules.llm.providers.google_provider.load_max_retries", return_value=3
             ),
         ):
             GoogleProvider(
@@ -211,9 +200,6 @@ class TestGoogleProviderInit:
                 "modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
             ),
-            patch(
-                "modules.llm.providers.google_provider.load_max_retries", return_value=3
-            ),
         ):
             GoogleProvider(
                 api_key="AIza-test",
@@ -234,9 +220,6 @@ class TestGoogleProviderInit:
             patch(
                 "modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
-            ),
-            patch(
-                "modules.llm.providers.google_provider.load_max_retries", return_value=3
             ),
         ):
             GoogleProvider(
@@ -259,9 +242,6 @@ class TestGoogleProviderInit:
                 "modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
             ),
-            patch(
-                "modules.llm.providers.google_provider.load_max_retries", return_value=3
-            ),
         ):
             GoogleProvider(
                 api_key="AIza-test",
@@ -283,9 +263,6 @@ class TestGoogleProviderInit:
                 "modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
             ),
-            patch(
-                "modules.llm.providers.google_provider.load_max_retries", return_value=3
-            ),
         ):
             GoogleProvider(
                 api_key="AIza-test",
@@ -306,9 +283,6 @@ class TestGoogleProviderInit:
                 "modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
                 side_effect=lambda **kw: captured.update(kw) or MagicMock(),
             ),
-            patch(
-                "modules.llm.providers.google_provider.load_max_retries", return_value=3
-            ),
         ):
             GoogleProvider(
                 api_key="AIza-test",
@@ -326,10 +300,6 @@ class TestGoogleProviderInit:
 
         with (
             patch("modules.llm.providers.google_provider.ChatGoogleGenerativeAI"),
-            patch(
-                "modules.llm.providers.google_provider.load_max_retries",
-                return_value=3,
-            ),
         ):
             provider = GoogleProvider(
                 api_key="AIza-test",

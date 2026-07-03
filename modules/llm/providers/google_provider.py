@@ -8,9 +8,11 @@ Supports Gemini models:
 - Gemini 1.5 Pro/Flash
 
 LangChain handles:
-- Retry logic with exponential backoff (max_retries parameter)
 - Token usage tracking (response_metadata)
 - Structured output parsing (with_structured_output)
+
+Retries are owned solely by BaseProvider._ainvoke_with_retry (tenacity); the SDK
+client is built with max_retries=0.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from modules.llm.providers.base import (
     GOOGLE_TOKEN_MAPPING,
     BaseProvider,
     TranscriptionResult,
-    load_max_retries,
+    aclose_chat_model,
 )
 
 logger = setup_logger(__name__)
@@ -65,9 +67,10 @@ class GoogleProvider(BaseProvider):
         self.reasoning_config = reasoning_config
 
         self._capabilities = caps
-        max_retries = load_max_retries()
 
-        # Build LLM kwargs
+        # Build LLM kwargs. max_retries=0 disables SDK-internal retries so the
+        # tenacity loop in BaseProvider._ainvoke_with_retry is the single retry
+        # authority.
         llm_kwargs: dict[str, Any] = {
             "google_api_key": api_key,
             "model": model,
@@ -76,7 +79,7 @@ class GoogleProvider(BaseProvider):
             else None,
             "max_tokens": effective_max_tokens,
             "timeout": timeout,
-            "max_retries": max_retries,
+            "max_retries": 0,
             "top_p": top_p if self._capabilities.supports_top_p else None,
             "top_k": top_k,
         }
@@ -220,5 +223,5 @@ class GoogleProvider(BaseProvider):
             )
 
     async def close(self) -> None:
-        """Clean up resources."""
-        pass
+        """Dispose the underlying LangChain/SDK HTTP clients. Never raises."""
+        await aclose_chat_model(getattr(self, "_llm", None))

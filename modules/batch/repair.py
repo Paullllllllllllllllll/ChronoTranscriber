@@ -28,6 +28,10 @@ from openai import OpenAI
 from modules.config.service import get_config_service
 from modules.infra.concurrency import run_concurrent_transcription_tasks
 from modules.infra.logger import setup_logger
+from modules.infra.token_budget import (
+    check_and_wait_for_token_limit,
+    get_token_tracker,
+)
 from modules.llm import open_transcriber
 from modules.llm.openai_sdk_utils import coerce_file_id, sdk_to_dict
 from modules.llm.response_parsing import (
@@ -699,6 +703,11 @@ async def _repair_sync_mode(
     repairs_dir.mkdir(parents=True, exist_ok=True)
     # Do not write a duplicate repair_session marker here; already recorded above.
 
+    # Repair issues real synchronous GPT calls; gate them on the daily token
+    # budget so a large repair pauses at the cap and resumes after the reset
+    # instead of blowing through it (mirrors the streaming manager's drain/wait).
+    tracker = get_token_tracker()
+
     async with open_transcriber(
         api_key=api_key,
         model=model_name,
@@ -737,15 +746,61 @@ async def _repair_sync_mode(
             async with write_lock:
                 write_repair_jsonl_line(repair_jsonl_path, record)
 
-        args_list = [(t, trans) for t in targets]
+        # Token-budget-gated multi-pass loop: each pass admits pages until the
+        # budget is exhausted, then drains and waits for the daily reset before
+        # re-passing over the deferred pages (their worker returned None and left
+        # no JSONL record, so they remain repairable on the next pass/run).
+        remaining = list(targets)
+        collected: list[tuple[int, str, dict[str, Any]]] = []
+        stalled_resets = 0
+        while remaining:
+            exhausted = asyncio.Event()
+            args_list = [(t, trans) for t in remaining]
+            results = await run_concurrent_transcription_tasks(
+                worker,
+                args_list,
+                concurrency_limit=concurrency_limit,
+                delay=delay_between,
+                on_result=on_result,
+                tracker=tracker,
+                exhausted=exhausted,
+            )
 
-        results = await run_concurrent_transcription_tasks(
-            worker,
-            args_list,
-            concurrency_limit=concurrency_limit,
-            delay=delay_between,
-            on_result=on_result,
-        )
+            deferred: list[RepairTarget] = []
+            for target, res in zip(remaining, results, strict=True):
+                if res is None:
+                    deferred.append(target)
+                else:
+                    collected.append(res)
+
+            if not exhausted.is_set() or not deferred:
+                break
+
+            made_progress = len(deferred) < len(remaining)
+            print_warning(
+                f"[WARN] Daily token budget reached; {len(deferred)} repair "
+                f"page(s) deferred. Waiting for daily reset..."
+            )
+            if not await check_and_wait_for_token_limit(conc):
+                print_info("[INFO] Wait cancelled; remaining pages left unrepaired.")
+                break
+
+            # Safeguard: if a full day's reset yields no progress twice running, a
+            # single page exceeds the entire daily budget; stop.
+            if not made_progress:
+                stalled_resets += 1
+                if stalled_resets >= 2:
+                    print_warning(
+                        "[WARN] A single page appears to exceed the entire daily "
+                        "token budget; stopping. Raise daily_tokens to repair the "
+                        "remaining pages."
+                    )
+                    break
+            else:
+                stalled_resets = 0
+            remaining = deferred
+
+    results = collected
 
     # Apply edits to final_lines with unified page-aware formatting
     target_by_line: dict[int, RepairTarget] = {t.line_index: t for t in targets}

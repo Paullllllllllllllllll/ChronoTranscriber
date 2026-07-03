@@ -13,9 +13,11 @@ Supported model families include:
 - And many more
 
 LangChain handles:
-- Retry logic with exponential backoff (max_retries parameter)
 - Token usage tracking (response_metadata)
 - Structured output parsing (with_structured_output)
+
+Retries are owned solely by BaseProvider._ainvoke_with_retry (tenacity); the SDK
+client is built with max_retries=0.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ from modules.llm.providers.base import (
     OPENROUTER_TOKEN_MAPPING,
     BaseProvider,
     TranscriptionResult,
-    load_max_retries,
+    aclose_chat_model,
 )
 
 logger = setup_logger(__name__)
@@ -106,7 +108,6 @@ class OpenRouterProvider(BaseProvider):
         self.reasoning_config = reasoning_config
 
         self._capabilities = detect_capabilities(model)
-        max_retries = load_max_retries()
 
         # Build disabled_params for models that don't support certain features
         disabled_params = self._build_disabled_params()
@@ -193,17 +194,17 @@ class OpenRouterProvider(BaseProvider):
             "X-Title": self.app_name,
         }
 
-        # Initialize LangChain ChatOpenAI with OpenRouter endpoint
-        # LangChain handles:
-        # - Retry logic with exponential backoff (max_retries)
-        # - Parameter filtering for unsupported models (disabled_params)
+        # Initialize LangChain ChatOpenAI with OpenRouter endpoint.
+        # LangChain handles parameter filtering (disabled_params). max_retries=0
+        # disables SDK-internal retries so the tenacity loop in
+        # BaseProvider._ainvoke_with_retry is the single retry authority.
         self._llm = ChatOpenAI(  # type: ignore[call-arg]
             api_key=api_key,  # type: ignore[arg-type]
             model=model,
             base_url=OPENROUTER_BASE_URL,
             max_tokens=max_tokens,
             timeout=timeout,
-            max_retries=max_retries,
+            max_retries=0,
             disabled_params=disabled_params,
             default_headers=default_headers,
             **model_kwargs,
@@ -349,5 +350,5 @@ class OpenRouterProvider(BaseProvider):
             )
 
     async def close(self) -> None:
-        """Clean up resources."""
-        pass
+        """Dispose the underlying LangChain/SDK HTTP clients. Never raises."""
+        await aclose_chat_model(getattr(self, "_llm", None))

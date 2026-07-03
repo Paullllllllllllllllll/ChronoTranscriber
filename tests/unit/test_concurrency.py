@@ -119,6 +119,53 @@ class TestRunConcurrentTranscriptionTasks:
         )
         assert results == [0, 1, 2]
 
+    async def test_bounded_lazy_submission_no_eager_task_pile(self) -> None:
+        """Only ``min(limit, n)`` Task objects are created, not one per item."""
+        from unittest.mock import patch
+
+        n = 50
+        limit = 4
+        created = 0
+        orig_create_task = asyncio.create_task
+
+        def counting_create_task(coro, *args, **kwargs):
+            nonlocal created
+            created += 1
+            return orig_create_task(coro, *args, **kwargs)
+
+        async def work(i):
+            await asyncio.sleep(0)
+            return i * 2
+
+        with patch(
+            "modules.infra.concurrency.asyncio.create_task", counting_create_task
+        ):
+            results = await run_concurrent_transcription_tasks(
+                work, [(i,) for i in range(n)], concurrency_limit=limit
+            )
+
+        assert results == [i * 2 for i in range(n)]
+        # A 50-item folder must not materialize 50 tasks.
+        assert created == limit
+
+    async def test_gather_failure_cancels_all_workers(self) -> None:
+        """A BaseException out of a worker cancels the whole pool (no orphans)."""
+
+        class Boom(BaseException):
+            pass
+
+        async def work(i):
+            raise Boom
+
+        with pytest.raises(Boom):
+            await run_concurrent_transcription_tasks(
+                work, [(i,) for i in range(50)], concurrency_limit=4
+            )
+
+        current = asyncio.current_task()
+        leaked = [t for t in asyncio.all_tasks() if t is not current and not t.done()]
+        assert leaked == []
+
 
 @pytest.mark.asyncio
 class TestStreamingBudgetGate:
@@ -192,3 +239,32 @@ class TestStreamingBudgetGate:
 
         assert not exhausted.is_set()
         assert sorted(processed) == [0, 1, 2, 3, 4]
+
+
+@pytest.mark.asyncio
+class TestStreamingOrphanFreeFailure:
+    """The streaming runner cancels every task if the gather raises (B8)."""
+
+    async def test_gather_failure_cancels_producer_and_workers(self) -> None:
+        class Boom(BaseException):
+            pass
+
+        async def producer():
+            for i in range(100):
+                yield i
+                await asyncio.sleep(0)
+
+        async def handler(item):
+            # BaseException is NOT swallowed by the worker's `except Exception`,
+            # so it propagates and makes the gather raise.
+            raise Boom
+
+        with pytest.raises(Boom):
+            await run_streaming_transcription_tasks(
+                producer(), handler, concurrency_limit=4
+            )
+
+        # No orphaned producer/worker tasks remain.
+        current = asyncio.current_task()
+        leaked = [t for t in asyncio.all_tasks() if t is not current and not t.done()]
+        assert leaked == []

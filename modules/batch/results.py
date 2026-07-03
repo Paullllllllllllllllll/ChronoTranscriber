@@ -43,10 +43,16 @@ def _process_non_openai_batch(
     processing_settings: dict[str, Any],
     postprocessing_config: dict[str, Any] | None = None,
     output_format: str = "txt",
-) -> None:
+) -> str:
     """Process batch results for non-OpenAI providers (Anthropic, Google).
 
     Uses the BatchBackend abstraction to check status and download results.
+
+    Returns:
+        Outcome string for summary accounting (CT-4): ``"finalized"`` when the
+        output file was written, ``"failed"`` on a terminal batch failure or
+        local write error, ``"pending"`` otherwise (still running or
+        retryable download problem).
     """
 
     identifier = temp_file.stem.replace("_transcription", "")
@@ -57,7 +63,7 @@ def _process_non_openai_batch(
         backend = get_batch_backend(batch_provider)
     except (ValueError, ImportError) as e:
         print_error(f"Failed to get batch backend for {batch_provider}: {e}")
-        return
+        return "failed"
 
     # Check status of all batches
     all_completed = True
@@ -111,7 +117,8 @@ def _process_non_openai_batch(
                 f"{failed_count} batches have failed."
                 f" Check the {batch_provider} dashboard for details."
             )
-        return
+            return "failed"
+        return "pending"
 
     # All batches completed - download results
     print_info(
@@ -223,11 +230,11 @@ def _process_non_openai_batch(
         ) as e:
             print_error(f"Failed to download results for batch {batch_id}: {e}")
             logger.exception(f"Error downloading batch {batch_id}: {e}")
-            return
+            return "pending"
 
     if not all_transcriptions:
         print_warning(f"No transcriptions extracted for {temp_file.name}. Skipping.")
-        return
+        return "pending"
 
     # Sort transcriptions by order
     def get_sorting_key(entry: dict[str, Any]) -> tuple[int, Any]:
@@ -273,7 +280,7 @@ def _process_non_openai_batch(
     except (OSError, ValueError, TypeError) as e:
         print_error(f"Failed to write transcription file: {e}")
         logger.exception(f"Error writing {final_txt_path}: {e}")
-        return
+        return "failed"
 
     # Optionally delete temp JSONL
     if not processing_settings.get("retain_temporary_jsonl", True):
@@ -282,6 +289,8 @@ def _process_non_openai_batch(
             print_info(f"Deleted temporary file: {temp_file.name}")
         except OSError as e:
             logger.warning(f"Could not delete temp file {temp_file.name}: {e}")
+
+    return "finalized"
 
 
 def _resolve_error_file_id(batch: dict[str, Any]) -> str | None:

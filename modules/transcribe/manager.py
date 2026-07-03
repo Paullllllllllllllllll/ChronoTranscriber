@@ -75,9 +75,16 @@ def _relative_key(item: Path, input_root: Path | None) -> str | None:
     if input_root is None:
         return None
     try:
-        return str(item.relative_to(input_root))
+        rel = str(item.relative_to(input_root))
     except ValueError:
         return None
+    # A single-file --input makes item == input_root, so the relative key
+    # degenerates to "." and would hash into a hidden ".-<hash>" output
+    # directory (CT-1). Fall back to None so the output directory name is
+    # derived from the item's own stem/name instead.
+    if rel in (".", ""):
+        return None
+    return rel
 
 
 class TransientFileTracker:

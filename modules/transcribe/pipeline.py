@@ -31,11 +31,53 @@ from modules.infra.concurrency import (
 )
 from modules.infra.logger import setup_logger
 from modules.llm import transcribe_image_with_llm
-from modules.llm.response_parsing import extract_transcribed_text
+from modules.llm.response_parsing import (
+    detect_transcription_cause,
+    extract_transcribed_text,
+)
 from modules.postprocess.writer import write_transcription_output
 from modules.ui import print_error, print_info, print_success, print_warning
 
 logger = setup_logger(__name__)
+
+
+class PageTranscriptionError(Exception):
+    """Raised when one or more pages of an item failed to transcribe.
+
+    Raised AFTER the combined output has been written (so partial results and
+    error placeholders are preserved on disk / in the JSONL for a later
+    resume), and propagated so the item is counted as failed by
+    ``WorkflowManager.process_selected_items`` — giving a truthful item
+    status, ``--json`` summary, and non-zero exit code (CT-2).
+    """
+
+    def __init__(self, source_name: str, failed_pages: int, total_pages: int) -> None:
+        self.source_name = source_name
+        self.failed_pages = failed_pages
+        self.total_pages = total_pages
+        super().__init__(
+            f"{failed_pages} of {total_pages} page(s) failed to transcribe "
+            f"for '{source_name}'"
+        )
+
+
+def count_failed_page_results(results: list[Any]) -> int:
+    """Count failed pages in a list of transcription result tuples.
+
+    A page counts as failed when its result is missing/malformed, its text is
+    None, or its text is a ``[transcription error: ...]`` placeholder. Pages
+    deferred by the token budget never appear in the streaming results list,
+    so budget deferrals are not misclassified as failures.
+    """
+    failed = 0
+    for result in results:
+        if not isinstance(result, tuple) or len(result) < 5:
+            failed += 1
+            continue
+        text = result[2]
+        if text is None or detect_transcription_cause(str(text)) == "api_error":
+            failed += 1
+    return failed
 
 
 async def transcribe_single_image(
@@ -332,7 +374,7 @@ async def run_streaming_transcription_pipeline(
 
         try:
             print_info(f"Processing with concurrency limit of {concurrency_limit}...")
-            await run_streaming_transcription_tasks(
+            results = await run_streaming_transcription_tasks(
                 payload_source,
                 handle,
                 concurrency_limit,
@@ -357,6 +399,12 @@ async def run_streaming_transcription_pipeline(
         postprocessing_config,
         output_format=output_format,
     )
+
+    # Page-level failures must surface as an item failure (CT-2). Raised only
+    # after the output was written, so partial results survive for resume.
+    failed_pages = count_failed_page_results(results)
+    if failed_pages:
+        raise PageTranscriptionError(source_name, failed_pages, len(results))
 
 
 async def run_transcription_pipeline(
@@ -484,7 +532,7 @@ async def run_transcription_pipeline(
 
         try:
             print_info(f"Processing with concurrency limit of {concurrency_limit}...")
-            await run_concurrent_transcription_tasks(
+            results = await run_concurrent_transcription_tasks(
                 transcribe_single_image,
                 args_list,
                 concurrency_limit,
@@ -511,6 +559,12 @@ async def run_transcription_pipeline(
         postprocessing_config,
         output_format=output_format,
     )
+
+    # Page-level failures must surface as an item failure (CT-2). Raised only
+    # after the output was written, so partial results survive for resume.
+    failed_pages = count_failed_page_results(results)
+    if failed_pages:
+        raise PageTranscriptionError(source_name, failed_pages, len(results))
 
 
 def write_output_from_jsonl(

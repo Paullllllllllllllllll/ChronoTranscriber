@@ -71,7 +71,7 @@ PROVIDERS = {
         "temperature": 1,
     },
     "google": {
-        "model": "gemini-2.0-flash",
+        "model": "gemini-3-flash",
         "env_var": "GOOGLE_API_KEY",
         "reasoning_effort": None,
         "temperature": 0.0,

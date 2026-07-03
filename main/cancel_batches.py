@@ -116,12 +116,31 @@ class CancelBatchesScript(DualModeScript):
         # Display cancellation results
         display_batch_cancellation_results(cancelled_batches, skipped_batches)
 
+    @staticmethod
+    def _emit_json_summary(
+        args: Namespace, cancelled: int, failed: int, exit_code: int
+    ) -> None:
+        """Print the one-line ``--json`` summary on stdout when requested (CT-4)."""
+        if not getattr(args, "json_summary", False):
+            return
+        import json
+
+        payload = {
+            "tool": "chronotranscriber",
+            "command": "cancel_batches",
+            "cancelled": cancelled,
+            "failed": failed,
+            "exit_code": exit_code,
+        }
+        print(json.dumps(payload, ensure_ascii=False))
+
     def run_cli(self, args: Namespace) -> None:
         """Cancel batches in CLI mode with arguments."""
         try:
             from openai import OpenAI
         except Exception as e:
             print_error(f"Could not import OpenAI SDK: {e}")
+            self._emit_json_summary(args, 0, 0, 1)
             sys.exit(1)
 
         print_header("BATCH CANCELLATION (CLI MODE)", "")
@@ -141,6 +160,7 @@ class CancelBatchesScript(DualModeScript):
             except Exception as e:
                 self.logger.error(f"Error listing batches: {e}")
                 print_error(f"Error listing batches: {e}")
+                self._emit_json_summary(args, 0, 0, 1)
                 sys.exit(1)
 
             # Filter to non-terminal batches
@@ -156,6 +176,7 @@ class CancelBatchesScript(DualModeScript):
 
         if not batch_ids_to_cancel:
             print_info("No batches to cancel.")
+            self._emit_json_summary(args, 0, 0, 0)
             return
 
         # Confirm if not forced
@@ -166,6 +187,7 @@ class CancelBatchesScript(DualModeScript):
             )
             if not confirm_action("Proceed with cancellation?", default=False):
                 print_info("Cancellation aborted.")
+                self._emit_json_summary(args, 0, 0, 0)
                 return
 
         # Cancel batches
@@ -185,6 +207,8 @@ class CancelBatchesScript(DualModeScript):
         # Summary
         print_header("CANCELLATION COMPLETE", "")
         print_success(f"Successfully cancelled: {success_count}")
+        exit_code = 1 if fail_count > 0 else 0
+        self._emit_json_summary(args, success_count, fail_count, exit_code)
         if fail_count > 0:
             print_error(f"Failed to cancel: {fail_count}")
             # CLI agent contract: non-zero exit when any cancellation failed.

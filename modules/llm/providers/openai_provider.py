@@ -17,6 +17,7 @@ client is built with max_retries=0.
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -32,6 +33,27 @@ from modules.llm.providers.base import (
 )
 
 logger = setup_logger(__name__)
+
+
+def suppress_pydantic_serializer_warnings() -> None:
+    """Silence pydantic's "Pydantic serializer warnings" UserWarning (CT-5).
+
+    Serializing OpenAI SDK response objects through LangChain triggers a
+    ``PydanticSerializationUnexpectedValue`` UserWarning from ``pydantic.main``
+    on every structured-output call, spamming stderr without signal. The
+    filter is deliberately narrow: only this message pattern, only
+    ``UserWarning``, only when emitted from the pydantic package — every
+    other warning remains visible.
+    """
+    warnings.filterwarnings(
+        "ignore",
+        message=r"Pydantic serializer warnings",
+        category=UserWarning,
+        module=r"pydantic(\..*)?",
+    )
+
+
+suppress_pydantic_serializer_warnings()
 
 
 class OpenAIProvider(BaseProvider):

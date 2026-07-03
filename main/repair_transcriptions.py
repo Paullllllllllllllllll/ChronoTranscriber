@@ -9,6 +9,7 @@ Supports two modes:
 
 from __future__ import annotations
 
+import json
 from argparse import ArgumentParser, Namespace
 
 from modules.batch.repair import main as repair_main_interactive
@@ -32,8 +33,22 @@ class RepairTranscriptionsScript(AsyncDualModeScript):
         await repair_main_interactive()
 
     async def run_cli(self, args: Namespace) -> None:
-        """Run repair in CLI mode."""
-        await main_cli(args, self.paths_config)
+        """Run repair in CLI mode.
+
+        Emits a one-line JSON summary on stdout when ``--json`` is passed
+        (CT-4). Exit code stays 0 on a completed run (existing contract);
+        unexpected exceptions still exit 1 via the framework handler.
+        """
+        summary = await main_cli(args, self.paths_config)
+        if getattr(args, "json_summary", False):
+            payload = {
+                "tool": "chronotranscriber",
+                "command": "repair_transcriptions",
+                "repaired": int(summary.get("repaired", 0)),
+                "failed": int(summary.get("failed", 0)),
+                "exit_code": 0,
+            }
+            print(json.dumps(payload, ensure_ascii=False))
 
 
 def main() -> None:

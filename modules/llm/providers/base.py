@@ -992,6 +992,8 @@ class BaseProvider(ABC):
             httpx.TimeoutException              — covers all httpx timeout subclasses
             pydantic.ValidationError            — unparseable structured output
                                                   (capped at validation_attempts)
+            OutputParserException (langchain)   — invalid JSON model output
+                                                  (capped at validation_attempts)
             InputTokensBelowThresholdError      — image payload silently dropped;
                                                   shares the validation retry budget
 
@@ -1008,6 +1010,7 @@ class BaseProvider(ABC):
         """
         import httpx
         import tenacity
+        from langchain_core.exceptions import OutputParserException
         from pydantic import ValidationError
 
         from modules.llm.quality import ContentQualityError
@@ -1053,9 +1056,18 @@ class BaseProvider(ABC):
                     str(exc)[:200],
                 )
                 return True
+            # OutputParserException covers LangChain's "Invalid json output"
+            # from with_structured_output when a model returns flaky JSON
+            # (CT-3): transient invalid model output, retried on the
+            # validation budget like a pydantic ValidationError.
             if isinstance(
                 exc,
-                (ValidationError, InputTokensBelowThresholdError, ContentQualityError),
+                (
+                    ValidationError,
+                    OutputParserException,
+                    InputTokensBelowThresholdError,
+                    ContentQualityError,
+                ),
             ):
                 validation_attempt_count += 1
                 if validation_attempt_count >= max_validation_attempts:

@@ -21,6 +21,7 @@ Multi-provider support:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -62,13 +63,40 @@ from modules.ui.batch_display import (
 logger = setup_logger(__name__)
 
 
+@dataclass
+class BatchCheckStats:
+    """Per-job outcome counts for a batch finalization run (CT-4).
+
+    Each batched temp JSONL counts once: ``finalized`` when its output file
+    was written, ``failed`` when any of its batches reached a terminal
+    failure (or the batch list could not be retrieved), ``pending``
+    otherwise (still running or retryable download problem).
+
+    ``had_failure`` preserves the previous boolean return contract: exit
+    non-zero when any batch reached a terminal failure (CLI agent contract).
+    """
+
+    finalized: int = 0
+    pending: int = 0
+    failed: int = 0
+
+    @property
+    def had_failure(self) -> bool:
+        return self.failed > 0
+
+    def merge(self, other: BatchCheckStats) -> None:
+        self.finalized += other.finalized
+        self.pending += other.pending
+        self.failed += other.failed
+
+
 def process_all_batches(
     root_folder: Path,
     processing_settings: dict[str, Any],
     client: OpenAI,
     postprocessing_config: dict[str, Any] | None = None,
     output_format: str = "txt",
-) -> bool:
+) -> BatchCheckStats:
     """Finalize all completed batch jobs for a given root folder.
 
     Scans for ``.jsonl`` files (both legacy ``*_transcription.jsonl`` and new format),
@@ -76,17 +104,19 @@ def process_all_batches(
     a final ``.txt`` output when all parts are available.
 
     Returns:
-        True if any batch reached a terminal failure (failed/expired/cancelled),
-        so callers can surface a non-zero exit code (CLI agent contract).
+        A :class:`BatchCheckStats` with finalized/pending/failed counts;
+        ``stats.had_failure`` is True if any batch reached a terminal failure
+        (failed/expired/cancelled), so callers can surface a non-zero exit
+        code (CLI agent contract).
     """
-    had_failure = False
+    stats = BatchCheckStats()
     print_info(f"Scanning directory '{root_folder}' for temporary batch files...")
     # Search for both new format (*.jsonl) and legacy format (*_transcription.jsonl)
     temp_files = list(root_folder.rglob("*.jsonl"))
     if not temp_files:
         print_info(f"No temporary batch files found in {root_folder}.")
         logger.info(f"No temporary batch files found in {root_folder}.")
-        return had_failure
+        return stats
 
     # Retrieve all batches from OpenAI
     print_info("Retrieving list of submitted batches from OpenAI...")
@@ -98,7 +128,8 @@ def process_all_batches(
     except (OpenAIError, OSError, ValueError, TypeError) as e:
         print_error(f"Failed to retrieve batches from OpenAI: {e}")
         logger.exception(f"Error retrieving batches: {e}")
-        return True
+        stats.failed += 1
+        return stats
 
     # Display batch summary (handles dicts or SDK objects)
     display_batch_summary(batches)
@@ -160,7 +191,7 @@ def process_all_batches(
 
         # --- 4. Route non-OpenAI providers to backend abstraction ---
         if batch_provider != "openai" and supports_batch(batch_provider):
-            _process_non_openai_batch(
+            outcome = _process_non_openai_batch(
                 temp_file=temp_file,
                 batch_ids=batch_ids,
                 batch_provider=batch_provider,
@@ -169,6 +200,12 @@ def process_all_batches(
                 postprocessing_config=postprocessing_config,
                 output_format=output_format,
             )
+            if outcome == "finalized":
+                stats.finalized += 1
+            elif outcome == "failed":
+                stats.failed += 1
+            else:
+                stats.pending += 1
             continue
 
         # --- 5. Check OpenAI batch status ---
@@ -186,11 +223,13 @@ def process_all_batches(
 
         if not all_completed:
             if failed_count > 0:
-                had_failure = True
+                stats.failed += 1
                 print_warning(
                     f"{failed_count} batches have failed."
                     f" Check the OpenAI dashboard for details."
                 )
+            else:
+                stats.pending += 1
             continue
 
         # --- 6. Download and parse OpenAI results ---
@@ -237,17 +276,22 @@ def process_all_batches(
                 postprocessing_config,
                 output_format,
             )
+            stats.finalized += 1
+        else:
+            # Download/extraction problem with completed batches: retryable,
+            # counted as pending (matches the previous exit-code semantics).
+            stats.pending += 1
 
     print_info(f"Completed processing batches in directory: {root_folder}")
     logger.info(f"Batch results processing complete for directory: {root_folder}")
-    return had_failure
+    return stats
 
 
 def run_batch_finalization(
     run_diagnostics: bool = True,
     custom_directory: Path | None = None,
     output_format: str = "txt",
-) -> bool:
+) -> BatchCheckStats:
     """High-level entrypoint used by the CLI to finalize batch results.
 
     Args:
@@ -256,7 +300,9 @@ def run_batch_finalization(
         output_format: Output file format (``"txt"``, ``"md"``, or ``"json"``)
 
     Returns:
-        True if any scanned directory reported a terminal batch failure.
+        Aggregated :class:`BatchCheckStats` across all scanned directories;
+        ``stats.had_failure`` is True if any directory reported a terminal
+        batch failure.
     """
     if custom_directory:
         # Use the specified directory instead of loading from config
@@ -276,16 +322,17 @@ def run_batch_finalization(
     if run_diagnostics:
         diagnose_api_issues()
 
-    had_failure = False
+    stats = BatchCheckStats()
     for directory in scan_dirs:
-        if process_all_batches(
-            directory,
-            processing_settings,
-            client,
-            postprocessing_config,
-            output_format=output_format,
-        ):
-            had_failure = True
+        stats.merge(
+            process_all_batches(
+                directory,
+                processing_settings,
+                client,
+                postprocessing_config,
+                output_format=output_format,
+            )
+        )
     print_info("Batch results processing complete across all directories.")
     logger.info("Batch results processing complete across all directories.")
-    return had_failure
+    return stats

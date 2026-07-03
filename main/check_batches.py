@@ -10,6 +10,7 @@ Supports two modes:
 
 from __future__ import annotations
 
+import json
 import sys
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
@@ -59,13 +60,24 @@ class CheckBatchesScript(DualModeScript):
             custom_directory = resolve_path(args.directory, Path.cwd())
             validate_input_path(custom_directory)
 
-        had_failure = run_batch_finalization(
+        stats = run_batch_finalization(
             run_diagnostics=run_diagnostics,
             custom_directory=custom_directory,
             output_format=output_format,
         )
-        if had_failure:
-            sys.exit(1)
+        exit_code = 1 if stats.had_failure else 0
+        if getattr(args, "json_summary", False):
+            payload = {
+                "tool": "chronotranscriber",
+                "command": "check_batches",
+                "finalized": stats.finalized,
+                "pending": stats.pending,
+                "failed": stats.failed,
+                "exit_code": exit_code,
+            }
+            print(json.dumps(payload, ensure_ascii=False))
+        if exit_code:
+            sys.exit(exit_code)
 
 
 def main() -> None:

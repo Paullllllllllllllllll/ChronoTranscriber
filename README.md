@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.17.0
+# ChronoTranscriber v1.18.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -685,6 +685,24 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v1.18.0** (3 July 2026) -- Honest exit codes and full `--json`
+    coverage from a live cross-provider bug hunt. Propagate page-level
+    transcription failures to the item status, the JSON summary, and the
+    exit code: a run whose output contains any `[transcription error]`
+    placeholder now exits 1 instead of reporting full success (partial
+    output and the resume JSONL are still written first, so resume and
+    `--retry-errors` keep working). Name the hash-suffixed output
+    directory after the input file when `--input` is a single file
+    (previously such runs wrote to a hidden `.-<hash>` directory).
+    Classify LangChain `OutputParserException` as validation-retryable so
+    flaky-JSON models are retried within the `validation_attempts`
+    budget. Implement real one-line `--json` summaries on the four entry
+    points where the flag was a documented no-op (`check_batches`,
+    `cancel_batches`, `repair_transcriptions`,
+    `postprocess_transcriptions`). Suppress the noisy upstream Pydantic
+    serializer warnings from the OpenAI SDK with a narrowly scoped
+    warnings filter.
 
 - **v1.17.0** (3 July 2026) -- Optional shared cross-tool token budget.
     Add the vendored `modules/infra/shared_ledger.py` (locked delta merges

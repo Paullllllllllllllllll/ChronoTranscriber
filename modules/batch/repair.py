@@ -633,7 +633,8 @@ async def _repair_sync_mode(
     repair_jsonl_path: Path,
     schema_path: Path | None = None,
     additional_context_path: Path | None = None,
-) -> None:
+) -> tuple[int, int]:
+    """Synchronous repair pass. Returns ``(repaired, failed)`` counts (CT-4)."""
     from modules.llm import transcribe_image_with_llm
 
     targets = _resolve_repair_targets(
@@ -655,7 +656,7 @@ async def _repair_sync_mode(
 
     if not targets:
         print_info("[INFO] No targets resolved for synchronous repair.")
-        return
+        return (0, 0)
 
     print_info(
         f"[INFO] Synchronous repair of {len(targets)} page(s) for '{job.identifier}'."
@@ -688,7 +689,7 @@ async def _repair_sync_mode(
     api_key = os.getenv(env_var)
     if not api_key:
         print_error(f"[ERROR] {env_var} is required for GPT repair. Aborting.")
-        return
+        return (0, len(targets))
 
     model_name = model_config.get("transcription_model", {}).get(
         "name", "gpt-4o-2024-08-06"
@@ -826,6 +827,18 @@ async def _repair_sync_mode(
         f"Backup written to: {backup.name}"
     )
 
+    # Outcome counts for the --json summary (CT-4): a result whose text is
+    # still an error placeholder counts as failed, as do pages left
+    # unrepaired (deferred/aborted before completion).
+    error_count = sum(
+        1
+        for _, text, _ in results
+        if detect_transcription_cause((text or "").strip()) == "api_error"
+    )
+    repaired = len(results) - error_count
+    failed = error_count + (len(targets) - len(results))
+    return (repaired, failed)
+
 
 def _await_batches_blocking(
     client: OpenAI,
@@ -911,7 +924,8 @@ async def _repair_batch_mode(
     repair_jsonl_path: Path,
     schema_path: Path | None = None,
     additional_context_path: Path | None = None,
-) -> None:
+) -> tuple[int, int]:
+    """Batch repair pass. Returns ``(repaired, failed)`` counts (CT-4)."""
     targets = _resolve_repair_targets(
         job, image_entries, failure_indices, final_lines, model_config
     )
@@ -939,7 +953,7 @@ async def _repair_batch_mode(
 
     if not targets:
         print_info("[INFO] No targets resolved for batch repair.")
-        return
+        return (0, 0)
 
     print_info(f"[INFO] Batch repair of {len(targets)} page(s) for '{job.identifier}'.")
 
@@ -957,7 +971,7 @@ async def _repair_batch_mode(
     except Exception as e:
         logger.exception("Error submitting repair batch: %s", e)
         print_error("[ERROR] Failed to submit repair batch.")
-        return
+        return (0, len(targets))
 
     # Persist metadata and batch tracking in repair JSONL
     for rec in metadata_records:
@@ -984,7 +998,7 @@ async def _repair_batch_mode(
 
     if not batch_ids:
         print_error("[ERROR] No batch IDs returned for repair submission.")
-        return
+        return (0, len(targets))
 
     client = OpenAI()
     print_info("[INFO] Waiting for repair batches to complete...")
@@ -1067,6 +1081,18 @@ async def _repair_batch_mode(
         f"[SUCCESS] Batch repair complete for '{job.identifier}'. "
         f"Backup written to: {backup.name}"
     )
+
+    # Outcome counts for the --json summary (CT-4): a repaired line whose text
+    # is still an error placeholder counts as failed, as do targets that never
+    # received a parsed batch result.
+    error_count = sum(
+        1
+        for text in fixed_text_by_custom.values()
+        if detect_transcription_cause((text or "").strip()) == "api_error"
+    )
+    repaired = len(fixed_text_by_custom) - error_count
+    failed = error_count + max(0, len(targets) - len(fixed_text_by_custom))
+    return (repaired, failed)
 
 
 async def main() -> None:
@@ -1276,16 +1302,21 @@ async def main() -> None:
     print_info(f"Repair log: {repair_jsonl_path.relative_to(job_sel.parent_folder)}")
 
 
-async def main_cli(args: Any, paths_config: dict[str, Any]) -> None:
+async def main_cli(args: Any, paths_config: dict[str, Any]) -> dict[str, int]:
     """CLI mode repair workflow entrypoint.
 
     Args:
         args: Parsed command-line arguments
         paths_config: Paths configuration dictionary
+
+    Returns:
+        Summary counts ``{"repaired": N, "failed": N}`` for the ``--json``
+        summary line (CT-4); zeros when the run ends before any repair.
     """
     from modules.config.config_loader import PROJECT_ROOT
     from modules.core.cli_args import parse_indices, resolve_path, validate_input_path
 
+    empty_summary = {"repaired": 0, "failed": 0}
     print_header("REPAIR TRANSCRIPTIONS (CLI MODE)", "")
 
     try:
@@ -1293,7 +1324,7 @@ async def main_cli(args: Any, paths_config: dict[str, Any]) -> None:
     except Exception as e:
         print_error(f"Failed to load configs: {e}")
         logger.critical(f"Failed to load configs: {e}")
-        return
+        return empty_summary
 
     # Resolve transcription file path
     transcription_path = resolve_path(args.transcription, PROJECT_ROOT)
@@ -1303,7 +1334,7 @@ async def main_cli(args: Any, paths_config: dict[str, Any]) -> None:
         print_error(
             f"Expected .txt or .md transcription file, got: {transcription_path.name}"
         )
-        return
+        return empty_summary
 
     # Find corresponding temp JSONL file
     # Support both legacy (*_transcription.txt) and new (*.txt) naming
@@ -1369,7 +1400,7 @@ async def main_cli(args: Any, paths_config: dict[str, Any]) -> None:
             "No failure types selected."
             " Use --errors-only, --not-possible, --no-text, or --all-failures"
         )
-        return
+        return empty_summary
 
     print_info(f"Targeting failure types: {', '.join(selected_causes)}")
 
@@ -1382,7 +1413,7 @@ async def main_cli(args: Any, paths_config: dict[str, Any]) -> None:
 
     if not failure_indices:
         print_info("No failed lines detected matching your criteria.")
-        return
+        return empty_summary
 
     print_success(f"Found {len(failure_indices)} line(s) to repair.")
 
@@ -1397,11 +1428,11 @@ async def main_cli(args: Any, paths_config: dict[str, Any]) -> None:
             ]
             if not failure_indices:
                 print_error("None of the specified indices matched detected failures.")
-                return
+                return empty_summary
             print_info(f"Filtered to {len(failure_indices)} specified line(s).")
         except ValueError as e:
             print_error(f"Invalid indices format: {e}")
-            return
+            return empty_summary
 
     # Determine mode
     mode = "batch" if args.batch else "sync"
@@ -1445,7 +1476,7 @@ async def main_cli(args: Any, paths_config: dict[str, Any]) -> None:
 
     # Execute repair
     if mode == "sync":
-        await _repair_sync_mode(
+        repaired, failed = await _repair_sync_mode(
             job=job,
             model_config=model_cfg,
             image_entries=image_entries,
@@ -1456,7 +1487,7 @@ async def main_cli(args: Any, paths_config: dict[str, Any]) -> None:
             additional_context_path=additional_context_path,
         )
     else:
-        await _repair_batch_mode(
+        repaired, failed = await _repair_batch_mode(
             job=job,
             model_config=model_cfg,
             image_entries=image_entries,
@@ -1470,3 +1501,4 @@ async def main_cli(args: Any, paths_config: dict[str, Any]) -> None:
     print_header("REPAIR COMPLETE", "")
     print_success(f"Repair session completed for '{job.identifier}'")
     print_info(f"Repair log: {repair_jsonl_path.relative_to(job.parent_folder)}")
+    return {"repaired": repaired, "failed": failed}

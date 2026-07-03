@@ -12,6 +12,7 @@ Supports two modes:
 
 from __future__ import annotations
 
+import json
 import sys
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
@@ -110,6 +111,22 @@ def build_config_from_args(args: Any, base_config: dict[str, Any]) -> dict[str, 
     return config
 
 
+def _emit_postprocess_json_summary(
+    args: Any, files_processed: int, files_failed: int, exit_code: int
+) -> None:
+    """Print the one-line ``--json`` summary on stdout when requested (CT-4)."""
+    if not getattr(args, "json_summary", False):
+        return
+    payload = {
+        "tool": "chronotranscriber",
+        "command": "postprocess_transcriptions",
+        "files_processed": files_processed,
+        "files_failed": files_failed,
+        "exit_code": exit_code,
+    }
+    print(json.dumps(payload, ensure_ascii=False))
+
+
 def postprocess_cli(args: Any) -> int:
     """Handle CLI mode post-processing.
 
@@ -128,12 +145,14 @@ def postprocess_cli(args: Any) -> int:
     input_path = resolve_path(args.input)
     if not input_path.exists():
         print_error(f"Input path does not exist: {input_path}")
+        _emit_postprocess_json_summary(args, 0, 0, 1)
         return 1
 
     # Collect files to process
     files = collect_transcription_files(input_path, args.recursive)
     if not files:
         print_warning(f"No transcription files found at: {input_path}")
+        _emit_postprocess_json_summary(args, 0, 0, 1)
         return 1
 
     # Build config from args
@@ -143,19 +162,26 @@ def postprocess_cli(args: Any) -> int:
     if args.in_place:
         # In-place processing
         print_info(f"Processing {len(files)} file(s) in-place...")
+        success_count = 0
+        fail_count = 0
         for file_path in files:
             try:
                 postprocess_file(file_path, config=config, in_place=True)
                 print_success(f"Processed: {file_path.name}")
+                success_count += 1
             except Exception as e:
                 print_error(f"Failed to process {file_path.name}: {e}")
                 logger.exception(f"Error processing {file_path}")
-        print_success(f"Post-processing complete. {len(files)} file(s) processed.")
+                fail_count += 1
+        print_success(f"Post-processing complete. {success_count} file(s) processed.")
+        _emit_postprocess_json_summary(args, success_count, fail_count, 0)
         return 0
 
     elif args.output:
         # Output to specified path
         output_path = resolve_path(args.output)
+        success_count = 0
+        fail_count = 0
 
         if len(files) == 1:
             # Single file -> single output
@@ -165,8 +191,10 @@ def postprocess_cli(args: Any) -> int:
             try:
                 postprocess_file(files[0], output_path=output_path, config=config)
                 print_success(f"Processed: {files[0].name} -> {output_path}")
+                success_count += 1
             except Exception as e:
                 print_error(f"Failed to process: {e}")
+                _emit_postprocess_json_summary(args, 0, 1, 1)
                 return 1
         else:
             # Multiple files -> output directory
@@ -177,11 +205,14 @@ def postprocess_cli(args: Any) -> int:
                     out_file = output_path / file_path.name
                     postprocess_file(file_path, output_path=out_file, config=config)
                     print_success(f"Processed: {file_path.name}")
+                    success_count += 1
                 except Exception as e:
                     print_error(f"Failed to process {file_path.name}: {e}")
                     logger.exception(f"Error processing {file_path}")
+                    fail_count += 1
 
         print_success(f"Post-processing complete. Files saved to: {output_path}")
+        _emit_postprocess_json_summary(args, success_count, fail_count, 0)
         return 0
 
     else:
@@ -190,15 +221,18 @@ def postprocess_cli(args: Any) -> int:
             print_error(
                 "Cannot output multiple files to stdout. Use --output or --in-place."
             )
+            _emit_postprocess_json_summary(args, 0, 0, 1)
             return 1
 
         try:
             text = files[0].read_text(encoding="utf-8", errors="replace")
             processed = postprocess_transcription(text, config)
             sys.stdout.write(processed)
+            _emit_postprocess_json_summary(args, 1, 0, 0)
             return 0
         except Exception as e:
             print_error(f"Failed to process: {e}")
+            _emit_postprocess_json_summary(args, 0, 1, 1)
             return 1
 
 

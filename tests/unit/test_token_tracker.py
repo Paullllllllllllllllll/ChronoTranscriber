@@ -6,11 +6,13 @@ Tests token usage tracking and daily limit management.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+import modules.infra.token_budget as _tb_module
 from modules.infra.token_budget import (
     DailyTokenTracker,
     get_token_tracker,
@@ -95,6 +97,67 @@ class TestDailyTokenTracker:
 
         tracker.add_tokens(100000)  # Hit limit
         assert tracker.can_use_tokens() is False
+
+
+class TestResetBoundary:
+    """The budget day rolls over at 00:01 UTC, not exact UTC midnight."""
+
+    @pytest.mark.unit
+    def test_date_str_before_buffer_is_previous_day(self, temp_dir, monkeypatch):
+        tracker = DailyTokenTracker(
+            daily_limit=1000, enabled=True, state_file=temp_dir / "s.json"
+        )
+
+        class _FrozenDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime(2026, 7, 5, 0, 0, 30, tzinfo=UTC)
+
+        monkeypatch.setattr(_tb_module, "datetime", _FrozenDateTime)
+        assert tracker._get_current_date_str() == "2026-07-04"
+
+    @pytest.mark.unit
+    def test_date_str_after_buffer_is_new_day(self, temp_dir, monkeypatch):
+        tracker = DailyTokenTracker(
+            daily_limit=1000, enabled=True, state_file=temp_dir / "s.json"
+        )
+
+        class _FrozenDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime(2026, 7, 5, 0, 1, 30, tzinfo=UTC)
+
+        monkeypatch.setattr(_tb_module, "datetime", _FrozenDateTime)
+        assert tracker._get_current_date_str() == "2026-07-05"
+
+    @pytest.mark.unit
+    def test_seconds_until_reset_targets_next_00_01_utc(self, temp_dir, monkeypatch):
+        tracker = DailyTokenTracker(
+            daily_limit=1000, enabled=True, state_file=temp_dir / "s.json"
+        )
+
+        class _FrozenDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime(2026, 7, 5, 12, 0, 0, tzinfo=UTC)
+
+        monkeypatch.setattr(_tb_module, "datetime", _FrozenDateTime)
+        # From 12:00:00 UTC to the next 00:01 UTC (6 July) is 12h 1m.
+        expected = 12 * 3600 + 60
+        assert tracker.get_seconds_until_reset() == expected
+
+    @pytest.mark.unit
+    def test_reset_time_is_aware_utc_00_01(self, temp_dir):
+        tracker = DailyTokenTracker(
+            daily_limit=1000, enabled=True, state_file=temp_dir / "s.json"
+        )
+        reset_time = tracker.get_reset_time()
+        now = datetime.now(UTC)
+        assert reset_time > now
+        assert reset_time.tzinfo is not None
+        assert reset_time.utcoffset().total_seconds() == 0
+        assert reset_time.hour == 0
+        assert reset_time.minute == 1
 
 
 class TestDailyTokensUnderscoreParsing:

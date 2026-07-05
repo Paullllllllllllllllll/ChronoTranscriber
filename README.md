@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.18.0
+# ChronoTranscriber v1.19.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -82,8 +82,8 @@ preprocessing.
   validation retries for malformed structured output; content-quality
   retries for hallucination loops, truncation, system-prompt bleed,
   and excessive line repetition
-- **Daily token budget** -- configurable per-day limits with automatic
-  midnight reset
+- **Daily token budget** -- configurable per-day limits that reset at
+  00:01 UTC (one minute after OpenAI's 00:00 UTC free-tier reset)
 - **Three output formats** -- `txt`, `md` (with page headers), `json`
   (structured per-page array)
 - **Resume and repair** -- skip already-transcribed pages; repair
@@ -537,7 +537,8 @@ python main/postprocess_transcriptions.py \
 ### Daily Token Budget
 
 Enable in `concurrency_config.yaml` to cap daily API usage. Tracks
-total tokens per call, resets at local midnight. The counter is persisted
+total tokens per call, resets at 00:01 UTC (one minute after OpenAI's
+00:00 UTC free-tier reset). The counter is persisted
 under a user-level state directory (`~/.chronotranscriber/token_state.json`
 by default), so it is shared across runs regardless of the working
 directory. Override the location with `general.state_dir` in
@@ -685,6 +686,20 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v1.19.0** (5 July 2026) -- Fix the daily token budget's reset boundary.
+    Both the private per-tool tracker (`modules/infra/token_budget.py`) and
+    the vendored shared cross-tool ledger (`modules/infra/shared_ledger.py`,
+    bumped to 1.1.0) now roll the budget day over at 00:01 UTC -- one minute
+    after OpenAI's 00:00 UTC free-tier reset -- instead of local midnight, so
+    the tool never frees its budget before OpenAI's own counter has actually
+    reset. The one-minute buffer is a deliberate safety margin against clock
+    skew. `get_reset_time()` now returns a timezone-aware UTC datetime;
+    user-facing wait messages show the local wall-clock time alongside an
+    explicit "(00:01 UTC)" anchor for clarity. Updated docs and config
+    comments accordingly. The shared ledger module was re-vendored (module and
+    its test) in sync with ChronoMiner and AutoExcerpter to keep all three
+    tools on one combined budget day. All tests pass.
 
 - **v1.18.0** (3 July 2026) -- Honest exit codes and full `--json`
     coverage from a live cross-provider bug hunt. Propagate page-level

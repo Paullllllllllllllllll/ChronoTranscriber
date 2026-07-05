@@ -181,7 +181,9 @@ prompt_caching:
 # Daily Token Limit
 # =============================================================================
 # Tracks cumulative token usage across all LLM API calls and enforces a daily
-# cap. When the limit is reached, processing pauses until midnight reset.
+# cap. When the limit is reached, processing pauses until the daily reset.
+# Resets at 00:01 UTC, one minute after OpenAI's free-tier counter reset at
+# 00:00 UTC.
 #
 # Used by:
 #   - modules/infra/token_budget.py (usage tracking, limit enforcement, and the
@@ -194,7 +196,7 @@ daily_token_limit:
   enabled: false
 
   # Maximum tokens allowed per day (input + output combined).
-  # Processing pauses when this limit is reached; resumes at midnight.
+  # Processing pauses when this limit is reached; resumes at the 00:01 UTC reset.
   daily_tokens: 10_000_000
 
   # Cold-start guess (tokens) for one page before any usage is observed this

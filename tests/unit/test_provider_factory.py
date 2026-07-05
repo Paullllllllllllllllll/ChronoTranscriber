@@ -152,6 +152,7 @@ class TestGetApiKeyForProvider:
         assert result == "explicit-key"
 
     @pytest.mark.unit
+    @pytest.mark.usefixtures("no_api_key_remap")
     def test_env_key_used(self) -> None:
         """Test that environment variable key is used."""
         with patch.dict(os.environ, {"OPENAI_API_KEY": "env-key"}, clear=True):

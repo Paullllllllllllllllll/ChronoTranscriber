@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.19.0
+# ChronoTranscriber v1.19.1
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -687,6 +687,18 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.19.1** (5 July 2026) -- Harden retries and the test suite from a live
+    failure hunt. Fix a retry gap in `modules/llm/providers/base.py`:
+    SDK-wrapped connection failures (`openai.APIConnectionError` raised from
+    `httpx.ConnectError`, and the Anthropic SDK's identical wrapping) escaped
+    `_should_retry` because only the top-level exception type was inspected;
+    a bounded cause-chain walk now classifies them as retryable, so a
+    transient TCP failure no longer fails a page permanently on the first
+    attempt (regression-tested). Make three unit tests hermetic against the
+    machine's live `api_keys_config.yaml` provider remap via a shared
+    `no_api_key_remap` fixture, and fix the live-API fixture's stale Google
+    model id (`gemini-3-flash` to `gemini-3-flash-preview`), which 404'd on
+    every call.
 - **v1.19.0** (5 July 2026) -- Fix the daily token budget's reset boundary.
     Both the private per-tool tracker (`modules/infra/token_budget.py`) and
     the vendored shared cross-tool ledger (`modules/infra/shared_ledger.py`,

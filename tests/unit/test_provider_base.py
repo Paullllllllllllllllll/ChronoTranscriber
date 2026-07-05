@@ -866,6 +866,48 @@ class TestAInvokeWithRetry:
         assert mock_llm.ainvoke.call_count == 3
 
     @pytest.mark.unit
+    def test_retries_on_sdk_wrapped_connection_error(self) -> None:
+        """Retries openai.APIConnectionError wrapping an httpx.ConnectError.
+
+        Provider SDKs raise their own connection-error type ``from`` the
+        underlying httpx transport error; the retry predicate must find the
+        httpx error via the ``__cause__`` chain (regression for live CLI
+        tests failing permanently on transient 'Connection error.').
+        """
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        import httpx
+        import openai
+        import tenacity
+
+        def _sdk_conn_error() -> openai.APIConnectionError:
+            req = httpx.Request("POST", "https://api.openai.com/v1/responses")
+            err = openai.APIConnectionError(request=req)
+            err.__cause__ = httpx.ConnectError("connection refused", request=req)
+            return err
+
+        provider = self._make_provider()
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(
+            side_effect=[_sdk_conn_error(), _sdk_conn_error(), "success_response"]
+        )
+
+        async def _run():
+            with (
+                patch("modules.llm.providers.base.load_max_retries", return_value=5),
+                patch(
+                    "tenacity.wait_exponential_jitter",
+                    return_value=tenacity.wait_none(),
+                ),
+            ):
+                return await provider._ainvoke_with_retry(mock_llm, ["msg"])
+
+        result = asyncio.run(_run())
+        assert result == "success_response"
+        assert mock_llm.ainvoke.call_count == 3
+
+    @pytest.mark.unit
     def test_reraises_after_exhausting_attempts(self) -> None:
         """Raises httpx.ConnectError after all retry attempts are exhausted."""
         import asyncio

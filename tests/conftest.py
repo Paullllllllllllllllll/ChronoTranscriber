@@ -388,6 +388,22 @@ def mock_env_with_openai_key() -> Generator[None]:
         yield
 
 
+@pytest.fixture
+def no_api_key_remap() -> Generator[None]:
+    """Neutralize the optional ``api_keys_config.yaml`` provider->env-var remap.
+
+    A developer machine may ship a real ``config/api_keys_config.yaml`` that
+    remaps a provider to a non-default env var (e.g. openai -> OPENAI_API_KEY_2).
+    Unit tests asserting default env-var semantics must not depend on that live
+    file, so this fixture stubs the config service to expose an empty mapping,
+    forcing :func:`resolve_api_key_env_var` back to its hardcoded defaults.
+    """
+    fake = MagicMock()
+    fake.get_api_keys_config.return_value = {}
+    with patch("modules.config.service.get_config_service", return_value=fake):
+        yield
+
+
 # =============================================================================
 # Schema Fixtures
 # =============================================================================

@@ -126,6 +126,7 @@ def test_get_openai_client_uses_explicit_api_key() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("no_api_key_remap")
 def test_get_openai_client_raises_when_missing_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -135,6 +136,7 @@ def test_get_openai_client_raises_when_missing_key(
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("no_api_key_remap")
 def test_validate_api_key() -> None:
     with patch.dict("os.environ", {}, clear=True):
         assert validate_api_key() is False

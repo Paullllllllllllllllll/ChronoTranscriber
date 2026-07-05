@@ -137,6 +137,28 @@ def _classify_status(exc: BaseException) -> tuple[bool, bool]:
     return is_rate_limit, is_server_error
 
 
+def _is_connection_error(exc: BaseException) -> bool:
+    """Return True when the exception is a transient connection/timeout failure.
+
+    Provider SDKs wrap the underlying ``httpx`` transport error before it
+    reaches the retry loop (e.g. the openai and anthropic SDKs raise
+    ``APIConnectionError from httpx.ConnectError``), so checking only the
+    top-level exception type misses them. Walk the ``__cause__``/``__context__``
+    chain (bounded, cycle-safe) looking for ``httpx.ConnectError`` or
+    ``httpx.TimeoutException``.
+    """
+    import httpx
+
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, (httpx.ConnectError, httpx.TimeoutException)):
+            return True
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return False
+
+
 def parse_retry_after(exc: BaseException | None) -> float | None:
     """Extract a Retry-After delay (in seconds) from an exception's HTTP headers.
 
@@ -988,7 +1010,11 @@ class BaseProvider(ABC):
         SDK/LangChain client with ``max_retries=0``, so all retries happen here.
         Retryable classes:
             HTTP 429 / 5xx (status-code-first)  — transient API errors, full budget
-            httpx.ConnectError                  — TCP/DNS connection failure
+            httpx.ConnectError                  — TCP/DNS connection failure,
+                                                  including SDK-wrapped forms
+                                                  (openai/anthropic
+                                                  APIConnectionError) detected
+                                                  via the __cause__ chain
             httpx.TimeoutException              — covers all httpx timeout subclasses
             pydantic.ValidationError            — unparseable structured output
                                                   (capped at validation_attempts)
@@ -1008,7 +1034,6 @@ class BaseProvider(ABC):
         committed to the daily budget. After exhausting all attempts the
         exception is re-raised to the caller.
         """
-        import httpx
         import tenacity
         from langchain_core.exceptions import OutputParserException
         from pydantic import ValidationError
@@ -1022,7 +1047,10 @@ class BaseProvider(ABC):
 
         def _should_retry(exc: BaseException) -> bool:
             nonlocal validation_attempt_count
-            if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException)):
+            # Cause-chain-aware: provider SDKs wrap httpx transport errors
+            # (e.g. openai.APIConnectionError from httpx.ConnectError), so
+            # the underlying connection failure is found via __cause__.
+            if _is_connection_error(exc):
                 return True
             # Status-code-first classification (authoritative). Since every
             # provider builds its SDK client with max_retries=0, this loop is the

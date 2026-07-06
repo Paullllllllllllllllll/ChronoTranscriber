@@ -782,7 +782,12 @@ async def _repair_sync_mode(
                 f"[WARN] Daily token budget reached; {len(deferred)} repair "
                 f"page(s) deferred. Waiting for daily reset..."
             )
-            if not await check_and_wait_for_token_limit(conc):
+            # Reservation-aware: admission control defers pages on a per-page
+            # reservation estimate while actual usage is still just under the
+            # cap, so the plain is_limit_reached() check would return instantly
+            # and spin this loop without progress (CT-8). would_block_next_page()
+            # makes the wait actually wait until the daily reset frees budget.
+            if not await check_and_wait_for_token_limit(conc, reservation_aware=True):
                 print_info("[INFO] Wait cancelled; remaining pages left unrepaired.")
                 break
 

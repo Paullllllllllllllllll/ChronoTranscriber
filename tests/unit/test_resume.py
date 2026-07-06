@@ -399,6 +399,60 @@ class TestInputAsOutput:
 
 
 # ===========================================================================
+# CT-1: single-file --input (item == input_root) must not degenerate the
+#       relative key to "." — the checker would hash a ".-<hash>" directory and
+#       never recognize the completed item. Mirrors manager._relative_key.
+# ===========================================================================
+
+
+class TestSingleFileInputRelativeKey:
+    @pytest.mark.unit
+    def test_relative_key_none_when_item_equals_input_root(
+        self, temp_dir: Path
+    ) -> None:
+        pdf = temp_dir / "book.pdf"
+        pdf.write_bytes(b"%PDF")
+        checker = ResumeChecker(
+            "skip",
+            _make_paths_config(temp_dir / "out"),
+            input_root=pdf,  # single-file input: item will equal input_root
+        )
+        assert checker._relative_key(pdf) is None
+
+    @pytest.mark.unit
+    def test_relative_key_preserved_for_dir_input(self, temp_dir: Path) -> None:
+        pdf = temp_dir / "book.pdf"
+        pdf.write_bytes(b"%PDF")
+        checker = ResumeChecker(
+            "skip",
+            _make_paths_config(temp_dir / "out"),
+            input_root=temp_dir,
+        )
+        assert checker._relative_key(pdf) == "book.pdf"
+
+    @pytest.mark.unit
+    def test_single_file_input_recognizes_completed_output(
+        self, temp_dir: Path
+    ) -> None:
+        out = temp_dir / "out"
+        pdf = temp_dir / "book.pdf"
+        pdf.write_bytes(b"%PDF")
+        # The real processor writes output under the stem-derived hash dir when
+        # the relative key is None; the checker must look there too (not under a
+        # ".-<hash>" directory) to file the item COMPLETE.
+        _create_output_txt(out, "book")
+
+        checker = ResumeChecker(
+            "skip",
+            _make_paths_config(out),
+            pdf_output_dir=out,
+            input_root=pdf,
+        )
+        result = checker.should_skip(pdf, "pdfs")
+        assert result.state == ProcessingState.COMPLETE
+
+
+# ===========================================================================
 # CLI argument parsing for --resume / --force
 # ===========================================================================
 

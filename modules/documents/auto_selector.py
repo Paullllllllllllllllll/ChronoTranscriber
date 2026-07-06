@@ -51,8 +51,11 @@ class AutoSelector:
         self.pdf_ocr_method = general.get("auto_mode_pdf_ocr_method", "tesseract")
         self.image_ocr_method = general.get("auto_mode_image_ocr_method", "tesseract")
 
-        # Check GPT availability
-        self.gpt_available = bool(os.getenv("OPENAI_API_KEY"))
+        # Check LLM ("gpt" method) availability for the *configured* provider,
+        # not OpenAI specifically. The auto pipeline's "gpt" OCR method targets
+        # whichever provider model_config.yaml selects (OpenAI, Anthropic, Google,
+        # OpenRouter, or a custom endpoint).
+        self.gpt_available = self._resolve_gpt_available()
 
         logger.info(
             "AutoSelector initialized: "
@@ -66,6 +69,44 @@ class AutoSelector:
             self.image_ocr_method,
             self.gpt_available,
         )
+
+    def _resolve_gpt_available(self) -> bool:
+        """Return True when the configured LLM provider has a usable API key.
+
+        Resolves the provider from ``model_config.yaml`` (explicit ``provider``
+        or auto-detected from the model name) and checks its key through the same
+        factory helpers the provider pipeline uses, honoring the optional
+        ``api_keys_config.yaml`` env-var remap. Falls back to the legacy
+        ``OPENAI_API_KEY`` check if resolution fails for any reason.
+        """
+        try:
+            from modules.config.service import get_config_service
+            from modules.llm.providers.factory import (
+                ProviderType,
+                detect_provider_from_model,
+                resolve_api_key_optional,
+            )
+
+            model_config = get_config_service().get_model_config() or {}
+            tm = model_config.get("transcription_model", {}) or {}
+            provider = tm.get("provider")
+            model = tm.get("name")
+
+            provider_type: ProviderType
+            if provider:
+                try:
+                    provider_type = ProviderType(str(provider).lower())
+                except ValueError:
+                    provider_type = detect_provider_from_model(str(model or ""))
+            elif model:
+                provider_type = detect_provider_from_model(str(model))
+            else:
+                provider_type = ProviderType.OPENAI
+
+            return resolve_api_key_optional(provider_type) is not None
+        except Exception as e:  # defensive: never let detection break auto mode
+            logger.debug(f"Could not resolve configured provider key: {e}")
+            return bool(os.getenv("OPENAI_API_KEY"))
 
     def scan_directory(
         self, input_dir: Path

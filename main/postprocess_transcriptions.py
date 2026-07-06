@@ -62,8 +62,22 @@ def collect_transcription_files(
     if not input_path.is_dir():
         return []
 
-    pattern = "**/*_transcription.txt" if recursive else "*_transcription.txt"
-    return sorted(input_path.glob(pattern))
+    # Current writers emit "{stem}.txt"; legacy writers emit
+    # "{stem}_transcription.txt". modules/batch/jsonl.py already supports both
+    # conventions, so directory mode must too -- matching only the legacy suffix
+    # finds zero modern outputs. We therefore scan every ".txt" file (the legacy
+    # suffix is a subset) and drop the only known non-transcription ".txt"
+    # sidecars: transcription-context files ("{stem}_transcr_context.txt",
+    # "{parent}_transcr_context.txt", "transcr_context.txt").
+    pattern = "**/*.txt" if recursive else "*.txt"
+
+    def _is_context_sidecar(path: Path) -> bool:
+        return (
+            path.name.endswith("_transcr_context.txt")
+            or path.name == "transcr_context.txt"
+        )
+
+    return sorted(p for p in input_path.glob(pattern) if not _is_context_sidecar(p))
 
 
 def build_config_from_args(args: Any, base_config: dict[str, Any]) -> dict[str, Any]:
@@ -174,8 +188,9 @@ def postprocess_cli(args: Any) -> int:
                 logger.exception(f"Error processing {file_path}")
                 fail_count += 1
         print_success(f"Post-processing complete. {success_count} file(s) processed.")
-        _emit_postprocess_json_summary(args, success_count, fail_count, 0)
-        return 0
+        exit_code = 1 if fail_count else 0
+        _emit_postprocess_json_summary(args, success_count, fail_count, exit_code)
+        return exit_code
 
     elif args.output:
         # Output to specified path
@@ -212,8 +227,9 @@ def postprocess_cli(args: Any) -> int:
                     fail_count += 1
 
         print_success(f"Post-processing complete. Files saved to: {output_path}")
-        _emit_postprocess_json_summary(args, success_count, fail_count, 0)
-        return 0
+        exit_code = 1 if fail_count else 0
+        _emit_postprocess_json_summary(args, success_count, fail_count, exit_code)
+        return exit_code
 
     else:
         # Output to stdout (single file only)

@@ -227,6 +227,707 @@ class TestPageFailurePropagation:
 
 
 # ---------------------------------------------------------------------------
+# CT-6: mid-document daily-budget exhaustion must fail the item, withhold the
+#       truncated output, and resume from the JSONL on the next run.
+# ---------------------------------------------------------------------------
+
+
+def _fake_pdf_stream(source_path: Any = None, *, page_indices: Any, **_kw: Any) -> Any:
+    """Stand-in for stream_pdf_payloads: yield a lightweight payload per index."""
+
+    async def gen() -> Any:
+        for i in page_indices:
+            yield SimpleNamespace(
+                index=i,
+                page_index=i,
+                image_name=f"page_{i + 1:04d}_pre_processed.jpg",
+                source_file=str(source_path),
+            )
+
+    return gen()
+
+
+def _make_fake_pipeline(budget_per_pass: int) -> Any:
+    """Fake run_streaming_transcription_pipeline mirroring the on-disk effects.
+
+    Writes a JSONL record per admitted page, finalizes the output txt from the
+    full JSONL (exactly as the real pipeline does), and sets ``exhausted`` once
+    the per-pass page budget is spent so the caller's re-pass loop engages.
+    """
+    from modules.batch.jsonl import ensure_resume_marker, write_jsonl_record
+    from modules.transcribe.pipeline import write_output_from_jsonl
+
+    async def fake(
+        payload_source: Any,
+        transcriber: Any,
+        temp_jsonl_path: Path,
+        output_txt_path: Path,
+        source_name: str,
+        concurrency_config: Any,
+        postprocessing_config: Any,
+        *,
+        is_folder: bool,
+        output_format: str,
+        file_provenance: Any,
+        tracker: Any,
+        exhausted: Any,
+    ) -> None:
+        ensure_resume_marker(temp_jsonl_path)
+        written = 0
+        async for p in payload_source:
+            if written >= budget_per_pass:
+                exhausted.set()
+                break
+            write_jsonl_record(
+                temp_jsonl_path,
+                {
+                    "file_name": source_name,
+                    "image_name": p.image_name,
+                    "text_chunk": f"page {p.index} text",
+                    "order_index": p.index,
+                    "method": "gpt",
+                },
+            )
+            written += 1
+        write_output_from_jsonl(
+            temp_jsonl_path,
+            output_txt_path,
+            postprocessing_config,
+            output_format=output_format,
+        )
+
+    return fake
+
+
+def _make_bare_manager(transient: Any = None) -> Any:
+    """Build a WorkflowManager with only the attributes the GPT streaming flow
+    touches, bypassing __init__ (which resolves output dirs and config)."""
+    from modules.transcribe.manager import TransientFileTracker, WorkflowManager
+
+    mgr = WorkflowManager.__new__(WorkflowManager)
+    mgr.resume_mode = "skip"
+    mgr.model_config = {"transcription_model": {"provider": "openai", "name": "gpt-4o"}}
+    mgr.concurrency_config = {
+        "concurrency": {"transcription": {"concurrency_limit": 2}},
+        "daily_token_limit": {"enabled": True},
+    }
+    mgr.postprocessing_config = {}
+    mgr.processing_settings = {"retain_temporary_jsonl": True}
+    mgr.user_config = SimpleNamespace(
+        use_batch_processing=False,
+        retry_errors=False,
+        output_format="txt",
+    )
+    mgr._transient_tracker = transient or TransientFileTracker()
+    if transient is None:
+        mgr._transient_tracker.configure({"retain_temporary_jsonl": True})
+    return mgr
+
+
+def _patch_streaming_env(
+    monkeypatch: pytest.MonkeyPatch, pipeline: Any, wait_result: bool
+) -> None:
+    """Patch the module-level collaborators used by _process_gpt_streaming."""
+    import modules.transcribe.manager as mm
+
+    monkeypatch.setattr(
+        mm, "resolve_image_settings", lambda p, m: ({}, "openai", 300, 1_000_000)
+    )
+    monkeypatch.setattr(mm, "stream_pdf_payloads", _fake_pdf_stream)
+    monkeypatch.setattr(mm, "get_token_tracker", lambda: MagicMock())
+    monkeypatch.setattr(mm, "run_streaming_transcription_pipeline", pipeline)
+
+    async def _wait(cfg: Any, reservation_aware: bool = False) -> bool:
+        return wait_result
+
+    monkeypatch.setattr(mm, "check_and_wait_for_token_limit", _wait)
+
+
+async def _run_stream(mgr: Any, tmp_path: Path, jsonl: Path, out: Path) -> None:
+    await mgr._process_gpt_streaming(
+        source_path=tmp_path / "doc.pdf",
+        source_name="doc.pdf",
+        source_stem="doc",
+        is_folder=False,
+        total_units=4,
+        page_indices=None,
+        parent_folder=tmp_path,
+        temp_jsonl_path=jsonl,
+        output_txt_path=out,
+        transcriber=MagicMock(),
+    )
+
+
+@pytest.mark.unit
+class TestBudgetExhaustionContract:
+    @pytest.mark.asyncio
+    async def test_exhaustion_raises_and_withholds_output(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from modules.batch.jsonl import get_processed_image_names
+        from modules.transcribe.pipeline import BudgetExhaustedError
+
+        # 4-page doc, budget admits 2 pages, then the wait gives up (False).
+        _patch_streaming_env(monkeypatch, _make_fake_pipeline(2), wait_result=False)
+        mgr = _make_bare_manager()
+        jsonl = tmp_path / "doc.jsonl"
+        jsonl.touch()
+        out = tmp_path / "doc.txt"
+
+        with pytest.raises(BudgetExhaustedError) as excinfo:
+            await _run_stream(mgr, tmp_path, jsonl, out)
+
+        # (a) item counted failed via the exception channel.
+        assert excinfo.value.deferred_pages == 2
+        assert excinfo.value.completed_pages == 2
+        # (b) the truncated finalized output is withheld.
+        assert not out.exists()
+        # ... but the JSONL retains the 2 completed pages plus its resume marker.
+        assert len(get_processed_image_names(jsonl)) == 2
+
+    @pytest.mark.asyncio
+    async def test_resume_completes_file_from_jsonl(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import modules.transcribe.manager as mm
+        from modules.batch.jsonl import get_processed_image_names
+        from modules.transcribe.pipeline import BudgetExhaustedError
+
+        jsonl = tmp_path / "doc.jsonl"
+        jsonl.touch()
+        out = tmp_path / "doc.txt"
+
+        # First run: exhausts after 2 of 4 pages, withholds output, raises.
+        _patch_streaming_env(monkeypatch, _make_fake_pipeline(2), wait_result=False)
+        with pytest.raises(BudgetExhaustedError):
+            await _run_stream(_make_bare_manager(), tmp_path, jsonl, out)
+        assert not out.exists()
+
+        # Second run after the daily reset: ample budget, no exhaustion. Page-
+        # level resume reads the 2 cached pages from the JSONL and transcribes
+        # only the remaining 2, then finalizes the complete output.
+        monkeypatch.setattr(
+            mm, "run_streaming_transcription_pipeline", _make_fake_pipeline(99)
+        )
+        await _run_stream(_make_bare_manager(), tmp_path, jsonl, out)
+
+        assert out.exists()
+        assert len(get_processed_image_names(jsonl)) == 4
+        text = out.read_text(encoding="utf-8")
+        for i in range(4):
+            assert f"page {i} text" in text
+
+    @pytest.mark.asyncio
+    async def test_partial_jsonl_survives_aggressive_cleanup(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from modules.batch.jsonl import get_processed_image_names
+        from modules.transcribe.manager import TransientFileTracker
+        from modules.transcribe.pipeline import BudgetExhaustedError
+
+        jsonl = tmp_path / "doc.jsonl"
+        jsonl.touch()
+        out = tmp_path / "doc.txt"
+
+        # retain_temporary_jsonl False makes cleanup_pending() delete tracked
+        # JSONLs — the budget-partial artifact must nonetheless survive because
+        # it is removed from the cleanup list before the item fails.
+        transient = TransientFileTracker()
+        transient.configure({"retain_temporary_jsonl": False})
+        transient.register_jsonl(jsonl, "gpt")
+
+        _patch_streaming_env(monkeypatch, _make_fake_pipeline(2), wait_result=False)
+        mgr = _make_bare_manager(transient=transient)
+
+        with pytest.raises(BudgetExhaustedError):
+            await _run_stream(mgr, tmp_path, jsonl, out)
+
+        transient.cleanup_pending()
+        assert jsonl.exists()
+        assert len(get_processed_image_names(jsonl)) == 2
+
+
+# ---------------------------------------------------------------------------
+# CT-7: a page failure on the SAME pass that exhausts the budget must not
+#       bypass the withhold. The streaming pipeline finalizes the truncated
+#       output then raises PageTranscriptionError; the manager must fold that
+#       into the budget flow (withhold + JSONL protection) rather than let it
+#       propagate and leave a truncated txt that resume files COMPLETE.
+# ---------------------------------------------------------------------------
+
+
+def _make_exhaust_and_fail_pipeline(budget_per_pass: int, fail_index: int) -> Any:
+    """Fake pipeline whose exhausting pass ALSO fails a page.
+
+    Mirrors the real pipeline's on-disk effects: writes a JSONL record per
+    admitted page (an ``[transcription error]`` placeholder for ``fail_index``),
+    finalizes the output txt, sets ``exhausted`` once the per-pass budget is
+    spent, and — like the real pipeline — raises PageTranscriptionError AFTER
+    finalizing when a page failed this pass.
+    """
+    from modules.batch.jsonl import ensure_resume_marker, write_jsonl_record
+    from modules.transcribe.pipeline import (
+        PageTranscriptionError,
+        write_output_from_jsonl,
+    )
+
+    async def fake(
+        payload_source: Any,
+        transcriber: Any,
+        temp_jsonl_path: Path,
+        output_txt_path: Path,
+        source_name: str,
+        concurrency_config: Any,
+        postprocessing_config: Any,
+        *,
+        is_folder: bool,
+        output_format: str,
+        file_provenance: Any,
+        tracker: Any,
+        exhausted: Any,
+    ) -> None:
+        ensure_resume_marker(temp_jsonl_path)
+        written = 0
+        failed = 0
+        async for p in payload_source:
+            if written >= budget_per_pass:
+                exhausted.set()
+                break
+            is_fail = p.index == fail_index
+            text = (
+                f"[transcription error: {p.image_name}]"
+                if is_fail
+                else f"page {p.index} text"
+            )
+            write_jsonl_record(
+                temp_jsonl_path,
+                {
+                    "file_name": source_name,
+                    "image_name": p.image_name,
+                    "text_chunk": text,
+                    "order_index": p.index,
+                    "method": "gpt",
+                },
+            )
+            written += 1
+            failed += int(is_fail)
+        write_output_from_jsonl(
+            temp_jsonl_path,
+            output_txt_path,
+            postprocessing_config,
+            output_format=output_format,
+        )
+        if failed:
+            raise PageTranscriptionError(source_name, failed, written)
+
+    return fake
+
+
+def _make_fail_first_pass_then_clean_pipeline(
+    budget_first_pass: int, fail_index: int
+) -> Any:
+    """Stateful fake: pass 1 fails a page AND exhausts; pass 2 finishes clean.
+
+    Models the daily reset freeing budget so the re-pass transcribes the
+    remaining pages while the earlier page failure remains a placeholder in the
+    JSONL. The final output is COMPLETE (with the placeholder), so it must NOT
+    be withheld — only re-raised so the item counts failed.
+    """
+    from modules.batch.jsonl import ensure_resume_marker, write_jsonl_record
+    from modules.transcribe.pipeline import (
+        PageTranscriptionError,
+        write_output_from_jsonl,
+    )
+
+    state = {"calls": 0}
+
+    async def fake(
+        payload_source: Any,
+        transcriber: Any,
+        temp_jsonl_path: Path,
+        output_txt_path: Path,
+        source_name: str,
+        concurrency_config: Any,
+        postprocessing_config: Any,
+        *,
+        is_folder: bool,
+        output_format: str,
+        file_provenance: Any,
+        tracker: Any,
+        exhausted: Any,
+    ) -> None:
+        state["calls"] += 1
+        first = state["calls"] == 1
+        ensure_resume_marker(temp_jsonl_path)
+        written = 0
+        failed = 0
+        async for p in payload_source:
+            if first and written >= budget_first_pass:
+                exhausted.set()
+                break
+            is_fail = first and p.index == fail_index
+            text = (
+                f"[transcription error: {p.image_name}]"
+                if is_fail
+                else f"page {p.index} text"
+            )
+            write_jsonl_record(
+                temp_jsonl_path,
+                {
+                    "file_name": source_name,
+                    "image_name": p.image_name,
+                    "text_chunk": text,
+                    "order_index": p.index,
+                    "method": "gpt",
+                },
+            )
+            written += 1
+            failed += int(is_fail)
+        write_output_from_jsonl(
+            temp_jsonl_path,
+            output_txt_path,
+            postprocessing_config,
+            output_format=output_format,
+        )
+        if failed:
+            raise PageTranscriptionError(source_name, failed, written)
+
+    return fake
+
+
+@pytest.mark.unit
+class TestBudgetExhaustionWithPageFailure:
+    @pytest.mark.asyncio
+    async def test_page_failure_on_exhausting_pass_still_withholds(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from modules.batch.jsonl import get_processed_image_names
+        from modules.transcribe.pipeline import BudgetExhaustedError
+
+        # 4-page doc; pass 1 admits 2 pages (page 1 FAILS), then exhausts and the
+        # wait gives up (False). The pipeline raises PageTranscriptionError after
+        # finalizing — the manager must catch it, withhold, and raise the budget
+        # failure rather than let the page error bypass the withhold.
+        _patch_streaming_env(
+            monkeypatch,
+            _make_exhaust_and_fail_pipeline(budget_per_pass=2, fail_index=1),
+            wait_result=False,
+        )
+        jsonl = tmp_path / "doc.jsonl"
+        jsonl.touch()
+        out = tmp_path / "doc.txt"
+
+        with pytest.raises(BudgetExhaustedError) as excinfo:
+            await _run_stream(_make_bare_manager(), tmp_path, jsonl, out)
+
+        assert excinfo.value.deferred_pages == 2
+        # The truncated finalized output is withheld despite the page failure.
+        assert not out.exists()
+        # JSONL keeps the 2 attempted pages (1 ok + 1 error placeholder).
+        assert len(get_processed_image_names(jsonl)) == 2
+
+    @pytest.mark.asyncio
+    async def test_completed_after_reset_keeps_output_but_still_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from modules.batch.jsonl import get_processed_image_names
+        from modules.transcribe.pipeline import PageTranscriptionError
+
+        # Pass 1 fails page 1 and exhausts; the wait succeeds (True); pass 2
+        # transcribes the remaining pages. The output is COMPLETE with the error
+        # placeholder — it must be KEPT (not withheld) and the item still fails.
+        _patch_streaming_env(
+            monkeypatch,
+            _make_fail_first_pass_then_clean_pipeline(
+                budget_first_pass=2, fail_index=1
+            ),
+            wait_result=True,
+        )
+        jsonl = tmp_path / "doc.jsonl"
+        jsonl.touch()
+        out = tmp_path / "doc.txt"
+
+        with pytest.raises(PageTranscriptionError) as excinfo:
+            await _run_stream(_make_bare_manager(), tmp_path, jsonl, out)
+
+        assert excinfo.value.failed_pages == 1
+        # Output retained (complete, with the error placeholder for page 1).
+        assert out.exists()
+        assert len(get_processed_image_names(jsonl)) == 4
+        text = out.read_text(encoding="utf-8")
+        assert "[transcription error" in text
+        for i in (0, 2, 3):
+            assert f"page {i} text" in text
+
+
+# ---------------------------------------------------------------------------
+# CT-8: the GPT image-folder path must propagate failures (ResumeFormatError,
+#       render failure-rate guard, ...) like the PDF path, not swallow them as
+#       "processed" with exit 0.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestImageFolderPropagatesRuntimeError:
+    @pytest.mark.asyncio
+    async def test_runtime_error_from_streaming_propagates(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from modules.batch.jsonl import ResumeFormatError
+
+        folder = tmp_path / "scans"
+        folder.mkdir()
+        (folder / "page1.png").write_bytes(b"\x89PNG")
+
+        mgr = _make_bare_manager()
+        mgr.use_input_as_output = False
+        mgr.output_mode = "hash"
+        mgr.input_root = tmp_path
+        mgr.image_output_dir = tmp_path / "out"
+        mgr.user_config = SimpleNamespace(
+            transcription_method="gpt",
+            additional_context_path=None,
+            additional_context_image_path=None,
+            use_hierarchical_context=True,
+            page_range=None,
+            output_format="txt",
+            retry_errors=False,
+        )
+
+        async def _boom(**kwargs: Any) -> None:
+            # A RuntimeError subclass (ResumeFormatError) that the removed
+            # `except RuntimeError` used to swallow into a silent skip.
+            raise ResumeFormatError("incompatible resume artifact")
+
+        monkeypatch.setattr(mgr, "_process_gpt_streaming", _boom)
+
+        with pytest.raises(ResumeFormatError):
+            await mgr.process_single_image_folder(folder, transcriber=None)
+
+
+# ---------------------------------------------------------------------------
+# CT-10: EPUB/MOBI page ranges must resolve against the REAL section count, not
+#        a 2**31 sentinel (which silently drops last:N and OOMs on open spans).
+# ---------------------------------------------------------------------------
+
+
+class _FakeExtraction:
+    def __init__(self, sections: list[str]) -> None:
+        self.sections = sections
+        self.source_format: str | None = None
+
+    def to_plain_text(self) -> str:
+        return "\n".join(self.sections) + "\n"
+
+
+def _make_fake_ebook_processor(n_sections: int) -> Any:
+    class _FakeEbookProcessor:
+        def __init__(self, path: Path) -> None:
+            self.path = path
+
+        def extract_text(
+            self, section_indices: Any = None, page_range: Any = None
+        ) -> Any:
+            # The manager now extracts ALL sections and slices afterward.
+            return _FakeExtraction([f"section {i}" for i in range(n_sections)])
+
+        def prepare_output_folder(self, out_dir: Path) -> tuple[Path, Path]:
+            parent = out_dir / "book"
+            parent.mkdir(parents=True, exist_ok=True)
+            return parent, parent / "book.txt"
+
+    return _FakeEbookProcessor
+
+
+def _make_ebook_manager(page_range: Any) -> Any:
+    from modules.transcribe.manager import WorkflowManager
+
+    mgr = WorkflowManager.__new__(WorkflowManager)
+    mgr.use_input_as_output = False
+    mgr.postprocessing_config = {}
+    mgr.user_config = SimpleNamespace(page_range=page_range, output_format="txt")
+    return mgr
+
+
+@pytest.mark.unit
+class TestEbookPageRangeResolvesAgainstRealCount:
+    @pytest.mark.asyncio
+    async def test_last_n_selects_final_sections_not_empty(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import modules.transcribe.manager as mm
+        from modules.documents.page_range import parse_page_range
+
+        captured: dict[str, str] = {}
+
+        def fake_writer(pages: Any, out: Path, **kw: Any) -> Path:
+            captured["text"] = pages[0]["text"]
+            Path(out).write_text(pages[0]["text"], encoding="utf-8")
+            return Path(out)
+
+        monkeypatch.setattr(mm, "write_transcription_output", fake_writer)
+
+        mgr = _make_ebook_manager(parse_page_range("last:5"))
+        await mgr._process_native_ebook(
+            file_path=tmp_path / "book.epub",
+            processor_cls=_make_fake_ebook_processor(10),
+            format_label="EPUB",
+            default_output_dir=tmp_path / "out",
+        )
+        # last:5 of 10 sections -> sections 5..9 (previously the 2**31 sentinel
+        # pushed these indices out of range and produced EMPTY output).
+        text = captured["text"]
+        for i in range(5, 10):
+            assert f"section {i}" in text
+        assert "section 4" not in text
+
+    @pytest.mark.asyncio
+    async def test_open_span_clamps_to_real_count(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import modules.transcribe.manager as mm
+        from modules.documents.page_range import parse_page_range
+
+        captured: dict[str, str] = {}
+
+        def fake_writer(pages: Any, out: Path, **kw: Any) -> Path:
+            captured["text"] = pages[0]["text"]
+            return Path(out)
+
+        monkeypatch.setattr(mm, "write_transcription_output", fake_writer)
+
+        # `3-` open span: previously materialized ~2.1B indices (OOM). With the
+        # real count it clamps to sections 2..9.
+        mgr = _make_ebook_manager(parse_page_range("3-"))
+        await mgr._process_native_ebook(
+            file_path=tmp_path / "book.epub",
+            processor_cls=_make_fake_ebook_processor(10),
+            format_label="EPUB",
+            default_output_dir=tmp_path / "out",
+        )
+        text = captured["text"]
+        assert "section 2" in text
+        assert "section 9" in text
+        assert "section 1" not in text
+
+    @pytest.mark.asyncio
+    async def test_out_of_range_warns_and_skips_without_empty_output(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import modules.transcribe.manager as mm
+        from modules.documents.page_range import parse_page_range
+
+        called = {"wrote": False}
+
+        def fake_writer(pages: Any, out: Path, **kw: Any) -> Path:
+            called["wrote"] = True
+            return Path(out)
+
+        monkeypatch.setattr(mm, "write_transcription_output", fake_writer)
+
+        # A valid range beyond the section count selects nothing: the manager
+        # must warn and skip, never write an empty output with a success message.
+        mgr = _make_ebook_manager(parse_page_range("50-60"))
+        await mgr._process_native_ebook(
+            file_path=tmp_path / "book.epub",
+            processor_cls=_make_fake_ebook_processor(3),
+            format_label="EPUB",
+            default_output_dir=tmp_path / "out",
+        )
+        assert called["wrote"] is False
+
+
+# ---------------------------------------------------------------------------
+# CT-9: CLI auto mode must build the per-method config as a FULL copy of the
+#       user's config (only overriding the auto-decided fields), and re-point
+#       the WorkflowManager's ResumeChecker at the redirected auto output dir.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestAutoModeConfigPropagation:
+    @pytest.mark.asyncio
+    async def test_full_copy_and_resume_checker_repointed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import main.unified_transcriber as ut
+        from modules.transcribe.manager import ProcessingSummary
+        from modules.transcribe.user_config import UserConfiguration
+
+        captured: dict[str, Any] = {}
+
+        class _FakeResumeChecker:
+            def __init__(self) -> None:
+                self.pdf_output_dir: Any = None
+                self.image_output_dir: Any = None
+                self.epub_output_dir: Any = None
+                self.mobi_output_dir: Any = None
+
+        class _FakeManager:
+            def __init__(self, cfg: Any, *a: Any, **k: Any) -> None:
+                captured["cfg"] = cfg
+                self.pdf_output_dir: Any = None
+                self.image_output_dir: Any = None
+                self.epub_output_dir: Any = None
+                self.mobi_output_dir: Any = None
+                self.resume_checker = _FakeResumeChecker()
+
+            async def process_selected_items(self, transcriber: Any = None) -> Any:
+                captured["rc"] = self.resume_checker
+                return ProcessingSummary(processed=1, failed=0, total=1)
+
+        class _FakePathConfig:
+            @classmethod
+            def from_paths_config(cls, pc: Any) -> Any:
+                return SimpleNamespace(use_input_as_output=False)
+
+        monkeypatch.setattr(ut, "WorkflowManager", _FakeManager)
+        monkeypatch.setattr(ut, "PathConfig", _FakePathConfig)
+
+        out_dir = tmp_path / "auto_out"
+        input_root = tmp_path / "root"
+        ctx = tmp_path / "ctx.txt"
+        ctx_img = tmp_path / "ctx.png"
+        decision = SimpleNamespace(method="native", file_path=tmp_path / "a.pdf")
+        user_config = UserConfiguration(
+            processing_type="auto",
+            auto_decisions=[decision],
+            selected_items=[out_dir],
+            auto_selector=SimpleNamespace(print_decision_summary=lambda d: None),
+            output_format="md",
+            output_mode="mirror",
+            input_root=input_root,
+            additional_context_path=ctx,
+            additional_context_image_path=ctx_img,
+            sync_fallback=True,
+            resume_mode="skip",
+        )
+
+        summary = await ut.process_auto_mode(user_config, {}, {}, {}, {})
+
+        cfg = captured["cfg"]
+        # Previously-dropped fields now carried through unchanged.
+        assert cfg.output_format == "md"
+        assert cfg.output_mode == "mirror"
+        assert cfg.input_root == input_root
+        assert cfg.additional_context_path == ctx
+        assert cfg.additional_context_image_path == ctx_img
+        assert cfg.sync_fallback is True
+        # Auto-decided overrides applied.
+        assert cfg.transcription_method == "native"
+        assert cfg.processing_type == "auto"
+        assert cfg.selected_items == [decision.file_path]
+        assert cfg.use_batch_processing is False
+        # ResumeChecker re-pointed at the redirected auto output dir.
+        rc = captured["rc"]
+        assert rc.pdf_output_dir == out_dir
+        assert rc.image_output_dir == out_dir
+        assert rc.epub_output_dir == out_dir
+        assert rc.mobi_output_dir == out_dir
+        assert summary.processed == 1
+
+
+# ---------------------------------------------------------------------------
 # CT-3: OutputParserException is retried like other validation failures
 # ---------------------------------------------------------------------------
 

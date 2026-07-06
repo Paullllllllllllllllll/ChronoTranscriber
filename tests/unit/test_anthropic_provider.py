@@ -341,6 +341,81 @@ class TestAnthropicProviderInit:
         assert captured["thinking"] == {"type": "adaptive"}
 
     @pytest.mark.unit
+    def test_thinking_drops_sampler_kwargs(self) -> None:
+        """Sampler kwargs are stripped when extended thinking is active.
+
+        Regression: Anthropic rejects temperature!=1 and forbids top_p/top_k
+        alongside a thinking block with an unretryable 400. The upstream default
+        temperature is 0.0, so these must never reach ChatAnthropic when a
+        thinking block is set.
+        """
+        from modules.llm.providers.anthropic_provider import AnthropicProvider
+
+        captured: dict[str, Any] = {}
+
+        with patch(
+            "modules.llm.providers.anthropic_provider.ChatAnthropic",
+            side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+        ):
+            AnthropicProvider(
+                api_key="sk-ant-test",
+                model="claude-sonnet-4-5-20250929",
+                temperature=0.0,
+                top_p=0.9,
+                top_k=5,
+                reasoning_config={"effort": "medium"},
+            )
+
+        assert captured["thinking"]["type"] == "enabled"
+        assert "temperature" not in captured
+        assert "top_p" not in captured
+        assert "top_k" not in captured
+
+    @pytest.mark.unit
+    def test_adaptive_thinking_drops_sampler_kwargs(self) -> None:
+        """Adaptive thinking (Claude 4.6+) also strips sampler kwargs."""
+        from modules.llm.providers.anthropic_provider import AnthropicProvider
+
+        captured: dict[str, Any] = {}
+
+        with patch(
+            "modules.llm.providers.anthropic_provider.ChatAnthropic",
+            side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+        ):
+            AnthropicProvider(
+                api_key="sk-ant-test",
+                model="claude-opus-4-6",
+                temperature=0.0,
+                top_k=7,
+                reasoning_config={"effort": "high"},
+            )
+
+        assert captured["thinking"] == {"type": "adaptive"}
+        assert "temperature" not in captured
+        assert "top_p" not in captured
+        assert "top_k" not in captured
+
+    @pytest.mark.unit
+    def test_sampler_kwargs_kept_without_thinking(self) -> None:
+        """Sampler controls survive when no thinking block is active."""
+        from modules.llm.providers.anthropic_provider import AnthropicProvider
+
+        captured: dict[str, Any] = {}
+
+        with patch(
+            "modules.llm.providers.anthropic_provider.ChatAnthropic",
+            side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+        ):
+            AnthropicProvider(
+                api_key="sk-ant-test",
+                model="claude-3-5-sonnet-20241022",  # non-reasoning
+                temperature=0.3,
+            )
+
+        assert "thinking" not in captured
+        assert captured.get("temperature") == 0.3
+
+    @pytest.mark.unit
     def test_max_tokens_capped_at_model_limit(self) -> None:
         """max_tokens is capped at model's max_output_tokens."""
         from modules.llm.providers.anthropic_provider import AnthropicProvider

@@ -42,8 +42,10 @@ from modules.infra.token_budget import (
     check_and_wait_for_token_limit,
     get_token_tracker,
 )
-from modules.postprocess.writer import write_transcription_output
+from modules.postprocess.writer import resolve_output_path, write_transcription_output
 from modules.transcribe.pipeline import (
+    BudgetExhaustedError,
+    PageTranscriptionError,
     build_file_provenance,
     run_streaming_transcription_pipeline,
     run_transcription_pipeline,
@@ -480,30 +482,47 @@ class WorkflowManager:
         """
         print_info(f"Processing {format_label}: {file_path.name}")
 
-        # Resolve page/section range if configured
-        section_indices = None
-        if self.user_config.page_range is not None:
-            # We need a preliminary extraction to count sections, but that's
-            # expensive.  Instead, pass section_indices through and let the
-            # processor clamp internally.  For the log message we do a quick
-            # count by reading the spine / item list without full extraction.
-            section_indices_raw = self.user_config.page_range.resolve(2**31)
-            if section_indices_raw:
-                section_indices = section_indices_raw
-                print_info(
-                    f"Page range: {self.user_config.page_range.describe()} "
-                    f"(applied to {format_label} sections)"
-                )
+        # Resolve page/section range if configured. The real section count is
+        # only known after extraction, so we extract ALL sections and slice
+        # against that count. Resolving up front against a 2**31 sentinel is
+        # unsafe: `last:N` lands near 2**31 and the processor's `0 <= i < len`
+        # filter drops every index -> silently empty output written with a
+        # success message; an open span (`3-`) materializes ~2.1 billion indices
+        # into a set -> hang/OOM (CT-10). Indices address non-empty extracted
+        # sections in reading order.
+        page_range = self.user_config.page_range
+        if page_range is not None and page_range.is_empty_spec():
+            page_range = None
+        if page_range is not None:
+            print_info(
+                f"Page range: {page_range.describe()} "
+                f"(applied to {format_label} sections)"
+            )
 
         processor = processor_cls(file_path)
         try:
-            extraction = processor.extract_text(section_indices=section_indices)
+            extraction = processor.extract_text()
         except Exception as exc:
             logger.exception(
                 "Failed to extract %s %s: %s", format_label, file_path.name, exc
             )
             print_error(f"Failed to extract text from {file_path.name}.")
             return
+
+        if page_range is not None:
+            total_sections = len(extraction.sections)
+            keep = page_range.resolve(total_sections)
+            if not keep:
+                # A valid range that selects nothing (e.g. section 50 of a
+                # 3-section book). Warn and skip rather than write empty output
+                # with a success message, matching the PDF page-range path.
+                print_warning(
+                    f"Page range '{page_range.describe()}' selected no "
+                    f"{format_label} sections for '{file_path.name}' "
+                    f"({total_sections} section(s)). Skipping."
+                )
+                return
+            extraction.sections = [extraction.sections[i] for i in keep]
 
         # Determine output directory and prepare working folder
         if self.use_input_as_output:
@@ -635,6 +654,29 @@ class WorkflowManager:
                 f"Preserving {temp_jsonl_path.name} for batch tracking"
                 f" (required for retrieval)"
             )
+
+    def _withhold_partial_output(
+        self, output_txt_path: Path, output_format: str
+    ) -> None:
+        """Remove a finalized output written before a budget-partial give-up.
+
+        The streaming pipeline finalizes the output from the JSONL on every
+        pass, including the pass that exhausted the budget; that file omits the
+        deferred pages yet looks complete. Removing it leaves only the temp
+        JSONL, from which page-level resume rebuilds the full output on the next
+        run. The JSONL and its resume marker are left untouched. Resolves the
+        real extension so md/json outputs are withheld too.
+        """
+        actual_path = resolve_output_path(output_txt_path, output_format)
+        try:
+            if actual_path.exists():
+                actual_path.unlink()
+                print_info(
+                    f"Withheld partial output {actual_path.name}; it will be "
+                    f"rebuilt from the JSONL on resume."
+                )
+        except OSError as e:
+            logger.warning("Could not remove partial output %s: %s", actual_path, e)
 
     async def _process_gpt_streaming(
         self,
@@ -793,22 +835,42 @@ class WorkflowManager:
         first_provenance: dict[str, Any] | None = file_provenance
         completed_fully = True
         stalled_resets = 0
+        # A page-level failure on the SAME pass that exhausted the budget is
+        # remembered here. The pipeline finalizes the (truncated) output then
+        # raises PageTranscriptionError BEFORE we can inspect `exhausted`, so a
+        # bare propagation would skip the withhold + JSONL-protection flow and
+        # leave a truncated txt that resume files COMPLETE (CT-7). We catch it,
+        # fold it into the budget re-pass/withhold flow, and re-raise an
+        # appropriate failure once the loop settles.
+        page_failure: PageTranscriptionError | None = None
         while True:
             exhausted = asyncio.Event()
-            await run_streaming_transcription_pipeline(
-                build_source(needed),
-                transcriber,
-                temp_jsonl_path,
-                output_txt_path,
-                source_name,
-                self.concurrency_config,
-                self.postprocessing_config,
-                is_folder=is_folder,
-                output_format=output_format,
-                file_provenance=first_provenance,
-                tracker=tracker,
-                exhausted=exhausted,
-            )
+            try:
+                await run_streaming_transcription_pipeline(
+                    build_source(needed),
+                    transcriber,
+                    temp_jsonl_path,
+                    output_txt_path,
+                    source_name,
+                    self.concurrency_config,
+                    self.postprocessing_config,
+                    is_folder=is_folder,
+                    output_format=output_format,
+                    file_provenance=first_provenance,
+                    tracker=tracker,
+                    exhausted=exhausted,
+                )
+            except PageTranscriptionError as pte:
+                if not exhausted.is_set():
+                    # No budget deferral: pages genuinely failed and the output
+                    # (with error placeholders) is complete. Preserve the CT-2
+                    # contract — propagate unchanged so the item counts failed
+                    # and the JSONL/output survive for --errors-only repair.
+                    raise
+                # Budget exhausted on the same pass a page failed. Remember the
+                # newest failure (its counts reflect the latest pass) and fall
+                # through to the wait/re-pass/withhold flow below.
+                page_failure = pte
             if not exhausted.is_set():
                 break
 
@@ -824,7 +886,14 @@ class WorkflowManager:
                 f"Daily token budget reached; {len(needed)} page(s) deferred. "
                 f"Waiting for daily reset..."
             )
-            if not await check_and_wait_for_token_limit(self.concurrency_config):
+            # Reservation-aware: admission control defers pages on a per-page
+            # reservation estimate while actual usage is still just under the
+            # cap, so the plain is_limit_reached() check would return instantly
+            # and spin this loop without progress. would_block_next_page() makes
+            # the wait actually wait until the daily reset frees enough budget.
+            if not await check_and_wait_for_token_limit(
+                self.concurrency_config, reservation_aware=True
+            ):
                 completed_fully = False
                 break
 
@@ -843,16 +912,65 @@ class WorkflowManager:
             else:
                 stalled_resets = 0
 
-        if completed_fully:
+        if completed_fully and page_failure is None:
             print_success(
                 f"Saved transcription for '{source_name}' -> {output_txt_path.name}"
             )
             self._cleanup_temp_jsonl(temp_jsonl_path, "gpt")
             self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
+        elif completed_fully:
+            # All deferred pages were eventually transcribed, but a page failed
+            # on an earlier pass. The finalized output is COMPLETE with error
+            # placeholders (the CT-2 case), so it must NOT be withheld — resume
+            # would only rebuild the same placeholders. Leave the output and the
+            # JSONL in place (matching the non-budget CT-2 path, which propagates
+            # without cleanup) and re-raise so the item counts failed.
+            assert page_failure is not None  # narrowed by the branch conditions
+            print_warning(
+                f"Transcription for '{source_name}' completed with "
+                f"{page_failure.failed_pages} failed page(s); output retained "
+                f"with error placeholders."
+            )
+            raise page_failure
         else:
-            print_info(
-                f"Partial transcription for '{source_name}'. Remaining pages will "
-                f"resume on the next run."
+            # Budget exhausted mid-document (or the wait was cancelled / the
+            # per-page estimate exceeds the daily limit). The streaming pipeline
+            # already finalized the output from the JSONL on the exhausting pass,
+            # so a truncated {stem}.txt would look complete to
+            # resume/orchestration. Withhold it and keep only the temp JSONL
+            # (with its resume marker) so page-level resume rebuilds the full
+            # output on the next run. Remove the JSONL from the transient cleanup
+            # list so a False retain_temporary_jsonl setting cannot delete the
+            # resume artifact when this item is counted as failed.
+            deferred_pages = len(needed)
+            completed_pages = len(all_indices) - deferred_pages
+            self._withhold_partial_output(output_txt_path, output_format)
+            self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
+            if page_failure is not None:
+                # Both a budget deferral AND a page failure occurred. The
+                # withheld output is rebuilt from the JSONL on resume; the page
+                # failure's error placeholder is already in the JSONL and
+                # resurfaces (as PageTranscriptionError) on the resume run that
+                # finalizes the output. Report both now; the budget deferral is
+                # why we withhold and need resume, so raise BudgetExhaustedError.
+                print_info(
+                    f"Partial transcription for '{source_name}': {deferred_pages} "
+                    f"page(s) deferred by the daily token budget and "
+                    f"{page_failure.failed_pages} page(s) failed. Withheld the "
+                    f"partial output; {completed_pages} completed/attempted "
+                    f"page(s) retained in {temp_jsonl_path.name} for resume."
+                )
+            else:
+                print_info(
+                    f"Partial transcription for '{source_name}': {deferred_pages} "
+                    f"page(s) deferred by the daily token budget. Withheld the "
+                    f"partial output; {completed_pages} completed page(s) retained "
+                    f"in {temp_jsonl_path.name} for resume on the next run."
+                )
+            raise BudgetExhaustedError(
+                source_name,
+                deferred_pages=deferred_pages,
+                completed_pages=completed_pages,
             )
 
     async def process_single_pdf(self, pdf_path: Path, transcriber: Any | None) -> None:
@@ -1200,22 +1318,24 @@ class WorkflowManager:
             print_warning(f"No images found or processed in {folder}.")
             return
 
-        try:
-            await self._process_gpt_streaming(
-                source_path=folder,
-                source_name=folder.name,
-                source_stem=folder.name,
-                is_folder=True,
-                total_units=total_images,
-                page_indices=page_indices,
-                parent_folder=parent_folder,
-                temp_jsonl_path=temp_jsonl_path,
-                output_txt_path=output_txt_path,
-                transcriber=transcriber,
-            )
-        except RuntimeError as e:
-            print_error(f"Skipping folder '{folder.name}': {e}")
-            return
+        # Propagate failures (ResumeFormatError, the render failure-rate guard,
+        # PageTranscriptionError, BudgetExhaustedError) so the item counts failed
+        # and the run exits non-zero, matching the PDF path (honest exit codes,
+        # CT-8). A prior `except RuntimeError` here silently swallowed
+        # ResumeFormatError and the render guard, filing broken folders as
+        # processed with exit 0.
+        await self._process_gpt_streaming(
+            source_path=folder,
+            source_name=folder.name,
+            source_stem=folder.name,
+            is_folder=True,
+            total_units=total_images,
+            page_indices=page_indices,
+            parent_folder=parent_folder,
+            temp_jsonl_path=temp_jsonl_path,
+            output_txt_path=output_txt_path,
+            transcriber=transcriber,
+        )
 
     async def _process_images_with_method(
         self,

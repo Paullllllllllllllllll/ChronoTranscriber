@@ -6,6 +6,7 @@ Tests provider factory for dynamic LLM provider selection.
 from __future__ import annotations
 
 import os
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -269,6 +270,83 @@ class TestGetProvider:
         """Test that Anthropic models are correctly detected."""
         result = detect_provider_from_model("claude-3-opus")
         assert result == ProviderType.ANTHROPIC
+
+
+class TestGetProviderConfigDefaults:
+    """Config defaults must not clobber explicitly supplied caller arguments."""
+
+    @staticmethod
+    def _fake_service(tm: dict[str, Any]) -> MagicMock:
+        fake = MagicMock()
+        fake.get_model_config.return_value = {"transcription_model": tm}
+        fake.get_api_keys_config.return_value = {}
+        return fake
+
+    def _capture_provider_kwargs(
+        self, tm: dict[str, Any], **call_kwargs: Any
+    ) -> dict[str, Any]:
+        """Call get_provider through the auto-detect path, capturing kwargs.
+
+        ``provider`` is deliberately omitted from ``call_kwargs`` so the
+        config-defaults block runs (it triggers on ``provider is None``).
+        """
+        captured: dict[str, Any] = {}
+
+        class _FakeProvider:
+            def __init__(self, **kwargs: Any) -> None:
+                captured.update(kwargs)
+
+        fake = self._fake_service(tm)
+        with (
+            patch("modules.config.service.get_config_service", return_value=fake),
+            patch(
+                "modules.llm.providers.factory._import_provider_class",
+                return_value=_FakeProvider,
+            ),
+            patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True),
+        ):
+            get_provider(model="gpt-4o", **call_kwargs)
+        return captured
+
+    @pytest.mark.unit
+    def test_explicit_max_tokens_survives_auto_detect(self) -> None:
+        """CLI --max-output-tokens must win even when provider: is omitted."""
+        captured = self._capture_provider_kwargs(
+            {"name": "gpt-4o", "max_output_tokens": 999},
+            max_tokens=12345,
+        )
+        assert captured["max_tokens"] == 12345
+
+    @pytest.mark.unit
+    def test_config_max_tokens_used_when_caller_omits(self) -> None:
+        """Config max_output_tokens fills in when the caller omits max_tokens."""
+        captured = self._capture_provider_kwargs(
+            {"name": "gpt-4o", "max_output_tokens": 999},
+        )
+        assert captured["max_tokens"] == 999
+
+    @pytest.mark.unit
+    def test_hardcoded_max_tokens_when_neither_supplied(self) -> None:
+        """Falls back to 4096 when neither caller nor config supply max_tokens."""
+        captured = self._capture_provider_kwargs({"name": "gpt-4o"})
+        assert captured["max_tokens"] == 4096
+
+    @pytest.mark.unit
+    def test_explicit_temperature_survives_auto_detect(self) -> None:
+        """Explicit temperature must not be overwritten by config default."""
+        captured = self._capture_provider_kwargs(
+            {"name": "gpt-4o", "temperature": 0.5},
+            temperature=0.9,
+        )
+        assert captured["temperature"] == 0.9
+
+    @pytest.mark.unit
+    def test_config_temperature_used_when_caller_omits(self) -> None:
+        """Config temperature fills in when the caller omits temperature."""
+        captured = self._capture_provider_kwargs(
+            {"name": "gpt-4o", "temperature": 0.5},
+        )
+        assert captured["temperature"] == 0.5
 
 
 class TestProviderTypeIntegration:

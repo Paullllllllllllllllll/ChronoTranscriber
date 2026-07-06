@@ -347,9 +347,17 @@ class ResumeChecker:
         if self.input_root is None:
             return None
         try:
-            return str(item.relative_to(self.input_root))
+            rel = str(item.relative_to(self.input_root))
         except ValueError:
             return None
+        # A single-file --input makes item == input_root, so the relative key
+        # degenerates to "." and would hash into a hidden ".-<hash>" directory
+        # that never matches the real output dir — item-level resume then never
+        # recognizes the completed item (CT-1). Fall back to None so the hash is
+        # derived from the item's own stem/name, matching manager._relative_key.
+        if rel in (".", ""):
+            return None
+        return rel
 
     def _check_mirror_output(
         self,

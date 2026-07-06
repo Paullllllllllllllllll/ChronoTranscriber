@@ -5,13 +5,32 @@ Tests automatic file detection and transcription method selection.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from modules.documents.auto_selector import AutoSelector, FileDecision
+
+
+@contextmanager
+def configured_provider(provider: str | None, model: str = "") -> Iterator[None]:
+    """Pin the model config the AutoSelector resolves its provider from.
+
+    Patches ``get_config_service`` so ``_resolve_gpt_available`` sees a
+    deterministic ``transcription_model`` and an empty ``api_keys_config``
+    remap, independent of any real config on the developer machine.
+    """
+    fake = MagicMock()
+    fake.get_model_config.return_value = {
+        "transcription_model": {"provider": provider, "name": model}
+    }
+    fake.get_api_keys_config.return_value = {}
+    with patch("modules.config.service.get_config_service", return_value=fake):
+        yield
 
 
 class TestFileDecision:
@@ -66,19 +85,54 @@ class TestAutoSelectorInit:
         assert selector.image_ocr_method == "gpt"
 
     @pytest.mark.unit
-    def test_gpt_available_with_key(
+    def test_gpt_available_with_openai_key(
         self, mock_paths_config: dict[str, Any], mock_env_with_openai_key
     ) -> None:
-        """Test GPT availability when API key is set."""
-        selector = AutoSelector(mock_paths_config)
+        """GPT available when the configured OpenAI provider's key is set."""
+        with configured_provider("openai", "gpt-4o"):
+            selector = AutoSelector(mock_paths_config)
         assert selector.gpt_available is True
+
+    @pytest.mark.unit
+    def test_gpt_available_with_anthropic_key(
+        self, mock_paths_config: dict[str, Any]
+    ) -> None:
+        """GPT available for an Anthropic setup with ANTHROPIC_API_KEY set.
+
+        Regression: availability must follow the *configured* provider, not
+        OPENAI_API_KEY. An Anthropic setup must not silently downgrade to
+        Tesseract just because OPENAI_API_KEY is absent.
+        """
+        import os
+
+        with (
+            patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-ant-test"}, clear=True),
+            configured_provider("anthropic", "claude-sonnet-4-5-20250929"),
+        ):
+            selector = AutoSelector(mock_paths_config)
+        assert selector.gpt_available is True
+
+    @pytest.mark.unit
+    def test_gpt_not_available_wrong_provider_key(
+        self, mock_paths_config: dict[str, Any]
+    ) -> None:
+        """Anthropic setup with only OPENAI_API_KEY set is not available."""
+        import os
+
+        with (
+            patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True),
+            configured_provider("anthropic", "claude-sonnet-4-5-20250929"),
+        ):
+            selector = AutoSelector(mock_paths_config)
+        assert selector.gpt_available is False
 
     @pytest.mark.unit
     def test_gpt_not_available_without_key(
         self, mock_paths_config: dict[str, Any], mock_env_no_api_keys
     ) -> None:
         """Test GPT not available when no API key."""
-        selector = AutoSelector(mock_paths_config)
+        with configured_provider("openai", "gpt-4o"):
+            selector = AutoSelector(mock_paths_config)
         assert selector.gpt_available is False
 
 
@@ -234,7 +288,8 @@ class TestAutoSelectorDecidePdfMethod:
         pdf_path = temp_dir / "test.pdf"
         pdf_path.write_bytes(b"%PDF")
 
-        selector = AutoSelector(config)
+        with configured_provider("openai", "gpt-4o"):
+            selector = AutoSelector(config)
 
         with patch("modules.documents.auto_selector.PDFProcessor") as mock_processor:
             mock_processor.return_value.is_native_pdf.return_value = False
@@ -273,7 +328,8 @@ class TestAutoSelectorDecideImageMethod:
         img_path = temp_dir / "image.png"
         img_path.write_bytes(b"")
 
-        selector = AutoSelector(config)
+        with configured_provider("openai", "gpt-4o"):
+            selector = AutoSelector(config)
         method, reason = selector.decide_image_method(img_path)
 
         assert method == "gpt"
@@ -291,7 +347,8 @@ class TestAutoSelectorDecideImageMethod:
         img_path = temp_dir / "image.png"
         img_path.write_bytes(b"")
 
-        selector = AutoSelector(config)
+        with configured_provider("openai", "gpt-4o"):
+            selector = AutoSelector(config)
         method, reason = selector.decide_image_method(img_path)
 
         assert method == "tesseract"

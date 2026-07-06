@@ -9,6 +9,7 @@ Supports two modes:
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import sys
 from copy import deepcopy
@@ -234,17 +235,19 @@ async def process_auto_mode(
     for method, items in by_method.items():
         print_info(f"Processing {len(items)} file(s) with {method.upper()} method...")
 
-        # Create a temporary UserConfiguration for this method
-        temp_config = UserConfiguration()
-        temp_config.transcription_method = method
-        temp_config.use_batch_processing = False  # Auto mode uses synchronous
-        temp_config.selected_items = [d.file_path for d in items]
-        temp_config.resume_mode = user_config.resume_mode
-        temp_config.processing_type = (
-            "auto"  # per-item routing in process_selected_items
+        # Full copy of the user's config, overriding only the fields the auto
+        # method-grouping decides. A field-by-field rebuild previously dropped
+        # output_format, output_mode, input_root, the two context paths, and
+        # sync_fallback (e.g. `--auto --output-format md` wrote .txt, and an
+        # explicit --context was clobbered per file). dataclasses.replace carries
+        # every other field through unchanged (CT-9).
+        temp_config = dataclasses.replace(
+            user_config,
+            transcription_method=method,
+            use_batch_processing=False,  # Auto mode uses synchronous
+            selected_items=[d.file_path for d in items],
+            processing_type="auto",  # per-item routing in process_selected_items
         )
-        temp_config.page_range = user_config.page_range
-        temp_config.retry_errors = user_config.retry_errors
 
         # Create workflow manager
         workflow_manager = WorkflowManager(
@@ -262,6 +265,16 @@ async def process_auto_mode(
             workflow_manager.image_output_dir = output_dir
             workflow_manager.epub_output_dir = output_dir
             workflow_manager.mobi_output_dir = output_dir
+            # The ResumeChecker was built in WorkflowManager.__init__ from the
+            # ORIGINAL output dirs; re-point it at the redirected auto output dir
+            # so item-level resume actually finds completed items (CT-9). Without
+            # this the checker looks in the wrong directory and re-processes
+            # everything.
+            rc = workflow_manager.resume_checker
+            rc.pdf_output_dir = output_dir
+            rc.image_output_dir = output_dir
+            rc.epub_output_dir = output_dir
+            rc.mobi_output_dir = output_dir
 
         transcriber = None
         if method == "gpt":

@@ -61,6 +61,32 @@ class PageTranscriptionError(Exception):
         )
 
 
+class BudgetExhaustedError(Exception):
+    """Raised when the daily token budget is exhausted mid-document and the
+    synchronous run gives up before all pages are transcribed.
+
+    Raised AFTER the finalized output has been WITHHELD (removed) and the temp
+    JSONL plus its resume marker preserved, so page-level resume rebuilds the
+    full output on the next run (after the daily reset). Propagated so the item
+    is counted as failed by ``WorkflowManager.process_selected_items`` — giving
+    a truthful item status, ``--json`` summary, and non-zero exit code. A
+    sibling of :class:`PageTranscriptionError`: budget deferral is not a
+    page-level API failure, so it is a distinct type (CT-6).
+    """
+
+    def __init__(
+        self, source_name: str, deferred_pages: int, completed_pages: int
+    ) -> None:
+        self.source_name = source_name
+        self.deferred_pages = deferred_pages
+        self.completed_pages = completed_pages
+        super().__init__(
+            f"Daily token budget exhausted for '{source_name}': "
+            f"{deferred_pages} page(s) deferred, {completed_pages} completed "
+            f"page(s) retained for resume"
+        )
+
+
 def count_failed_page_results(results: list[Any]) -> int:
     """Count failed pages in a list of transcription result tuples.
 

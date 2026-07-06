@@ -560,3 +560,121 @@ class TestLiveLimitReread:
         assert ok is True
         # The re-read lifted the cap, so processing resumes with the new limit.
         assert tracker.daily_limit == 1000
+
+
+class TestWouldBlockNextPage:
+    """Reservation-aware predicate: blocks when the remaining budget cannot
+    cover the current per-page reservation estimate, even though the hard limit
+    is not yet reached (CT-6)."""
+
+    @pytest.mark.unit
+    def test_disabled_never_blocks(self, temp_dir: Path) -> None:
+        t = DailyTokenTracker(
+            daily_limit=100,
+            enabled=False,
+            state_file=temp_dir / "s.json",
+            chunk_estimate_seed=30,
+        )
+        assert t.would_block_next_page() is False
+
+    @pytest.mark.unit
+    def test_blocks_near_cap_while_limit_not_reached(self, temp_dir: Path) -> None:
+        # smoothing=0 freezes the EWMA estimate at the seed (30).
+        t = DailyTokenTracker(
+            daily_limit=100,
+            enabled=True,
+            state_file=temp_dir / "s.json",
+            chunk_estimate_seed=30,
+            estimate_smoothing=0.0,
+        )
+        t.add_tokens(80)  # remaining 20 < per-page estimate 30
+        # This is the crux of the bug: the hard limit is NOT reached, yet the
+        # next page cannot be admitted. would_block_next_page catches it.
+        assert t.is_limit_reached() is False
+        assert t.would_block_next_page() is True
+
+    @pytest.mark.unit
+    def test_does_not_block_with_ample_budget(self, temp_dir: Path) -> None:
+        t = DailyTokenTracker(
+            daily_limit=100,
+            enabled=True,
+            state_file=temp_dir / "s.json",
+            chunk_estimate_seed=30,
+            estimate_smoothing=0.0,
+        )
+        t.add_tokens(50)  # remaining 50 >= estimate 30
+        assert t.would_block_next_page() is False
+
+    @pytest.mark.unit
+    def test_matches_try_reserve_admission(self, temp_dir: Path) -> None:
+        # The predicate must agree with try_reserve(): if it says "blocked",
+        # a bare reservation is denied, and vice versa.
+        t = DailyTokenTracker(
+            daily_limit=100,
+            enabled=True,
+            state_file=temp_dir / "s.json",
+            chunk_estimate_seed=30,
+            estimate_smoothing=0.0,
+        )
+        t.add_tokens(80)
+        assert t.would_block_next_page() is True
+        assert t.try_reserve() is None
+
+    @pytest.mark.unit
+    def test_unblocks_after_day_rollover(self, temp_dir: Path, monkeypatch) -> None:
+        t = DailyTokenTracker(
+            daily_limit=100,
+            enabled=True,
+            state_file=temp_dir / "s.json",
+            chunk_estimate_seed=30,
+            estimate_smoothing=0.0,
+        )
+        t.add_tokens(80)
+        assert t.would_block_next_page() is True
+        # Simulate the daily reset: the internal date-check zeroes usage.
+        monkeypatch.setattr(t, "_get_current_date_str", lambda: "2099-01-01")
+        assert t.would_block_next_page() is False
+
+
+class TestEstimateExceedsDailyLimit:
+    """Fast-fail predicate: the per-page estimate alone exceeds the whole daily
+    limit, so even a fresh daily reset cannot admit the next page (CT-11)."""
+
+    @pytest.mark.unit
+    def test_disabled_never_blocks(self, temp_dir: Path) -> None:
+        t = DailyTokenTracker(
+            daily_limit=100,
+            enabled=False,
+            state_file=temp_dir / "s.json",
+            chunk_estimate_seed=500,
+        )
+        assert t.estimate_exceeds_daily_limit() is False
+
+    @pytest.mark.unit
+    def test_true_when_seed_estimate_exceeds_limit(self, temp_dir: Path) -> None:
+        # Per-page estimate (seed 150) > daily limit (100): no reset can help.
+        t = DailyTokenTracker(
+            daily_limit=100,
+            enabled=True,
+            state_file=temp_dir / "s.json",
+            chunk_estimate_seed=150,
+            estimate_smoothing=0.0,
+        )
+        assert t.estimate_exceeds_daily_limit() is True
+        # Even with a completely fresh budget the page would still be blocked.
+        assert t.would_block_next_page() is True
+
+    @pytest.mark.unit
+    def test_false_when_estimate_fits_the_daily_limit(self, temp_dir: Path) -> None:
+        t = DailyTokenTracker(
+            daily_limit=100,
+            enabled=True,
+            state_file=temp_dir / "s.json",
+            chunk_estimate_seed=30,
+            estimate_smoothing=0.0,
+        )
+        # Blocked only because usage is high, not because the estimate is too
+        # big — a reset WOULD help, so this stays False.
+        t.add_tokens(90)
+        assert t.would_block_next_page() is True
+        assert t.estimate_exceeds_daily_limit() is False

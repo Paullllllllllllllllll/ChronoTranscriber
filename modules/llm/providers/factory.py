@@ -195,8 +195,8 @@ def get_provider(
     model: str | None = None,
     api_key: str | None = None,
     *,
-    temperature: float = 0.0,
-    max_tokens: int = 4096,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
     timeout: float | None = None,
     **kwargs: Any,
 ) -> BaseProvider:
@@ -207,8 +207,10 @@ def get_provider(
                   If None, attempts to detect from model name or config
         model: Model name/identifier
         api_key: Optional explicit API key
-        temperature: Sampling temperature
-        max_tokens: Maximum output tokens
+        temperature: Sampling temperature. ``None`` (the default) means "not
+            supplied": config defaults fill it, else it falls back to 0.0.
+        max_tokens: Maximum output tokens. ``None`` (the default) means "not
+            supplied": config defaults fill it, else it falls back to 4096.
         timeout: Request timeout in seconds
         **kwargs: Provider-specific configuration
 
@@ -218,6 +220,13 @@ def get_provider(
     Raises:
         ValueError: If provider cannot be determined or API key is missing
     """
+    # Hardcoded fallbacks applied only when neither the caller nor config supply
+    # a value. Sentinel ``None`` defaults above let us distinguish "caller passed
+    # 0.0/4096 explicitly" from "caller omitted the argument" so config defaults
+    # never clobber an explicit CLI override (e.g. --max-output-tokens).
+    _DEFAULT_TEMPERATURE = 0.0
+    _DEFAULT_MAX_TOKENS = 4096
+
     # Load defaults from config if not provided
     if model is None or provider is None:
         try:
@@ -231,13 +240,14 @@ def get_provider(
             if provider is None:
                 provider = tm.get("provider")  # May still be None
 
-            # Load other defaults from config
-            if "temperature" not in kwargs and tm.get("temperature") is not None:
-                temperature = float(tm.get("temperature", 0.0))
-            if tm.get("max_output_tokens") is not None:
-                max_tokens = int(tm.get("max_output_tokens", max_tokens))
-            elif tm.get("max_tokens") is not None:
-                max_tokens = int(tm.get("max_tokens", max_tokens))
+            # Fill defaults from config only for arguments the caller omitted.
+            if temperature is None and tm.get("temperature") is not None:
+                temperature = float(tm.get("temperature"))
+            if max_tokens is None:
+                if tm.get("max_output_tokens") is not None:
+                    max_tokens = int(tm.get("max_output_tokens"))
+                elif tm.get("max_tokens") is not None:
+                    max_tokens = int(tm.get("max_tokens"))
 
             # Load optional parameters
             for key in ["top_p", "frequency_penalty", "presence_penalty", "top_k"]:
@@ -252,6 +262,12 @@ def get_provider(
             logger.warning(f"Could not load config defaults: {e}")
             if model is None:
                 model = "gpt-4o"
+
+    # Resolve any still-unset values to the hardcoded fallbacks.
+    if temperature is None:
+        temperature = _DEFAULT_TEMPERATURE
+    if max_tokens is None:
+        max_tokens = _DEFAULT_MAX_TOKENS
 
     # Load custom endpoint config (must run even when provider/model are explicit)
     if (provider or "").lower() == "custom" and "base_url" not in kwargs:

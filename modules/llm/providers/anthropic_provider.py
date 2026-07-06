@@ -131,6 +131,7 @@ class AnthropicProvider(BaseProvider):
         # Opus 4.7: adaptive only (budget_tokens returns 400).
         # Opus 4.6 / Sonnet 4.6: adaptive recommended, enabled deprecated.
         # Older models (4.5, 4.1, etc.): extended thinking with budget_tokens.
+        thinking_enabled = False
         if self._capabilities.supports_reasoning_effort and reasoning_config:
             effort = reasoning_config.get("effort", "medium")
             family = self._capabilities.family
@@ -156,6 +157,28 @@ class AnthropicProvider(BaseProvider):
                 }
                 logger.info(
                     f"Using extended thinking (budget={budget}) for model {model}"
+                )
+            thinking_enabled = True
+
+        # Anthropic rejects sampler controls while any thinking block is active:
+        # the API requires temperature=1 and forbids top_p/top_k for both the
+        # "enabled" (budget_tokens) and "adaptive" branches. The upstream default
+        # temperature is 0.0, so leaving these in model_kwargs alongside thinking
+        # produces an unretryable 400 on every page. Drop the incompatible
+        # samplers here so a thinking-enabled model transcribes instead of failing.
+        if thinking_enabled:
+            dropped = [
+                key for key in ("temperature", "top_p", "top_k") if key in model_kwargs
+            ]
+            for key in dropped:
+                model_kwargs.pop(key, None)
+            if dropped:
+                logger.info(
+                    "Dropped sampler kwargs (%s) for model %s: Anthropic requires "
+                    "temperature=1 and forbids top_p/top_k when a thinking block "
+                    "is active.",
+                    ", ".join(dropped),
+                    model,
                 )
 
         # Initialize LangChain ChatAnthropic. max_retries=0 disables SDK-internal

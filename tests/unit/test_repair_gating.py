@@ -78,10 +78,13 @@ async def test_repair_sync_mode_defers_and_waits(
     monkeypatch.setattr(repair_mod, "open_transcriber", _fake_open)
     monkeypatch.setattr(repair_mod, "get_token_tracker", lambda: MagicMock())
 
-    waited: list[Any] = []
+    waited: list[bool] = []
 
-    async def _fake_wait(cfg: Any) -> bool:
-        waited.append(cfg)
+    async def _fake_wait(cfg: Any, reservation_aware: bool = False) -> bool:
+        # Record the reservation_aware flag: the sync repair loop must pass True
+        # so the wait actually waits while pages are reservation-blocked near the
+        # cap instead of spinning and aborting (CT-8, mirrors the manager fix).
+        waited.append(reservation_aware)
         return True
 
     monkeypatch.setattr(repair_mod, "check_and_wait_for_token_limit", _fake_wait)
@@ -125,8 +128,8 @@ async def test_repair_sync_mode_defers_and_waits(
         repair_jsonl_path=repair_jsonl,
     )
 
-    # The wait gate fired once after exhaustion.
-    assert len(waited) == 1
+    # The wait gate fired once after exhaustion, and it was reservation-aware.
+    assert waited == [True]
     # Exactly two passes: the second covered only the two deferred pages.
     assert len(passes) == 2
     assert passes[0] == [0, 1, 2]

@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.19.1
+# ChronoTranscriber v1.20.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -687,6 +687,31 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.20.0** (6 July 2026) -- Correctness hardening from the production
+    budget-exhaustion incident plus a full-repository bug hunt. Fix the bug
+    where daily-token-budget exhaustion mid-document left a truncated final
+    txt that looked complete while the run exited 0: the mid-document wait
+    is now reservation-aware (`would_block_next_page()`), with a fast-fail
+    when the per-page estimate exceeds the entire daily budget and a
+    post-countdown re-check; on give-up the partial output is withheld, the
+    resume JSONL is protected from transient cleanup, and the item raises
+    `BudgetExhaustedError` so the run exits 1 with truthful `--json`
+    counters. A page failure on the exhausting pass now folds into the same
+    withhold flow instead of bypassing it. Also fix: the image-folder path
+    swallowing `RuntimeError` (silent exit 0 on broken folders); the sync
+    repair loop's reservation-blind wait; auto mode dropping
+    `output_format`, context paths, and other settings and checking
+    item-level resume against the wrong directories; the `ResumeChecker`'s
+    degenerate "." key for single-file inputs; EPUB/MOBI page ranges
+    resolved against a `2**31` sentinel (OOM on open spans, silently empty
+    output on `last:N`); Anthropic thinking configs failing every page with
+    an unretryable 400 when temperature/top_p/top_k were set; auto mode
+    gating LLM availability on `OPENAI_API_KEY` alone instead of the
+    configured provider; `get_provider()` clobbering explicit CLI
+    `--max-output-tokens`/temperature during provider auto-detection; and
+    the postprocess CLI missing modern `{stem}.txt` outputs in directory
+    scans while exiting 0 despite failures. Extensive regression tests
+    accompany every fix.
 - **v1.19.1** (5 July 2026) -- Harden retries and the test suite from a live
     failure hunt. Fix a retry gap in `modules/llm/providers/base.py`:
     SDK-wrapped connection failures (`openai.APIConnectionError` raised from

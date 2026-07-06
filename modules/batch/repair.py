@@ -353,6 +353,11 @@ def resolve_image_path(
             raw_stem = Path(entry.image_name).stem
             for suffix in ("_pre_processed", "_preprocessed"):
                 raw_stem = raw_stem.replace(suffix, "")
+            # Extension-inclusive virtual names ({name.ext}_pre_processed.jpg)
+            # strip down to the full source filename; try it as-is first.
+            cand = entry_dir / raw_stem
+            if cand.exists():
+                return cand
             for ext in (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".jp2"):
                 cand = entry_dir / f"{raw_stem}{ext}"
                 if cand.exists():
@@ -577,11 +582,24 @@ def _resolve_repair_targets(
                         raw_stem = Path(image_name).stem
                         for sfx in ("_pre_processed", "_preprocessed"):
                             raw_stem = raw_stem.replace(sfx, "")
-                        for ext in (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".jp2"):
-                            cand = entry_dir / f"{raw_stem}{ext}"
-                            if cand.exists():
-                                resolved_path = cand
-                                break
+                        # Extension-inclusive virtual names strip down to the
+                        # full source filename; try it as-is first.
+                        cand = entry_dir / raw_stem
+                        if cand.exists():
+                            resolved_path = cand
+                        else:
+                            for ext in (
+                                ".jpg",
+                                ".jpeg",
+                                ".png",
+                                ".tif",
+                                ".tiff",
+                                ".jp2",
+                            ):
+                                cand = entry_dir / f"{raw_stem}{ext}"
+                                if cand.exists():
+                                    resolved_path = cand
+                                    break
 
         if rerendered is None and (resolved_path is None or not resolved_path.exists()):
             logger.warning(
@@ -682,18 +700,33 @@ async def _repair_sync_mode(
 
     from modules.llm.providers.factory import (
         ProviderType,
+        detect_provider_from_model,
         resolve_api_key_env_var,
     )
 
-    env_var = resolve_api_key_env_var(ProviderType.OPENAI) or "OPENAI_API_KEY"
-    api_key = os.getenv(env_var)
-    if not api_key:
-        print_error(f"[ERROR] {env_var} is required for GPT repair. Aborting.")
-        return (0, len(targets))
+    tm = model_config.get("transcription_model", {})
+    model_name = tm.get("name", "gpt-4o-2024-08-06")
+    provider_name = tm.get("provider")
+    if provider_name:
+        try:
+            provider_type = ProviderType(str(provider_name).lower())
+        except ValueError:
+            provider_type = detect_provider_from_model(model_name)
+    else:
+        provider_type = detect_provider_from_model(model_name)
 
-    model_name = model_config.get("transcription_model", {}).get(
-        "name", "gpt-4o-2024-08-06"
-    )
+    # Gate on the *configured* provider's API-key env var (not always OpenAI's),
+    # and do not pass an explicit key: let the provider factory resolve the key
+    # for the configured provider. Passing OpenAI's key verbatim to another
+    # provider was the bug. The custom provider has no default env var (None), so
+    # skip the gate and let the factory resolve it from model_config.
+    env_var = resolve_api_key_env_var(provider_type)
+    if env_var and not os.getenv(env_var):
+        print_error(
+            f"[ERROR] {env_var} is required for synchronous repair with provider"
+            f" '{provider_type.value}'. Aborting."
+        )
+        return (0, len(targets))
 
     conc = get_config_service().get_concurrency_config()
     trans_cfg = conc.get("concurrency", {}).get("transcription", {})
@@ -710,8 +743,8 @@ async def _repair_sync_mode(
     tracker = get_token_tracker()
 
     async with open_transcriber(
-        api_key=api_key,
         model=model_name,
+        provider=provider_type.value,
         schema_path=schema_path,
         additional_context_path=additional_context_path,
     ) as trans:
@@ -959,6 +992,33 @@ async def _repair_batch_mode(
     if not targets:
         print_info("[INFO] No targets resolved for batch repair.")
         return (0, 0)
+
+    # Batch repair uses the OpenAI Batch API directly (client = OpenAI() below,
+    # posting to /v1/responses); it has no multi-provider batch path. For any
+    # non-OpenAI provider, refuse cleanly and point the user at synchronous
+    # repair instead of silently handing the job to OpenAI (B2).
+    from modules.llm.providers.factory import (
+        ProviderType,
+        detect_provider_from_model,
+    )
+
+    tm = model_config.get("transcription_model", {})
+    provider_name = tm.get("provider")
+    if provider_name:
+        try:
+            provider_type = ProviderType(str(provider_name).lower())
+        except ValueError:
+            provider_type = detect_provider_from_model(tm.get("name", ""))
+    else:
+        provider_type = detect_provider_from_model(tm.get("name", ""))
+
+    if provider_type != ProviderType.OPENAI:
+        print_error(
+            f"[ERROR] Batch repair is only supported for the OpenAI provider;"
+            f" configured provider is '{provider_type.value}'. Re-run repair in"
+            f" synchronous mode instead."
+        )
+        return (0, len(targets))
 
     print_info(f"[INFO] Batch repair of {len(targets)} page(s) for '{job.identifier}'.")
 

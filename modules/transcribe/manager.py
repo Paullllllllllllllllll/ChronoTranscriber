@@ -21,6 +21,7 @@ from modules.images.page_stream import (
     compute_folder_skip_names,
     compute_pdf_skip_indices,
     folder_image_name,
+    legacy_folder_image_name,
     list_folder_images,
     resolve_image_settings,
     stream_folder_payloads,
@@ -740,6 +741,7 @@ class WorkflowManager:
                     for i in all_indices
                     if 0 <= i < len(files)
                     and folder_image_name(files[i]) not in skip_names
+                    and legacy_folder_image_name(files[i]) not in skip_names
                     and files[i].name not in skip_names
                 ]
             skip_indices = (

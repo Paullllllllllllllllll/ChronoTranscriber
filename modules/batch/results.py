@@ -172,12 +172,8 @@ def _process_non_openai_batch(
 
                 # Extract transcription text
                 transcription_text = result.content
-                if (
-                    result.parsed_output
-                    and isinstance(result.parsed_output, dict)
-                    and "transcribed_text" in result.parsed_output
-                ):
-                    transcription_text = result.parsed_output["transcribed_text"]
+                if result.parsed_output and isinstance(result.parsed_output, dict):
+                    transcription_text = extract_transcribed_text(result.parsed_output)
 
                 # Handle special cases
                 if result.no_transcribable_text:
@@ -446,6 +442,30 @@ def _reconcile_missing_custom_ids(
     return entries
 
 
+def _build_fallback_entry(
+    idx: int,
+    transcription: str,
+    line_custom_ids: list[str | None],
+    batch_order: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a fallback transcription entry, attaching the line's custom_id.
+
+    When direct parsing fails and we fall back to ``process_batch_output``, we
+    still know each JSONL line's ``custom_id`` by position. Attaching it (and
+    the matching ``order_info``) keeps the entry in page order and stops the
+    completeness reconciliation from emitting a duplicate error placeholder for
+    the same page (B3).
+    """
+    entry: dict[str, Any] = {"transcription": transcription, "fallback_index": idx}
+    custom_id = line_custom_ids[idx] if idx < len(line_custom_ids) else None
+    if custom_id:
+        entry["custom_id"] = custom_id
+        order_info = batch_order.get(custom_id)
+        if order_info is not None:
+            entry["order_info"] = order_info
+    return entry
+
+
 def _download_and_parse_openai_results(
     batch_ids: set[str],
     batch_dict: dict[str, dict[str, Any]],
@@ -540,6 +560,13 @@ def _download_and_parse_openai_results(
             all_completed = False
             break
 
+        # Track entries produced by *this* batch's lines (not the global list)
+        # so the no-entry fallback below can fire per batch, and remember each
+        # line's custom_id so fallback entries stay ordered. Defined before the
+        # try so the except-branch fallback can reference them safely (B3).
+        batch_start_len = len(all_transcriptions)
+        batch_line_custom_ids: list[str | None] = []
+
         # Parse the batch output file content (Responses API aware)
         try:
             batch_response_text = (
@@ -557,6 +584,7 @@ def _download_and_parse_openai_results(
                     continue
 
                 custom_id = response_obj.get("custom_id")
+                batch_line_custom_ids.append(custom_id)
                 image_info = custom_id_map.get(custom_id, {}) if custom_id else {}
                 image_name = image_info.get("image_name") or (
                     custom_id or "[unknown image]"
@@ -685,12 +713,17 @@ def _download_and_parse_openai_results(
                         }
                     all_transcriptions.append(entry)
 
-            # If nothing parsed, fall back to generic processor
-            if not all_transcriptions:
+            # If this batch's lines produced no entries, fall back to the
+            # generic processor. Attach each line's custom_id (by position) so
+            # the fallback entries keep their page order instead of being
+            # reconciled away as duplicate error placeholders (B3).
+            if len(all_transcriptions) == batch_start_len:
                 transcriptions = process_batch_output(file_content)
                 for idx, transcription in enumerate(transcriptions):
                     all_transcriptions.append(
-                        {"transcription": transcription, "fallback_index": idx}
+                        _build_fallback_entry(
+                            idx, transcription, batch_line_custom_ids, batch_order
+                        )
                     )
         except (
             json.JSONDecodeError,
@@ -709,10 +742,13 @@ def _download_and_parse_openai_results(
             )
             transcriptions = process_batch_output(file_content)
 
-            # In fallback mode, we can't maintain page order reliably
+            # Attach each line's custom_id (by position) where known so entries
+            # keep their page order instead of collapsing to fallback_index (B3).
             for idx, transcription in enumerate(transcriptions):
                 all_transcriptions.append(
-                    {"transcription": transcription, "fallback_index": idx}
+                    _build_fallback_entry(
+                        idx, transcription, batch_line_custom_ids, batch_order
+                    )
                 )
 
         # A completed batch can carry BOTH an output file and an error file;

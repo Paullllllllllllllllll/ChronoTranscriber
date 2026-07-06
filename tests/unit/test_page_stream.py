@@ -94,7 +94,8 @@ class TestNaming:
     @pytest.mark.unit
     def test_folder_image_name(self, tmp_path: Path) -> None:
         assert (
-            folder_image_name(tmp_path / "scan_01.png") == "scan_01_pre_processed.jpg"
+            folder_image_name(tmp_path / "scan_01.png")
+            == "scan_01.png_pre_processed.jpg"
         )
 
 
@@ -202,9 +203,9 @@ class TestStreamFolderPayloads:
             )
         )
         assert [p.image_name for p in payloads] == [
-            "scan_00_pre_processed.jpg",
-            "scan_01_pre_processed.jpg",
-            "scan_02_pre_processed.jpg",
+            "scan_00.png_pre_processed.jpg",
+            "scan_01.png_pre_processed.jpg",
+            "scan_02.png_pre_processed.jpg",
         ]
         assert [p.index for p in payloads] == [0, 1, 2]
         assert all(p.page_index is None for p in payloads)
@@ -223,7 +224,10 @@ class TestStreamFolderPayloads:
                 )
             )
         )
-        assert [p.image_name for p in payloads] == ["scan_01_pre_processed.jpg"]
+        # "scan_00_pre_processed.jpg" is the legacy stem-based virtual name;
+        # backward matching still skips it even though the current virtual name
+        # now includes the extension (CT-9).
+        assert [p.image_name for p in payloads] == ["scan_01.png_pre_processed.jpg"]
 
     @pytest.mark.unit
     def test_list_folder_images_sorted(self, tmp_path: Path) -> None:
@@ -613,5 +617,5 @@ class TestRepairRerenderFallback:
         img_payload = load_image_payload(
             img_path, 4, img_cfg=IMG_CFG, model_type="openai"
         )
-        assert img_payload.image_name == "scan_pre_processed.jpg"
+        assert img_payload.image_name == "scan.png_pre_processed.jpg"
         assert img_payload.index == 4

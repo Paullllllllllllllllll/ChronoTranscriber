@@ -217,7 +217,15 @@ def postprocess_cli(args: Any) -> int:
             print_info(f"Processing {len(files)} file(s) to {output_path}...")
             for file_path in files:
                 try:
-                    out_file = output_path / file_path.name
+                    # Mirror the input tree under the output directory so that
+                    # same-named files in different subdirectories do not
+                    # overwrite each other (CT-10). Flat naming is kept for a
+                    # single-file input (handled in the branch above).
+                    if input_path.is_dir():
+                        out_file = output_path / file_path.relative_to(input_path)
+                        out_file.parent.mkdir(parents=True, exist_ok=True)
+                    else:
+                        out_file = output_path / file_path.name
                     postprocess_file(file_path, output_path=out_file, config=config)
                     print_success(f"Processed: {file_path.name}")
                     success_count += 1

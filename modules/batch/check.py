@@ -93,7 +93,7 @@ class BatchCheckStats:
 def process_all_batches(
     root_folder: Path,
     processing_settings: dict[str, Any],
-    client: OpenAI,
+    client: OpenAI | None = None,
     postprocessing_config: dict[str, Any] | None = None,
     output_format: str = "txt",
 ) -> BatchCheckStats:
@@ -118,21 +118,41 @@ def process_all_batches(
         logger.info(f"No temporary batch files found in {root_folder}.")
         return stats
 
-    # Retrieve all batches from OpenAI
-    print_info("Retrieving list of submitted batches from OpenAI...")
-    try:
-        batches = list_all_batches(client)
-        batch_dict: dict[str, dict[str, Any]] = {
+    # OpenAI's batch list is fetched lazily: only when at least one temp file
+    # resolves to an OpenAI batch. This lets Anthropic/Google-only setups (with
+    # no OpenAI credentials) finalize their batches, and confines any OpenAI-list
+    # failure to the OpenAI files rather than aborting the whole run (B4).
+    batch_dict: dict[str, dict[str, Any]] = {}
+    openai_listing_done = False
+    openai_listing_ok = False
+
+    def ensure_openai_batches() -> bool:
+        """List OpenAI batches on first need; return False if unavailable."""
+        nonlocal client, batch_dict, openai_listing_done, openai_listing_ok
+        if openai_listing_done:
+            return openai_listing_ok
+        openai_listing_done = True
+        if client is None:
+            try:
+                client = OpenAI()
+            except (OpenAIError, OSError, ValueError, TypeError) as e:
+                print_error(f"OpenAI client unavailable: {e}")
+                logger.exception(f"Could not construct OpenAI client: {e}")
+                return False
+        print_info("Retrieving list of submitted batches from OpenAI...")
+        try:
+            batches = list_all_batches(client)
+        except (OpenAIError, OSError, ValueError, TypeError) as e:
+            print_error(f"Failed to retrieve batches from OpenAI: {e}")
+            logger.exception(f"Error retrieving batches: {e}")
+            return False
+        batch_dict = {
             str(b.get("id")): b for b in batches if isinstance(b, dict) and b.get("id")
         }
-    except (OpenAIError, OSError, ValueError, TypeError) as e:
-        print_error(f"Failed to retrieve batches from OpenAI: {e}")
-        logger.exception(f"Error retrieving batches: {e}")
-        stats.failed += 1
-        return stats
-
-    # Display batch summary (handles dicts or SDK objects)
-    display_batch_summary(batches)
+        # Display batch summary (handles dicts or SDK objects)
+        display_batch_summary(batches)
+        openai_listing_ok = True
+        return True
 
     # Process each temporary file
     for temp_file in temp_files:
@@ -209,6 +229,13 @@ def process_all_batches(
             continue
 
         # --- 5. Check OpenAI batch status ---
+        # Lazily fetch the OpenAI batch list; if it cannot be retrieved, fail
+        # only this OpenAI file instead of the whole run (B4).
+        if not ensure_openai_batches():
+            stats.failed += 1
+            continue
+        assert client is not None  # ensured by ensure_openai_batches()
+
         all_completed, missing_batches, completed_count, failed_count = (
             _check_openai_batch_status(batch_ids, batch_dict, client)
         )
@@ -317,7 +344,19 @@ def run_batch_finalization(
         # Load standard configuration
         scan_dirs, processing_settings, postprocessing_config = load_config()
 
-    client = OpenAI()
+    # Construct the OpenAI client defensively: an Anthropic/Google-only setup
+    # may have no OpenAI credentials, in which case process_all_batches builds
+    # one lazily only if an OpenAI batch is actually encountered (B4).
+    client: OpenAI | None
+    try:
+        client = OpenAI()
+    except (OpenAIError, OSError, ValueError, TypeError) as e:
+        logger.info(
+            "OpenAI client not available up front (%s); "
+            "will construct lazily if an OpenAI batch is found.",
+            e,
+        )
+        client = None
 
     if run_diagnostics:
         diagnose_api_issues()

@@ -205,6 +205,17 @@ _OPENROUTER_BASE: dict[str, Any] = dict(
 _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]]] = [
     # --- OpenAI GPT-5.x family (reasoning, Responses-native) ---
     (
+        ("gpt-5.5",),
+        "gpt-5.5",
+        _OPENAI_REASONING_BASE,
+        dict(
+            supports_chat_completions=False,
+            max_context_tokens=1050000,
+            max_output_tokens=128000,
+            supports_image_detail_original=True,
+        ),
+    ),
+    (
         ("gpt-5.4-pro",),
         "gpt-5.4-pro",
         _OPENAI_REASONING_BASE,

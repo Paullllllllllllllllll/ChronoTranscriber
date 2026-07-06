@@ -81,7 +81,21 @@ def parse_pdf_page_index(image_name: str) -> int | None:
 
 
 def folder_image_name(source: Path) -> str:
-    """Virtual image name for a source folder image."""
+    """Virtual image name for a source folder image.
+
+    Includes the source extension so two files that share a stem but differ by
+    extension (e.g. ``scan_001.png`` and ``scan_001.tif``) map to distinct
+    virtual names and do not collide in the JSONL dedup (CT-9).
+    """
+    return f"{source.name}_pre_processed.jpg"
+
+
+def legacy_folder_image_name(source: Path) -> str:
+    """Pre-CT-9 stem-based virtual name, kept for backward resume matching.
+
+    Old partial JSONLs recorded ``{stem}_pre_processed.jpg``; the skip-set logic
+    still matches this form so existing runs resume without re-transcribing.
+    """
     return f"{source.stem}_pre_processed.jpg"
 
 
@@ -379,7 +393,11 @@ async def stream_folder_payloads(
         if not (0 <= i < len(files)):
             continue
         src = files[i]
-        if folder_image_name(src) in skip or src.name in skip:
+        if (
+            folder_image_name(src) in skip
+            or legacy_folder_image_name(src) in skip
+            or src.name in skip
+        ):
             continue
         needed.append((i, src))
 

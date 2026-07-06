@@ -62,9 +62,16 @@ def _compute_openrouter_reasoning_max_tokens(*, max_tokens: int, effort: str) ->
     # Ensure some tokens remain for the final response.
     reserve_for_answer = 256
     upper = max(0, int(max_tokens) - reserve_for_answer)
+    # Not enough room to reserve tokens for the answer *and* meet the 1024 floor:
+    # skip reasoning entirely (0) rather than let the floor eat the whole output
+    # allocation. The caller keeps effort-based reasoning when this returns 0.
+    if upper < 1024:
+        return 0
     budget = int(int(max_tokens) * ratio)
     budget = min(budget, 32000, upper)
-    budget = max(budget, 1024)
+    # Apply the 1024 floor but clamp by the answer reserve so a small max_tokens
+    # can never push the reasoning budget past ``upper``.
+    budget = min(max(budget, 1024), upper)
     return budget
 
 

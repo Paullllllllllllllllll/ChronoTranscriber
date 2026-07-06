@@ -23,6 +23,7 @@ from modules.batch.backends.base import (
 from modules.images.encoding import encode_image_to_base64
 from modules.infra.logger import setup_logger
 from modules.llm.prompt_utils import prepare_prompt_with_context
+from modules.llm.response_parsing import extract_transcribed_text
 
 logger = setup_logger(__name__)
 
@@ -291,9 +292,10 @@ class GoogleBatchBackend(BatchBackend):
     def _apply_json_content(result_item: BatchResultItem) -> None:
         """Parse ``result_item.content`` as JSON in place when possible.
 
-        Stores the decoded dict on ``parsed_output`` and, when present,
-        replaces ``content`` with its ``transcribed_text`` field. Leaves the
-        item untouched when the content is empty or not valid JSON.
+        Stores the decoded dict on ``parsed_output`` and replaces ``content``
+        with the transcription extracted from the schema object (handling flags
+        and null). Leaves the item untouched when the content is empty or not
+        valid JSON.
         """
         if not result_item.content:
             return
@@ -303,8 +305,7 @@ class GoogleBatchBackend(BatchBackend):
             return
         if isinstance(parsed, dict):
             result_item.parsed_output = parsed
-            if "transcribed_text" in parsed:
-                result_item.content = parsed["transcribed_text"]
+            result_item.content = extract_transcribed_text(parsed)
 
     def download_results(self, handle: BatchHandle) -> Iterator[BatchResultItem]:
         """Download and parse Google batch results."""

@@ -419,12 +419,19 @@ async def run_streaming_transcription_pipeline(
 
     # Regenerate the combined output from the full JSONL so pages completed
     # in earlier (resumed) runs are included alongside this run's results.
-    write_output_from_jsonl(
-        temp_jsonl_path,
-        output_txt_path,
-        postprocessing_config,
-        output_format=output_format,
-    )
+    # Skip finalization on a pass that exhausted the daily token budget: the
+    # output would be truncated, and a later interruption (Ctrl+C or a raised
+    # error) before the caller's withhold flow runs would leave that truncated
+    # file on disk, where resume/ResumeChecker sees non-empty output and marks
+    # the item COMPLETE (CT-7, silent data loss). The JSONL preserves every
+    # completed page, so a non-exhausting resume pass rebuilds the full output.
+    if exhausted is None or not exhausted.is_set():
+        write_output_from_jsonl(
+            temp_jsonl_path,
+            output_txt_path,
+            postprocessing_config,
+            output_format=output_format,
+        )
 
     # Page-level failures must surface as an item failure (CT-2). Raised only
     # after the output was written, so partial results survive for resume.

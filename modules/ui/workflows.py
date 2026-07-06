@@ -162,31 +162,38 @@ class WorkflowUI:
             return True
 
         # Check API key based on configured provider
-        import os
-
         from modules.config.service import get_config_service
         from modules.llm.providers.factory import (
             ProviderType,
-            resolve_api_key_env_var,
+            detect_provider_from_model,
+            resolve_api_key_optional,
         )
 
         config_service = get_config_service()
         model_config = config_service.get_model_config()
-        provider = model_config.get("transcription_model", {}).get("provider", "openai")
+        tm = model_config.get("transcription_model", {}) or {}
+        provider = tm.get("provider")
+        model_name = tm.get("name")
 
-        # Resolve the env var name via the central resolver so an optional
-        # api_keys_config.yaml remap is honored; default to OPENAI_API_KEY.
-        try:
-            provider_type = ProviderType(str(provider).lower())
-        except ValueError:
+        # Resolve the provider (explicit or auto-detected from the model name)
+        # and check its key through the same factory helpers the provider
+        # pipeline uses, honoring the optional api_keys_config.yaml remap and
+        # the custom endpoint's api_key_env_var indirection.
+        provider_type: ProviderType
+        if provider:
+            try:
+                provider_type = ProviderType(str(provider).lower())
+            except ValueError:
+                provider_type = detect_provider_from_model(str(model_name or ""))
+        elif model_name:
+            provider_type = detect_provider_from_model(str(model_name))
+        else:
             provider_type = ProviderType.OPENAI
-        env_var = resolve_api_key_env_var(provider_type) or "OPENAI_API_KEY"
-        api_key = os.getenv(env_var)
 
-        if not api_key:
+        if resolve_api_key_optional(provider_type) is None:
             raise ValueError(
-                f"{env_var} environment variable is required for"
-                f" {provider.upper()} transcription."
+                f"An API key is required for {provider_type.value.upper()}"
+                f" transcription."
             )
 
         # Ask about batch processing

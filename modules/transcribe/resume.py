@@ -244,12 +244,16 @@ class ResumeChecker:
         co_locate_dir = item.parent
 
         if self.use_input_as_output:
+            # The producer builds the name with ".txt" then the writer swaps the
+            # suffix to the real format (writer.resolve_output_path). Derive the
+            # name identically here so long stems with md/json outputs match
+            # instead of diverging by one reserved character (CT-8).
             out_name = create_safe_filename(
                 item_stem,
-                self._output_ext,
+                ".txt",
                 co_locate_dir,
             )
-            out_path = co_locate_dir / out_name
+            out_path = (co_locate_dir / out_name).with_suffix(self._output_ext)
             if out_path.exists() and out_path.stat().st_size > 0:
                 return ResumeResult(
                     item=item,
@@ -277,12 +281,18 @@ class ResumeChecker:
                 reason="no output folder",
             )
 
+        # Match the producer/writer naming: build with ".txt" then swap to the
+        # real format suffix, so long stems with md/json outputs resolve to the
+        # same file the writer produced instead of diverging by one reserved
+        # character and forcing a full re-transcription (CT-8).
         txt_name_in_dir = create_safe_filename(
             item_stem,
-            self._output_ext,
+            ".txt",
             parent_folder,
         )
-        txt_path_in_dir = parent_folder / txt_name_in_dir
+        txt_path_in_dir = (parent_folder / txt_name_in_dir).with_suffix(
+            self._output_ext
+        )
 
         if txt_path_in_dir.exists() and txt_path_in_dir.stat().st_size > 0:
             return ResumeResult(

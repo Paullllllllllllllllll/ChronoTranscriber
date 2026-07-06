@@ -24,6 +24,7 @@ from modules.config.service import get_config_service
 from modules.images.encoding import encode_image_to_base64
 from modules.infra.logger import setup_logger
 from modules.llm.prompt_utils import prepare_prompt_with_context
+from modules.llm.response_parsing import extract_transcribed_text
 
 logger = setup_logger(__name__)
 
@@ -288,8 +289,9 @@ class AnthropicBatchBackend(BatchBackend):
                                 parsed = json.loads(result_item.content)
                                 if isinstance(parsed, dict):
                                     result_item.parsed_output = parsed
-                                    if "transcribed_text" in parsed:
-                                        result_item.content = parsed["transcribed_text"]
+                                    result_item.content = extract_transcribed_text(
+                                        parsed
+                                    )
                             except json.JSONDecodeError:
                                 pass
 

@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.20.0
+# ChronoTranscriber v1.21.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -687,6 +687,31 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.21.0** (6 July 2026) -- Multi-agent bug hunt and fix batch across the
+    batch, transcribe, and UI layers. Batch result extraction now reads the
+    schema's actual `transcription` key via `extract_transcribed_text()`
+    (previously a nonexistent `transcribed_text` lookup left raw JSON blobs
+    as page text in Anthropic/Google batch outputs). Repair no longer
+    hardwires OpenAI: sync repair resolves the configured provider's key
+    through the factory, and batch repair refuses cleanly for non-OpenAI
+    providers. Batch checking constructs the OpenAI client lazily so
+    Anthropic/Google-only setups can finalize their batches. OpenAI batch
+    fallback parsing attaches per-line `custom_id`s (no more duplicated
+    error placeholders and scrambled order) and fires per batch instead of
+    once globally. The streaming pipeline no longer finalizes output on a
+    budget-exhausting pass, closing the window where an interruption left a
+    truncated file that resume marked complete. ResumeChecker derives
+    md/json output names exactly as the writer does, fixing perpetual
+    re-transcription of long-stem documents. Folder-image virtual names now
+    include the source extension so same-stem files no longer collide in
+    JSONL dedup (legacy names still resume; repair resolves both forms).
+    Recursive postprocessing mirrors the input tree instead of flattening
+    it, auto-mode's resume pre-filter checks the actual Auto output root,
+    the interactive wizard's API-key gate honors custom endpoints and
+    auto-detects the provider from the model name, and the OpenRouter
+    reasoning budget is clamped by the answer reserve. Register `gpt-5.5`
+    in the model registry (Responses-native, 1.05M context, 128K output,
+    original image detail) including the OpenRouter passthrough.
 - **v1.20.0** (6 July 2026) -- Correctness hardening from the production
     budget-exhaustion incident plus a full-repository bug hunt. Fix the bug
     where daily-token-budget exhaustion mid-document left a truncated final

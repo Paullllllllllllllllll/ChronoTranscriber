@@ -245,14 +245,27 @@ def create_config_from_cli_args(
             )
 
             pc = PathConfig.from_paths_config(paths_config)
+            # In auto mode with non-co-located output, process_auto_mode
+            # redirects every per-type output into the single Auto output root
+            # (auto_output). Build the pre-filter checker against that same root
+            # so it looks where auto-mode output actually lands; using the
+            # per-type dirs would both wrongly skip files with stale per-type
+            # outputs and never match genuine auto-mode outputs (CT-11).
+            if pc.use_input_as_output:
+                pdf_out = pc.pdf_output_dir
+                image_out = pc.image_output_dir
+                epub_out = pc.epub_output_dir
+                mobi_out = pc.mobi_output_dir
+            else:
+                pdf_out = image_out = epub_out = mobi_out = auto_output
             checker = ResumeChecker(
                 resume_mode=config.resume_mode,
                 paths_config=paths_config,
                 use_input_as_output=pc.use_input_as_output,
-                pdf_output_dir=pc.pdf_output_dir,
-                image_output_dir=pc.image_output_dir,
-                epub_output_dir=pc.epub_output_dir,
-                mobi_output_dir=pc.mobi_output_dir,
+                pdf_output_dir=pdf_out,
+                image_output_dir=image_out,
+                epub_output_dir=epub_out,
+                mobi_output_dir=mobi_out,
                 output_format=config.output_format,
                 output_mode=config.output_mode,
                 input_root=config.input_root,

@@ -367,14 +367,22 @@ class DailyTokenTracker:
                 self.sync_ledger_now()
 
     def _flush_on_exit(self) -> None:
-        """atexit hook: stop the writer and persist any pending state.
+        """atexit hook: stop the writer and flush pending state or ledger delta.
 
-        Fully silent: skips the write when nothing is pending or the target
-        directory has gone (e.g. a test temp dir already removed), and swallows
-        any error so interpreter shutdown is never disrupted.
+        Shared mode delegates to :meth:`flush`, which pushes the accumulated
+        unsynced ledger delta (a bare ``_save_state`` would write the private
+        file — which shared mode deliberately avoids — and drop the delta).
+        atexit runs on the main thread with no running loop, so the final
+        ledger sync runs inline. Fully silent: skips the private write when
+        nothing is pending or the target directory has gone (e.g. a test temp
+        dir already removed), and swallows any error so interpreter shutdown
+        is never disrupted.
         """
         self._writer_stop.set()
         try:
+            if self._shared_enabled:
+                self.flush()
+                return
             if not self._pending_write:
                 return
             if not self.state_file.parent.exists():

@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.21.0
+# ChronoTranscriber v1.22.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -686,6 +686,21 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v1.22.0** (7 July 2026) -- Adopt shared token ledger 1.2.0 and fix two
+    infra defects found in ChronoMiner's audit. The vendored
+    `modules/infra/shared_ledger.py` is re-copied: `_merge` now coerces a
+    non-numeric stored tool value to 0 and catches `ValueError`/`TypeError`
+    alongside `OSError`, so a corrupt ledger degrades to standalone mode
+    instead of crashing the call path (never-crash contract). The rate
+    limiter's error backoff now imposes a real, bounded admission delay after
+    429s: the multiplier previously scaled a zero wait when no window was
+    saturated (a silent no-op), and the new penalty is a deadline from wait
+    start rather than a perpetual floor, so admission always resumes. The
+    token budget's atexit hook delegates to `flush()` in shared mode, so the
+    last unsynced ledger delta is pushed at exit instead of being dropped
+    (and the private state file is no longer written while the ledger is the
+    active persistence). All 1,454 tests pass.
 
 - **v1.21.0** (6 July 2026) -- Multi-agent bug hunt and fix batch across the
     batch, transcribe, and UI layers. Batch result extraction now reads the

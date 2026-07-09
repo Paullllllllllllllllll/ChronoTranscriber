@@ -1133,13 +1133,13 @@ class TestCancelBatchesJsonSummary:
 @pytest.mark.unit
 class TestRepairJsonSummary:
     @pytest.mark.asyncio
-    async def test_emits_summary(
+    async def test_emits_summary_all_repaired_exit_0(
         self, monkeypatch: pytest.MonkeyPatch, capsys: Any
     ) -> None:
         import main.repair_transcriptions as rt
 
         async def fake_main_cli(args: Any, paths_config: Any) -> dict[str, int]:
-            return {"repaired": 3, "failed": 1}
+            return {"repaired": 3, "failed": 0}
 
         monkeypatch.setattr(rt, "main_cli", fake_main_cli)
         script = rt.RepairTranscriptionsScript()
@@ -1150,8 +1150,34 @@ class TestRepairJsonSummary:
             "tool": "chronotranscriber",
             "command": "repair_transcriptions",
             "repaired": 3,
-            "failed": 1,
+            "failed": 0,
             "exit_code": 0,
+        }
+
+    @pytest.mark.asyncio
+    async def test_unrepaired_line_reports_failure_and_exit_1(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: Any
+    ) -> None:
+        """A surviving placeholder must surface as a non-zero exit, not a
+        silent success (the single-line unresolved-target incident)."""
+        import main.repair_transcriptions as rt
+
+        async def fake_main_cli(args: Any, paths_config: Any) -> dict[str, int]:
+            return {"repaired": 3, "failed": 1}
+
+        monkeypatch.setattr(rt, "main_cli", fake_main_cli)
+        script = rt.RepairTranscriptionsScript()
+
+        with pytest.raises(SystemExit) as exc_info:
+            await script.run_cli(Namespace(json_summary=True))
+        assert exc_info.value.code == 1
+        payload = _extract_json_line(capsys.readouterr().out)
+        assert payload == {
+            "tool": "chronotranscriber",
+            "command": "repair_transcriptions",
+            "repaired": 3,
+            "failed": 1,
+            "exit_code": 1,
         }
 
 

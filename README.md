@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.23.0
+# ChronoTranscriber v1.23.1
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -687,6 +687,20 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.23.1** (9 July 2026) -- Fix the repair pipeline to report truthfully.
+    Previously `repair_transcriptions` announced `[SUCCESS]` and exited 0 even
+    when no placeholder was actually repaired, silently dropping unresolved
+    targets; a live incident left a `[transcription error]` marker in place
+    under a SUCCESS banner. The repair outcome is now tied to actual file
+    content: a new `_count_unrepaired_lines` helper counts remaining
+    placeholders, an empty target set returns the full failure count with a
+    WARNING instead of a false zero, and `[SUCCESS]` is emitted only when no
+    line is left unrepaired, otherwise `[WARN] ... left N of M line(s)
+    unrepaired`. The CLI now exits 1 whenever any line remains unrepaired and
+    the `--json` payload reflects the true counts, establishing a firm
+    exit-code contract for downstream automation. Regression tests cover the
+    single-line filename-prefix marker, unresolved targets, a re-failed
+    transcription, and the exit-code contract.
 - **v1.23.0** (9 July 2026) -- Extend the model-capability registry with the
     current GPT-5.6 family (sol, terra, luna, and the bare alias), GPT-5.5 Pro,
     the Claude 5 generation (Fable 5, Sonnet 5) plus Opus 4.8, and the newly

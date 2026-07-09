@@ -642,6 +642,26 @@ def _persist_repaired_file(
     return backup
 
 
+def _count_unrepaired_lines(final_lines: list[str], failure_indices: list[int]) -> int:
+    """Count targeted lines still carrying a failure placeholder after write-back.
+
+    Truthful-outcome check: a targeted line that is still *any* failure
+    placeholder was NOT repaired, whether because it could not be resolved to an
+    image (silently skipped by ``_resolve_repair_targets``), the re-transcription
+    itself failed again (the placeholder is re-emitted by ``format_page_line``),
+    or the page was deferred and never re-attempted. This ties the reported
+    outcome to the actual file content rather than to whether an API call was
+    merely attempted, so a repair that changed nothing can no longer report
+    success (the single-line, unresolved-target incident).
+    """
+    return sum(
+        1
+        for i in failure_indices
+        if 0 <= i < len(final_lines)
+        and detect_transcription_cause((final_lines[i] or "").strip()) != "ok"
+    )
+
+
 async def _repair_sync_mode(
     job: Job,
     model_config: dict[str, Any],
@@ -673,8 +693,14 @@ async def _repair_sync_mode(
     )
 
     if not targets:
-        print_info("[INFO] No targets resolved for synchronous repair.")
-        return (0, 0)
+        # Every failure line failed to resolve to an image; nothing was written
+        # back, so the placeholders remain. Report them as failed (not zero) so
+        # the caller does not declare success over an untouched file.
+        print_warning(
+            f"[WARN] No repair targets could be resolved for '{job.identifier}';"
+            f" {len(failure_indices)} line(s) left unrepaired."
+        )
+        return (0, len(failure_indices))
 
     print_info(
         f"[INFO] Synchronous repair of {len(targets)} page(s) for '{job.identifier}'."
@@ -860,21 +886,25 @@ async def _repair_sync_mode(
                 final_lines[line_index] = format_page_line(text, pn, t.image_name)
 
     backup = _persist_repaired_file(job, final_lines)
-    print_success(
-        f"[SUCCESS] Synchronous repair complete for '{job.identifier}'. "
-        f"Backup written to: {backup.name}"
-    )
 
-    # Outcome counts for the --json summary (CT-4): a result whose text is
-    # still an error placeholder counts as failed, as do pages left
-    # unrepaired (deferred/aborted before completion).
-    error_count = sum(
-        1
-        for _, text, _ in results
-        if detect_transcription_cause((text or "").strip()) == "api_error"
-    )
-    repaired = len(results) - error_count
-    failed = error_count + (len(targets) - len(results))
+    # Truthful outcome (CT-4): count placeholders that survived the write-back
+    # rather than assuming every attempted page succeeded. This catches
+    # unresolved targets, re-emitted placeholders (the API failed again), and
+    # deferred pages that were never re-attempted, so a repair that changed
+    # nothing can no longer report success.
+    failed = _count_unrepaired_lines(final_lines, failure_indices)
+    repaired = len(failure_indices) - failed
+    if failed == 0:
+        print_success(
+            f"[SUCCESS] Synchronous repair complete for '{job.identifier}'. "
+            f"Backup written to: {backup.name}"
+        )
+    else:
+        print_warning(
+            f"[WARN] Synchronous repair for '{job.identifier}' left {failed} of "
+            f"{len(failure_indices)} line(s) unrepaired. "
+            f"Backup written to: {backup.name}"
+        )
     return (repaired, failed)
 
 
@@ -990,8 +1020,14 @@ async def _repair_batch_mode(
     )
 
     if not targets:
-        print_info("[INFO] No targets resolved for batch repair.")
-        return (0, 0)
+        # No failure line resolved to an image; the placeholders remain. Report
+        # them as failed so the caller does not declare success over an
+        # untouched file.
+        print_warning(
+            f"[WARN] No repair targets could be resolved for '{job.identifier}';"
+            f" {len(failure_indices)} line(s) left unrepaired."
+        )
+        return (0, len(failure_indices))
 
     # Batch repair uses the OpenAI Batch API directly (client = OpenAI() below,
     # posting to /v1/responses); it has no multi-provider batch path. For any
@@ -1142,21 +1178,24 @@ async def _repair_batch_mode(
             final_lines[li] = format_page_line(text, pn, img_name)
 
     backup = _persist_repaired_file(job, final_lines)
-    print_success(
-        f"[SUCCESS] Batch repair complete for '{job.identifier}'. "
-        f"Backup written to: {backup.name}"
-    )
 
-    # Outcome counts for the --json summary (CT-4): a repaired line whose text
-    # is still an error placeholder counts as failed, as do targets that never
-    # received a parsed batch result.
-    error_count = sum(
-        1
-        for text in fixed_text_by_custom.values()
-        if detect_transcription_cause((text or "").strip()) == "api_error"
-    )
-    repaired = len(fixed_text_by_custom) - error_count
-    failed = error_count + max(0, len(targets) - len(fixed_text_by_custom))
+    # Truthful outcome (CT-4): count placeholders that survived the write-back
+    # rather than assuming every submitted page succeeded. This catches
+    # unresolved targets, re-emitted placeholders (the batch item errored), and
+    # targets that never received a parsed batch result.
+    failed = _count_unrepaired_lines(final_lines, failure_indices)
+    repaired = len(failure_indices) - failed
+    if failed == 0:
+        print_success(
+            f"[SUCCESS] Batch repair complete for '{job.identifier}'. "
+            f"Backup written to: {backup.name}"
+        )
+    else:
+        print_warning(
+            f"[WARN] Batch repair for '{job.identifier}' left {failed} of "
+            f"{len(failure_indices)} line(s) unrepaired. "
+            f"Backup written to: {backup.name}"
+        )
     return (repaired, failed)
 
 
@@ -1340,7 +1379,7 @@ async def main() -> None:
     print_header("PROCESSING REPAIR", f"Repairing {len(failure_indices)} line(s)...")
 
     if mode == "sync":
-        await _repair_sync_mode(
+        _repaired, _failed = await _repair_sync_mode(
             job=job_sel,
             model_config=model_cfg,
             image_entries=image_entries,
@@ -1351,7 +1390,7 @@ async def main() -> None:
             additional_context_path=additional_context_path,
         )
     else:
-        await _repair_batch_mode(
+        _repaired, _failed = await _repair_batch_mode(
             job=job_sel,
             model_config=model_cfg,
             image_entries=image_entries,
@@ -1363,7 +1402,13 @@ async def main() -> None:
         )
 
     print_header("REPAIR COMPLETE", "")
-    print_success(f"Repair session completed for '{job_sel.identifier}'")
+    if _failed:
+        print_warning(
+            f"Repair session completed for '{job_sel.identifier}' with "
+            f"{_failed} line(s) still unrepaired."
+        )
+    else:
+        print_success(f"Repair session completed for '{job_sel.identifier}'")
     print_info(f"Repair log: {repair_jsonl_path.relative_to(job_sel.parent_folder)}")
 
 
@@ -1564,6 +1609,12 @@ async def main_cli(args: Any, paths_config: dict[str, Any]) -> dict[str, int]:
         )
 
     print_header("REPAIR COMPLETE", "")
-    print_success(f"Repair session completed for '{job.identifier}'")
+    if failed:
+        print_warning(
+            f"Repair session completed for '{job.identifier}' with "
+            f"{failed} line(s) still unrepaired."
+        )
+    else:
+        print_success(f"Repair session completed for '{job.identifier}'")
     print_info(f"Repair log: {repair_jsonl_path.relative_to(job.parent_folder)}")
     return {"repaired": repaired, "failed": failed}

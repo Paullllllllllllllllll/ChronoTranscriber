@@ -1,6 +1,7 @@
 """Anthropic (Claude) provider implementation using LangChain.
 
 Supports the full Claude model family via ChatAnthropic:
+- Claude 5 (Fable, Sonnet), Claude 4.8 Opus (adaptive thinking only)
 - Claude 4.7 Opus (adaptive thinking only)
 - Claude 4.6 (Opus, Sonnet -- adaptive thinking recommended)
 - Claude 4.5 (Opus, Sonnet, Haiku -- extended thinking)
@@ -137,6 +138,9 @@ class AnthropicProvider(BaseProvider):
             family = self._capabilities.family
 
             _ADAPTIVE_FAMILIES = (
+                "claude-fable-5",
+                "claude-sonnet-5",
+                "claude-opus-4.8",
                 "claude-opus-4.7",
                 "claude-opus-4.6",
                 "claude-sonnet-4.6",

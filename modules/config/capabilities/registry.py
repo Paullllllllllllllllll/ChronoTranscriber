@@ -204,6 +204,74 @@ _OPENROUTER_BASE: dict[str, Any] = dict(
 
 _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]]] = [
     # --- OpenAI GPT-5.x family (reasoning, Responses-native) ---
+    # GPT-5.6 (GA 2026-07-09): sol (flagship), terra (mid), luna (small).
+    # All three share the same capability profile: 1.05M context, 128k
+    # output, vision with image_detail original/auto (no patch cap), and
+    # reasoning-effort support. The bare "gpt-5.6" API alias routes to sol.
+    # These MUST precede the bare "gpt-5" prefix so unknown-model text-only
+    # fallback never triggers.
+    (
+        ("gpt-5.6-sol",),
+        "gpt-5.6-sol",
+        _OPENAI_REASONING_BASE,
+        dict(
+            supports_chat_completions=False,
+            max_context_tokens=1050000,
+            max_output_tokens=128000,
+            supports_image_detail_original=True,
+        ),
+    ),
+    (
+        ("gpt-5.6-terra",),
+        "gpt-5.6-terra",
+        _OPENAI_REASONING_BASE,
+        dict(
+            supports_chat_completions=False,
+            max_context_tokens=1050000,
+            max_output_tokens=128000,
+            supports_image_detail_original=True,
+        ),
+    ),
+    (
+        ("gpt-5.6-luna",),
+        "gpt-5.6-luna",
+        _OPENAI_REASONING_BASE,
+        dict(
+            supports_chat_completions=False,
+            max_context_tokens=1050000,
+            max_output_tokens=128000,
+            supports_image_detail_original=True,
+        ),
+    ),
+    # Bare "gpt-5.6" alias (routes to sol). Must follow the -sol/-terra/-luna
+    # entries above so those distinct families win.
+    (
+        ("gpt-5.6",),
+        "gpt-5.6",
+        _OPENAI_REASONING_BASE,
+        dict(
+            supports_chat_completions=False,
+            max_context_tokens=1050000,
+            max_output_tokens=128000,
+            supports_image_detail_original=True,
+        ),
+    ),
+    # GPT-5.5 Pro (GA 2026): Responses-native reasoning flagship. Vision with
+    # image_detail low/high/auto (no "original"/no-patch-cap tier). The
+    # changelog scopes it to the Responses API, so register it Responses-only
+    # (supports_chat_completions=False) even though the model page also lists
+    # Chat Completions — the safe side, matching other Responses-only entries.
+    # MUST precede the bare "gpt-5.5" prefix.
+    (
+        ("gpt-5.5-pro",),
+        "gpt-5.5-pro",
+        _OPENAI_REASONING_BASE,
+        dict(
+            supports_chat_completions=False,
+            max_context_tokens=1050000,
+            max_output_tokens=128000,
+        ),
+    ),
     (
         ("gpt-5.5",),
         "gpt-5.5",
@@ -370,6 +438,50 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
         ),
     ),
     # --- Anthropic Claude models (most-specific first) ---
+    # Claude 5 generation + Opus 4.8 (dateless IDs are the canonical pinned
+    # IDs from the 4.6 generation on). Vision (2576px), 1M context, 128k out.
+    # Adaptive thinking is on (Fable 5 rejects any request that disables it);
+    # effort low..max maps through supports_reasoning_effort. The API returns
+    # HTTP 400 for temperature/top_p/top_k and for thinking budget_tokens on
+    # these models, so supports_top_p is disabled here (mirroring Opus 4.7) and
+    # the family names are registered in the provider's adaptive-thinking set,
+    # which sends {"type": "adaptive"} instead of a budget_tokens block.
+    (
+        ("claude-fable-5",),
+        "claude-fable-5",
+        _ANTHROPIC_BASE,
+        dict(
+            is_reasoning_model=True,
+            supports_reasoning_effort=True,
+            supports_top_p=False,
+            max_context_tokens=1000000,
+            max_output_tokens=128000,
+        ),
+    ),
+    (
+        ("claude-opus-4-8", "claude-opus-4.8"),
+        "claude-opus-4.8",
+        _ANTHROPIC_BASE,
+        dict(
+            is_reasoning_model=True,
+            supports_reasoning_effort=True,
+            supports_top_p=False,
+            max_context_tokens=1000000,
+            max_output_tokens=128000,
+        ),
+    ),
+    (
+        ("claude-sonnet-5",),
+        "claude-sonnet-5",
+        _ANTHROPIC_BASE,
+        dict(
+            is_reasoning_model=True,
+            supports_reasoning_effort=True,
+            supports_top_p=False,
+            max_context_tokens=1000000,
+            max_output_tokens=128000,
+        ),
+    ),
     # Claude 4.7
     (
         ("claude-opus-4-7", "claude-opus-4.7"),
@@ -558,6 +670,20 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
         ),
     ),
     # --- Google Gemini ---
+    # Gemini 3.5 Flash (GA 2026-07-09): vision + PDF input, media_resolution
+    # low/medium/high/ultra_high, thinking_level minimal/low/medium(default)/
+    # high. MUST precede the bare "gemini-3" prefix.
+    (
+        ("gemini-3.5-flash", "gemini-3-5-flash"),
+        "gemini-3.5-flash",
+        _GOOGLE_BASE,
+        dict(
+            is_reasoning_model=True,
+            supports_reasoning_effort=True,
+            max_context_tokens=1048576,
+            max_output_tokens=65536,
+        ),
+    ),
     (
         ("gemini-3.1-pro-preview", "gemini-3-1-pro-preview"),
         "gemini-3.1-pro",
@@ -575,6 +701,20 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
         _GOOGLE_BASE,
         dict(
             max_context_tokens=1000000,
+            max_output_tokens=65536,
+        ),
+    ),
+    # Gemini 3.1 Flash-Lite (GA 2026-07-09): same shape as 3.5 Flash but with
+    # thinking_level default minimal. Placed AFTER the -preview entry above so
+    # the longer preview id still resolves to its own entry first.
+    (
+        ("gemini-3.1-flash-lite", "gemini-3-1-flash-lite"),
+        "gemini-3.1-flash-lite",
+        _GOOGLE_BASE,
+        dict(
+            is_reasoning_model=True,
+            supports_reasoning_effort=True,
+            max_context_tokens=1048576,
             max_output_tokens=65536,
         ),
     ),
@@ -640,6 +780,8 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
             max_output_tokens=65536,
         ),
     ),
+    # Gemini 2.5 family: scheduled for shutdown 2026-10-16. Entries kept so the
+    # models still resolve until then; retire after the shutdown date.
     (
         ("gemini-2.5-pro", "gemini-2-5-pro"),
         "gemini-2.5-pro",

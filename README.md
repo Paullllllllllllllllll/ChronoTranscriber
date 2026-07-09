@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.22.0
+# ChronoTranscriber v1.23.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -98,9 +98,9 @@ auto-detect from the model name.
 
 | Provider | Notable model families | Env variable | Batch |
 |----------|----------------------|--------------|-------|
-| OpenAI | GPT-5.4, GPT-5.3, GPT-5.2, GPT-5.1, GPT-5, o-series, GPT-4.1, GPT-4o | `OPENAI_API_KEY` | Yes |
-| Anthropic | Claude 4.7, 4.6, 4.5, 4.1, 4, 3.7, 3.5 | `ANTHROPIC_API_KEY` | Yes |
-| Google | Gemini 3.1, 3, 2.5, 2.0, 1.5; Gemma 4 | `GOOGLE_API_KEY` | Yes |
+| OpenAI | GPT-5.6, GPT-5.5, GPT-5.4, GPT-5.3, GPT-5.2, GPT-5.1, GPT-5, o-series, GPT-4.1, GPT-4o | `OPENAI_API_KEY` | Yes |
+| Anthropic | Claude 5 (Fable, Sonnet), 4.8, 4.7, 4.6, 4.5, 4.1, 4, 3.7, 3.5 | `ANTHROPIC_API_KEY` | Yes |
+| Google | Gemini 3.5, 3.1, 3, 2.5, 2.0, 1.5; Gemma 4 | `GOOGLE_API_KEY` | Yes |
 | OpenRouter | 200+ models via unified API | `OPENROUTER_API_KEY` | No |
 | Custom | Any OpenAI-compatible endpoint | User-configured | No |
 
@@ -686,6 +686,21 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v1.23.0** (9 July 2026) -- Extend the model-capability registry with the
+    current GPT-5.6 family (sol, terra, luna, and the bare alias), GPT-5.5 Pro,
+    the Claude 5 generation (Fable 5, Sonnet 5) plus Opus 4.8, and the newly
+    GA Gemini 3.5 Flash and Gemini 3.1 Flash-Lite. Each entry mirrors the
+    established per-provider profile: GPT-5.5 Pro is registered Responses-only
+    with a 1.05M context and image_detail low/high/auto; the new Claude models
+    carry 1M context, 128k output, adaptive-thinking-only reasoning (top_p and
+    budget_tokens disabled), and their family names are added to the Anthropic
+    provider's adaptive-thinking set so they emit an adaptive thinking block
+    rather than a rejected budget_tokens block; the GA Gemini entries expose
+    thinking_level support at 1,048,576 context. The GA Gemini 3.1 Flash-Lite
+    entry is ordered after its preview sibling so preview ids still resolve to
+    the preview profile, and the Gemini 2.5 family is annotated with its
+    2026-10-16 shutdown date. All 1,454 unit and capability tests pass.
 
 - **v1.22.0** (7 July 2026) -- Adopt shared token ledger 1.2.0 and fix two
     infra defects found in ChronoMiner's audit. The vendored

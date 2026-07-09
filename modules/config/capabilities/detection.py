@@ -148,7 +148,7 @@ def detect_capabilities(model_name: str) -> Capabilities:
                 supports_sampler_controls=False,
                 supports_top_p=False,
             )
-            if "gpt-5.4" in m or "gpt-5.5" in m:
+            if "gpt-5.4" in m or "gpt-5.5" in m or "gpt-5.6" in m:
                 or_overrides["supports_image_detail_original"] = True
             if "gpt-5.3" in m:
                 or_overrides["is_reasoning_model"] = False

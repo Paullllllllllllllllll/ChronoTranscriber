@@ -774,6 +774,10 @@ async def _repair_sync_mode(
         schema_path=schema_path,
         additional_context_path=additional_context_path,
     ) as trans:
+        # Per-key token-accounting stamp for this repair run's provider, so
+        # reservations, commits, and the daily-reset wait all land in the right
+        # per-key pool bucket.
+        repair_stamp = getattr(getattr(trans, "provider", None), "token_stamp", None)
         write_lock = asyncio.Lock()
 
         async def on_result(res: Any) -> None:
@@ -824,6 +828,7 @@ async def _repair_sync_mode(
                 on_result=on_result,
                 tracker=tracker,
                 exhausted=exhausted,
+                stamp=repair_stamp,
             )
 
             deferred: list[RepairTarget] = []
@@ -846,7 +851,9 @@ async def _repair_sync_mode(
             # cap, so the plain is_limit_reached() check would return instantly
             # and spin this loop without progress (CT-8). would_block_next_page()
             # makes the wait actually wait until the daily reset frees budget.
-            if not await check_and_wait_for_token_limit(conc, reservation_aware=True):
+            if not await check_and_wait_for_token_limit(
+                conc, reservation_aware=True, stamp=repair_stamp
+            ):
                 print_info("[INFO] Wait cancelled; remaining pages left unrepaired.")
                 break
 

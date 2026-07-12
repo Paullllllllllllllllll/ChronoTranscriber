@@ -80,7 +80,9 @@ async def test_repair_sync_mode_defers_and_waits(
 
     waited: list[bool] = []
 
-    async def _fake_wait(cfg: Any, reservation_aware: bool = False) -> bool:
+    async def _fake_wait(
+        cfg: Any, reservation_aware: bool = False, stamp: Any = None
+    ) -> bool:
         # Record the reservation_aware flag: the sync repair loop must pass True
         # so the wait actually waits while pages are reservation-blocked near the
         # cap instead of spinning and aborting (CT-8, mirrors the manager fix).
@@ -100,6 +102,7 @@ async def test_repair_sync_mode_defers_and_waits(
         on_result: Any,
         tracker: Any,
         exhausted: Any,
+        stamp: Any = None,
     ) -> list[Any]:
         passes.append([a[0].line_index for a in args_list])
         if len(passes) == 1:
@@ -185,6 +188,7 @@ def _install_sync_stubs(monkeypatch: pytest.MonkeyPatch, worker_text: str) -> No
         on_result: Any,
         tracker: Any,
         exhausted: Any,
+        stamp: Any = None,
     ) -> list[Any]:
         results = []
         for target, _trans in args_list:

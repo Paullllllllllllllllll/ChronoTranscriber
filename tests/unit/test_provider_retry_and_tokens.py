@@ -229,7 +229,7 @@ def test_commit_tokens_from_exception_total(monkeypatch: pytest.MonkeyPatch) -> 
     committed: list[int] = []
     monkeypatch.setattr(
         "modules.infra.token_budget.get_token_tracker",
-        lambda: SimpleNamespace(add_tokens=committed.append),
+        lambda: SimpleNamespace(add_tokens=lambda n, **kw: committed.append(n)),
     )
     _commit_tokens_from_exception(
         _make_api_error(429, body={"usage": {"total_tokens": 321}})
@@ -244,7 +244,7 @@ def test_commit_tokens_from_exception_prompt_completion(
     committed: list[int] = []
     monkeypatch.setattr(
         "modules.infra.token_budget.get_token_tracker",
-        lambda: SimpleNamespace(add_tokens=committed.append),
+        lambda: SimpleNamespace(add_tokens=lambda n, **kw: committed.append(n)),
     )
     _commit_tokens_from_exception(
         _make_api_error(
@@ -269,7 +269,7 @@ async def test_retried_attempt_recovers_tokens(
     monkeypatch.setattr(
         "modules.infra.token_budget.get_token_tracker",
         lambda: SimpleNamespace(
-            add_tokens=lambda n: committed.append(n),
+            add_tokens=lambda n, **kw: committed.append(n),
             get_tokens_used_today=lambda: 0,
         ),
     )
@@ -289,7 +289,7 @@ async def test_terminal_failure_recovers_tokens(
     committed: list[int] = []
     monkeypatch.setattr(
         "modules.infra.token_budget.get_token_tracker",
-        lambda: SimpleNamespace(add_tokens=committed.append),
+        lambda: SimpleNamespace(add_tokens=lambda n, **kw: committed.append(n)),
     )
     # A 400 is not retried; its usage must still be recovered in the terminal path.
     err = _make_api_error(400, body={"usage": {"input_tokens": 10, "output_tokens": 5}})
@@ -311,7 +311,7 @@ async def test_anthropic_cache_committed_at_full_weight(
     monkeypatch.setattr(
         "modules.infra.token_budget.get_token_tracker",
         lambda: SimpleNamespace(
-            add_tokens=lambda n: committed.append(n),
+            add_tokens=lambda n, **kw: committed.append(n),
             get_tokens_used_today=lambda: 0,
         ),
     )
@@ -342,7 +342,7 @@ async def test_openai_cache_not_double_counted(
     monkeypatch.setattr(
         "modules.infra.token_budget.get_token_tracker",
         lambda: SimpleNamespace(
-            add_tokens=lambda n: committed.append(n),
+            add_tokens=lambda n, **kw: committed.append(n),
             get_tokens_used_today=lambda: 0,
         ),
     )

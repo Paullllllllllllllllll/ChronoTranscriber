@@ -197,7 +197,43 @@ daily_token_limit:
 
   # Maximum tokens allowed per day (input + output combined).
   # Processing pauses when this limit is reached; resumes at the 00:01 UTC reset.
+  # This is the SECONDARY (combined) guard; see `scope` below for what it caps.
   daily_tokens: 10_000_000
+
+  # Scope of the combined `daily_tokens` guard:
+  #   pooled (default) -- caps only calls whose model belongs to a defined pool,
+  #     plus un-attributed usage; a pool-less bucket (a self-hosted/local
+  #     endpoint or any provider without a pool program) is counted but never
+  #     blocked by other providers' usage. The per-key pool caps below are then
+  #     the primary guard.
+  #   all -- legacy block-everything: the combined cap governs every call.
+  scope: pooled
+
+  # PRIMARY guard: per-key daily pools. A "pool" is a named set of models that
+  # shares one daily token allowance per API key, where a key is identified by
+  # the NAME of the env var that serves it (never the key value; e.g.
+  # OPENAI_API_KEY_2 counts separately from OPENAI_API_KEY). Built-in pool
+  # definitions currently cover OpenAI's complimentary daily token program
+  # (`large`/`small`); any provider may define its own pools here.
+  #
+  # Each `<provider>.<label>` entry is EITHER a bare integer (the cap; the
+  # pool's model list comes from the built-ins) OR a mapping with optional
+  # `cap` and `models` keys. `models` is a list of model-name prefixes
+  # (longest prefix wins, matching only at separator boundaries); defining
+  # `models` for a provider REPLACES its built-in pools. A pool without a
+  # resolvable cap is tracked but uncapped. Omit this whole block to apply the
+  # built-in pools and default caps; set `enabled: false` to disable per-key
+  # caps entirely.
+  per_key_pool_caps:
+    enabled: true
+    openai:
+      small: 9_750_000            # bare int: cap only, built-in model list
+      large:
+        cap: 975_000              # mapping form; `models` optional
+    # myhost:                     # example: a custom provider with its own pool
+    #   standard:
+    #     cap: 5_000_000
+    #     models: ["my-model"]
 
   # Cold-start guess (tokens) for one page before any usage is observed this
   # run; a self-calibrating rolling average (EWMA) takes over after the first

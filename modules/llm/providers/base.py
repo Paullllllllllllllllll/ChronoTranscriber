@@ -216,15 +216,21 @@ def parse_retry_after(exc: BaseException | None) -> float | None:
         return None
 
 
-def _commit_tokens_from_exception(exc: BaseException) -> None:
+def _commit_tokens_from_exception(
+    exc: BaseException,
+    stamp: tuple[str | None, str | None, str | None] | None = None,
+) -> None:
     """Best-effort: recover token usage from a failed call and commit it.
 
     Provider SDK exceptions often carry usage data in ``exc.body["usage"]`` or
     ``exc.response.json()["usage"]``; recovering it keeps the daily budget
     honest even for calls that ultimately errored. Tries ``total_tokens``, then
     ``prompt_tokens`` + ``completion_tokens`` (OpenAI), then ``input_tokens`` +
-    ``output_tokens`` (Anthropic). Never raises.
+    ``output_tokens`` (Anthropic). ``stamp`` is the (provider, key_env, model)
+    of the call so the recovered usage lands in the right per-key bucket; when
+    absent it lands unattributed. Never raises.
     """
+    provider, key_env, model = stamp if stamp else (None, None, None)
     try:
         usage: dict[str, Any] | None = None
 
@@ -268,7 +274,9 @@ def _commit_tokens_from_exception(exc: BaseException) -> None:
         if isinstance(total, int) and total > 0:
             from modules.infra.token_budget import get_token_tracker
 
-            get_token_tracker().add_tokens(total)
+            get_token_tracker().add_tokens(
+                total, provider=provider, key_env=key_env, model=model
+            )
             logger.info(
                 "[TOKEN] Recovered %s tokens from a failed request.", f"{total:,}"
             )
@@ -417,6 +425,7 @@ class BaseProvider(ABC):
         temperature: float = 0.0,
         max_tokens: int = 4096,
         timeout: float | None = None,
+        key_env: str | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize the provider.
@@ -427,6 +436,9 @@ class BaseProvider(ABC):
             temperature: Sampling temperature (0.0-2.0)
             max_tokens: Maximum output tokens
             timeout: Request timeout in seconds
+            key_env: NAME of the environment variable that supplied ``api_key``
+                (never the key value), used to stamp per-key token usage. The
+                factory resolves it at construction; ``None`` when unknown.
             **kwargs: Provider-specific configuration
         """
         self.api_key = api_key
@@ -434,6 +446,11 @@ class BaseProvider(ABC):
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.timeout = timeout
+        # Per-key token-accounting stamp: which env var served this provider's
+        # calls (the key VALUE is never stored). Combined with provider_name and
+        # model, this identifies the daily-budget bucket for every commit and
+        # reservation on the hot path.
+        self.key_env = key_env
         self.extra_config = kwargs
 
         # Load prompt caching configuration
@@ -450,6 +467,22 @@ class BaseProvider(ABC):
     def provider_name(self) -> str:
         """Return the provider name (e.g., 'openai', 'anthropic')."""
         pass
+
+    @property
+    def token_stamp(self) -> tuple[str, str | None, str | None]:
+        """Per-key token-accounting stamp: (provider, key_env, model).
+
+        Threaded to the daily budget's ``add_tokens`` and to every
+        ``try_reserve``/``release`` on the transcription hot path so usage and
+        reservations land in the right per-key pool bucket. ``key_env`` is the
+        NAME of the env var that served the call (never the value); it is
+        ``None`` when the factory could not resolve one.
+        """
+        return (
+            self.provider_name,
+            getattr(self, "key_env", None),
+            getattr(self, "model", None),
+        )
 
     @property
     def use_plain_text_prompt(self) -> bool:
@@ -761,7 +794,10 @@ class BaseProvider(ABC):
                 from modules.infra.token_budget import get_token_tracker
 
                 token_tracker = get_token_tracker()
-                token_tracker.add_tokens(total_tokens)
+                provider, key_env, model = self.token_stamp
+                token_tracker.add_tokens(
+                    total_tokens, provider=provider, key_env=key_env, model=model
+                )
                 cache_msg = ""
                 if cached_input_tokens > 0 and input_tokens > 0:
                     pct = cached_input_tokens / input_tokens * 100
@@ -1144,7 +1180,7 @@ class BaseProvider(ABC):
             """Recover usage from the failed attempt, then log the retry."""
             exc = retry_state.outcome.exception() if retry_state.outcome else None
             if exc is not None:
-                _commit_tokens_from_exception(exc)
+                _commit_tokens_from_exception(exc, self.token_stamp)
             tenacity.before_sleep_log(logger, logging.WARNING)(retry_state)
 
         last_result: Any = None
@@ -1179,7 +1215,7 @@ class BaseProvider(ABC):
             # Terminal failure of the retry loop: the final attempt is not
             # followed by a before_sleep, so recover its usage here too. Earlier
             # attempts were committed in _before_sleep, so no double counting.
-            _commit_tokens_from_exception(exc)
+            _commit_tokens_from_exception(exc, self.token_stamp)
             raise
         # Unreachable: the retry loop always returns or raises.
         raise RuntimeError("retry loop exited without a result")

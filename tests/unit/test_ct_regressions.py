@@ -337,7 +337,9 @@ def _patch_streaming_env(
     monkeypatch.setattr(mm, "get_token_tracker", lambda: MagicMock())
     monkeypatch.setattr(mm, "run_streaming_transcription_pipeline", pipeline)
 
-    async def _wait(cfg: Any, reservation_aware: bool = False) -> bool:
+    async def _wait(
+        cfg: Any, reservation_aware: bool = False, stamp: Any = None
+    ) -> bool:
         return wait_result
 
     monkeypatch.setattr(mm, "check_and_wait_for_token_limit", _wait)

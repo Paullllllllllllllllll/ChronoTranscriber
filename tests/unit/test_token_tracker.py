@@ -678,3 +678,456 @@ class TestEstimateExceedsDailyLimit:
         t.add_tokens(90)
         assert t.would_block_next_page() is True
         assert t.estimate_exceeds_daily_limit() is False
+
+
+# --------------------------------------------------------------------------- #
+# Per-provider-key accounting (schema v2): bucket stamping, pool caps, scope
+# --------------------------------------------------------------------------- #
+
+_OAI = "OPENAI_API_KEY"
+_OAI2 = "OPENAI_API_KEY_2"
+
+
+def _pooled_tracker(temp_dir: Path, **kwargs) -> DailyTokenTracker:
+    """Standalone tracker with small OpenAI pool caps for gate tests."""
+    defaults = dict(
+        daily_limit=1_000_000,
+        enabled=True,
+        state_file=temp_dir / "s.json",
+        chunk_estimate_seed=1,
+        estimate_smoothing=0.0,
+        daily_scope="pooled",
+        per_key_pool_caps_enabled=True,
+        pool_caps={("openai", "large"): 100, ("openai", "small"): 100},
+    )
+    defaults.update(kwargs)
+    return DailyTokenTracker(**defaults)
+
+
+class TestBucketStamping:
+    """add_tokens attributes usage to the (provider, key_env, pool) bucket."""
+
+    @pytest.mark.unit
+    def test_stamp_resolves_openai_pool_bucket(self, temp_dir: Path) -> None:
+        from modules.infra.shared_ledger import BucketKey
+
+        t = _pooled_tracker(temp_dir)
+        t.add_tokens(50, provider="openai", key_env=_OAI, model="gpt-4o")
+        bucket = BucketKey("openai", _OAI, "large")
+        assert t._bucket_used_today.get(bucket) == 50
+        # The plain daily sum stays a flat total across buckets.
+        assert t.get_own_tokens_used_today() == 50
+
+    @pytest.mark.unit
+    def test_missing_stamp_lands_unattributed(self, temp_dir: Path) -> None:
+        from modules.infra.shared_ledger import UNATTRIBUTED_BUCKET
+
+        t = _pooled_tracker(temp_dir)
+        t.add_tokens(40)  # no stamp
+        t.add_tokens(10, provider="openai")  # key_env missing -> unattributed
+        assert t._bucket_used_today.get(UNATTRIBUTED_BUCKET) == 50
+
+
+class TestPerKeyPoolGate:
+    """The primary per-key pool cap blocks one key while another admits."""
+
+    @pytest.mark.unit
+    def test_key1_blocks_while_key2_admits(self, temp_dir: Path) -> None:
+        t = _pooled_tracker(temp_dir)
+        # Fill key 1's large pool to the cap.
+        t.add_tokens(90, provider="openai", key_env=_OAI, model="gpt-4o")
+        # Key 1: 90 + est 20 > cap 100 -> denied.
+        assert (
+            t.try_reserve(20, provider="openai", key_env=_OAI, model="gpt-4o") is None
+        )
+        # Key 2 has its own fresh pool -> admitted.
+        assert t.try_reserve(20, provider="openai", key_env=_OAI2, model="gpt-4o") == 20
+
+    @pytest.mark.unit
+    def test_pools_are_independent_per_model(self, temp_dir: Path) -> None:
+        t = _pooled_tracker(temp_dir)
+        # Exhaust the large pool on key 1.
+        t.add_tokens(100, provider="openai", key_env=_OAI, model="gpt-4o")
+        assert (
+            t.try_reserve(10, provider="openai", key_env=_OAI, model="gpt-4o") is None
+        )
+        # A small-pool model on the same key uses a different pool -> admitted.
+        assert (
+            t.try_reserve(10, provider="openai", key_env=_OAI, model="gpt-4o-mini")
+            == 10
+        )
+
+    @pytest.mark.unit
+    def test_disabled_pool_caps_do_not_gate(self, temp_dir: Path) -> None:
+        t = _pooled_tracker(temp_dir, per_key_pool_caps_enabled=False)
+        t.add_tokens(100, provider="openai", key_env=_OAI, model="gpt-4o")
+        # No per-key gate; combined cap is huge -> admitted.
+        assert t.try_reserve(50, provider="openai", key_env=_OAI, model="gpt-4o") == 50
+
+
+class TestScopeAndPoollessRegression:
+    """The bug fix: a pool-less bucket is never blocked by OpenAI usage."""
+
+    @pytest.mark.unit
+    def test_custom_admitted_when_openai_and_combined_exhausted(
+        self, temp_dir: Path
+    ) -> None:
+        # daily_limit small so the COMBINED cap is also exhausted.
+        t = _pooled_tracker(temp_dir, daily_limit=100)
+        # Exhaust OpenAI key 1's large pool AND the combined cap.
+        t.add_tokens(100, provider="openai", key_env=_OAI, model="gpt-4o")
+        assert (
+            t.try_reserve(20, provider="openai", key_env=_OAI, model="gpt-4o") is None
+        )
+        assert t.is_limit_reached() is True  # combined exhausted too
+        # A custom/local endpoint (pool None) must still be admitted under
+        # scope=pooled, even with OpenAI pools AND the combined cap spent.
+        assert (
+            t.try_reserve(50, provider="custom", key_env="UZH_KEY", model="local-ocr")
+            == 50
+        )
+        assert (
+            t.would_block_next_page(
+                provider="custom", key_env="UZH_KEY", model="local-ocr"
+            )
+            is False
+        )
+
+    @pytest.mark.unit
+    def test_scope_all_restores_legacy_blocking(self, temp_dir: Path) -> None:
+        t = _pooled_tracker(temp_dir, daily_limit=100, daily_scope="all")
+        t.add_tokens(100, provider="openai", key_env=_OAI, model="gpt-4o")
+        # scope=all: the combined cap governs even the pool-less custom bucket.
+        assert (
+            t.try_reserve(50, provider="custom", key_env="UZH_KEY", model="local-ocr")
+            is None
+        )
+
+    @pytest.mark.unit
+    def test_unstamped_keeps_combined_semantics(self, temp_dir: Path) -> None:
+        t = _pooled_tracker(temp_dir, daily_limit=100)
+        t.add_tokens(100)  # unattributed
+        # Un-stamped calls keep today's combined-only blocking under scope=pooled.
+        assert t.try_reserve(10) is None
+
+
+class TestPrivateStateBucketPersistence:
+    """The private state file round-trips per-bucket counts and adopts legacy."""
+
+    @pytest.mark.unit
+    def test_buckets_persist_and_reload(self, temp_dir: Path) -> None:
+        from modules.infra.shared_ledger import BucketKey
+
+        state_file = temp_dir / "s.json"
+        t1 = _pooled_tracker(temp_dir, state_file=state_file)
+        t1.add_tokens(70, provider="openai", key_env=_OAI, model="gpt-4o")
+        t1.add_tokens(30, provider="custom", key_env="UZH_KEY", model="local-ocr")
+        t1._writer_stop.set()
+        t1.flush()
+
+        data = json.loads(state_file.read_text(encoding="utf-8"))
+        assert data["tokens_used"] == 100
+        assert data["buckets"]["openai|OPENAI_API_KEY|large"] == 70
+        assert data["buckets"]["custom|UZH_KEY|"] == 30
+
+        t2 = _pooled_tracker(temp_dir, state_file=state_file)
+        assert t2._bucket_used_today.get(BucketKey("openai", _OAI, "large")) == 70
+        assert t2._bucket_used_today.get(BucketKey("custom", "UZH_KEY", None)) == 30
+
+    @pytest.mark.unit
+    def test_legacy_state_adopted_as_unattributed(self, temp_dir: Path) -> None:
+        from modules.infra.shared_ledger import UNATTRIBUTED_BUCKET
+
+        state_file = temp_dir / "s.json"
+        # Legacy state without a "buckets" object.
+        today = DailyTokenTracker(
+            daily_limit=100, enabled=True, state_file=temp_dir / "throwaway.json"
+        )._get_current_date_str()
+        state_file.write_text(
+            json.dumps({"date": today, "tokens_used": 500}), encoding="utf-8"
+        )
+        t = _pooled_tracker(temp_dir, state_file=state_file)
+        assert t._bucket_used_today.get(UNATTRIBUTED_BUCKET) == 500
+        assert t.get_own_tokens_used_today() == 500
+
+
+class TestPolicyConfigParsing:
+    """get_token_tracker parses scope + per_key_pool_caps."""
+
+    def _tracker_from_cfg(self, cfg: dict):
+        import modules.infra.token_budget as tt
+
+        original = tt._tracker_instance
+        tt._tracker_instance = None
+        try:
+            with patch("modules.infra.token_budget.get_config_service") as mock_svc:
+                svc = mock_svc.return_value
+                svc.get_concurrency_config.return_value = cfg
+                svc.get_paths_config.return_value = {"general": {}}
+                return tt.get_token_tracker()
+        finally:
+            tt._tracker_instance = original
+
+    @pytest.mark.unit
+    def test_absent_block_uses_defaults(self, temp_dir: Path) -> None:
+        t = self._tracker_from_cfg(
+            {"daily_token_limit": {"enabled": True, "daily_tokens": 100}}
+        )
+        assert t._scope == "pooled"
+        assert t._per_key_pool_caps_enabled is True
+        # No configured caps: resolution falls back to the vendored defaults.
+        assert t._pool_caps == {}
+        assert t._pool_cap_for("openai", "large") == 975_000
+        assert t._pool_cap_for("openai", "small") == 9_750_000
+
+    @pytest.mark.unit
+    def test_scope_and_partial_caps_parsed(self, temp_dir: Path) -> None:
+        t = self._tracker_from_cfg(
+            {
+                "daily_token_limit": {
+                    "enabled": True,
+                    "daily_tokens": 100,
+                    "scope": "all",
+                    "per_key_pool_caps": {
+                        "enabled": False,
+                        "openai": {"large": "500_000"},
+                    },
+                }
+            }
+        )
+        assert t._scope == "all"
+        assert t._per_key_pool_caps_enabled is False
+        assert t._pool_caps[("openai", "large")] == 500_000
+        # Unspecified pool falls back to its vendored default.
+        assert t._pool_cap_for("openai", "small") == 9_750_000
+
+    @pytest.mark.unit
+    def test_invalid_scope_falls_back_to_pooled(self, temp_dir: Path) -> None:
+        t = self._tracker_from_cfg(
+            {
+                "daily_token_limit": {
+                    "enabled": True,
+                    "daily_tokens": 100,
+                    "scope": "nonsense",
+                }
+            }
+        )
+        assert t._scope == "pooled"
+
+    @pytest.mark.unit
+    def test_mapping_form_parsed_into_caps_and_pools(self) -> None:
+        from modules.infra.token_budget import _parse_pool_caps
+
+        enabled, caps, pools = _parse_pool_caps(
+            {
+                "per_key_pool_caps": {
+                    "enabled": True,
+                    "openai": {
+                        "small": 9_750_000,  # bare int: cap only
+                        "large": {"cap": "975_000"},  # mapping, cap only
+                    },
+                    "myhost": {
+                        "standard": {
+                            "cap": 5_000_000,
+                            "models": ["my-model", 42, "  "],
+                        },
+                        "free": {"models": ["other-model"]},  # cap-less
+                    },
+                    "broken": "not-a-dict",  # dropped
+                }
+            }
+        )
+        assert enabled is True
+        assert caps[("openai", "small")] == 9_750_000
+        assert caps[("openai", "large")] == 975_000
+        assert caps[("myhost", "standard")] == 5_000_000
+        assert ("myhost", "free") not in caps
+        # Only entries carrying `models` define pools; junk prefixes dropped.
+        assert pools == {"myhost": {"standard": ["my-model"], "free": ["other-model"]}}
+
+
+class TestDefinablePools:
+    """Custom pool definitions: mapping form, built-in replacement, uncapped."""
+
+    @pytest.mark.unit
+    def test_custom_provider_pool_derived_capped_enforced(self, temp_dir: Path) -> None:
+        from modules.infra.shared_ledger import BucketKey
+
+        t = DailyTokenTracker(
+            daily_limit=1_000_000,
+            enabled=True,
+            state_file=temp_dir / "s.json",
+            chunk_estimate_seed=1,
+            estimate_smoothing=0.0,
+            daily_scope="pooled",
+            pool_caps={("myhost", "standard"): 100},
+            provider_pools={"myhost": {"standard": ["my-model"]}},
+        )
+        # Prefix match at a separator boundary derives the custom pool.
+        t.add_tokens(90, provider="myhost", key_env="MY_KEY", model="my-model-v2")
+        bucket = BucketKey("myhost", "MY_KEY", "standard")
+        assert t._bucket_used_today.get(bucket) == 90
+        # The custom cap gates the pool: 90 + 20 > 100 -> denied.
+        assert (
+            t.try_reserve(20, provider="myhost", key_env="MY_KEY", model="my-model")
+            is None
+        )
+        # A second key for the same host has its own fresh pool.
+        assert (
+            t.try_reserve(20, provider="myhost", key_env="MY_KEY_2", model="my-model")
+            == 20
+        )
+        # Pool-less regression still holds: an unlisted model on the same host
+        # derives NO pool and is admitted under scope=pooled despite the
+        # exhausted pool.
+        assert (
+            t.try_reserve(50, provider="myhost", key_env="MY_KEY", model="unlisted")
+            == 50
+        )
+
+    @pytest.mark.unit
+    def test_configured_openai_models_replace_builtins(self, temp_dir: Path) -> None:
+        from modules.infra.shared_ledger import BucketKey
+
+        t = DailyTokenTracker(
+            daily_limit=1_000_000,
+            enabled=True,
+            state_file=temp_dir / "s.json",
+            chunk_estimate_seed=1,
+            estimate_smoothing=0.0,
+            pool_caps={("openai", "tiny"): 100},
+            provider_pools={"openai": {"tiny": ["gpt-4o-mini"]}},
+        )
+        # gpt-4o is in the BUILT-IN large pool, but configured pools REPLACE
+        # the built-ins for openai -> it now derives no pool at all.
+        t.add_tokens(40, provider="openai", key_env=_OAI, model="gpt-4o")
+        assert t._bucket_used_today.get(BucketKey("openai", _OAI, None)) == 40
+        # The configured pool still derives and gates.
+        t.add_tokens(95, provider="openai", key_env=_OAI, model="gpt-4o-mini")
+        assert t._bucket_used_today.get(BucketKey("openai", _OAI, "tiny")) == 95
+        assert (
+            t.try_reserve(10, provider="openai", key_env=_OAI, model="gpt-4o-mini")
+            is None
+        )
+
+    @pytest.mark.unit
+    def test_capless_pool_tracked_but_uncapped(self, temp_dir: Path) -> None:
+        from modules.infra.shared_ledger import BucketKey
+
+        t = DailyTokenTracker(
+            daily_limit=1_000_000,
+            enabled=True,
+            state_file=temp_dir / "s.json",
+            chunk_estimate_seed=1,
+            estimate_smoothing=0.0,
+            provider_pools={"myhost": {"free": ["other-model"]}},
+            # No cap for (myhost, free); "free" is unknown to DEFAULT_POOL_CAPS.
+        )
+        t.add_tokens(10_000, provider="myhost", key_env="MY_KEY", model="other-model")
+        bucket = BucketKey("myhost", "MY_KEY", "free")
+        # Tracked under its derived pool...
+        assert t._bucket_used_today.get(bucket) == 10_000
+        # ...but never blocked by a pool cap (and scope=pooled: the combined
+        # gate applies to pooled buckets, with plenty of combined headroom).
+        assert (
+            t.try_reserve(500, provider="myhost", key_env="MY_KEY", model="other-model")
+            == 500
+        )
+        assert (
+            t.would_block_next_page(
+                provider="myhost", key_env="MY_KEY", model="other-model"
+            )
+            is False
+        )
+
+    @pytest.mark.unit
+    def test_set_token_policy_refreshes_pools(self, temp_dir: Path) -> None:
+        """The wait loop's policy refresh swaps compiled pools live."""
+        t = _pooled_tracker(temp_dir)
+        # Initially built-ins apply: gpt-4o derives "large".
+        assert _pooled_tracker(temp_dir, state_file=temp_dir / "s2.json") is not None
+        t.set_token_policy(
+            pool_caps={("openai", "solo"): 50},
+            provider_pools={"openai": {"solo": ["gpt-4o"]}},
+        )
+        # After the refresh gpt-4o derives the new label and its new cap.
+        t.add_tokens(45, provider="openai", key_env=_OAI, model="gpt-4o")
+        assert (
+            t.try_reserve(10, provider="openai", key_env=_OAI, model="gpt-4o") is None
+        )
+
+
+class TestDegradedPerBucketPreservation:
+    """Degraded shared sync preserves un-pushed per-bucket deltas."""
+
+    @pytest.mark.unit
+    def test_per_bucket_deltas_survive_degraded_then_land(self, temp_dir: Path) -> None:
+        from modules.infra.shared_ledger import BucketKey, UsageSnapshot
+
+        class _FakeLedger:
+            def __init__(self) -> None:
+                self.rows: dict = {}
+                self.fail = True
+
+            def seed_usage(self, own_total, own_buckets=None):
+                if self.fail:
+                    return None
+                for b, n in (own_buckets or {}).items():
+                    self.rows[b] = max(self.rows.get(b, 0), int(n))
+                return self._snap()
+
+            def sync_usage(self, deltas):
+                if self.fail:
+                    return None
+                for b, n in deltas.items():
+                    self.rows[b] = self.rows.get(b, 0) + int(n)
+                return self._snap()
+
+            def _snap(self):
+                total = sum(self.rows.values())
+                buckets = {
+                    b: n for b, n in self.rows.items() if b.provider != "unattributed"
+                }
+                return UsageSnapshot(total, total, buckets, dict(self.rows))
+
+            def read_breakdown(self):
+                return (
+                    None
+                    if self.fail
+                    else {"chronotranscriber": sum(self.rows.values())}
+                )
+
+        t = DailyTokenTracker(
+            daily_limit=10_000_000,
+            enabled=True,
+            state_file=temp_dir / "s.json",
+            chunk_estimate_seed=1,
+            estimate_smoothing=0.0,
+            shared_enabled=True,
+            shared_ledger_dir=temp_dir / "ledger",
+        )
+        t._writer_stop.set()
+        fake = _FakeLedger()
+        with t._lock:
+            t._ledger = fake
+            t._seeded = False
+            t._combined_total = 0
+            t._unsynced_deltas = {}
+            t._bucket_totals = {}
+            t._ledger_degraded = False
+
+        k1 = BucketKey("openai", _OAI, "large")
+        k2 = BucketKey("custom", "UZH_KEY", None)
+        t.add_tokens(100, provider="openai", key_env=_OAI, model="gpt-4o")
+        t.sync_ledger_now()  # seed fails -> degraded, deltas preserved
+        assert t._ledger_degraded is True
+        t.add_tokens(30, provider="custom", key_env="UZH_KEY", model="local-ocr")
+        assert t._unsynced_deltas.get(k1) == 100
+        assert t._unsynced_deltas.get(k2) == 30
+
+        fake.fail = False
+        t.sync_ledger_now()  # recovery: both per-bucket deltas land
+        assert t._ledger_degraded is False
+        assert fake.rows.get(k1) == 100
+        assert fake.rows.get(k2) == 30
+        assert not any(t._unsynced_deltas.values())

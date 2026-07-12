@@ -25,6 +25,7 @@ async def run_concurrent_transcription_tasks(
     on_result: Callable[[Any], Awaitable[None]] | None = None,
     tracker: Any = None,
     exhausted: asyncio.Event | None = None,
+    stamp: tuple[str | None, str | None, str | None] | None = None,
 ) -> list[Any]:
     """
     Run async function concurrently over argument tuples with concurrency control.
@@ -41,6 +42,9 @@ async def run_concurrent_transcription_tasks(
         exhausted: Optional event set when the budget is exhausted; tasks not
             yet started then defer (return None without running), letting the
             caller drain, wait for the daily reset, and re-pass.
+        stamp: Optional (provider, key_env, model) so each reservation and
+            release lands in the call's per-key pool bucket. ``None`` reserves
+            against the unattributed bucket (today's combined-only semantics).
 
     Returns:
         List of results from all task executions, one per input tuple in the
@@ -60,6 +64,7 @@ async def run_concurrent_transcription_tasks(
     for i in range(n):
         index_queue.put_nowait(i)
     workers_n = max(1, min(int(concurrency_limit), n))
+    s_provider, s_key_env, s_model = stamp if stamp else (None, None, None)
 
     async def worker() -> None:
         while True:
@@ -73,7 +78,9 @@ async def run_concurrent_transcription_tasks(
                 continue
             reserved = None
             if tracker is not None:
-                reserved = tracker.try_reserve()
+                reserved = tracker.try_reserve(
+                    provider=s_provider, key_env=s_key_env, model=s_model
+                )
                 if reserved is None:
                     if exhausted is not None:
                         exhausted.set()
@@ -96,7 +103,12 @@ async def run_concurrent_transcription_tasks(
                 results[i] = None
             finally:
                 if reserved:
-                    tracker.release(reserved)
+                    tracker.release(
+                        reserved,
+                        provider=s_provider,
+                        key_env=s_key_env,
+                        model=s_model,
+                    )
 
     worker_tasks = [asyncio.create_task(worker()) for _ in range(workers_n)]
     try:
@@ -118,6 +130,7 @@ async def run_streaming_transcription_tasks(
     on_result: Callable[[Any], Awaitable[None]] | None = None,
     tracker: Any = None,
     exhausted: asyncio.Event | None = None,
+    stamp: tuple[str | None, str | None, str | None] | None = None,
 ) -> list[Any]:
     """Consume an async producer with a bounded queue and worker pool.
 
@@ -148,6 +161,7 @@ async def run_streaming_transcription_tasks(
     queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=2 * workers_n)
     producer_error: list[BaseException] = []
     results: list[Any] = []
+    s_provider, s_key_env, s_model = stamp if stamp else (None, None, None)
 
     async def produce() -> None:
         try:
@@ -174,7 +188,9 @@ async def run_streaming_transcription_tasks(
                 continue
             reserved = None
             if tracker is not None:
-                reserved = tracker.try_reserve()
+                reserved = tracker.try_reserve(
+                    provider=s_provider, key_env=s_key_env, model=s_model
+                )
                 if reserved is None:
                     if exhausted is not None:
                         exhausted.set()
@@ -196,7 +212,12 @@ async def run_streaming_transcription_tasks(
                         logger.error(f"on_result callback failed: {cb_exc}")
             finally:
                 if reserved:
-                    tracker.release(reserved)
+                    tracker.release(
+                        reserved,
+                        provider=s_provider,
+                        key_env=s_key_env,
+                        model=s_model,
+                    )
 
     producer_task = asyncio.create_task(produce())
     worker_tasks = [asyncio.create_task(work()) for _ in range(workers_n)]

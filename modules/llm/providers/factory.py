@@ -300,6 +300,11 @@ def get_provider(
 
             kwargs["custom_capabilities"] = custom_capabilities
             kwargs["use_plain_text_prompt"] = use_plain_text_prompt
+            # Per-key token-accounting stamp: the custom endpoint's key env var
+            # NAME (never the value). Non-OpenAI/local endpoints derive pool None
+            # and are never blocked by OpenAI usage under scope=pooled.
+            if "key_env" not in kwargs:
+                kwargs["key_env"] = custom_cfg.get("api_key_env_var")
         except (KeyError, AttributeError, TypeError) as e:
             raise ValueError(
                 f"Could not load custom endpoint config: {e}. "
@@ -324,6 +329,12 @@ def get_provider(
 
     # Get API key
     resolved_api_key = get_api_key_for_provider(provider_type, api_key)
+
+    # Stamp the provider with its key env var NAME (never the value) for
+    # per-key token accounting. Standard providers resolve it via the
+    # api_keys_config mapping; the custom endpoint already set it above.
+    if "key_env" not in kwargs:
+        kwargs["key_env"] = resolve_api_key_env_var(provider_type)
 
     # Import and instantiate provider
     provider_class = _import_provider_class(provider_type)

@@ -834,6 +834,11 @@ class WorkflowManager:
         # (a fresh source rebuilt over the recomputed skip-set).
         print_info(f"Starting gpt transcription for {len(needed)} images...")
         tracker = get_token_tracker()
+        # Per-key token-accounting stamp so the daily-reset wait applies the
+        # right per-key pool cap and names the exhausted key.
+        token_stamp = getattr(
+            getattr(transcriber, "provider", None), "token_stamp", None
+        )
         first_provenance: dict[str, Any] | None = file_provenance
         completed_fully = True
         stalled_resets = 0
@@ -894,7 +899,7 @@ class WorkflowManager:
             # and spin this loop without progress. would_block_next_page() makes
             # the wait actually wait until the daily reset frees enough budget.
             if not await check_and_wait_for_token_limit(
-                self.concurrency_config, reservation_aware=True
+                self.concurrency_config, reservation_aware=True, stamp=token_stamp
             ):
                 completed_fully = False
                 break

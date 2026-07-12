@@ -41,6 +41,23 @@ from modules.ui import print_error, print_info, print_success, print_warning
 logger = setup_logger(__name__)
 
 
+def _provider_token_stamp(
+    transcriber: Any,
+) -> tuple[str | None, str | None, str | None] | None:
+    """Extract the (provider, key_env, model) token stamp from a transcriber.
+
+    Returns ``None`` when no provider is attached (e.g. the Tesseract path),
+    which leaves reservations unattributed (today's combined-only semantics).
+    """
+    if transcriber is None:
+        return None
+    provider = getattr(transcriber, "provider", None)
+    stamp = getattr(provider, "token_stamp", None)
+    if stamp is None:
+        return None
+    return (stamp[0], stamp[1], stamp[2])
+
+
 class PageTranscriptionError(Exception):
     """Raised when one or more pages of an item failed to transcribe.
 
@@ -408,6 +425,7 @@ async def run_streaming_transcription_pipeline(
                 on_result=on_result_write,
                 tracker=tracker,
                 exhausted=exhausted,
+                stamp=_provider_token_stamp(transcriber),
             )
         except Exception as e:
             # Producer failures (e.g. the render failure-rate guard) must

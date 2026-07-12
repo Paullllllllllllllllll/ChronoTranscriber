@@ -738,7 +738,9 @@ class TestProcessLLMResponse:
         assert result.input_tokens == 1500
         assert result.output_tokens == 350
         assert result.total_tokens == 1850
-        mock_tracker.return_value.add_tokens.assert_called_once_with(1850)
+        mock_tracker.return_value.add_tokens.assert_called_once_with(
+            1850, provider="test", key_env=None, model=None
+        )
 
     @pytest.mark.unit
     def test_response_metadata_takes_priority_over_usage_metadata(self) -> None:
@@ -1520,7 +1522,9 @@ class TestInputTokenThresholdRetry:
         assert result["raw"].usage_metadata["input_tokens"] == 1500
         assert mock_llm.ainvoke.call_count == 2
         # The discarded first attempt's total_tokens (800 + 100 = 900) was tracked
-        mock_tracker.add_tokens.assert_called_once_with(900)
+        mock_tracker.add_tokens.assert_called_once_with(
+            900, provider="test", key_env=None, model=None
+        )
 
     @pytest.mark.unit
     def test_tracks_tokens_on_input_below_threshold_retry(self) -> None:
@@ -1571,7 +1575,9 @@ class TestInputTokenThresholdRetry:
         assert result["raw"].usage_metadata["input_tokens"] == 1500
         assert mock_llm.ainvoke.call_count == 2
         # The discarded first attempt's total_tokens (234 + 100 = 334) was tracked
-        mock_tracker.add_tokens.assert_called_once_with(334)
+        mock_tracker.add_tokens.assert_called_once_with(
+            334, provider="test", key_env=None, model=None
+        )
 
 
 class TestExtractTotalTokens:

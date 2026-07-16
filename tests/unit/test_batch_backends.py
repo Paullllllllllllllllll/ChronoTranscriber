@@ -476,3 +476,49 @@ class TestOpenAIBuildResponsesBodyContextImage:
             "type": "input_text",
             "text": "OCR this page.",
         }
+
+
+class TestOpenAIBuildResponsesBodyOriginalDetail:
+    """Regression: batch bodies must honor llm_detail='original' where supported.
+
+    The backend previously accepted only 'low'/'high' and silently dropped
+    'original' — the shipped v2.0.0 default — so batch submissions fell back
+    to the API's default detail while the sync path sent full resolution.
+    """
+
+    def _build(self, model_name: str, llm_detail: str) -> dict:
+        from modules.batch.backends.openai_backend import _build_responses_body
+
+        with patch(
+            "modules.batch.backends.openai_backend.get_config_service"
+        ) as mock_cs:
+            mock_cs.return_value.get_concurrency_config.return_value = {}
+            return _build_responses_body(
+                model_config={"name": model_name, "max_output_tokens": 4096},
+                system_prompt="prompt",
+                image_url="data:image/png;base64,PAGE",
+                llm_detail=llm_detail,
+            )
+
+    @pytest.mark.unit
+    def test_original_detail_included_for_capable_model(self) -> None:
+        """detail='original' reaches the body for models that support it."""
+        body = self._build("gpt-5.6-luna", "original")
+        page_img = body["input"][1]["content"][-1]
+        assert page_img["type"] == "input_image"
+        assert page_img.get("detail") == "original"
+
+    @pytest.mark.unit
+    def test_original_detail_dropped_for_incapable_model(self) -> None:
+        """detail='original' is omitted for models without original support."""
+        body = self._build("gpt-4o", "original")
+        page_img = body["input"][1]["content"][-1]
+        assert page_img["type"] == "input_image"
+        assert "detail" not in page_img
+
+    @pytest.mark.unit
+    def test_high_detail_still_included(self) -> None:
+        """Existing 'high' behavior is unchanged."""
+        body = self._build("gpt-4o", "high")
+        page_img = body["input"][1]["content"][-1]
+        assert page_img.get("detail") == "high"

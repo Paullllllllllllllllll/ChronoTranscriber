@@ -1,4 +1,4 @@
-# ChronoTranscriber v2.0.0
+# ChronoTranscriber v2.0.1
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -727,6 +727,14 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v2.0.1** (16 July 2026) -- Fix the OpenAI batch backend silently dropping
+    `llm_detail: original` (the v2.0.0 recommended default): batch request
+    bodies only accepted low/high and fell back to the API's default detail,
+    degrading batch transcriptions relative to the synchronous path. The
+    backend now validates `original` against the model's
+    `supports_image_detail_original` capability, matching the sync provider
+    and the legacy request builder. Regression tests cover capable
+    (gpt-5.6-luna) and incapable (gpt-4o) models.
 - **v2.0.0** (16 July 2026) -- New recommended standard configuration for
     best processing results, shipped as the bundled example defaults: OpenAI
     gpt-5.6-luna at reasoning effort high, original (full-resolution) image

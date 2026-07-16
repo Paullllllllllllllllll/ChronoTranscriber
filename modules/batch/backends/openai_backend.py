@@ -47,11 +47,15 @@ def _build_responses_body(
     model_name: str = tm.get("name", "gpt-5.4-mini")
     caps = detect_capabilities(model_name)
 
-    # Normalize detail
+    # Normalize detail ("original" only for models that support it, matching
+    # the sync provider and modules/batch/requests.py)
     detail_norm: str | None = None
     if isinstance(llm_detail, str):
         d = llm_detail.lower().strip()
-        if d in ("low", "high"):
+        valid_details = {"low", "high"}
+        if caps.supports_image_detail_original:
+            valid_details.add("original")
+        if d in valid_details:
             detail_norm = d
 
     detail_kwargs: dict[str, str] = {}
@@ -227,7 +231,11 @@ class OpenAIBatchBackend(BatchBackend):
                 .get("api_image_processing", {})
             )
             raw_detail = str(image_cfg.get("llm_detail", "high")).lower().strip()
-            llm_detail = raw_detail if raw_detail in ("low", "high") else None
+            # "original" is passed through; _build_responses_body re-validates
+            # it against the model's capabilities before adding it to the body.
+            llm_detail = (
+                raw_detail if raw_detail in ("low", "high", "original") else None
+            )
         except (KeyError, AttributeError, TypeError):
             llm_detail = None
 

@@ -1,4 +1,4 @@
-# ChronoTranscriber v2.0.3
+# ChronoTranscriber v2.0.4
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -727,6 +727,11 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v2.0.4** (16 July 2026) -- Adopt the fully typed shared-ledger test
+    (vendored byte-identically across the ChronoTools repos; the ledger module
+    itself is unchanged at v2.1.1): Any-typed dynamic module handle,
+    `pytest.MonkeyPatch` annotations, and a covariant frozen-datetime
+    override, keeping the three vendored copies in sync.
 - **v2.0.3** (16 July 2026) -- Shared token-ledger module updated to
     v2.1.1 (vendored byte-identically from ChronoMiner): the lock-free
     reads `read_combined` and `read_breakdown` now degrade gracefully

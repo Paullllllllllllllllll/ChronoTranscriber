@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chronotranscriber"
-version = "1.24.0"
+version = "1.24.1"
 description = "LLM-assisted document transcription tool for researchers and archivists"
 readme = "README.md"
 license = "MIT"
@@ -81,7 +81,10 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --tb=short --strict-markers"
+# Live API smoke tests (marker: api) are opt-in: a plain `pytest` run must
+# never make real API calls or burn tokens. Run them explicitly with
+# `pytest -m api` (which overrides this deselection).
+addopts = "-v --tb=short --strict-markers -m 'not api'"
 markers = [
     "unit: Unit tests (fast, no external dependencies)",
     "integration: Integration tests (may require external services)",

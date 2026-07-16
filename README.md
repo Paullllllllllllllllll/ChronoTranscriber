@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.24.0
+# ChronoTranscriber v1.24.1
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -727,6 +727,12 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.24.1** (16 July 2026) -- Deselect the live API smoke tests from the
+    default pytest run: `pytest` now applies `-m 'not api'` via `addopts`, so
+    the 19 api-marked tests in `tests/integration/test_live_api.py` no longer
+    fire real LLM calls (and burn tokens) whenever API keys are present in the
+    environment. Run them explicitly with `pytest -m api`. Also clears
+    formatter drift in one test file.
 - **v1.24.0** (12 July 2026) -- Per-key token accounting and definable daily
     pools, fixing the guard that could block a free local endpoint on paid
     OpenAI usage. The shared cross-tool ledger moves to schema v2: every API

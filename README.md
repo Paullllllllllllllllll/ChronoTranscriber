@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.24.1
+# ChronoTranscriber v2.0.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -727,6 +727,12 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v2.0.0** (16 July 2026) -- New recommended standard configuration for
+    best processing results, shipped as the bundled example defaults: OpenAI
+    gpt-5.6-luna at reasoning effort high, original (full-resolution) image
+    detail, flex service tier with a 900 s request timeout, and transcription
+    concurrency of 16 tuned for OpenAI API tier 3. Major bump because the
+    public defaults change processing behavior for fresh clones.
 - **v1.24.1** (16 July 2026) -- Deselect the live API smoke tests from the
     default pytest run: `pytest` now applies `-m 'not api'` via `addopts`, so
     the 19 api-marked tests in `tests/integration/test_live_api.py` no longer

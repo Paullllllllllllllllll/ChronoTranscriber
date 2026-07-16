@@ -19,13 +19,16 @@
 #   - Custom:      set api_key_env_var in the custom_endpoint block
 # =============================================================================
 
+# Recommended configuration for best processing results: gpt-5.6-luna at
+# reasoning effort high (with original image detail, flex service tier, and a
+# 900 s timeout in the sibling configs).
 transcription_model:
   provider: openai
-  name: gpt-5.4-mini
+  name: gpt-5.6-luna
   max_output_tokens: 128000
   expects_image_inputs: true
   reasoning:
-    effort: medium
+    effort: high
   text:
     verbosity: medium
   temperature: 1

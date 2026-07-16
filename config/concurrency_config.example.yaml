@@ -18,8 +18,9 @@ concurrency:
   transcription:
     # Maximum concurrent LLM API calls during synchronous transcription.
     # Higher values = faster processing but more API load.
-    # Recommended: 20-50 for most use cases; up to 1500 for high-throughput scenarios.
-    concurrency_limit: 1
+    # Recommended: 16 (tuned for OpenAI API tier 3; also bounds how far
+    # in-flight pages can drain past a per-key daily pool cap).
+    concurrency_limit: 16
 
     # Delay (seconds) between starting each transcription task.
     # Helps avoid rate limiting; set to 0 for maximum throughput.
@@ -28,7 +29,8 @@ concurrency:
     # OpenAI service tier for Responses API (synchronous mode only).
     # Values: 'auto', 'default', 'flex', 'priority'
     # Note: 'flex' is synchronous-only; batch processing auto-converts to 'auto'.
-    service_tier: default
+    # Recommended: flex (cheaper; pair with request_timeout 900).
+    service_tier: flex
 
     # Number of images per batch file when using OpenAI Batch API.
     # Larger chunks = fewer API calls but larger file uploads.
@@ -38,7 +40,7 @@ concurrency:
     # OpenAI's default SDK timeout is 10 minutes; flex processing can exceed this.
     # Set to 900 (15 minutes) as recommended by OpenAI for flex service tier.
     # LangChain will raise APITimeoutError and trigger retry on expiry.
-    request_timeout: 300
+    request_timeout: 900
 
     # Retry configuration for transient API errors (429, 5xx, timeouts).
     # The tenacity loop in modules/llm/providers/base.py is the SINGLE retry

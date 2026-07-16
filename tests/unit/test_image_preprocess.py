@@ -337,9 +337,7 @@ class TestTesseractStemCollision:
         ):
             mock_cs.return_value.get_image_processing_config.return_value = {}
             mock_cs.return_value.get_concurrency_config.return_value = {}
-            return ImageProcessor.process_and_save_images_for_tesseract(
-                source, out_dir
-            )
+            return ImageProcessor.process_and_save_images_for_tesseract(source, out_dir)
 
     @pytest.mark.unit
     def test_colliding_stems_get_distinct_outputs(self, tmp_path: Path) -> None:

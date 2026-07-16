@@ -1,4 +1,4 @@
-# ChronoTranscriber v2.0.2
+# ChronoTranscriber v2.0.3
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -726,6 +726,15 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v2.0.3** (16 July 2026) -- Shared token-ledger module updated to
+    v2.1.1 (vendored byte-identically from ChronoMiner): the lock-free
+    reads `read_combined` and `read_breakdown` now degrade gracefully
+    (return None) when the ledger file contains valid-but-non-dict JSON
+    such as `null` or `[]`, instead of raising `AttributeError` in
+    violation of the module's never-crash contract; the vendored test
+    suite gains the matching regression test and pins the new module
+    hash.
 
 - **v2.0.2** (16 July 2026) -- Three robustness fixes and a repo hygiene fix.
     Tesseract folder preprocessing no longer clobbers source images that share

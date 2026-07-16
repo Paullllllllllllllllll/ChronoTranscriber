@@ -294,3 +294,68 @@ class TestPrepareImageFolder:
         assert temp_jsonl.suffix == ".jsonl"
         assert out_txt.suffix == ".txt"
         assert out_txt.parent == parent
+
+
+# ---------------------------------------------------------------------------
+# ImageProcessor.process_and_save_images_for_tesseract — stem collisions
+# ---------------------------------------------------------------------------
+
+
+class TestTesseractStemCollision:
+    """Regression: source files sharing a stem across extensions must not
+    clobber each other's preprocessed output (mirrors the CT-9 GPT-path fix).
+
+    Only colliding stems get extension-inclusive names; collision-free files
+    keep the legacy ``{stem}_tess_preprocessed`` name so existing resume
+    artifacts still match.
+    """
+
+    def _run(self, tmp_path: Path, filenames: list[str]) -> list[Path]:
+        from unittest.mock import patch
+
+        source = tmp_path / "src"
+        source.mkdir()
+        for name in filenames:
+            (source / name).write_bytes(b"fake image data")
+        out_dir = tmp_path / "pre"
+
+        def fake_pool(func, args_list, processes=None):  # noqa: ANN001, ANN202
+            # Sequential fake: touch each out_path so the naming logic is
+            # exercised without real image preprocessing.
+            results = []
+            for args in args_list:
+                args[1].write_bytes(b"out")
+                results.append(str(args[1]))
+            return results
+
+        with (
+            patch(
+                "modules.images.pipeline.run_multiprocessing_tasks",
+                side_effect=fake_pool,
+            ),
+            patch("modules.images.pipeline.get_config_service") as mock_cs,
+        ):
+            mock_cs.return_value.get_image_processing_config.return_value = {}
+            mock_cs.return_value.get_concurrency_config.return_value = {}
+            return ImageProcessor.process_and_save_images_for_tesseract(
+                source, out_dir
+            )
+
+    @pytest.mark.unit
+    def test_colliding_stems_get_distinct_outputs(self, tmp_path: Path) -> None:
+        result = self._run(tmp_path, ["scan_001.png", "scan_001.tif", "scan_002.png"])
+        names = sorted(p.name for p in result)
+        assert len(names) == len(set(names)) == 3
+        assert "scan_001.png_tess_preprocessed.png" in names
+        assert "scan_001.tif_tess_preprocessed.png" in names
+        # Non-colliding stem keeps the legacy name for resume compatibility.
+        assert "scan_002_tess_preprocessed.png" in names
+
+    @pytest.mark.unit
+    def test_collision_free_folder_keeps_legacy_names(self, tmp_path: Path) -> None:
+        result = self._run(tmp_path, ["page_1.png", "page_2.png"])
+        names = sorted(p.name for p in result)
+        assert names == [
+            "page_1_tess_preprocessed.png",
+            "page_2_tess_preprocessed.png",
+        ]

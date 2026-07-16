@@ -103,7 +103,7 @@ def _write_txt(
     combined = "\n".join(lines)
     if postprocess:
         combined = postprocess_transcription(combined, config or {})
-    path.write_text(combined, encoding="utf-8")
+    path.write_text(combined, encoding="utf-8", newline="\n")
 
 
 def _write_md(
@@ -131,7 +131,7 @@ def _write_md(
     combined = "\n\n".join(blocks)
     if postprocess:
         combined = postprocess_transcription(combined, config or {})
-    path.write_text(combined, encoding="utf-8")
+    path.write_text(combined, encoding="utf-8", newline="\n")
 
 
 def _write_json(pages: list[dict[str, Any]], path: Path) -> None:
@@ -148,4 +148,5 @@ def _write_json(pages: list[dict[str, Any]], path: Path) -> None:
     path.write_text(
         json.dumps(records, ensure_ascii=False, indent=2),
         encoding="utf-8",
+        newline="\n",
     )

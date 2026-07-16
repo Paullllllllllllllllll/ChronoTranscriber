@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import subprocess
 import tempfile
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -518,6 +519,16 @@ class ImageProcessor:
         # Deterministic natural ordering by filename (B5): page_2 before page_10.
         image_files.sort(key=lambda p: natural_sort_key(p.name))
 
+        # Source files sharing a stem across extensions (scan_001.png +
+        # scan_001.tif) would map to ONE output name, silently clobbering each
+        # other on disk and dropping a page from the output. Mirror the CT-9
+        # GPT-path fix with extension-inclusive names, but only for the
+        # colliding stems, so existing resume artifacts for the common
+        # (collision-free) case keep matching. Duplicates are detected over the
+        # FULL sorted folder listing so naming stays stable under page ranges.
+        stem_counts = Counter(p.stem for p in image_files)
+        dup_stems = {stem for stem, n in stem_counts.items() if n > 1}
+
         # Apply page-range filter
         if page_indices is not None:
             image_files = [
@@ -527,7 +538,11 @@ class ImageProcessor:
         preprocessed_folder.mkdir(parents=True, exist_ok=True)
         suffix = ".png" if output_format == "png" else ".tif"
         out_paths: list[Path] = [
-            preprocessed_folder / f"{img.stem}_tess_preprocessed{suffix}"
+            preprocessed_folder
+            / (
+                f"{img.name if img.stem in dup_stems else img.stem}"
+                f"_tess_preprocessed{suffix}"
+            )
             for img in image_files
         ]
 

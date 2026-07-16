@@ -522,3 +522,69 @@ class TestOpenAIBuildResponsesBodyOriginalDetail:
         body = self._build("gpt-4o", "high")
         page_img = body["input"][1]["content"][-1]
         assert page_img.get("detail") == "high"
+
+
+class TestOpenAIDownloadResultsMultiMessage:
+    """Regression: multi-message Responses outputs are concatenated in order.
+
+    The parser previously kept only the first output_text part of each
+    message and let a later message item overwrite earlier content
+    (last-message-wins), silently dropping text.
+    """
+
+    def _download(self, body: dict) -> list[BatchResultItem]:
+        import json
+        from unittest.mock import MagicMock
+
+        from modules.batch.backends.openai_backend import OpenAIBatchBackend
+
+        line = {
+            "custom_id": "req-1",
+            "response": {"status_code": 200, "body": body},
+        }
+        backend = OpenAIBatchBackend()
+        client = MagicMock()
+        client.batches.retrieve.return_value = MagicMock(output_file_id="file-1")
+        stream = MagicMock()
+        stream.read.return_value = (json.dumps(line) + "\n").encode("utf-8")
+        client.files.content.return_value = stream
+        backend._client = client
+
+        handle = BatchHandle(provider="openai", batch_id="batch_1")
+        return list(backend.download_results(handle))
+
+    @pytest.mark.unit
+    def test_concatenates_parts_across_messages_in_order(self) -> None:
+        body = {
+            "output": [
+                {
+                    "type": "message",
+                    "content": [
+                        {"type": "output_text", "text": "part one "},
+                        {"type": "output_text", "text": "part two "},
+                    ],
+                },
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "part three"}],
+                },
+            ],
+        }
+        results = self._download(body)
+        assert len(results) == 1
+        assert results[0].success is True
+        assert results[0].content == "part one part two part three"
+
+    @pytest.mark.unit
+    def test_single_message_unchanged(self) -> None:
+        body = {
+            "output": [
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "only part"}],
+                },
+            ],
+        }
+        results = self._download(body)
+        assert len(results) == 1
+        assert results[0].content == "only part"

@@ -1,4 +1,4 @@
-# ChronoTranscriber v2.0.1
+# ChronoTranscriber v2.0.2
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -727,6 +727,22 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v2.0.2** (16 July 2026) -- Three robustness fixes and a repo hygiene fix.
+    Tesseract folder preprocessing no longer clobbers source images that share
+    a stem across extensions (scan_001.png + scan_001.tif previously mapped to
+    one output file, silently dropping a page): colliding stems now get
+    extension-inclusive preprocessed names, mirroring the CT-9 GPT-path fix,
+    while collision-free files keep their legacy names so existing resume
+    artifacts still match. All transcription outputs (txt, md, json) and the
+    repair write-back/backup are now written with LF line endings on every
+    platform instead of CRLF on Windows; readers use universal newlines, so
+    old CRLF files resume and repair unchanged. The OpenAI batch result parser
+    now concatenates every output_text part across all message items in order
+    (previously it kept only the first part per message and let a later
+    message overwrite earlier content). Finally, a UTF-8 BOM at the start of
+    .gitattributes -- which made Git parse the line-1 comment as a pattern and
+    warn "policy: is not a valid attribute name" on every checkout -- is
+    stripped.
 - **v2.0.1** (16 July 2026) -- Fix the OpenAI batch backend silently dropping
     `llm_detail: original` (the v2.0.0 recommended default): batch request
     bodies only accepted low/high and fell back to the API's default detail,

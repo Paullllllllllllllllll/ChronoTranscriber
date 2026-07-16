@@ -369,7 +369,7 @@ def resolve_image_path(
 def backup_file(path: Path) -> Path:
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     backup = path.with_suffix(f".bak.{ts}{path.suffix}")
-    backup.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    backup.write_text(path.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
     return backup
 
 
@@ -638,7 +638,9 @@ def _persist_repaired_file(
 ) -> Path:
     """Back up the original file and write updated lines. Returns backup path."""
     backup = backup_file(job.final_txt_path)
-    job.final_txt_path.write_text("\n".join(final_lines), encoding="utf-8")
+    job.final_txt_path.write_text(
+        "\n".join(final_lines), encoding="utf-8", newline="\n"
+    )
     return backup
 
 

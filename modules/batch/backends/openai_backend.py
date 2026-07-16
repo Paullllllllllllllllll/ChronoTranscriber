@@ -416,8 +416,13 @@ class OpenAIBatchBackend(BatchBackend):
 
                 # Try to extract text from Responses API format
                 if isinstance(body, dict):
-                    # Extract from output array
+                    # Concatenate every output_text part across all message
+                    # items in order (mirrors response_parsing.
+                    # _extract_from_responses_object). Keeping only the first
+                    # part of the last message would silently drop or replace
+                    # text on multi-message outputs.
                     output = body.get("output", [])
+                    text_parts: list[str] = []
                     for item in output if isinstance(output, list) else []:
                         if isinstance(item, dict) and item.get("type") == "message":
                             content_list = item.get("content", [])
@@ -428,8 +433,16 @@ class OpenAIBatchBackend(BatchBackend):
                                     isinstance(c, dict)
                                     and c.get("type") == "output_text"
                                 ):
-                                    result_item.content = c.get("text", "")
-                                    break
+                                    text_parts.append(c.get("text", ""))
+                    if len(text_parts) > 1:
+                        logger.debug(
+                            "Batch result %s carried %d output_text parts; "
+                            "concatenating in order.",
+                            custom_id,
+                            len(text_parts),
+                        )
+                    if text_parts:
+                        result_item.content = "".join(text_parts)
 
                     # Try to parse as JSON for structured output
                     if result_item.content:

@@ -370,3 +370,30 @@ class TestWriteTranscriptionOutput:
         for content in (txt_content, md_content):
             assert "fail.jpg:" in content
             assert "[transcription error]" in content
+
+
+# =============================================================================
+# TestLineEndings
+# =============================================================================
+
+
+class TestLineEndings:
+    """Regression: outputs are written with LF line endings on every platform.
+
+    Without newline="\n", Path.write_text applied platform newline
+    translation and produced CRLF files on Windows.
+    """
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("output_format", ["txt", "md", "json"])
+    def test_output_has_no_crlf(self, tmp_path: Path, output_format: str) -> None:
+        pages = [
+            _make_normal_page("Line one.\nLine two.", 1, "p1.jpg"),
+            _make_normal_page("Second page.", 2, "p2.jpg"),
+        ]
+        path = write_transcription_output(
+            pages, tmp_path / "out.txt", output_format, postprocess=False
+        )
+        raw = path.read_bytes()
+        assert b"\r\n" not in raw
+        assert b"\n" in raw

@@ -26,6 +26,16 @@
 # cap, so the image actually sent to the API is unaffected.
 max_pixels_per_page: 24000000
 
+# Render strategy for the LLM/vision PDF path (does not affect Tesseract).
+# - direct (default): compute the final pixel dimensions the active resize
+#   profile would produce and rasterize the page directly at that zoom, never
+#   above target_dpi/72. Skips rendering pixels the provider/resize would only
+#   discard; the resize_for_detail pipeline still runs as a safety net. When the
+#   target_dpi render already fits the profile's caps, the payload is
+#   byte-identical to supersample.
+# - supersample: legacy behavior -- render at target_dpi, then downscale.
+render_strategy: direct
+
 # =============================================================================
 # 1. OpenAI API Image Processing
 # =============================================================================
@@ -116,7 +126,10 @@ anthropic_image_processing:
 
   # Parameters for resizing profiles
   low_max_side_px: 512
-  high_max_side_px: 1568
+  # 2576 targets high-res-tier models only (Claude Opus 4.7+ / Sonnet 5), which
+  # read a longer edge; costs ~3x the image tokens vs 1568. Older Claude models
+  # are server-side downscaled to 1568 anyway.
+  high_max_side_px: 2576
 
 # =============================================================================
 # 4. Tesseract OCR Image Processing
@@ -139,7 +152,7 @@ tesseract_image_processing:
     invert_to_dark_on_light: auto  # auto|always|never -> ensure dark text on light bg
     deskew: true                   # Detect and correct page skew
     denoise: median                # none|median|bilateral
-    binarization: sauvola          # sauvola|adaptive|otsu
+    binarization: otsu             # otsu (default, fast)|sauvola|adaptive
     sauvola_window: 25             # odd window size for Sauvola
     sauvola_k: 0.2                 # Sauvola k parameter
     morphology: none               # none|open|close|erode|dilate

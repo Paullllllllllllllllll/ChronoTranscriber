@@ -112,11 +112,12 @@ def list_folder_images(folder: Path) -> list[Path]:
 
 def resolve_image_settings(
     provider: str, model_name: str
-) -> tuple[dict[str, Any], str, int, int]:
+) -> tuple[dict[str, Any], str, int, int, str]:
     """Resolve provider-specific image settings from configuration.
 
     Returns:
-        Tuple of (img_cfg, model_type, target_dpi, max_pixels_per_page).
+        Tuple of (img_cfg, model_type, target_dpi, max_pixels_per_page,
+        render_strategy).
     """
     from modules.config.capabilities.detection import (
         detect_model_type,
@@ -129,7 +130,8 @@ def resolve_image_settings(
     img_cfg = full_cfg.get(get_image_config_section_name(model_type), {})
     target_dpi = int(img_cfg.get("target_dpi", 300))
     max_pixels = int(full_cfg.get("max_pixels_per_page", 0))
-    return img_cfg, model_type, target_dpi, max_pixels
+    render_strategy = str(full_cfg.get("render_strategy", "direct") or "direct").lower()
+    return img_cfg, model_type, target_dpi, max_pixels, render_strategy
 
 
 def compute_pdf_skip_indices(
@@ -190,17 +192,40 @@ def _render_pdf_page_payload(
     max_pixels: int,
     img_cfg: dict[str, Any],
     model_type: str,
+    render_strategy: str = "direct",
 ) -> PagePayload:
-    """Render one PDF page and preprocess it in memory (thread worker)."""
+    """Render one PDF page and preprocess it in memory (thread worker).
+
+    With ``render_strategy="direct"`` (the default) the page is rasterized at a
+    target-derived zoom: the render already lands at the pixel dimensions the
+    active resize profile would produce, so no pixels are rendered only to be
+    discarded downstream (the ``resize_for_detail`` pipeline still runs as a
+    safety net). ``render_strategy="supersample"`` restores the legacy behavior
+    of rendering at ``target_dpi`` and downscaling afterward.
+    """
     # Lazy import: modules.documents.pdf imports modules.images at module
     # level, so a top-level import here would be circular.
     from modules.documents.pdf import _get_effective_dpi
 
     page = doc[page_index]
-    effective_dpi = _get_effective_dpi(page, target_dpi, max_pixels)
-    mat = fitz.Matrix(effective_dpi / 72, effective_dpi / 72)
+    if render_strategy == "supersample":
+        effective_dpi = _get_effective_dpi(page, target_dpi, max_pixels)
+        zoom = effective_dpi / 72
+    else:
+        rect = page.rect
+        zoom = ImageProcessor.derive_render_zoom(
+            rect.width, rect.height, target_dpi, max_pixels, img_cfg, model_type
+        )
+        effective_dpi = int(round(zoom * 72))
+    mat = fitz.Matrix(zoom, zoom)
     pix = page.get_pixmap(matrix=mat, alpha=False)
-    img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+    # frombuffer + samples_mv avoids the extra buffer->bytes copy that
+    # pix.samples makes. For mode "RGB" (not a PIL shared mode) frombuffer
+    # copies into an independent image, so it is safe to free the pixmap
+    # afterwards (verified byte-identical to frombytes and lifetime-safe).
+    img = Image.frombuffer(
+        "RGB", (pix.width, pix.height), pix.samples_mv, "raw", "RGB", 0, 1
+    )
     pix = None  # free pixmap before preprocessing
     try:
         return _payload_from_pil(
@@ -262,8 +287,13 @@ def _load_image_payload(
         with Image.open(image_path) as img:
             _apply_jpeg_draft(img, img_cfg, model_type)
             # Honor EXIF orientation so camera JPEGs are not processed sideways
-            # (B14). exif_transpose returns a new upright image (or the original).
-            oriented = ImageOps.exif_transpose(img) or img
+            # (B14). exif_transpose always makes a full-image copy; skip it when
+            # there is no orientation to apply (tag absent or == 1), which is the
+            # common case, and use the image directly (byte-identical output).
+            if img.getexif().get(0x0112, 1) != 1:
+                oriented = ImageOps.exif_transpose(img) or img
+            else:
+                oriented = img
             return _payload_from_pil(
                 oriented,
                 index=index,
@@ -329,6 +359,7 @@ async def stream_pdf_payloads(
     img_cfg: dict[str, Any],
     model_type: str,
     max_pixels: int = 0,
+    render_strategy: str = "direct",
     page_indices: list[int] | None = None,
     skip_indices: set[int] | None = None,
 ) -> AsyncIterator[PagePayload]:
@@ -357,6 +388,7 @@ async def stream_pdf_payloads(
                     max_pixels,
                     img_cfg,
                     model_type,
+                    render_strategy,
                 )
             except Exception as e:
                 failed += 1
@@ -423,6 +455,7 @@ def render_single_pdf_page_payload(
     img_cfg: dict[str, Any],
     model_type: str,
     max_pixels: int = 0,
+    render_strategy: str = "direct",
 ) -> PagePayload:
     """Re-render a single PDF page in memory (used by the repair workflow)."""
     with fitz.open(pdf_path) as doc:
@@ -432,7 +465,14 @@ def render_single_pdf_page_payload(
                 f"({doc.page_count} pages)"
             )
         return _render_pdf_page_payload(
-            doc, pdf_path, page_index, target_dpi, max_pixels, img_cfg, model_type
+            doc,
+            pdf_path,
+            page_index,
+            target_dpi,
+            max_pixels,
+            img_cfg,
+            model_type,
+            render_strategy,
         )
 
 

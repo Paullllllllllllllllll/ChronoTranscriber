@@ -94,6 +94,12 @@ def _try_parse_json(text: str) -> dict[str, Any] | None:
         return result if isinstance(result, dict) else None
     except (json.JSONDecodeError, ValueError, TypeError):
         return None
+    except RecursionError:
+        # A pathological, deeply nested candidate (thousands of open braces)
+        # can exhaust the interpreter/C-scanner recursion budget. Treat it as
+        # unparseable so the caller degrades to the placeholder fallback
+        # instead of crashing the process.
+        return None
 
 
 # Regex to match code-fenced blocks: ```json ... ``` or ``` ... ```
@@ -161,17 +167,32 @@ def _normalize_llm_text(text: str) -> str:
     return stripped
 
 
+# Upper bound on the number of candidate opening braces examined by
+# _salvage_last_json_object. A valid salvageable object is, in practice,
+# among the last handful of '{' before the final '}', so this ceiling never
+# affects well-formed or ordinarily-malformed responses; it only stops a
+# degenerate string with thousands of unbalanced braces from backtracking
+# quadratically (each rejected candidate re-scans toward the end).
+_MAX_SALVAGE_CANDIDATES = 1000
+
+
 def _salvage_last_json_object(text: str) -> dict[str, Any] | None:
     """
     When the model returns concatenated JSON objects or mixed prose+JSON,
     try to salvage the last valid JSON object near the end of the string.
+
+    The backward walk is bounded to ``_MAX_SALVAGE_CANDIDATES`` opening-brace
+    attempts so pathological inputs (thousands of unbalanced/nested braces)
+    degrade gracefully to ``None`` in linear time rather than triggering
+    quadratic backtracking or an uncaught ``RecursionError``.
     """
     if not text:
         return None
     last_close = text.rfind("}")
     if last_close == -1:
         return None
-    # Walk backwards to find a starting '{' that yields a valid JSON object
+    # Walk backwards to find a starting '{' that yields a valid JSON object.
+    attempts = 0
     i = last_close
     while i >= 0:
         if text[i] == "{":
@@ -179,6 +200,9 @@ def _salvage_last_json_object(text: str) -> dict[str, Any] | None:
             obj = _try_parse_json(candidate)
             if obj is not None:
                 return obj
+            attempts += 1
+            if attempts >= _MAX_SALVAGE_CANDIDATES:
+                return None
         i -= 1
     return None
 

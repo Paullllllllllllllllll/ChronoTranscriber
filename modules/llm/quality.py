@@ -119,12 +119,6 @@ _DEFAULT_MAX_GENERIC_PLACEHOLDER_COUNT = 3
 _DEFAULT_MAX_QUESTION_MARK_RATIO = 0.05
 
 
-def _is_meaningful_substring(s: str, min_alphanum: int) -> bool:
-    """Return True if substring contains enough alphanumeric characters."""
-    alphanum_count = sum(1 for c in s if c.isalnum())
-    return alphanum_count >= min_alphanum
-
-
 def detect_hallucination_loop(text: str, config: dict[str, Any]) -> str | None:
     """Detect long repeated substrings or single-character runs."""
     if not text:
@@ -155,13 +149,21 @@ def detect_hallucination_loop(text: str, config: dict[str, Any]) -> str | None:
     if len(text) < min_len * max_count:
         return None
 
+    # Prefix sums of alnum flags let the meaningful-substring check become an
+    # O(1) lookup: alnum_count(text[i:j]) == prefix[j] - prefix[i]. Computed
+    # once per call in O(len(text)) instead of re-scanning every window slice.
+    n = len(text)
+    prefix = [0] * (n + 1)
+    for idx, ch in enumerate(text):
+        prefix[idx + 1] = prefix[idx] + (1 if ch.isalnum() else 0)
+
     upper = min(80, len(text) // max_count)
     for window in range(min_len, upper + 1, 4):
         seen: dict[str, int] = {}
         for i in range(len(text) - window + 1):
-            chunk = text[i : i + window]
-            if not _is_meaningful_substring(chunk, min_alphanum):
+            if prefix[i + window] - prefix[i] < min_alphanum:
                 continue
+            chunk = text[i : i + window]
             seen[chunk] = seen.get(chunk, 0) + 1
             if seen[chunk] >= max_count:
                 preview = chunk[:40].replace("\n", "\\n")

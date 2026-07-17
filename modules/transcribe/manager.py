@@ -709,8 +709,8 @@ class WorkflowManager:
         tm = self.model_config.get("transcription_model", {})
         provider = tm.get("provider", "openai")
         model_name = tm.get("name", "")
-        img_cfg, model_type, target_dpi, max_pixels = resolve_image_settings(
-            provider, model_name
+        img_cfg, model_type, target_dpi, max_pixels, render_strategy = (
+            resolve_image_settings(provider, model_name)
         )
 
         all_indices = (
@@ -773,6 +773,7 @@ class WorkflowManager:
                 img_cfg=img_cfg,
                 model_type=model_type,
                 max_pixels=max_pixels,
+                render_strategy=render_strategy,
                 page_indices=indices,
             )
 

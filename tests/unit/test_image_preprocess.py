@@ -211,6 +211,112 @@ class TestResizeForDetail:
 
 
 # ---------------------------------------------------------------------------
+# ImageProcessor.derive_render_zoom ("direct" render strategy)
+# ---------------------------------------------------------------------------
+
+# A4 in PostScript points (72 pt/inch): 210 x 297 mm.
+_A4_W_PT = 595.0
+_A4_H_PT = 842.0
+
+
+class TestDeriveRenderZoom:
+    @pytest.mark.unit
+    def test_original_under_caps_renders_at_target_dpi(self) -> None:
+        """A page whose target_dpi render already fits the original caps must
+        derive a zoom of exactly target_dpi/72 (byte-identical to supersample)."""
+        cfg = {
+            "llm_detail": "original",
+            "resize_profile": "high",
+            "original_max_side_px": 6000,
+            "original_max_pixels": 10240000,
+        }
+        # A4 at 300 DPI: long side ~3508 px, ~8.7 MP -> within both caps.
+        zoom = ImageProcessor.derive_render_zoom(
+            _A4_W_PT, _A4_H_PT, 300, 0, cfg, "openai"
+        )
+        assert zoom == pytest.approx(300 / 72.0)
+
+    @pytest.mark.unit
+    def test_original_over_pixel_cap_reduces_zoom(self) -> None:
+        cfg = {
+            "llm_detail": "original",
+            "resize_profile": "high",
+            "original_max_side_px": 6000,
+            "original_max_pixels": 10240000,
+        }
+        # 800 x 1200 pt at 300 DPI -> ~3333 x 5000 px = ~16.7 MP > 10.24 MP.
+        zoom = ImageProcessor.derive_render_zoom(800.0, 1200.0, 300, 0, cfg, "openai")
+        rendered_px = (800.0 * zoom) * (1200.0 * zoom)
+        assert rendered_px == pytest.approx(10240000, rel=1e-6)
+        assert zoom < 300 / 72.0
+
+    @pytest.mark.unit
+    def test_anthropic_high_derives_long_edge_dpi(self) -> None:
+        cfg = {"resize_profile": "auto", "high_max_side_px": 2576}
+        zoom = ImageProcessor.derive_render_zoom(
+            _A4_W_PT, _A4_H_PT, 300, 0, cfg, "anthropic"
+        )
+        long_px_at_target = _A4_H_PT * 300 / 72.0
+        expected_dpi = 300 * 2576 / long_px_at_target
+        assert zoom * 72.0 == pytest.approx(expected_dpi, rel=1e-6)
+        # Long edge lands at the cap.
+        assert _A4_H_PT * zoom == pytest.approx(2576, abs=1.0)
+
+    @pytest.mark.unit
+    def test_anthropic_small_page_not_upscaled(self) -> None:
+        """A page smaller than the cap keeps target_dpi (no render-upscaling)."""
+        cfg = {"resize_profile": "auto", "high_max_side_px": 2576}
+        # 200 x 100 pt at 72 DPI -> long side 200 px, far below 2576.
+        zoom = ImageProcessor.derive_render_zoom(200.0, 100.0, 72, 0, cfg, "anthropic")
+        assert zoom == pytest.approx(72 / 72.0)
+
+    @pytest.mark.unit
+    def test_openai_box_fit_downscales(self) -> None:
+        cfg = {
+            "resize_profile": "high",
+            "llm_detail": "high",
+            "high_target_box": [768, 1536],
+        }
+        zoom = ImageProcessor.derive_render_zoom(
+            _A4_W_PT, _A4_H_PT, 300, 0, cfg, "openai"
+        )
+        # Fit A4 (aspect ~0.707) into 768x1536 (aspect 0.5): width-limited, so
+        # the width edge lands on 768.
+        assert _A4_W_PT * zoom == pytest.approx(768, abs=1.0)
+        assert zoom < 300 / 72.0
+
+    @pytest.mark.unit
+    def test_openai_box_larger_than_target_not_upscaled(self) -> None:
+        cfg = {
+            "resize_profile": "high",
+            "llm_detail": "high",
+            "high_target_box": [768, 1536],
+        }
+        # 100 x 50 pt at 72 DPI -> 100x50 px, smaller than the box; no upscale.
+        zoom = ImageProcessor.derive_render_zoom(100.0, 50.0, 72, 0, cfg, "openai")
+        assert zoom == pytest.approx(72 / 72.0)
+
+    @pytest.mark.unit
+    def test_resize_profile_none_returns_target_zoom(self) -> None:
+        cfg = {"resize_profile": "none"}
+        zoom = ImageProcessor.derive_render_zoom(
+            _A4_W_PT, _A4_H_PT, 300, 0, cfg, "openai"
+        )
+        assert zoom == pytest.approx(300 / 72.0)
+
+    @pytest.mark.unit
+    def test_max_pixels_guard_applies(self) -> None:
+        """The max_pixels guard reduces even a profile-derived zoom."""
+        cfg = {"resize_profile": "none"}
+        # None profile would render A4 at 300 DPI (~8.7 MP); cap at 2 MP.
+        zoom = ImageProcessor.derive_render_zoom(
+            _A4_W_PT, _A4_H_PT, 300, 2_000_000, cfg, "openai"
+        )
+        rendered_px = (_A4_W_PT * zoom) * (_A4_H_PT * zoom)
+        assert rendered_px == pytest.approx(2_000_000, rel=1e-6)
+
+
+# ---------------------------------------------------------------------------
 # Tesseract helpers: _pil_to_np / _ensure_grayscale / _deskew
 # ---------------------------------------------------------------------------
 
@@ -264,6 +370,93 @@ class TestTesseractHelpers:
         assert isinstance(rotated, np.ndarray)
         assert rotated.shape == gray.shape
         assert isinstance(angle, float)
+
+
+def _make_skewed_page(width: int, height: int, angle_deg: float) -> np.ndarray:
+    """Build a synthetic printed page (dark text rows on white) skewed by
+    ``angle_deg`` degrees, returned as an 8-bit grayscale array."""
+    import cv2
+
+    page = np.full((height, width), 255, dtype=np.uint8)
+    # Evenly spaced horizontal "text" rows.
+    for y in range(80, height - 80, 60):
+        page[y : y + 8, 60 : width - 60] = 0
+    center = (width // 2, height // 2)
+    m = cv2.getRotationMatrix2D(center, angle_deg, 1.0)
+    return cv2.warpAffine(
+        page,
+        m,
+        (width, height),
+        flags=cv2.INTER_CUBIC,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=255,
+    )
+
+
+class TestDeskewDownsampling:
+    """The skew angle is estimated on a downsampled copy (long edge capped)
+    and applied to the full-resolution image; the estimate must stay close to
+    the full-resolution estimate."""
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("angle", [-5.0, -2.0, 3.0, 7.0])
+    def test_downsampled_angle_matches_full_res(self, angle: float) -> None:
+        from deskew import determine_skew
+
+        # Large page so the long edge exceeds the estimation cap.
+        page = _make_skewed_page(2000, 2600, angle)
+        full = determine_skew(page)
+        est = ImageProcessor._estimate_skew_angle(page)
+        assert full is not None and est is not None
+        # Downsampled estimate tracks the full-resolution estimate closely.
+        assert abs(float(est) - float(full)) <= 0.2
+
+    @pytest.mark.unit
+    def test_small_image_not_downsampled(self) -> None:
+        # Below the cap: estimate equals the direct determine_skew result.
+        from deskew import determine_skew
+
+        gray = np.full((400, 400), 255, dtype=np.uint8)
+        gray[200, :] = 0
+        direct = determine_skew(gray)
+        est = ImageProcessor._estimate_skew_angle(gray)
+        assert (direct is None) == (est is None)
+        if direct is not None and est is not None:
+            assert abs(float(direct) - float(est)) < 1e-9
+
+
+class TestBinarization:
+    """Tesseract-path binarization: default is Otsu (fast); Sauvola and
+    adaptive remain available via the ``binarization`` config option."""
+
+    @pytest.mark.unit
+    def test_default_method_is_otsu(self) -> None:
+        # A gradient image so Otsu produces a clean two-level output.
+        gray = np.tile(np.arange(256, dtype=np.uint8), (16, 1))
+        default_out = ImageProcessor._binarize(gray, None, 25, 0.2)  # type: ignore[arg-type]
+        otsu_out = ImageProcessor._binarize(gray, "otsu", 25, 0.2)
+        assert np.array_equal(default_out, otsu_out)
+        # Binary output: only 0 and 255.
+        assert set(np.unique(default_out).tolist()) <= {0, 255}
+
+    @pytest.mark.unit
+    def test_sauvola_still_available(self) -> None:
+        gray = np.tile(np.arange(256, dtype=np.uint8), (16, 1))
+        out = ImageProcessor._binarize(gray, "sauvola", 25, 0.2)
+        assert out.dtype == np.uint8
+        assert set(np.unique(out).tolist()) <= {0, 255}
+
+    @pytest.mark.unit
+    def test_adaptive_still_available(self) -> None:
+        gray = np.tile(np.arange(256, dtype=np.uint8), (32, 1))
+        out = ImageProcessor._binarize(gray, "adaptive", 25, 0.2)
+        assert set(np.unique(out).tolist()) <= {0, 255}
+
+    @pytest.mark.unit
+    def test_preprocess_default_binarization_diag_is_otsu(self) -> None:
+        img = Image.new("L", (64, 64), 200)
+        _out, diag = ImageProcessor.preprocess_for_tesseract(img, {})
+        assert diag["binarization"] == "otsu"
 
 
 # ---------------------------------------------------------------------------

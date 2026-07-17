@@ -59,27 +59,45 @@ def read_resume_version(records: list[dict[str, Any]]) -> int | None:
     return None
 
 
-def ensure_resume_marker(jsonl_path: Path) -> None:
+def ensure_resume_marker(
+    jsonl_path: Path, *, records: list[dict[str, Any]] | None = None
+) -> None:
     """Append the current resume-format marker if the file lacks one.
 
     Written lazily before the first result is streamed so fresh artifacts are
     always versioned; a no-op when a marker is already present.
+
+    Args:
+        jsonl_path: Path to the JSONL file.
+        records: Pre-parsed records for the file, to skip a redundant read. Must
+            reflect the file's *current* on-disk state (no writes since it was
+            parsed); pass None to read fresh. The read-then-maybe-append
+            behavior is unchanged: the append still targets ``jsonl_path``.
     """
-    records = read_jsonl_records(jsonl_path)
+    if records is None:
+        records = read_jsonl_records(jsonl_path)
     if read_resume_version(records) is not None:
         return
     write_jsonl_record(jsonl_path, resume_marker_record())
 
 
-def verify_resume_compatible(jsonl_path: Path) -> None:
+def verify_resume_compatible(
+    jsonl_path: Path, *, records: list[dict[str, Any]] | None = None
+) -> None:
     """Refuse to resume an artifact written by an incompatible version.
 
     Only enforced when the artifact already contains page transcriptions to
     resume: an unversioned artifact carrying prior results would otherwise be
     re-ordered/merged under assumptions that no longer hold (see decision 1).
     Fresh or marker-only files pass through untouched.
+
+    Args:
+        jsonl_path: Path to the JSONL file (used only for the error message).
+        records: Pre-parsed records for the file, to skip a redundant read;
+            pass None to read fresh.
     """
-    records = read_jsonl_records(jsonl_path)
+    if records is None:
+        records = read_jsonl_records(jsonl_path)
     if not any(_record_is_transcription(r) for r in records):
         return
     version = read_resume_version(records)
@@ -231,7 +249,10 @@ def _is_error_placeholder(text: Any) -> bool:
 
 
 def get_processed_image_names(
-    jsonl_path: Path, *, exclude_errors: bool = False
+    jsonl_path: Path,
+    *,
+    exclude_errors: bool = False,
+    records: list[dict[str, Any]] | None = None,
 ) -> set[str]:
     """Get set of image names that have been successfully processed.
 
@@ -240,14 +261,16 @@ def get_processed_image_names(
         exclude_errors: When True, image names whose latest transcription is a
             ``[transcription error]`` placeholder are omitted, so ``--retry-errors``
             re-processes them (decision 13).
+        records: Pre-parsed records for the file, to skip a redundant read;
+            pass None to read fresh.
 
     Returns:
         Set of image names with valid transcriptions.
     """
-    if not jsonl_path.exists():
-        return set()
-
-    records = read_jsonl_records(jsonl_path)
+    if records is None:
+        if not jsonl_path.exists():
+            return set()
+        records = read_jsonl_records(jsonl_path)
     # Deduplicate so the *latest* record per image decides its error status.
     transcriptions = extract_transcription_records(records, deduplicate=exclude_errors)
     if exclude_errors:

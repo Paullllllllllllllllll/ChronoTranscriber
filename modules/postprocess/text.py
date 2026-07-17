@@ -38,6 +38,44 @@ AEGEAN_ICON_CODEPOINTS = {
 # Requires at least 3 chars before hyphen and 2 after for safety
 _HYPHEN_PATTERN = re.compile(r"(\w{3,})-\n(\w{2,})")
 
+# Compiled pattern for collapsing runs of 2+ internal spaces between
+# non-space characters (hoisted out of the per-line loop in normalize_spacing).
+_COLLAPSE_INTERNAL_SPACES = re.compile(r"(?<=\S) {2,}(?=\S)")
+
+# Frequent layout artifacts dropped outright: soft hyphen, zero-width space, BOM.
+_DROP_CHARS = ("­", "​", "﻿")
+
+# Lazily-built translate table for normalize_unicode_text. Building it walks
+# the full Unicode range once (~150-190 ms), so it is deferred to first use
+# rather than paid at import time. str.translate requires a plain dict.
+_REMOVAL_TABLE: dict[int, str | None] | None = None
+
+
+def _get_removal_table() -> dict[int, str | None]:
+    """Return the cached codepoint -> replacement table, building it once.
+
+    Combines the icon-bullet remap, the explicit drop chars, and every
+    codepoint whose Unicode category starts with ``C`` (control / format /
+    surrogate / unassigned) except newline and tab, which are preserved.
+    """
+    global _REMOVAL_TABLE
+    table = _REMOVAL_TABLE
+    if table is not None:
+        return table
+
+    table = {cp: "•" for cp in AEGEAN_ICON_CODEPOINTS}
+    for ch in _DROP_CHARS:
+        table[ord(ch)] = None
+    keep = {ord("\n"), ord("\t")}
+    for cp in range(0x110000):
+        if cp in table or cp in keep:
+            continue
+        if unicodedata.category(chr(cp)).startswith("C"):
+            table[cp] = None
+
+    _REMOVAL_TABLE = table
+    return table
+
 
 def normalize_unicode_text(text: str) -> str:
     """
@@ -57,37 +95,12 @@ def normalize_unicode_text(text: str) -> str:
     Returns:
         Normalized text with spurious characters removed.
     """
-    # Normalize accents to composed form (NFC)
+    # Normalize accents to composed form (NFC) first, then apply a single
+    # precomputed translate table that maps icon glyphs to a bullet, drops the
+    # explicit layout artifacts (soft hyphen, ZWSP, BOM), and removes all other
+    # control/format/surrogate/unassigned chars except newline and tab.
     text = unicodedata.normalize("NFC", text)
-
-    # Map rare icon glyphs to a simple bullet
-    translation = {cp: "•" for cp in AEGEAN_ICON_CODEPOINTS}
-    text = text.translate(translation)
-
-    # Explicitly drop some frequent layout artifacts
-    drop_chars = {
-        "\u00ad",  # SOFT HYPHEN - invisible hyphenation hint
-        "\u200b",  # ZERO WIDTH SPACE - invisible separator
-        "\ufeff",  # BOM - byte order mark
-    }
-    for ch in drop_chars:
-        text = text.replace(ch, "")
-
-    # Remove other control / format / unassigned chars safely
-    out_chars: list[str] = []
-    for ch in text:
-        # Preserve newlines and tabs
-        if ch in ("\n", "\t"):
-            out_chars.append(ch)
-            continue
-        cat = unicodedata.category(ch)
-        # Skip all other control/format/surrogate/unassigned chars
-        # (category starts with 'C')
-        if cat.startswith("C"):
-            continue
-        out_chars.append(ch)
-
-    return "".join(out_chars)
+    return text.translate(_get_removal_table())
 
 
 def fix_hyphenation(text: str) -> str:
@@ -162,7 +175,7 @@ def normalize_spacing(
 
         if collapse_internal:
             # Collapse runs of 2+ spaces between non-space chars to exactly 2
-            line = re.sub(r"(?<=\S) {2,}(?=\S)", "  ", line)
+            line = _COLLAPSE_INTERNAL_SPACES.sub("  ", line)
 
         if line.strip() == "":
             blank_run += 1

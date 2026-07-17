@@ -6,12 +6,15 @@ Tests text extraction and processing functions for transcription outputs.
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 
 from modules.llm.response_parsing import (
     _normalize_llm_text,
+    _salvage_last_json_object,
     _strip_code_fences,
+    _try_parse_json,
     detect_transcription_cause,
     extract_transcribed_text,
     format_page_line,
@@ -438,6 +441,77 @@ class TestCheckTranscriptionFlags:
             }
         )
         assert result == "[No transcribable text]"
+
+
+class TestSalvageLastJsonObject:
+    """Regression tests for _salvage_last_json_object and _try_parse_json.
+
+    Guards against a latent crash: a pathological model response with many
+    unbalanced/deeply nested braces used to backtrack quadratically and could
+    raise an uncaught RecursionError, killing the process instead of degrading
+    to the placeholder fallback.
+    """
+
+    @pytest.mark.unit
+    def test_salvages_last_of_concatenated_objects(self) -> None:
+        """Ordinary behavior is preserved: the last valid object wins."""
+        text = '{"transcription": "first"}{"transcription": "second"}'
+        obj = _salvage_last_json_object(text)
+        assert obj is not None
+        assert obj["transcription"] == "second"
+
+    @pytest.mark.unit
+    def test_salvages_trailing_object_after_prose(self) -> None:
+        text = 'garbage {oops not json} tail {"transcription": "ok"}'
+        obj = _salvage_last_json_object(text)
+        assert obj is not None
+        assert obj["transcription"] == "ok"
+
+    @pytest.mark.unit
+    def test_no_closing_brace_returns_none(self) -> None:
+        assert _salvage_last_json_object("{" * 5000) is None
+
+    @pytest.mark.unit
+    def test_empty_returns_none(self) -> None:
+        assert _salvage_last_json_object("") is None
+
+    @pytest.mark.unit
+    def test_try_parse_json_deeply_nested_returns_none(self) -> None:
+        """A deeply nested valid-JSON string must not raise RecursionError."""
+        depth = 6000
+        deep = '{"a":' * depth + "1" + "}" * depth
+        # Must degrade to None (unparseable at this depth), not crash.
+        assert _try_parse_json(deep) is None
+
+    @pytest.mark.unit
+    def test_thousands_of_unbalanced_braces_degrade_fast(self) -> None:
+        """Thousands of unbalanced braces return the fallback in bounded time."""
+        text = '{"a":' * 6000 + "}"
+        start = time.perf_counter()
+        result = _salvage_last_json_object(text)
+        elapsed = time.perf_counter() - start
+        assert result is None
+        assert elapsed < 5.0
+
+    @pytest.mark.unit
+    def test_deeply_nested_balanced_braces_no_crash(self) -> None:
+        """Deeply nested balanced braces salvage to None without crashing."""
+        depth = 6000
+        text = '{"a":' * depth + "1" + "}" * depth
+        start = time.perf_counter()
+        result = _salvage_last_json_object(text)
+        elapsed = time.perf_counter() - start
+        # Bounded backtracking never reaches the (over-deep) outermost object.
+        assert result is None
+        assert elapsed < 5.0
+
+    @pytest.mark.unit
+    def test_extract_transcribed_text_pathological_content_no_crash(self) -> None:
+        """The public extractor degrades to a placeholder on pathological JSON."""
+        data = {"output_text": "{" * 6000}
+        result = extract_transcribed_text(data, "page.png")
+        # No exception; a string result is returned (fallback path).
+        assert isinstance(result, str)
 
 
 class TestStripCodeFences:

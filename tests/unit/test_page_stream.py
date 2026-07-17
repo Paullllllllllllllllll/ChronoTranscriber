@@ -125,7 +125,10 @@ class TestStreamPdfPayloads:
             assert p.mime_type == "image/jpeg"
             assert p.source_file == str(pdf)
             assert p.page_index == p.index
-            assert p.effective_dpi == 72
+            # Default "direct" strategy derives the render DPI from the active
+            # resize profile; it must be recorded and never exceed target_dpi
+            # (no render-upscaling).
+            assert p.effective_dpi is not None and 0 < p.effective_dpi <= 72
             assert p.byte_size > 0 and p.width > 0 and p.height > 0
             decoded = base64.b64decode(p.base64)
             assert len(decoded) == p.byte_size
@@ -186,6 +189,72 @@ class TestStreamPdfPayloads:
         # One raw page at a time: peak must stay far below an all-pages
         # accumulation (coarse structural bound).
         assert peak < 80 * 1024 * 1024
+
+
+class TestRenderStrategy:
+    @pytest.mark.unit
+    def test_supersample_records_target_dpi(self, tmp_path: Path) -> None:
+        pdf = _make_pdf(tmp_path / "doc.pdf", pages=1)
+        payload = render_single_pdf_page_payload(
+            pdf,
+            0,
+            target_dpi=72,
+            img_cfg=IMG_CFG,
+            model_type="openai",
+            render_strategy="supersample",
+        )
+        # Legacy path: render at target_dpi (max_pixels disabled here).
+        assert payload.effective_dpi == 72
+
+    @pytest.mark.unit
+    def test_direct_derives_below_target_for_box_fit(self, tmp_path: Path) -> None:
+        pdf = _make_pdf(tmp_path / "doc.pdf", pages=1)
+        payload = render_single_pdf_page_payload(
+            pdf,
+            0,
+            target_dpi=72,
+            img_cfg=IMG_CFG,
+            model_type="openai",
+            render_strategy="direct",
+        )
+        # IMG_CFG box-fits a 200x100 pt page into [64, 128] -> width-limited,
+        # so the derived render DPI drops well below the 72 target.
+        assert payload.effective_dpi is not None
+        assert 0 < payload.effective_dpi < 72
+
+    @pytest.mark.unit
+    def test_original_under_caps_is_byte_identical(self, tmp_path: Path) -> None:
+        """Under the original profile with the page within caps, direct and
+        supersample must produce byte-identical payloads."""
+        pdf = _make_pdf(tmp_path / "doc.pdf", pages=1)
+        cfg: dict[str, Any] = {
+            "grayscale_conversion": True,
+            "handle_transparency": True,
+            "jpeg_quality": 90,
+            "llm_detail": "original",
+            "resize_profile": "high",
+            "original_max_side_px": 6000,
+            "original_max_pixels": 10240000,
+        }
+        direct = render_single_pdf_page_payload(
+            pdf,
+            0,
+            target_dpi=150,
+            img_cfg=cfg,
+            model_type="openai",
+            render_strategy="direct",
+        )
+        supersample = render_single_pdf_page_payload(
+            pdf,
+            0,
+            target_dpi=150,
+            img_cfg=cfg,
+            model_type="openai",
+            render_strategy="supersample",
+        )
+        assert direct.effective_dpi == 150
+        assert direct.sha256 == supersample.sha256
+        assert (direct.width, direct.height) == (supersample.width, supersample.height)
 
 
 # ---------------------------------------------------------------------------
@@ -566,7 +635,7 @@ class TestRepairRerenderFallback:
 
         with patch(
             "modules.images.page_stream.resolve_image_settings",
-            return_value=(IMG_CFG, "openai", 72, 0),
+            return_value=(IMG_CFG, "openai", 72, 0, "direct"),
         ):
             targets = _resolve_repair_targets(
                 job, entries, [0], final_lines, {"transcription_model": {}}

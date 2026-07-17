@@ -499,6 +499,13 @@ async def run_transcription_pipeline(
     # run-1's and scrambles the merged output.
     absolute_index = {img.name: idx for idx, img in enumerate(image_files)}
 
+    # One parse shared by every read that observes the pre-transcription file
+    # state: verify_resume_compatible, get_processed_image_names, the
+    # all-processed early-return write, and ensure_resume_marker's presence
+    # check. None in overwrite mode (the file is cleared first, so nothing is
+    # cached) and after transcription appends (the final write re-reads).
+    cached_records: list[dict[str, Any]] | None = None
+
     if resume_mode == "overwrite":
         # Clear stale JSONL so old results do not mix with the new run.
         if temp_jsonl_path.exists():
@@ -510,9 +517,10 @@ async def run_transcription_pipeline(
         # layer in WorkflowManager.process_selected_items() skips items whose
         # final output file already exists. Refuse artifacts written by an
         # incompatible resume format (decision 1).
-        verify_resume_compatible(temp_jsonl_path)
+        cached_records = read_jsonl_records(temp_jsonl_path)
+        verify_resume_compatible(temp_jsonl_path, records=cached_records)
         already_processed = get_processed_image_names(
-            temp_jsonl_path, exclude_errors=retry_errors
+            temp_jsonl_path, exclude_errors=retry_errors, records=cached_records
         )
         if already_processed:
             original_count = len(image_files)
@@ -533,11 +541,14 @@ async def run_transcription_pipeline(
         print_info(
             "All images already processed. Regenerating output file from JSONL..."
         )
+        # No transcription runs on this path, so the file is unchanged since
+        # cached_records was parsed (None in overwrite mode -> fresh read).
         write_output_from_jsonl(
             temp_jsonl_path,
             output_txt_path,
             postprocessing_config,
             output_format=output_format,
+            records=cached_records,
         )
         return
 
@@ -565,7 +576,10 @@ async def run_transcription_pipeline(
     delay_between_tasks = transcription_conf.get("delay_between_tasks", 0)
 
     # Version the resume artifact before the first streamed write (decision 1).
-    ensure_resume_marker(temp_jsonl_path)
+    # cached_records still matches the file here (nothing has appended since the
+    # resume read); None in overwrite mode forces a fresh read of the cleared
+    # file. The marker append itself is unchanged.
+    ensure_resume_marker(temp_jsonl_path, records=cached_records)
 
     # Streaming JSONL writes as results arrive
     write_lock = asyncio.Lock()
@@ -623,6 +637,7 @@ def write_output_from_jsonl(
     output_path: Path,
     postprocessing_config: dict[str, Any],
     output_format: str = "txt",
+    records: list[dict[str, Any]] | None = None,
 ) -> bool:
     """Write combined output text from JSONL transcription records.
 
@@ -631,12 +646,17 @@ def write_output_from_jsonl(
         output_path: Path to write combined text output.
         postprocessing_config: Post-processing configuration dictionary.
         output_format: Output format (``"txt"``, ``"md"``, or ``"json"``).
+        records: Pre-parsed records for the file, to skip a redundant read. Only
+            safe when they reflect the file's current on-disk state; after any
+            marker or transcription append the file has changed, so callers must
+            pass None there to force a fresh read.
 
     Returns:
         True if successful, False otherwise.
     """
     try:
-        records = read_jsonl_records(jsonl_path)
+        if records is None:
+            records = read_jsonl_records(jsonl_path)
         transcriptions = extract_transcription_records(records, deduplicate=True)
 
         if not transcriptions:

@@ -6,6 +6,7 @@ used throughout the codebase.
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 
 from modules.config.capabilities.registry import (
     _MODEL_REGISTRY,
@@ -26,11 +27,16 @@ def _norm(name: str) -> str:
     return name.strip().lower()
 
 
+@lru_cache(maxsize=256)
 def detect_provider(model_name: str) -> ProviderType:
     """Detect LLM provider from model name.
 
     Canonical provider detection. All other modules should use this function
     or delegate to it.
+
+    Cached: the mapping is a pure function of ``model_name`` and returns an
+    immutable Literal string, so results are memoized across the many
+    per-page calls in the batch-build paths.
     """
     m = _norm(model_name)
 
@@ -58,11 +64,16 @@ def detect_provider(model_name: str) -> ProviderType:
     return "unknown"
 
 
+@lru_cache(maxsize=256)
 def detect_capabilities(model_name: str) -> Capabilities:
     """Map a model name to its known capabilities.
 
     Covers OpenAI, Anthropic, Google, and OpenRouter models via a static
     registry with provider base templates and per-model overrides.
+
+    Cached: the result is a pure function of ``model_name`` and is a frozen,
+    immutable ``Capabilities`` instance, so memoizing avoids rescanning the
+    ~80-entry registry on every per-page call in the batch-build paths.
     """
     m = _norm(model_name)
 

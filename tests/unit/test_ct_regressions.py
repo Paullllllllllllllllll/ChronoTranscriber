@@ -331,7 +331,9 @@ def _patch_streaming_env(
     import modules.transcribe.manager as mm
 
     monkeypatch.setattr(
-        mm, "resolve_image_settings", lambda p, m: ({}, "openai", 300, 1_000_000)
+        mm,
+        "resolve_image_settings",
+        lambda p, m: ({}, "openai", 300, 1_000_000, "direct"),
     )
     monkeypatch.setattr(mm, "stream_pdf_payloads", _fake_pdf_stream)
     monkeypatch.setattr(mm, "get_token_tracker", lambda: MagicMock())

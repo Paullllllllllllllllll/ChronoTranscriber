@@ -1,4 +1,4 @@
-# ChronoTranscriber v2.0.5
+# ChronoTranscriber v2.1.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -732,6 +732,29 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v2.1.0** (17 July 2026) -- Performance and robustness release; API
+    behavior and LLM payloads for in-cap pages are unchanged. The
+    hallucination-loop detector drops from ~99 to ~8 ms per page via
+    prefix-sum window checks, unblocking the async event loop; Unicode
+    normalization and spacing cleanup in postprocessing run via cached
+    translation tables and precompiled regexes (2.4x on large documents);
+    batch repair replaces O(n squared) target scans with dict lookups (up
+    to ~1,000x on large failure sets); batch request building hoists
+    run-invariant prompt, schema, and context preparation out of the
+    per-page loop (3.7x); capability detection is cached; PDF rasterization
+    uses zero-copy pixel buffers and skips no-op EXIF transposes; resume
+    re-parses each temp JSONL once instead of up to four times. A new
+    `render_strategy` option (`direct`, the default, vs. the legacy
+    `supersample`) derives the render DPI from the active provider resize
+    profile (2.25x on the Anthropic profile, 6.2x on box-fit; the shipped
+    OpenAI `original` profile stays byte-identical for A4 pages at 300
+    DPI). The Anthropic `high_max_side_px` default rises from 1568 to 2576
+    for the Claude high-resolution tier; Tesseract preprocessing defaults
+    to Otsu binarization (Sauvola remains available) and estimates deskew
+    angles on a downsampled copy (~4x, angle deviation 0.0 degrees in
+    testing); JSON salvage of malformed responses is bounded and degrades
+    to the transcription-error fallback instead of crashing on pathological
+    inputs.
 - **v2.0.5** (17 July 2026) -- Documentation reconciliation release; no code
     changes. Correct the package count (ten packages under `modules/`, not
     nine) and the bundled schema count (three, not four); document the

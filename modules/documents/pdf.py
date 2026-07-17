@@ -219,7 +219,18 @@ class PDFProcessor:
                     matrix=fitz.Matrix(effective_dpi / 72, effective_dpi / 72),
                     alpha=False,
                 )
-                img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                # frombuffer + samples_mv avoids the extra buffer->bytes copy
+                # pix.samples makes; mode "RGB" is not a PIL shared mode so the
+                # image is an independent copy (byte-identical to frombytes).
+                img = Image.frombuffer(
+                    "RGB",
+                    (pix.width, pix.height),
+                    pix.samples_mv,
+                    "raw",
+                    "RGB",
+                    0,
+                    1,
+                )
 
             processed_img, _diag = ImageProcessor.preprocess_for_tesseract(
                 img, tess_cfg

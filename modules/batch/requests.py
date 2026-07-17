@@ -17,6 +17,7 @@ Note:
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -229,23 +230,37 @@ def _build_responses_body_for_image(
     return body
 
 
-def create_batch_request_line(
-    custom_id: str,
-    image_url: str,
-    image_info: dict[str, Any],
+@dataclass
+class _BatchRequestPrep:
+    """Run-invariant inputs for building batch request lines.
+
+    Computed once per :func:`process_batch_transcription` run and reused for
+    every page, hoisting the system-prompt read, schema parse, schema render,
+    explicit-context load, and llm_detail resolution out of the per-image loop.
+    Only per-image hierarchical context resolution and the body build remain
+    per page.
+    """
+
+    base_system_prompt: str
+    transcription_schema: Any
+    llm_detail: str | None
+    use_explicit_context: bool
+    explicit_context: str | None
+    model_config: dict[str, Any]
+
+
+def _prepare_batch_request(
     model_config: dict[str, Any],
     system_prompt_path: Path | None = None,
     schema_path: Path | None = None,
     additional_context_path: Path | None = None,
-    use_hierarchical_context: bool = True,
-) -> tuple[str, dict[str, Any]]:
-    """
-    Create a Responses API batch request line for an image transcription task.
+) -> _BatchRequestPrep:
+    """Compute the run-invariant parts of a batch request line once.
 
-    Returns
-    -------
-    Tuple[str, Dict[str, Any]]
-        (json_line_for_api, local_metadata_record)
+    Performs path resolution, the system-prompt read, schema parse and render,
+    explicit additional-context load, and llm_detail resolution -- all of which
+    are identical for every page in a run. The result is consumed by
+    :func:`_build_batch_request_line` per image.
     """
     # Resolve prompt/schema paths with PROJECT_ROOT defaults and optional overrides
     if system_prompt_path is None or schema_path is None:
@@ -302,11 +317,15 @@ def create_batch_request_line(
     if inject_schema_into_prompt:
         system_prompt = render_prompt_with_schema(system_prompt, loaded_schema)
 
-    # Inject additional context - use explicit path or hierarchical resolution
-    additional_context = None
+    # Explicit additional context (run-invariant). When an explicit path is
+    # given and exists, it wins over per-image hierarchical resolution, exactly
+    # as in the original single-call flow.
+    use_explicit_context = False
+    explicit_context: str | None = None
     if additional_context_path is not None and additional_context_path.exists():
+        use_explicit_context = True
         try:
-            additional_context = additional_context_path.read_text(
+            explicit_context = additional_context_path.read_text(
                 encoding="utf-8"
             ).strip()
         except (OSError, PermissionError, UnicodeDecodeError) as e:
@@ -315,6 +334,53 @@ def create_batch_request_line(
                 additional_context_path,
                 e,
             )
+
+    # Load image processing config for llm_detail
+    try:
+        image_cfg = (
+            get_config_service()
+            .get_image_processing_config()
+            .get("api_image_processing", {})
+        )
+        raw_detail = str(image_cfg.get("llm_detail", "high")).lower().strip()
+        llm_detail: str | None
+        if raw_detail in ("low", "high", "original"):
+            llm_detail = raw_detail
+        elif raw_detail == "auto":
+            llm_detail = "auto"
+        else:
+            llm_detail = "auto"
+    except (KeyError, AttributeError, TypeError):
+        llm_detail = "auto"
+
+    return _BatchRequestPrep(
+        base_system_prompt=system_prompt,
+        transcription_schema=transcription_schema,
+        llm_detail=llm_detail,
+        use_explicit_context=use_explicit_context,
+        explicit_context=explicit_context,
+        model_config=model_config,
+    )
+
+
+def _build_batch_request_line(
+    prep: _BatchRequestPrep,
+    custom_id: str,
+    image_url: str,
+    image_info: dict[str, Any],
+    use_hierarchical_context: bool = True,
+) -> tuple[str, dict[str, Any]]:
+    """Build one batch request line from precomputed run-invariant inputs.
+
+    Only per-image work remains here: hierarchical context resolution (when no
+    explicit context path was supplied), context injection, and the body build.
+    """
+    system_prompt = prep.base_system_prompt
+
+    # Inject additional context - use explicit context or hierarchical resolution
+    additional_context = None
+    if prep.use_explicit_context:
+        additional_context = prep.explicit_context
     elif use_hierarchical_context:
         # Use hierarchical context resolution for file-specific context
         from modules.config.context import resolve_context_for_file
@@ -338,39 +404,21 @@ def create_batch_request_line(
     # Inject context into prompt (or remove section if empty)
     system_prompt = inject_additional_context(system_prompt, additional_context or "")
 
-    # Load image processing config for llm_detail
-    try:
-        image_cfg = (
-            get_config_service()
-            .get_image_processing_config()
-            .get("api_image_processing", {})
-        )
-        raw_detail = str(image_cfg.get("llm_detail", "high")).lower().strip()
-        llm_detail: str | None
-        if raw_detail in ("low", "high", "original"):
-            llm_detail = raw_detail
-        elif raw_detail == "auto":
-            llm_detail = "auto"
-        else:
-            llm_detail = "auto"
-    except (KeyError, AttributeError, TypeError):
-        llm_detail = "auto"
-
     # Build Responses body (typed input + text.format where supported)
     request_body = _build_responses_body_for_image(
-        model_config=model_config,
+        model_config=prep.model_config,
         system_prompt=system_prompt,
         image_url=image_url,
-        transcription_schema=transcription_schema,
-        llm_detail=llm_detail,
+        transcription_schema=prep.transcription_schema,
+        llm_detail=prep.llm_detail,
     )
 
     logger.debug(
         "Batch image body: model=%s include_detail=%s detail=%s",
-        model_config.get("name"),
-        isinstance(llm_detail, str)
-        and llm_detail.lower().strip() in ("low", "high", "original"),
-        llm_detail,
+        prep.model_config.get("name"),
+        isinstance(prep.llm_detail, str)
+        and prep.llm_detail.lower().strip() in ("low", "high", "original"),
+        prep.llm_detail,
     )
 
     # Final request line for the Batch API (must have exactly these fields)
@@ -386,6 +434,43 @@ def create_batch_request_line(
         "batch_request": {"custom_id": custom_id, "image_info": image_info}
     }
     return json.dumps(request_line), metadata_record
+
+
+def create_batch_request_line(
+    custom_id: str,
+    image_url: str,
+    image_info: dict[str, Any],
+    model_config: dict[str, Any],
+    system_prompt_path: Path | None = None,
+    schema_path: Path | None = None,
+    additional_context_path: Path | None = None,
+    use_hierarchical_context: bool = True,
+) -> tuple[str, dict[str, Any]]:
+    """
+    Create a Responses API batch request line for an image transcription task.
+
+    Thin wrapper: computes the run-invariant prep and builds a single line.
+    The batch loop hoists the prep step and calls
+    :func:`_build_batch_request_line` directly to avoid redundant per-page work.
+
+    Returns
+    -------
+    Tuple[str, Dict[str, Any]]
+        (json_line_for_api, local_metadata_record)
+    """
+    prep = _prepare_batch_request(
+        model_config,
+        system_prompt_path=system_prompt_path,
+        schema_path=schema_path,
+        additional_context_path=additional_context_path,
+    )
+    return _build_batch_request_line(
+        prep,
+        custom_id=custom_id,
+        image_url=image_url,
+        image_info=image_info,
+        use_hierarchical_context=use_hierarchical_context,
+    )
 
 
 def write_batch_file(request_lines: list[str], output_path: Path) -> Path:
@@ -506,6 +591,19 @@ def process_batch_transcription(
 
     print_info(f"Processing {total_images} images in chunks of {chunk_size}...")
 
+    # Compute the run-invariant request prep once (system prompt read, schema
+    # parse/render, explicit-context load, llm_detail). On failure fall back to
+    # per-image create_batch_request_line so the original per-image error
+    # handling and outcome (logged failure -> RuntimeError) are preserved.
+    try:
+        request_prep: _BatchRequestPrep | None = _prepare_batch_request(
+            model_config,
+            schema_path=schema_path,
+            additional_context_path=additional_context_path,
+        )
+    except Exception:
+        request_prep = None
+
     submitted_parts = 0
     attempted_parts = 0
 
@@ -537,15 +635,24 @@ def process_batch_transcription(
                     "order_index": global_idx,
                     "page_number": global_idx + 1,
                 }
-                request_line, metadata_record = create_batch_request_line(
-                    custom_id=custom_id,
-                    image_url=data_url,
-                    image_info=image_info,
-                    model_config=model_config,
-                    schema_path=schema_path,
-                    additional_context_path=additional_context_path,
-                    use_hierarchical_context=use_hierarchical_context,
-                )
+                if request_prep is not None:
+                    request_line, metadata_record = _build_batch_request_line(
+                        request_prep,
+                        custom_id=custom_id,
+                        image_url=data_url,
+                        image_info=image_info,
+                        use_hierarchical_context=use_hierarchical_context,
+                    )
+                else:
+                    request_line, metadata_record = create_batch_request_line(
+                        custom_id=custom_id,
+                        image_url=data_url,
+                        image_info=image_info,
+                        model_config=model_config,
+                        schema_path=schema_path,
+                        additional_context_path=additional_context_path,
+                        use_hierarchical_context=use_hierarchical_context,
+                    )
                 batch_request_lines.append(request_line)
                 metadata_records.append(metadata_record)
                 all_metadata_records.append(metadata_record)

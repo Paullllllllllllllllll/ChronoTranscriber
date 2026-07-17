@@ -136,6 +136,14 @@ FAILURE_PATTERNS = [
 NO_TEXT_PATTERN = re.compile(
     r"^(?:[^\[]+?:\s*)?\[\s*No\s+transcribable\s+text.*\]$", re.IGNORECASE
 )
+# Inline-format image-name extractor: "[placeholder: image_name; ...]".
+# Compiled once at import; hoisted out of extract_image_name_from_failure_line
+# so the per-call regex compilation cost is paid a single time.
+_INLINE_IMAGE_NAME_PATTERN = re.compile(
+    r"^\[(?:transcription error|Transcription not possible"
+    r"|No transcribable text):\s*([^;]+)",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -181,12 +189,7 @@ def extract_image_name_from_failure_line(line: str) -> str | None:
 
     # Inline format: "[placeholder: image_name; ...]"
     core = re.sub(r"^[^\[]*?:\s*", "", stripped)
-    pattern = re.compile(
-        r"^\[(?:transcription error|Transcription not possible"
-        r"|No transcribable text):\s*([^;]+)",
-        re.IGNORECASE,
-    )
-    m = pattern.match(core)
+    m = _INLINE_IMAGE_NAME_PATTERN.match(core)
     if m:
         name = m.group(1).strip()
         name = name.rstrip("]\")' ")
@@ -502,8 +505,8 @@ def _rerender_payload_for_entry(
         return None
 
     tm = model_config.get("transcription_model", {})
-    img_cfg, model_type, target_dpi, max_pixels = resolve_image_settings(
-        tm.get("provider", "openai"), tm.get("name", "")
+    img_cfg, model_type, target_dpi, max_pixels, render_strategy = (
+        resolve_image_settings(tm.get("provider", "openai"), tm.get("name", ""))
     )
 
     try:
@@ -522,6 +525,7 @@ def _rerender_payload_for_entry(
                 img_cfg=img_cfg,
                 model_type=model_type,
                 max_pixels=max_pixels,
+                render_strategy=render_strategy,
             )
         return load_image_payload(
             source,
@@ -770,6 +774,11 @@ async def _repair_sync_mode(
     # instead of blowing through it (mirrors the streaming manager's drain/wait).
     tracker = get_token_tracker()
 
+    # Index targets by line for O(1) lookups. Built once here and reused both by
+    # the per-result callback (closure) below and the write-back pass later,
+    # replacing three linear scans per result (O(n^2) overall).
+    target_by_line: dict[int, RepairTarget] = {t.line_index: t for t in targets}
+
     async with open_transcriber(
         model=model_name,
         provider=provider_type.value,
@@ -786,23 +795,16 @@ async def _repair_sync_mode(
             if not res:
                 return
             line_index, text, raw = res
-            img_name = next(
-                (t.image_name for t in targets if t.line_index == line_index), None
-            )
+            target = target_by_line.get(line_index)
+            img_name = target.image_name if target else None
             # Keep placeholders minimal; page/image context added during formatting
             normalized_text = text
             record = {
                 "repair_response": {
                     "line_index": line_index,
-                    "order_index": next(
-                        (t.order_index for t in targets if t.line_index == line_index),
-                        None,
-                    ),
+                    "order_index": target.order_index if target else None,
                     "image_name": img_name,
-                    "page_number": next(
-                        (t.page_number for t in targets if t.line_index == line_index),
-                        None,
-                    ),
+                    "page_number": target.page_number if target else None,
                     "raw_response": raw,
                     "text": normalized_text,
                     "raw_text": text,
@@ -876,9 +878,8 @@ async def _repair_sync_mode(
 
     results = collected
 
-    # Apply edits to final_lines with unified page-aware formatting
-    target_by_line: dict[int, RepairTarget] = {t.line_index: t for t in targets}
-
+    # Apply edits to final_lines with unified page-aware formatting.
+    # target_by_line was built once above (before on_result) and is reused here.
     for line_index, text, _raw in results:
         if 0 <= line_index < len(final_lines):
             t = target_by_line.get(line_index)

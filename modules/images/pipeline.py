@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import math
 import subprocess
 import tempfile
 from collections import Counter
@@ -148,6 +149,99 @@ class ImageProcessor:
             paste_y = (target_height - new_height) // 2
             final_img.paste(resized_img, (paste_x, paste_y))
             return final_img
+
+    @staticmethod
+    def derive_render_zoom(
+        page_width_pt: float,
+        page_height_pt: float,
+        target_dpi: int,
+        max_pixels: int,
+        img_cfg: dict[str, Any],
+        model_type: str,
+    ) -> float:
+        """Render zoom (px/pt) for the "direct" LLM-payload render strategy.
+
+        Given a PDF page's dimensions in points, compute the float zoom at which
+        to rasterize the page so that the rendered pixels already match the
+        dimensions the active :meth:`resize_for_detail` profile would produce
+        from a ``target_dpi`` render. This avoids rendering pixels that the
+        provider (or the local resize) would only discard again.
+
+        The zoom never exceeds ``target_dpi / 72`` (quality ceiling; no
+        render-upscaling, matching the existing no-upscale semantics), and the
+        ``max_pixels`` per-page guard is applied last. When the active profile
+        would not shrink the ``target_dpi`` render at all, the returned zoom is
+        exactly ``target_dpi / 72`` so the payload stays byte-identical to the
+        legacy ("supersample") render.
+        """
+        target_zoom = target_dpi / 72.0
+        resize_profile = (img_cfg.get("resize_profile", "auto") or "auto").lower()
+        if resize_profile == "none":
+            return ImageProcessor._apply_max_pixels_zoom(
+                page_width_pt, page_height_pt, target_zoom, max_pixels
+            )
+
+        w0 = page_width_pt * target_zoom
+        h0 = page_height_pt * target_zoom
+        if w0 <= 0 or h0 <= 0:
+            return target_zoom
+        longest = max(w0, h0)
+
+        detail = ImageProcessor.resolve_detail(img_cfg, model_type).lower()
+        if detail not in ("low", "high", "auto", "medium", "ultra_high", "original"):
+            detail = "high"
+
+        if detail == "low":
+            max_side = int(img_cfg.get("low_max_side_px", 512))
+            scale = min(1.0, max_side / longest)
+        elif detail == "original":
+            max_side = int(img_cfg.get("original_max_side_px", 6000))
+            max_pix = int(img_cfg.get("original_max_pixels", 10240000))
+            s1 = min(1.0, max_side / longest)
+            w1 = w0 * s1
+            h1 = h0 * s1
+            s2 = math.sqrt(max_pix / (w1 * h1)) if w1 * h1 > max_pix else 1.0
+            scale = s1 * s2
+        elif model_type == "anthropic":
+            max_side = int(img_cfg.get("high_max_side_px", 1568))
+            scale = min(1.0, max_side / longest)
+        else:
+            # OpenAI/Google: fit into high_target_box. A box larger than the
+            # target render would upscale; the ceiling forbids render-upscaling,
+            # so cap the scale at 1.0 and let the resize_for_detail safety net
+            # perform any box upscaling (byte-identical to supersample there).
+            box = img_cfg.get("high_target_box", [768, 1536])
+            try:
+                box_w = int(box[0])
+                box_h = int(box[1])
+            except (TypeError, ValueError, IndexError):
+                box_w, box_h = 768, 1536
+            scale = min(1.0, box_w / w0, box_h / h0)
+
+        render_zoom = target_zoom * scale
+        return ImageProcessor._apply_max_pixels_zoom(
+            page_width_pt, page_height_pt, render_zoom, max_pixels
+        )
+
+    @staticmethod
+    def _apply_max_pixels_zoom(
+        page_width_pt: float,
+        page_height_pt: float,
+        zoom: float,
+        max_pixels: int,
+    ) -> float:
+        """Reduce *zoom* so the rendered page stays within *max_pixels*.
+
+        Float analogue of ``modules.documents.pdf._get_effective_dpi`` operating
+        on a zoom factor rather than an integer DPI. Returns *zoom* unchanged
+        when the budget is disabled or already satisfied.
+        """
+        if max_pixels <= 0:
+            return zoom
+        pixels = (page_width_pt * zoom) * (page_height_pt * zoom)
+        if pixels <= max_pixels:
+            return zoom
+        return zoom * math.sqrt(max_pixels / pixels)
 
     @staticmethod
     def resolve_detail(img_cfg: dict[str, Any], model_type: str) -> str:
@@ -351,10 +445,38 @@ class ImageProcessor:
             return cv2.bitwise_not(gray)
         return gray
 
+    # Long-edge cap (px) for skew-angle estimation. determine_skew's
+    # Canny+Hough cost scales with pixel count and dominates the Tesseract
+    # preprocessing path (~900 ms/page at full resolution). The estimated
+    # angle on a page downsampled to this cap matches the full-resolution
+    # estimate to within a fraction of a degree, so we estimate the angle on a
+    # downsampled copy and apply the rotation at full resolution.
+    _DESKEW_ESTIMATE_MAX_SIDE = 1500
+
+    @staticmethod
+    def _estimate_skew_angle(gray: np.ndarray) -> float | None:
+        """Estimate the page skew angle, downsampling large inputs first.
+
+        The angle is estimated on a copy whose longest side is capped at
+        ``_DESKEW_ESTIMATE_MAX_SIDE``; images already within the cap are used
+        as-is. Returns ``None`` when no skew could be determined.
+        """
+        h, w = gray.shape[:2]
+        longest = max(h, w)
+        if longest > ImageProcessor._DESKEW_ESTIMATE_MAX_SIDE:
+            scale = ImageProcessor._DESKEW_ESTIMATE_MAX_SIDE / float(longest)
+            new_w = max(1, int(round(w * scale)))
+            new_h = max(1, int(round(h * scale)))
+            small = cv2.resize(gray, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        else:
+            small = gray
+        angle = determine_skew(small)
+        return None if angle is None else float(angle)
+
     @staticmethod
     def _deskew(gray: np.ndarray) -> tuple[np.ndarray, float]:
         try:
-            angle = determine_skew(gray)
+            angle = ImageProcessor._estimate_skew_angle(gray)
             if angle is None:
                 return gray, 0.0
             angle_deg = float(angle)
@@ -386,7 +508,7 @@ class ImageProcessor:
 
     @staticmethod
     def _binarize(gray: np.ndarray, method: str, window: int, k: float) -> np.ndarray:
-        m = (method or "sauvola").lower()
+        m = (method or "otsu").lower()
         if m == "sauvola":
             w = window if isinstance(window, int) and window % 2 == 1 else 25
             thresh = threshold_sauvola(
@@ -458,11 +580,11 @@ class ImageProcessor:
         # 6) Binarization
         binary = ImageProcessor._binarize(
             gray,
-            cfg.get("binarization", "sauvola"),
+            cfg.get("binarization", "otsu"),
             int(cfg.get("sauvola_window", 25)),
             float(cfg.get("sauvola_k", 0.2)),
         )
-        diag["binarization"] = cfg.get("binarization", "sauvola")
+        diag["binarization"] = cfg.get("binarization", "otsu")
         # 7) Morphology
         binary = ImageProcessor._morph(
             binary, cfg.get("morphology", "none"), int(cfg.get("morph_kernel", 3))
@@ -575,7 +697,13 @@ class ImageProcessor:
         try:
             with Image.open(img_path) as im:
                 # Honor EXIF orientation before preprocessing (B14).
-                oriented = ImageOps.exif_transpose(im) or im
+                # exif_transpose always makes a full-image copy; skip it when
+                # there is no orientation to apply (tag absent or == 1) and use
+                # the image directly (byte-identical output).
+                if im.getexif().get(0x0112, 1) != 1:
+                    oriented = ImageOps.exif_transpose(im) or im
+                else:
+                    oriented = im
                 processed_img, diag = ImageProcessor.preprocess_for_tesseract(
                     oriented, cfg
                 )

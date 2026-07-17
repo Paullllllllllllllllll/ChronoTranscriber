@@ -8,7 +8,7 @@
 # Used by:
 #   - modules/llm/transcriber.py (LangChain-based multi-provider transcription)
 #   - modules/llm/providers/*.py (provider-specific implementations)
-#   - modules/llm/batch/batching.py (OpenAI Batch API transcription)
+#   - modules/batch/backends/*.py (batch API transcription)
 #   - modules/config/config_loader.py (model validation at startup)
 #
 # API Keys (environment variables):

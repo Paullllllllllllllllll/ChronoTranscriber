@@ -1,4 +1,4 @@
-# ChronoTranscriber v2.0.4
+# ChronoTranscriber v2.0.5
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -89,7 +89,7 @@ preprocessing.
 - **Resume and repair** -- skip already-transcribed pages; repair
   individual failed pages after the fact
 - **Custom transcription schemas** -- JSON schemas controlling output
-  structure; four included, custom schemas supported
+  structure; three included, custom schemas supported
 
 ## Supported Providers and Models
 
@@ -281,7 +281,10 @@ python main/repair_transcriptions.py \
 --model ID                 Override model
 --provider NAME            openai | anthropic | google | openrouter
 --reasoning-effort LEVEL   none | low | medium | high | xhigh
+--model-verbosity LEVEL    concise | medium | verbose (OpenAI GPT-5 family)
+--max-output-tokens N      Override the max output token limit
 --output-format FORMAT     txt | md | json
+--output-mode MODE         hash | mirror (mirror replicates input hierarchy)
 --pages RANGE              e.g., '3-7', 'first:5', '1,3,5-8'
 --resume / --force         Skip vs overwrite existing output
 --retry-errors             Re-process pages left as '[transcription error]'
@@ -613,7 +616,7 @@ a v1 ledger is adopted in place without losing the day's count.
 
 ## Architecture
 
-ChronoTranscriber follows a deep-module architecture: nine packages
+ChronoTranscriber follows a deep-module architecture: ten packages
 under `modules/`, each with a narrow public surface, composed by CLI
 entry points in `main/`.
 
@@ -714,8 +717,10 @@ Run the test suite:
 uv run python -m pytest -v
 ```
 
-The suite contains 1,250+ tests (unit and integration) covering all
-modules, providers, batch backends, and CLI parsers.
+The suite contains roughly 1,500 tests (unit and integration) covering
+all modules, providers, batch backends, and CLI parsers. Live API smoke
+tests are marked `api` and deselected by default; run them explicitly
+with `pytest -m api`.
 
 ## Versioning
 
@@ -727,6 +732,21 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v2.0.5** (17 July 2026) -- Documentation reconciliation release; no code
+    changes. Correct the package count (ten packages under `modules/`, not
+    nine) and the bundled schema count (three, not four); document the
+    previously missing `--model-verbosity`, `--max-output-tokens`, and
+    `--output-mode` flags in the CLI reference; refresh the test-count claim
+    (roughly 1,500 tests, api-marked live tests deselected by default).
+    Rewrite the stale `tests/README.md` (its file tree listed 12 of 71 test
+    files, one nonexistent, and a misregistered marker set) as a lean,
+    accurate guide. Fix `eval/README.md`: invalid `--type pdf` example
+    commands (the CLI accepts `pdfs`), the Gemini 3 Pro model id
+    (`gemini-3-pro-preview`), and the undocumented `latex_tables/` and PDF
+    chart outputs. Repair eight stale "Used by:" module paths in the shipped
+    `*.example.yaml` config templates that still referenced the pre-refactor
+    `modules/processing/`, `modules/operations/`, `modules/core/workflow.py`,
+    and `modules/llm/batch/` layout.
 - **v2.0.4** (16 July 2026) -- Adopt the fully typed shared-ledger test
     (vendored byte-identically across the ChronoTools repos; the ledger module
     itself is unchanged at v2.1.1): Any-typed dynamic module handle,

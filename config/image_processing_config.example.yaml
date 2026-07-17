@@ -7,12 +7,14 @@
 # and edit it.
 #
 # Used by:
-#   - modules/processing/image_utils.py (image preprocessing pipelines)
-#   - modules/processing/pdf_utils.py (PDF page image extraction)
-#   - modules/processing/tesseract_utils.py (Tesseract OCR settings)
-#   - modules/llm/batch/batching.py (llm_detail for batch requests)
-#   - modules/core/workflow.py (target_dpi, postprocessing)
-#   - modules/operations/batch/check.py (postprocessing on batch results)
+#   - modules/images/pipeline.py (image preprocessing pipelines)
+#   - modules/documents/pdf.py (PDF page image extraction)
+#   - modules/images/tesseract_runtime.py (Tesseract OCR settings)
+#   - modules/batch/requests.py and modules/batch/backends/*.py
+#     (llm_detail for batch requests)
+#   - modules/transcribe/pipeline.py and modules/transcribe/manager.py
+#     (target_dpi, postprocessing)
+#   - modules/batch/check.py (postprocessing on batch results)
 # =============================================================================
 
 
@@ -155,9 +157,9 @@ tesseract_image_processing:
 # preserving Markdown formatting and semantic content.
 #
 # Used by:
-#   - modules/processing/postprocess.py (postprocess_transcription function)
-#   - modules/core/workflow.py (after transcription completes)
-#   - modules/operations/batch/check.py (after batch results retrieved)
+#   - modules/postprocess/text.py (postprocess_transcription function)
+#   - modules/transcribe/manager.py (after transcription completes)
+#   - modules/batch/check.py (after batch results retrieved)
 # =============================================================================
 
 postprocessing:

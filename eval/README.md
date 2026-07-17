@@ -20,7 +20,7 @@ Metrics are computed **page-by-page** using the temporary JSONL files produced b
 | Local | Tesseract OCR | `tesseract` | None (baseline) |
 | OpenAI | GPT-5.2 | `gpt-5.2` | Medium |
 | OpenAI | GPT-5 Mini | `gpt-5-mini` | Medium |
-| Google | Gemini 3 Pro | `gemini-3-pro` | Medium |
+| Google | Gemini 3 Pro | `gemini-3-pro-preview` | Medium |
 | Google | Gemini 3 Flash | `gemini-3-flash-preview` | Medium |
 | Anthropic | Claude Sonnet 4.5 | `claude-sonnet-4-5-20250929` | Medium |
 | Anthropic | Claude Haiku 4.5 | `claude-haiku-4-5` | Medium |
@@ -56,6 +56,7 @@ eval/
 │       └── {category}/
 │           └── {source}.jsonl   # Flat JSONL, one file per source
 └── reports/                     # Generated evaluation reports (auto-created)
+    └── latex_tables/            # Publication-ready LaTeX tables and figures
 ```
 
 **Ground truth sources**:
@@ -93,14 +94,14 @@ python main/unified_transcriber.py --input eval/test_data/input/address_books \
 python main/unified_transcriber.py \
     --input eval/test_data/input/bibliography/Whitaker_1913_English_Cookery_Books_to_the_Year_1850.pdf \
     --output eval/test_data/output/bibliography/gpt_5.2_medium \
-    --type pdf --method gpt --model gpt-5.2
+    --type pdfs --method gpt --model gpt-5.2
 ```
 
 **military_records** (each PDF separately, or the whole folder):
 ```bash
 python main/unified_transcriber.py --input eval/test_data/input/military_records \
     --output eval/test_data/output/military_records/gpt_5.2_medium \
-    --type pdf --method gpt --model gpt-5.2
+    --type pdfs --method gpt --model gpt-5.2
 ```
 
 Repeat for every model in `eval_config.yaml`. The transcriber produces JSONL files
@@ -164,7 +165,8 @@ After running the evaluation:
 | `eval_results_*.json` | Full metrics with all details |
 | `eval_results_*.csv` | Tabular format for spreadsheets |
 | `eval_results_*.md` | Markdown summary for documentation |
-| `eval_chart_*.png` | Visualization (if matplotlib available) |
+| `eval_chart_*.png` / `.pdf` | Visualization (if matplotlib available) |
+| `latex_tables/*.tex`, `latex_tables/*.pdf` | Publication-ready LaTeX table fragments and figures |
 
 ## Configuration
 

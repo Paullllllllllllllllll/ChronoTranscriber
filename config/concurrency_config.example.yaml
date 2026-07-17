@@ -160,7 +160,7 @@ concurrency:
 #
 # Used by:
 #   - modules/llm/providers/*.py (cache_control annotations)
-#   - modules/llm/batch/backends/anthropic_backend.py (batch system param)
+#   - modules/batch/backends/anthropic_backend.py (batch system param)
 # =============================================================================
 
 prompt_caching:

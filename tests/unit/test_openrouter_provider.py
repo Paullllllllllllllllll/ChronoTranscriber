@@ -407,6 +407,109 @@ class TestOpenRouterProviderTranscribe:
         assert "API error" in result.error
 
 
+class TestOpenRouterSamplerGating:
+    """H1: sampler params must be gated on capability flags, not always sent.
+
+    langchain-openai's disabled_params only filters bind-time kwargs; every
+    non-None constructor value still reaches _default_params. A reasoning model
+    that receives temperature/top_p/penalties 400s unretryably.
+    """
+
+    @patch("modules.llm.providers.openrouter_provider.ChatOpenAI")
+    def test_reasoning_model_omits_all_sampler_params(
+        self, mock_chat: MagicMock
+    ) -> None:
+        # openai/gpt-5 is a reasoning model: no sampler controls at all.
+        OpenRouterProvider(
+            api_key="k",
+            model="openai/gpt-5",
+            temperature=0.3,
+            top_p=0.9,
+            frequency_penalty=0.5,
+            presence_penalty=0.5,
+        )
+        call_kwargs = mock_chat.call_args.kwargs
+        assert "temperature" not in call_kwargs
+        assert "top_p" not in call_kwargs
+        assert "frequency_penalty" not in call_kwargs
+        assert "presence_penalty" not in call_kwargs
+
+    @patch("modules.llm.providers.openrouter_provider.ChatOpenAI")
+    def test_non_reasoning_model_sends_supported_samplers_only(
+        self, mock_chat: MagicMock
+    ) -> None:
+        # openai/gpt-4o: temperature + top_p supported; penalties not.
+        OpenRouterProvider(
+            api_key="k",
+            model="openai/gpt-4o",
+            temperature=0.2,
+            top_p=0.8,
+            frequency_penalty=0.5,
+            presence_penalty=0.5,
+        )
+        call_kwargs = mock_chat.call_args.kwargs
+        assert call_kwargs["temperature"] == 0.2
+        assert call_kwargs["top_p"] == 0.8
+        assert "frequency_penalty" not in call_kwargs
+        assert "presence_penalty" not in call_kwargs
+
+
+class TestOpenRouterContextImage:
+    """M2: OpenRouter must actually attach the context image content block."""
+
+    @pytest.mark.asyncio
+    @patch("modules.llm.providers.openrouter_provider.ChatOpenAI")
+    @patch("modules.llm.providers.openrouter_provider.detect_capabilities")
+    async def test_context_image_block_is_appended(
+        self, mock_caps: MagicMock, mock_chat: MagicMock
+    ) -> None:
+        caps = MagicMock()
+        caps.supports_image_input = True
+        caps.supports_image_detail = False
+        caps.supports_structured_outputs = False
+        caps.default_image_detail = None
+        mock_caps.return_value = caps
+
+        mock_llm_instance = MagicMock()
+        mock_response = MagicMock()
+        mock_response.content = "Transcribed text"
+        mock_response.response_metadata = {}
+        mock_response.usage_metadata = {
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "total_tokens": 15,
+        }
+        mock_llm_instance.ainvoke = AsyncMock(return_value=mock_response)
+        mock_chat.return_value = mock_llm_instance
+
+        provider = OpenRouterProvider(api_key="k", model="openai/gpt-4o")
+        await provider.transcribe_image_from_base64(
+            image_base64="pageimg",
+            mime_type="image/png",
+            system_prompt="Transcribe this.",
+            context_image_base64="ctximg",
+            context_image_mime_type="image/png",
+            context_image_instruction="Reference page:",
+        )
+
+        messages = mock_llm_instance.ainvoke.call_args.args[0]
+        human = messages[-1]
+        # Two image_url blocks (context + page) and the context instruction text.
+        image_urls = [
+            b["image_url"]["url"]
+            for b in human.content
+            if isinstance(b, dict) and b.get("type") == "image_url"
+        ]
+        assert any("ctximg" in u for u in image_urls)
+        assert any("pageimg" in u for u in image_urls)
+        texts = [
+            b["text"]
+            for b in human.content
+            if isinstance(b, dict) and b.get("type") == "text"
+        ]
+        assert "Reference page:" in texts
+
+
 class TestOpenRouterProviderClose:
     @pytest.mark.asyncio
     @patch("modules.llm.providers.openrouter_provider.ChatOpenAI")

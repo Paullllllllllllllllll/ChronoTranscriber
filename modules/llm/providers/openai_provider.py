@@ -261,9 +261,22 @@ class OpenAIProvider(BaseProvider):
                 "type": "image_url",
                 "image_url": {"url": ctx_data_url},
             }
+            # Normalize the context image detail through the same valid-tier
+            # logic as the page image. Sending an unsupported tier (e.g. the
+            # shipped default "original" to a model without the original tier)
+            # 400s the request, so drop or default it exactly as for the page.
             ctx_det = context_image_detail
             if ctx_det:
                 ctx_det = ctx_det.lower().strip()
+                ctx_valid_details = {"low", "high"}
+                if caps.supports_image_detail_original:
+                    ctx_valid_details.add("original")
+                if ctx_det not in ctx_valid_details:
+                    ctx_det = None
+            if ctx_det is None:
+                ctx_det = (
+                    caps.default_image_detail if caps.supports_image_detail else None
+                )
             if ctx_det and caps.supports_image_detail:
                 ctx_block["image_url"]["detail"] = ctx_det
             if context_image_instruction:
@@ -283,7 +296,6 @@ class OpenAIProvider(BaseProvider):
 
         # Use LangChain's structured output if schema provided and supported
         llm_to_use = self._llm
-        use_pydantic = False
 
         if json_schema and caps.supports_structured_outputs:
             # Try to use Pydantic model for better validation
@@ -295,7 +307,6 @@ class OpenAIProvider(BaseProvider):
                     TranscriptionOutput,
                     include_raw=True,
                 )
-                use_pydantic = True
             except ImportError:
                 # Fallback to JSON schema if Pydantic model not available
                 if isinstance(json_schema, dict) and "schema" in json_schema:
@@ -310,13 +321,12 @@ class OpenAIProvider(BaseProvider):
                 )
 
         # Invoke LLM - LangChain handles retries internally
-        return await self._invoke_llm(llm_to_use, messages, use_pydantic)
+        return await self._invoke_llm(llm_to_use, messages)
 
     async def _invoke_llm(
         self,
         llm: Any,
         messages: list[Any],
-        use_pydantic: bool = False,
     ) -> TranscriptionResult:
         """Invoke the LLM and process the response.
 

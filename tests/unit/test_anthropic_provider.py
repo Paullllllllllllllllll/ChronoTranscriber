@@ -187,6 +187,7 @@ class TestAnthropicProviderInit:
             AnthropicProvider(
                 api_key="sk-ant-test",
                 model="claude-sonnet-4-5-20250929",
+                max_tokens=32000,  # headroom so the budget clamp does not engage
                 reasoning_config={"effort": "medium"},
             )
 
@@ -231,10 +232,60 @@ class TestAnthropicProviderInit:
             AnthropicProvider(
                 api_key="sk-ant-test",
                 model="claude-sonnet-4-5-20250929",
+                max_tokens=32000,  # headroom so the budget clamp does not engage
                 reasoning_config={"effort": "high"},
             )
 
         assert captured["thinking"]["budget_tokens"] == 16384
+
+    @pytest.mark.unit
+    def test_thinking_budget_clamped_below_max_tokens(self) -> None:
+        """M4: budget_tokens must be clamped below max_tokens (reserving room
+        for the answer) rather than sent equal to / above it (unretryable 400)."""
+        from modules.llm.providers.anthropic_provider import AnthropicProvider
+
+        captured: dict[str, Any] = {}
+
+        with (
+            patch(
+                "modules.llm.providers.anthropic_provider.ChatAnthropic",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+        ):
+            AnthropicProvider(
+                api_key="sk-ant-test",
+                model="claude-sonnet-4-5-20250929",
+                max_tokens=2048,  # high effort wants 16384 -> must clamp
+                reasoning_config={"effort": "high"},
+            )
+
+        assert captured["thinking"]["type"] == "enabled"
+        # upper = 2048 - 256 reserve = 1792
+        assert captured["thinking"]["budget_tokens"] == 1792
+        assert captured["thinking"]["budget_tokens"] < 2048
+
+    @pytest.mark.unit
+    def test_thinking_skipped_when_max_tokens_below_floor(self) -> None:
+        """M4: when the clamped budget would fall under Anthropic's 1024 floor,
+        the thinking block is skipped entirely."""
+        from modules.llm.providers.anthropic_provider import AnthropicProvider
+
+        captured: dict[str, Any] = {}
+
+        with (
+            patch(
+                "modules.llm.providers.anthropic_provider.ChatAnthropic",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+        ):
+            AnthropicProvider(
+                api_key="sk-ant-test",
+                model="claude-sonnet-4-5-20250929",
+                max_tokens=1000,  # upper = 744 < 1024 floor -> skip thinking
+                reasoning_config={"effort": "high"},
+            )
+
+        assert "thinking" not in captured
 
     @pytest.mark.unit
     def test_thinking_not_set_for_non_reasoning_model(self) -> None:
@@ -544,3 +595,56 @@ class TestTransformSchemaForAnthropic:
         original_type = schema["properties"]["name"]["type"]
         _transform_schema_for_anthropic(schema)
         assert schema["properties"]["name"]["type"] == original_type  # unchanged
+
+
+class TestAnthropicProviderContextImage:
+    """M2: Anthropic must actually attach the context image content block."""
+
+    @pytest.mark.unit
+    async def test_context_image_block_is_appended(self) -> None:
+        from modules.llm.providers.anthropic_provider import AnthropicProvider
+
+        with patch("modules.llm.providers.anthropic_provider.ChatAnthropic"):
+            provider = AnthropicProvider(
+                api_key="sk-ant-test", model="claude-sonnet-4-5-20250929"
+            )
+
+        captured_messages: list[Any] = []
+
+        async def _capture(llm: Any, messages: Any, **kw: Any) -> Any:
+            captured_messages.extend(messages)
+            msg = MagicMock()
+            msg.content = "transcribed"
+            msg.response_metadata = {}
+            msg.usage_metadata = {
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "total_tokens": 150,
+            }
+            return msg
+
+        provider._ainvoke_with_retry = _capture
+
+        with patch("modules.infra.token_budget.get_token_tracker"):
+            await provider.transcribe_image_from_base64(
+                image_base64="pageimg",
+                mime_type="image/png",
+                system_prompt="Transcribe.",
+                context_image_base64="ctximg",
+                context_image_mime_type="image/jpeg",
+                context_image_instruction="Reference page:",
+            )
+
+        human = captured_messages[1]
+        image_blocks = [
+            b for b in human.content if isinstance(b, dict) and b.get("type") == "image"
+        ]
+        datas = [b["source"]["data"] for b in image_blocks]
+        assert "ctximg" in datas
+        assert "pageimg" in datas
+        texts = [
+            b["text"]
+            for b in human.content
+            if isinstance(b, dict) and b.get("type") == "text"
+        ]
+        assert "Reference page:" in texts

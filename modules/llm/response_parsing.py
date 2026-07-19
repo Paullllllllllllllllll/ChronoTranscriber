@@ -108,6 +108,9 @@ _CODE_FENCE_RE = re.compile(
     re.DOTALL,
 )
 
+# Matches a line that is (only) a code-fence delimiter, e.g. "```" or "```json".
+_FENCE_DELIM_RE = re.compile(r"^\s*```")
+
 
 def _strip_code_fences(text: str) -> str:
     """Extract content from markdown code fences if present.
@@ -123,13 +126,38 @@ def _strip_code_fences(text: str) -> str:
     *contains* an embedded fenced block (e.g. tabular content quoted in
     running prose) must pass through unchanged, since reducing it to the
     fence content would silently discard the surrounding transcription.
-    If the text starts with a fence, returns the last fenced block (models
-    sometimes emit a "thinking" block followed by the real output).
+
+    Two start-with-a-fence shapes are disambiguated:
+
+    - Fully fence-wrapped answer: the model wrapped its whole JSON answer in a
+      single fence, and that answer's ``transcription`` string itself contains
+      an inner fenced block (e.g. quoted code). Here only the *outermost* fence
+      is stripped so the inner fences survive; taking the last inner block would
+      discard nearly everything. Detected by the wrapped content opening with
+      ``{``.
+    - Thinking block then answer: the model emitted a "thinking" fenced block
+      followed by the real (fenced) output. Here the last fenced block is the
+      answer.
+
     Otherwise returns the original text unchanged.
     """
     if not text.lstrip().startswith("```"):
         return text
-    matches = _CODE_FENCE_RE.findall(text)
+    stripped = text.strip()
+    lines = stripped.split("\n")
+    if (
+        len(lines) >= 2
+        and _FENCE_DELIM_RE.match(lines[0])
+        and _FENCE_DELIM_RE.match(lines[-1])
+    ):
+        inner = "\n".join(lines[1:-1])
+        # A fully fence-wrapped JSON answer: strip only the outermost fence so
+        # any fenced block embedded inside the transcription string is kept.
+        if inner.lstrip().startswith("{"):
+            return inner.strip()
+    # Single block or the "thinking block then answer" sibling case: the last
+    # fenced block is the answer.
+    matches = _CODE_FENCE_RE.findall(stripped)
     if matches:
         return str(matches[-1]).strip()
     return text
@@ -229,7 +257,10 @@ def _extract_from_schema_object(result: dict[str, Any]) -> str:
     flag = _check_transcription_flags(result)
     if flag is not None:
         return flag
-    return str(result.get("transcription", "")).strip()
+    value = result.get("transcription")
+    # A schema `transcription: null` (no transcribable text) must degrade to an
+    # empty string, not the literal "None" that str(None) would yield.
+    return str(value).strip() if value is not None else ""
 
 
 def _extract_from_chat_completions(result: dict[str, Any], image_name: str) -> str:
@@ -282,7 +313,8 @@ def _extract_from_chat_completions(result: dict[str, Any], image_name: str) -> s
                 if flag is not None:
                     return flag
                 if "transcription" in parsed:
-                    return str(parsed["transcription"]).strip()
+                    value = parsed["transcription"]
+                    return str(value).strip() if value is not None else ""
         return normalized if normalized else content
 
     logger.error(
@@ -332,7 +364,8 @@ def extract_transcribed_text(result: dict[str, Any], image_name: str = "") -> st
                     if flag is not None:
                         return flag
                     if "transcription" in parsed:
-                        return str(parsed["transcription"]).strip()
+                        value = parsed["transcription"]
+                        return str(value).strip() if value is not None else ""
             # If normalization changed the text but JSON parsing failed,
             # still try salvaging from the original text
             if normalized != text.strip() and "{" in text:
@@ -342,7 +375,8 @@ def extract_transcribed_text(result: dict[str, Any], image_name: str = "") -> st
                     if flag is not None:
                         return flag
                     if "transcription" in parsed:
-                        return str(parsed["transcription"]).strip()
+                        value = parsed["transcription"]
+                        return str(value).strip() if value is not None else ""
             # Fallback: return normalized text (fences stripped)
             return normalized if normalized else text
 

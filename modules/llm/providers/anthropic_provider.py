@@ -148,6 +148,7 @@ class AnthropicProvider(BaseProvider):
             if family in _ADAPTIVE_FAMILIES:
                 model_kwargs["thinking"] = {"type": "adaptive"}
                 logger.info(f"Using adaptive thinking for model {model}")
+                thinking_enabled = True
             else:
                 effort_to_budget = {
                     "low": 1024,
@@ -155,14 +156,31 @@ class AnthropicProvider(BaseProvider):
                     "high": 16384,
                 }
                 budget = effort_to_budget.get(effort, 4096)
-                model_kwargs["thinking"] = {
-                    "type": "enabled",
-                    "budget_tokens": budget,
-                }
-                logger.info(
-                    f"Using extended thinking (budget={budget}) for model {model}"
-                )
-            thinking_enabled = True
+                # Anthropic requires budget_tokens < max_tokens and >= 1024.
+                # Clamp the budget below the effective max_tokens, reserving room
+                # for the answer; if that leaves less than the 1024 floor, skip
+                # the thinking block entirely rather than emit an unretryable
+                # 400. Mirrors _compute_openrouter_reasoning_max_tokens.
+                reserve_for_answer = 256
+                upper = effective_max_tokens - reserve_for_answer
+                if upper < 1024:
+                    logger.info(
+                        "Skipping extended thinking for model %s: max_tokens=%d "
+                        "leaves no room for a >=1024 thinking budget plus an "
+                        "answer reserve.",
+                        model,
+                        effective_max_tokens,
+                    )
+                else:
+                    budget = min(budget, upper)
+                    model_kwargs["thinking"] = {
+                        "type": "enabled",
+                        "budget_tokens": budget,
+                    }
+                    logger.info(
+                        f"Using extended thinking (budget={budget}) for model {model}"
+                    )
+                    thinking_enabled = True
 
         # Anthropic rejects sampler controls while any thinking block is active:
         # the API requires temperature=1 and forbids top_p/top_k for both the
@@ -279,7 +297,26 @@ class AnthropicProvider(BaseProvider):
         else:
             system_message = SystemMessage(content=system_prompt)
 
+        # Assemble content blocks: optional context image first, then the page
+        # image, matching the OpenAI/custom ordering. Reuse Anthropic's own
+        # base64 image source block for the context image.
         human_content: list[dict[str, Any]] = []
+        if context_image_base64 and context_image_mime_type:
+            if context_image_instruction:
+                human_content.append(
+                    {"type": "text", "text": context_image_instruction}
+                )
+            human_content.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": context_image_mime_type,
+                        "data": context_image_base64,
+                    },
+                }
+            )
+
         if user_instruction:
             human_content.append({"type": "text", "text": user_instruction})
         human_content.append(image_content)

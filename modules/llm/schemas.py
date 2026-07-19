@@ -48,7 +48,7 @@ class TranscriptionOutput(BaseModel):
             "- Page numbers — exact format: Write page numbers appearing on headers"
             " and footers "
             "(not in the main text or tables) like this example:"
-            " `<page_number>9<page_number>`.\n"
+            " `<page_number>9</page_number>`.\n"
             "- Footnotes: Format footnotes like in this example:"
             " `[^1]: My reference`.\n"
             "- Images or diagrams: Indicate their presence with a brief description"

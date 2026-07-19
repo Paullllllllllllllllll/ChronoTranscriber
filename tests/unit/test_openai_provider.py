@@ -551,3 +551,84 @@ class TestOpenAIProviderContextImage:
         human_msg = captured_messages[1]
         ctx_block = human_msg.content[1]
         assert ctx_block["image_url"].get("detail") == "high"
+
+    @pytest.mark.unit
+    async def test_context_image_detail_normalized_when_unsupported_tier(
+        self,
+    ) -> None:
+        """H2: an unsupported context detail tier ("original" on a model without
+        the original tier) must be normalized to the model default, not sent raw
+        (a raw unsupported tier 400s the request)."""
+        from modules.llm.providers.openai_provider import OpenAIProvider
+
+        with patch("modules.llm.providers.openai_provider.ChatOpenAI"):
+            # gpt-4o supports image detail but NOT the "original" tier.
+            provider = OpenAIProvider(api_key="sk-test", model="gpt-4o")
+
+        captured_messages: list[Any] = []
+
+        async def _capture(llm: Any, messages: Any, **kw: Any) -> Any:
+            captured_messages.extend(messages)
+            msg = MagicMock()
+            msg.content = "transcribed"
+            msg.response_metadata = {}
+            msg.usage_metadata = {
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "total_tokens": 150,
+            }
+            return msg
+
+        provider._ainvoke_with_retry = _capture
+
+        with patch("modules.infra.token_budget.get_token_tracker"):
+            await provider.transcribe_image_from_base64(
+                image_base64="AAAA",
+                mime_type="image/png",
+                system_prompt="Transcribe.",
+                context_image_base64="BBBB",
+                context_image_mime_type="image/png",
+                context_image_detail="original",
+            )
+
+        ctx_block = captured_messages[1].content[1]
+        # "original" is invalid for gpt-4o -> normalized to the "high" default.
+        assert ctx_block["image_url"].get("detail") == "high"
+
+    @pytest.mark.unit
+    async def test_context_image_detail_original_kept_when_supported(self) -> None:
+        """A model that supports the original tier keeps a raw "original"."""
+        from modules.llm.providers.openai_provider import OpenAIProvider
+
+        with patch("modules.llm.providers.openai_provider.ChatOpenAI"):
+            # gpt-5.4 supports the original detail tier.
+            provider = OpenAIProvider(api_key="sk-test", model="gpt-5.4")
+
+        captured_messages: list[Any] = []
+
+        async def _capture(llm: Any, messages: Any, **kw: Any) -> Any:
+            captured_messages.extend(messages)
+            msg = MagicMock()
+            msg.content = "transcribed"
+            msg.response_metadata = {}
+            msg.usage_metadata = {
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "total_tokens": 150,
+            }
+            return msg
+
+        provider._ainvoke_with_retry = _capture
+
+        with patch("modules.infra.token_budget.get_token_tracker"):
+            await provider.transcribe_image_from_base64(
+                image_base64="AAAA",
+                mime_type="image/png",
+                system_prompt="Transcribe.",
+                context_image_base64="BBBB",
+                context_image_mime_type="image/png",
+                context_image_detail="original",
+            )
+
+        ctx_block = captured_messages[1].content[1]
+        assert ctx_block["image_url"].get("detail") == "original"

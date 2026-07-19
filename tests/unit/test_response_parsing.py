@@ -132,6 +132,56 @@ class TestExtractTranscribedText:
         assert result == "This is the text."
 
     @pytest.mark.unit
+    def test_schema_object_null_transcription_returns_empty(self) -> None:
+        """M1: transcription=None must degrade to "" not the literal "None"."""
+        data = {
+            "transcription": None,
+            "no_transcribable_text": False,
+            "transcription_not_possible": False,
+        }
+        assert extract_transcribed_text(data) == ""
+
+    @pytest.mark.unit
+    def test_chat_completions_content_null_transcription_not_literal_none(self) -> None:
+        """M1: a content-string JSON with transcription:null must not yield the
+        literal "None". The helper returns "" (which degrades to the error
+        placeholder downstream), never str(None)."""
+        from modules.llm.response_parsing import _extract_from_chat_completions
+
+        data = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "transcription": None,
+                                "no_transcribable_text": False,
+                                "transcription_not_possible": False,
+                            }
+                        )
+                    }
+                }
+            ]
+        }
+        assert _extract_from_chat_completions(data, "") == ""
+        # And the public extractor never surfaces the literal "None".
+        assert extract_transcribed_text(data) != "None"
+
+    @pytest.mark.unit
+    def test_responses_output_text_null_transcription_returns_empty(self) -> None:
+        """M1: a Responses output_text JSON with transcription:null returns ""."""
+        data = {
+            "output_text": json.dumps(
+                {
+                    "transcription": None,
+                    "no_transcribable_text": False,
+                    "transcription_not_possible": False,
+                }
+            )
+        }
+        assert extract_transcribed_text(data) == ""
+
+    @pytest.mark.unit
     def test_schema_object_no_transcribable_text(self) -> None:
         """Test extraction when no_transcribable_text is True."""
         data = {
@@ -593,6 +643,28 @@ class TestStripCodeFences:
         # fence content.
         text = "Chapter I opens here.\n```\ncol1 col2\n```\nProse continues."
         assert _strip_code_fences(text) == text
+
+    @pytest.mark.unit
+    def test_fully_wrapped_json_with_inner_fence_keeps_inner(self) -> None:
+        # M3: a JSON answer fully wrapped in ```json ... ``` whose transcription
+        # string itself contains a fenced block must strip ONLY the outermost
+        # fence. Taking the last inner block would discard nearly everything.
+        text = (
+            "```json\n"
+            '{"transcription": "Here is code:\n'
+            "```python\n"
+            "x = 1\n"
+            "```\n"
+            'done"}\n'
+            "```"
+        )
+        result = _strip_code_fences(text)
+        assert result.startswith("{")
+        assert result.endswith("}")
+        assert "```python" in result
+        assert "x = 1" in result
+        # The old matches[-1] behavior would have returned just 'done"}'.
+        assert result != 'done"}'
 
 
 class TestNormalizeLlmText:

@@ -241,6 +241,24 @@ def _commit_tokens_from_exception(
     """
     provider, key_env, model = stamp if stamp else (None, None, None)
     try:
+        # A ContentQualityError carries the discarded attempt's token total
+        # directly (the call succeeded at the API level, so there is no SDK
+        # error body to mine). Commit that and stop: it is the authoritative
+        # spend for this discarded attempt.
+        discarded_total = getattr(exc, "discarded_total", None)
+        if isinstance(discarded_total, int) and discarded_total > 0:
+            from modules.infra.token_budget import get_token_tracker
+
+            get_token_tracker().add_tokens(
+                discarded_total, provider=provider, key_env=key_env, model=model
+            )
+            logger.info(
+                "[TOKEN] Recovered %s tokens from a discarded (content-quality) "
+                "attempt.",
+                f"{discarded_total:,}",
+            )
+            return
+
         usage: dict[str, Any] | None = None
 
         body = getattr(exc, "body", None)
@@ -926,14 +944,28 @@ class BaseProvider(ABC):
                 transcription_text = stripped
 
         if transcription_text and not skip_quality:
-            from modules.llm.quality import validate_content_quality
-
-            validate_content_quality(
-                transcription_text=transcription_text,
-                no_transcribable_text=False,
-                transcription_not_possible=False,
-                config=cq_config,
+            from modules.llm.quality import (
+                ContentQualityError,
+                validate_content_quality,
             )
+
+            try:
+                validate_content_quality(
+                    transcription_text=transcription_text,
+                    no_transcribable_text=False,
+                    transcription_not_possible=False,
+                    config=cq_config,
+                )
+            except ContentQualityError as exc:
+                # A content-quality failure is raised *after* the API call
+                # succeeded, so this attempt's tokens are real spend. Attach the
+                # total so _before_sleep can commit it to the daily budget when
+                # the attempt is discarded and retried. The final kept attempt
+                # is committed via _process_llm_response instead, and a kept
+                # attempt never passes through _before_sleep, so there is no
+                # double count.
+                exc.discarded_total = self._extract_total_tokens(response)
+                raise
 
     def _build_disabled_params(self) -> dict[str, Any] | None:
         """Build disabled_params dict based on model capabilities.
@@ -1265,7 +1297,16 @@ class BaseProvider(ABC):
             if raw_msg is not None:
                 meta = getattr(raw_msg, "response_metadata", {}) or {}
                 incomplete = meta.get("incomplete_details") or {}
-                if incomplete.get("reason") == "max_output_tokens":
+                # Truncation is signalled differently per provider: OpenAI
+                # Responses uses incomplete_details.reason, Anthropic uses
+                # stop_reason == "max_tokens", Google uses finish_reason ==
+                # "MAX_TOKENS". Treat all three as a truncated (unretryable)
+                # response.
+                if (
+                    incomplete.get("reason") == "max_output_tokens"
+                    or meta.get("stop_reason") == "max_tokens"
+                    or meta.get("finish_reason") == "MAX_TOKENS"
+                ):
                     usage = getattr(raw_msg, "usage_metadata", {}) or {}
                     out_tok = usage.get("output_tokens", 0)
                     out_detail = usage.get("output_token_details", {}) or {}

@@ -1674,3 +1674,151 @@ class TestBaseProviderAsyncContextManager:
                 assert p is provider
 
         asyncio.run(_check())
+
+
+class TestTruncationDetection:
+    """L4: _ainvoke_once must treat truncation across all three provider shapes.
+
+    OpenAI Responses signals it via incomplete_details.reason, Anthropic via
+    response_metadata.stop_reason == "max_tokens", Google via
+    response_metadata.finish_reason == "MAX_TOKENS".
+    """
+
+    def _make_provider(self):
+        class _ConcreteProvider(BaseProvider):
+            @property
+            def provider_name(self):
+                return "test"
+
+            def get_capabilities(self):
+                return Capabilities(model="m", family="test")
+
+            async def transcribe_image_from_base64(self, *a, **kw):
+                pass
+
+            async def close(self):
+                pass
+
+        p = _ConcreteProvider.__new__(_ConcreteProvider)
+        p._track_token_usage = MagicMock()  # type: ignore[attr-defined]
+        return p
+
+    def _make_result(self, response_metadata):
+        raw = MagicMock()
+        raw.response_metadata = response_metadata
+        raw.usage_metadata = {
+            "input_tokens": 500,
+            "output_tokens": 4096,
+            "total_tokens": 4596,
+            "output_token_details": {},
+        }
+        return {"raw": raw, "parsed": {"transcription": "x"}, "parsing_error": None}
+
+    def _run_once(self, provider, result):
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(return_value=result)
+        return asyncio.run(provider._ainvoke_once(mock_llm, ["m"], 0))
+
+    @pytest.mark.unit
+    def test_anthropic_stop_reason_max_tokens_is_truncation(self) -> None:
+        from modules.llm.providers.base import OutputTokensTruncatedError
+
+        provider = self._make_provider()
+        result = self._make_result({"stop_reason": "max_tokens"})
+        with pytest.raises(OutputTokensTruncatedError):
+            self._run_once(provider, result)
+
+    @pytest.mark.unit
+    def test_google_finish_reason_max_tokens_is_truncation(self) -> None:
+        from modules.llm.providers.base import OutputTokensTruncatedError
+
+        provider = self._make_provider()
+        result = self._make_result({"finish_reason": "MAX_TOKENS"})
+        with pytest.raises(OutputTokensTruncatedError):
+            self._run_once(provider, result)
+
+    @pytest.mark.unit
+    def test_openai_incomplete_details_still_truncation(self) -> None:
+        from modules.llm.providers.base import OutputTokensTruncatedError
+
+        provider = self._make_provider()
+        result = self._make_result(
+            {"incomplete_details": {"reason": "max_output_tokens"}}
+        )
+        with pytest.raises(OutputTokensTruncatedError):
+            self._run_once(provider, result)
+
+    @pytest.mark.unit
+    def test_normal_stop_reason_is_not_truncation(self) -> None:
+        provider = self._make_provider()
+        result = self._make_result({"stop_reason": "end_turn"})
+        # Returns the result unchanged (no raise).
+        out = self._run_once(provider, result)
+        assert out is result
+
+
+class TestContentQualityDiscardedTokens:
+    """M5: a discarded content-quality attempt must commit its token usage."""
+
+    @pytest.mark.unit
+    def test_commit_tokens_from_exception_honors_discarded_total(self) -> None:
+        from modules.llm.providers.base import _commit_tokens_from_exception
+        from modules.llm.quality import ContentQualityError
+
+        exc = ContentQualityError("truncation", "too short")
+        exc.discarded_total = 1234  # type: ignore[attr-defined]
+
+        with patch("modules.infra.token_budget.get_token_tracker") as mock_tracker:
+            add = MagicMock()
+            mock_tracker.return_value.add_tokens = add
+            _commit_tokens_from_exception(exc, ("openai", "OPENAI_API_KEY", "gpt-4o"))
+
+        add.assert_called_once()
+        args, kwargs = add.call_args
+        assert args[0] == 1234
+        assert kwargs["provider"] == "openai"
+        assert kwargs["key_env"] == "OPENAI_API_KEY"
+
+    @pytest.mark.unit
+    def test_validate_content_quality_attaches_discarded_total(self) -> None:
+        from modules.llm.quality import ContentQualityError
+
+        class _ConcreteProvider(BaseProvider):
+            @property
+            def provider_name(self):
+                return "test"
+
+            def get_capabilities(self):
+                return Capabilities(model="m", family="test")
+
+            async def transcribe_image_from_base64(self, *a, **kw):
+                pass
+
+            async def close(self):
+                pass
+
+        provider = _ConcreteProvider.__new__(_ConcreteProvider)
+        # Force content-quality validation on and a guaranteed failure.
+        provider._get_content_quality_config = MagicMock(  # type: ignore[attr-defined]
+            return_value={"enabled": True}
+        )
+        provider._extract_content = MagicMock(  # type: ignore[attr-defined]
+            return_value=("loop " * 200, None, None)
+        )
+        provider._extract_total_tokens = MagicMock(  # type: ignore[attr-defined]
+            return_value=777
+        )
+
+        def _boom(**kwargs):
+            raise ContentQualityError("hallucination_loop", "repeated")
+
+        with (
+            patch("modules.llm.quality.validate_content_quality", _boom),
+            pytest.raises(ContentQualityError) as ei,
+        ):
+            provider._validate_result_content_quality({"raw": MagicMock()})
+
+        assert getattr(ei.value, "discarded_total", None) == 777

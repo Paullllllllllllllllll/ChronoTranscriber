@@ -334,7 +334,19 @@ def get_provider(
     # per-key token accounting. Standard providers resolve it via the
     # api_keys_config mapping; the custom endpoint already set it above.
     if "key_env" not in kwargs:
-        kwargs["key_env"] = resolve_api_key_env_var(provider_type)
+        key_env = resolve_api_key_env_var(provider_type)
+        # Mirror the OpenRouter -> OPENAI_API_KEY fallback in
+        # get_api_key_for_provider: when OpenRouter's own key env var is unset
+        # but OPENAI_API_KEY supplied the key, stamp the env var that actually
+        # held it so per-key token accounting attributes usage correctly.
+        if (
+            provider_type == ProviderType.OPENROUTER
+            and api_key is None
+            and not (key_env and os.environ.get(key_env))
+            and os.environ.get("OPENAI_API_KEY")
+        ):
+            key_env = "OPENAI_API_KEY"
+        kwargs["key_env"] = key_env
 
     # Import and instantiate provider
     provider_class = _import_provider_class(provider_type)

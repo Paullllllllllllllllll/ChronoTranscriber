@@ -119,14 +119,22 @@ class OpenRouterProvider(BaseProvider):
         # Build disabled_params for models that don't support certain features
         disabled_params = self._build_disabled_params()
 
-        # Build model kwargs - include all params, LangChain will filter via
-        # disabled_params
-        model_kwargs: dict[str, Any] = {
-            "temperature": temperature,
-            "top_p": top_p,
-            "frequency_penalty": frequency_penalty,
-            "presence_penalty": presence_penalty,
-        }
+        # Gate each sampler kwarg on the corresponding capability flag, mirroring
+        # OpenAIProvider. langchain-openai's disabled_params only filters
+        # bind-time kwargs; every non-None constructor value still lands in
+        # _default_params and is sent on every request. Reasoning models
+        # (Gemini 3, o-series, DeepSeek R1, etc.) reject temperature/top_p/
+        # penalties with an unretryable 400, so omit the parameter entirely
+        # rather than relying on disabled_params.
+        model_kwargs: dict[str, Any] = {}
+        if self._capabilities.supports_sampler_controls:
+            model_kwargs["temperature"] = temperature
+        if self._capabilities.supports_top_p:
+            model_kwargs["top_p"] = top_p
+        if self._capabilities.supports_frequency_penalty:
+            model_kwargs["frequency_penalty"] = frequency_penalty
+        if self._capabilities.supports_presence_penalty:
+            model_kwargs["presence_penalty"] = presence_penalty
 
         # Apply OpenRouter unified reasoning controls.
         # OpenRouter accepts a top-level `reasoning` object and will route/translate
@@ -294,7 +302,33 @@ class OpenRouterProvider(BaseProvider):
         else:
             system_message = SystemMessage(content=system_prompt)
 
+        # Assemble content blocks: optional context image, then page image,
+        # matching the OpenAI/custom ordering (context instruction + context
+        # image first, then the page instruction and page image).
         human_content: list[dict[str, Any]] = []
+        if context_image_base64 and context_image_mime_type:
+            ctx_data_url = self.create_data_url(
+                context_image_base64, context_image_mime_type
+            )
+            ctx_block: dict[str, Any] = {
+                "type": "image_url",
+                "image_url": {"url": ctx_data_url},
+            }
+            ctx_det = context_image_detail
+            if ctx_det:
+                ctx_det = ctx_det.lower().strip()
+                if ctx_det not in ("low", "high"):
+                    ctx_det = None
+            if ctx_det is None and caps.supports_image_detail:
+                ctx_det = caps.default_image_detail
+            if ctx_det and caps.supports_image_detail and ctx_det in ("low", "high"):
+                ctx_block["image_url"]["detail"] = ctx_det
+            if context_image_instruction:
+                human_content.append(
+                    {"type": "text", "text": context_image_instruction}
+                )
+            human_content.append(ctx_block)
+
         if user_instruction:
             human_content.append({"type": "text", "text": user_instruction})
         human_content.append(image_content)

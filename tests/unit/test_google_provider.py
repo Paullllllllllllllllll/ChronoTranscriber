@@ -168,8 +168,8 @@ class TestGoogleProviderInit:
         assert provider.reasoning_config == {"effort": "high"}
 
     @pytest.mark.unit
-    def test_thinking_level_high_for_medium_effort(self) -> None:
-        """effort='medium' maps to thinking_level='high'."""
+    def test_thinking_level_medium_for_medium_effort(self) -> None:
+        """effort='medium' maps to thinking_level='medium' (Gemini 3+ only)."""
         from modules.llm.providers.google_provider import GoogleProvider
 
         captured: dict[str, Any] = {}
@@ -182,7 +182,7 @@ class TestGoogleProviderInit:
         ):
             GoogleProvider(
                 api_key="AIza-test",
-                model="gemini-2.5-pro",
+                model="gemini-3-pro",
                 reasoning_config={"effort": "medium"},
             )
 
@@ -190,7 +190,7 @@ class TestGoogleProviderInit:
 
     @pytest.mark.unit
     def test_thinking_level_high_for_high_effort(self) -> None:
-        """effort='high' maps to thinking_level='high'."""
+        """effort='high' maps to thinking_level='high' (Gemini 3+ only)."""
         from modules.llm.providers.google_provider import GoogleProvider
 
         captured: dict[str, Any] = {}
@@ -203,7 +203,7 @@ class TestGoogleProviderInit:
         ):
             GoogleProvider(
                 api_key="AIza-test",
-                model="gemini-2.5-pro",
+                model="gemini-3-pro",
                 reasoning_config={"effort": "high"},
             )
 
@@ -211,7 +211,7 @@ class TestGoogleProviderInit:
 
     @pytest.mark.unit
     def test_thinking_level_low_for_low_effort(self) -> None:
-        """effort='low' maps to thinking_level='low'."""
+        """effort='low' maps to thinking_level='low' (Gemini 3+ only)."""
         from modules.llm.providers.google_provider import GoogleProvider
 
         captured: dict[str, Any] = {}
@@ -224,7 +224,7 @@ class TestGoogleProviderInit:
         ):
             GoogleProvider(
                 api_key="AIza-test",
-                model="gemini-2.5-pro",
+                model="gemini-3-pro",
                 reasoning_config={"effort": "low"},
             )
 
@@ -272,6 +272,50 @@ class TestGoogleProviderInit:
         assert "thinking_level" not in captured
 
     @pytest.mark.unit
+    def test_thinking_level_not_set_for_gemini_2x(self) -> None:
+        """H3: Gemini 2.x rejects thinking_level (it uses thinking_budget), so
+        the level must never be sent even though the model supports reasoning
+        effort."""
+        from modules.llm.providers.google_provider import GoogleProvider
+
+        captured: dict[str, Any] = {}
+
+        with (
+            patch(
+                "modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+        ):
+            GoogleProvider(
+                api_key="AIza-test",
+                model="gemini-2.5-pro",  # supports_reasoning_effort, family gemini-2.x
+                reasoning_config={"effort": "high"},
+            )
+
+        assert "thinking_level" not in captured
+
+    @pytest.mark.unit
+    def test_thinking_level_not_set_for_unknown_effort(self) -> None:
+        """L1: an unknown/"none" effort must not silently map to "medium"."""
+        from modules.llm.providers.google_provider import GoogleProvider
+
+        captured: dict[str, Any] = {}
+
+        with (
+            patch(
+                "modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
+                side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+            ),
+        ):
+            GoogleProvider(
+                api_key="AIza-test",
+                model="gemini-3-pro",
+                reasoning_config={"effort": "none"},
+            )
+
+        assert "thinking_level" not in captured
+
+    @pytest.mark.unit
     def test_max_tokens_capped_at_model_limit(self) -> None:
         """max_tokens is capped at model's max_output_tokens."""
         from modules.llm.providers.google_provider import GoogleProvider
@@ -309,3 +353,55 @@ class TestGoogleProviderInit:
         caps = provider.get_capabilities()
         assert isinstance(caps, Capabilities)
         assert caps.provider == "google"
+
+
+class TestGoogleProviderContextImage:
+    """M2: Google must actually attach the context image content block."""
+
+    @pytest.mark.unit
+    async def test_context_image_block_is_appended(self) -> None:
+        from modules.llm.providers.google_provider import GoogleProvider
+
+        with patch("modules.llm.providers.google_provider.ChatGoogleGenerativeAI"):
+            provider = GoogleProvider(api_key="AIza-test", model="gemini-1.5-pro")
+
+        captured_messages: list[Any] = []
+
+        async def _capture(llm: Any, messages: Any, **kw: Any) -> Any:
+            captured_messages.extend(messages)
+            msg = MagicMock()
+            msg.content = "transcribed"
+            msg.response_metadata = {}
+            msg.usage_metadata = {
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "total_tokens": 150,
+            }
+            return msg
+
+        provider._ainvoke_with_retry = _capture
+
+        with patch("modules.infra.token_budget.get_token_tracker"):
+            await provider.transcribe_image_from_base64(
+                image_base64="pageimg",
+                mime_type="image/png",
+                system_prompt="Transcribe.",
+                context_image_base64="ctximg",
+                context_image_mime_type="image/jpeg",
+                context_image_instruction="Reference page:",
+            )
+
+        human = captured_messages[1]
+        image_urls = [
+            b["image_url"]
+            for b in human.content
+            if isinstance(b, dict) and b.get("type") == "image_url"
+        ]
+        assert any("ctximg" in u for u in image_urls)
+        assert any("pageimg" in u for u in image_urls)
+        texts = [
+            b["text"]
+            for b in human.content
+            if isinstance(b, dict) and b.get("type") == "text"
+        ]
+        assert "Reference page:" in texts

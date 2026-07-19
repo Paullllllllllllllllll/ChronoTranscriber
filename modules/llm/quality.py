@@ -38,6 +38,9 @@ class ContentQualityError(Exception):
     def __init__(self, failure_type: str, detail: str) -> None:
         self.failure_type = failure_type
         self.detail = detail
+        # Token total of the discarded attempt, attached by the provider before
+        # the exception is retried so the daily budget can be reconciled (M5).
+        self.discarded_total: int = 0
         super().__init__(f"Content quality check failed ({failure_type}): {detail}")
 
 

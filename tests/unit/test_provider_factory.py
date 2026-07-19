@@ -349,6 +349,46 @@ class TestGetProviderConfigDefaults:
         assert captured["temperature"] == 0.5
 
 
+class TestOpenRouterKeyEnvStamp:
+    """L5: when OpenRouter falls back to OPENAI_API_KEY, the token-accounting
+    stamp must name OPENAI_API_KEY, not OPENROUTER_API_KEY."""
+
+    @staticmethod
+    def _capture_kwargs(env: dict[str, str]) -> dict[str, Any]:
+        captured: dict[str, Any] = {}
+
+        class _FakeProvider:
+            def __init__(self, **kwargs: Any) -> None:
+                captured.update(kwargs)
+
+        fake = MagicMock()
+        fake.get_api_keys_config.return_value = {}
+        with (
+            patch("modules.config.service.get_config_service", return_value=fake),
+            patch(
+                "modules.llm.providers.factory._import_provider_class",
+                return_value=_FakeProvider,
+            ),
+            patch.dict(os.environ, env, clear=True),
+        ):
+            get_provider(provider="openrouter", model="openai/gpt-4o")
+        return captured
+
+    @pytest.mark.unit
+    def test_fallback_stamps_openai_api_key(self) -> None:
+        # Only OPENAI_API_KEY set -> OpenRouter fallback fires.
+        captured = self._capture_kwargs({"OPENAI_API_KEY": "sk-openai"})
+        assert captured["key_env"] == "OPENAI_API_KEY"
+
+    @pytest.mark.unit
+    def test_own_key_stamps_openrouter_api_key(self) -> None:
+        # OPENROUTER_API_KEY present -> no fallback, stamp its own env var.
+        captured = self._capture_kwargs(
+            {"OPENROUTER_API_KEY": "sk-or", "OPENAI_API_KEY": "sk-openai"}
+        )
+        assert captured["key_env"] == "OPENROUTER_API_KEY"
+
+
 class TestProviderTypeIntegration:
     """Integration tests for provider type handling."""
 

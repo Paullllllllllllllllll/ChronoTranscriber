@@ -84,20 +84,26 @@ class GoogleProvider(BaseProvider):
             "top_k": top_k,
         }
 
-        # Apply thinking mode for Gemini 2.5+ models that support it
-        # Maps reasoning_config.effort to Google's thinking_level parameter
-        # Gemini 3+: minimal, low, medium, high
-        # Gemini 2.5: low, high
+        # Apply thinking mode by mapping reasoning_config.effort to Google's
+        # thinking_level parameter.
+        #
+        # thinking_level is a Gemini 3+ control (minimal, low, medium, high).
+        # Gemini 2.x models reject it ("Thinking level is not supported for this
+        # model.") — they use the separate thinking_budget control instead — so
+        # thinking_level must never be sent to a gemini-2.x family. Only known
+        # effort values map to a level; unknown/"none" efforts leave thinking
+        # under the model's adaptive default rather than silently forcing medium.
         if self._capabilities.supports_reasoning_effort and reasoning_config:
             effort = reasoning_config.get("effort")
-            if effort:
-                effort_to_level = {
-                    "minimal": "minimal",
-                    "low": "low",
-                    "medium": "medium",
-                    "high": "high",
-                }
-                llm_kwargs["thinking_level"] = effort_to_level.get(effort, "medium")
+            family = self._capabilities.family or ""
+            effort_to_level = {
+                "minimal": "minimal",
+                "low": "low",
+                "medium": "medium",
+                "high": "high",
+            }
+            if effort in effort_to_level and not family.startswith("gemini-2"):
+                llm_kwargs["thinking_level"] = effort_to_level[effort]
                 logger.info(
                     f"Using thinking_level={llm_kwargs['thinking_level']}"
                     f" for model {model}"
@@ -161,7 +167,20 @@ class GoogleProvider(BaseProvider):
             "image_url": data_url,
         }
 
+        # Assemble content blocks: optional context image first, then the page
+        # image, matching the OpenAI/custom ordering. Reuse Gemini's own
+        # image_url/data-URL format for the context image.
         human_content: list[dict[str, Any]] = []
+        if context_image_base64 and context_image_mime_type:
+            ctx_data_url = self.create_data_url(
+                context_image_base64, context_image_mime_type
+            )
+            if context_image_instruction:
+                human_content.append(
+                    {"type": "text", "text": context_image_instruction}
+                )
+            human_content.append({"type": "image_url", "image_url": ctx_data_url})
+
         if user_instruction:
             human_content.append({"type": "text", "text": user_instruction})
         human_content.append(image_content)

@@ -36,6 +36,7 @@ from modules.batch.results import (  # noqa: F401
     _finalize_batch_output,
     _process_non_openai_batch,
     _sort_transcriptions,
+    append_finalized_marker,
 )
 
 # Re-export status submodule functions for backward compatibility
@@ -69,16 +70,21 @@ class BatchCheckStats:
 
     Each batched temp JSONL counts once: ``finalized`` when its output file
     was written, ``failed`` when any of its batches reached a terminal
-    failure (or the batch list could not be retrieved), ``pending``
-    otherwise (still running or retryable download problem).
+    failure (or the batch list could not be retrieved), ``skipped`` when the
+    file was already finalized in a previous run (a retained temp JSONL bearing
+    a ``finalized`` marker), ``pending`` otherwise (still running or retryable
+    download problem).
 
     ``had_failure`` preserves the previous boolean return contract: exit
     non-zero when any batch reached a terminal failure (CLI agent contract).
+    ``skipped`` defaults to 0 so existing consumers that print only
+    finalized/pending/failed stay correct.
     """
 
     finalized: int = 0
     pending: int = 0
     failed: int = 0
+    skipped: int = 0
 
     @property
     def had_failure(self) -> bool:
@@ -88,6 +94,7 @@ class BatchCheckStats:
         self.finalized += other.finalized
         self.pending += other.pending
         self.failed += other.failed
+        self.skipped += other.skipped
 
 
 def process_all_batches(
@@ -160,6 +167,19 @@ def process_all_batches(
 
         # --- 1. Parse temp file metadata ---
         meta = _parse_temp_file_metadata(temp_file)
+
+        # Skip files already finalized in a previous run. With
+        # retain_temporary_jsonl (the shipped default), the temp JSONL survives
+        # finalization; without this guard every run re-downloads the batch
+        # outputs and rewrites the final .txt, silently reverting repair edits
+        # and — once provider outputs expire — reporting finalized jobs as
+        # pending forever. Finalization writes a ``finalized`` batch_session
+        # marker that _parse_temp_file_metadata surfaces here.
+        if "finalized" in meta["batch_session_statuses"]:
+            print_info(f"{temp_file.name} already finalized; skipping.")
+            stats.skipped += 1
+            continue
+
         batch_ids: set[str] = meta["batch_ids"]
         batch_provider: str = meta["batch_provider"]
         batch_tracking_records: list[dict[str, Any]] = meta["batch_tracking_records"]
@@ -303,6 +323,10 @@ def process_all_batches(
                 postprocessing_config,
                 output_format,
             )
+            # Mark the retained temp JSONL finalized (after the output write) so
+            # a later run skips it instead of re-finalizing and clobbering repair
+            # edits. No-op when _finalize_batch_output deleted the temp file.
+            append_finalized_marker(temp_file)
             stats.finalized += 1
         else:
             # Download/extraction problem with completed batches: retryable,

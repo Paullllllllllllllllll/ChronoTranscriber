@@ -159,7 +159,13 @@ def detect_capabilities(model_name: str) -> Capabilities:
                 supports_sampler_controls=False,
                 supports_top_p=False,
             )
-            if "gpt-5.4" in m or "gpt-5.5" in m or "gpt-5.6" in m:
+            # The canonical registry withholds the image_detail "original"
+            # (no-patch-cap) tier from gpt-5.5-pro while granting it to the
+            # other 5.4/5.5/5.6 families; mirror that so OpenRouter routing of
+            # gpt-5.5-pro stays aligned with the direct-provider profile.
+            if ("gpt-5.4" in m or "gpt-5.5" in m or "gpt-5.6" in m) and (
+                "gpt-5.5-pro" not in m
+            ):
                 or_overrides["supports_image_detail_original"] = True
             if "gpt-5.3" in m:
                 or_overrides["is_reasoning_model"] = False

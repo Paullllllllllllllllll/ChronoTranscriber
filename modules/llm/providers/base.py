@@ -122,19 +122,28 @@ def load_min_input_tokens() -> int:
 def _classify_status(exc: BaseException) -> tuple[bool, bool]:
     """Classify an exception by its HTTP status code (authoritative when present).
 
-    Reads ``status_code`` first, then ``status``. Returns
+    Walks the exception's ``__cause__``/``__context__`` chain (bounded and
+    cycle-safe, mirroring :func:`_is_connection_error`) and, at each level,
+    reads ``status_code``, then ``status``, then ``code``, accepting only
+    integer values in the HTTP range 100-599. This reaches provider SDK errors
+    that carry the code on a wrapped cause: ``google.genai`` ``APIError``
+    exposes an int ``.code`` (its ``.status`` is a STRING), and
+    ``langchain_google_genai`` wraps 4xx/5xx in a ``ChatGoogleGenerativeAIError``
+    that has no status attributes at all but whose ``__cause__`` does. Returns
     ``(is_rate_limit, is_server_error)``: a 429 is rate-limit-retryable and a
-    5xx is server-error-retryable. Both default to False when no numeric status
-    is present.
+    5xx is server-error-retryable. Both default to False when no numeric HTTP
+    status is present anywhere in the chain.
     """
-    status = getattr(exc, "status_code", None)
-    if not isinstance(status, int):
-        status = getattr(exc, "status", None)
-    if not isinstance(status, int):
-        status = None
-    is_rate_limit = status == 429
-    is_server_error = status is not None and 500 <= status <= 599
-    return is_rate_limit, is_server_error
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        for attr in ("status_code", "status", "code"):
+            value = getattr(current, attr, None)
+            if isinstance(value, int) and 100 <= value <= 599:
+                return value == 429, 500 <= value <= 599
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return False, False
 
 
 def _is_connection_error(exc: BaseException) -> bool:

@@ -618,7 +618,6 @@ def process_batch_transcription(
         )
 
         batch_request_lines: list[str] = []
-        metadata_records: list[dict[str, Any]] = []
 
         for idx, image_file in enumerate(chunk_images):
             try:
@@ -654,7 +653,6 @@ def process_batch_transcription(
                         use_hierarchical_context=use_hierarchical_context,
                     )
                 batch_request_lines.append(request_line)
-                metadata_records.append(metadata_record)
                 all_metadata_records.append(metadata_record)
             except Exception as exc:
                 item_name = (
@@ -669,9 +667,8 @@ def process_batch_transcription(
 
         current_lines: list[str] = []
         current_size = 0
-        current_metadata: list[dict[str, Any]] = []
 
-        for i, line in enumerate(batch_request_lines):
+        for line in batch_request_lines:
             line_bytes = len(line.encode("utf-8"))
 
             if current_size + line_bytes > max_batch_size and current_lines:
@@ -686,12 +683,9 @@ def process_batch_transcription(
                 batch_index += 1
                 current_lines = []
                 current_size = 0
-                current_metadata = []
 
             current_lines.append(line)
             current_size += line_bytes
-            if i < len(metadata_records):
-                current_metadata.append(metadata_records[i])
 
         if current_lines:
             batch_file = Path(f"batch_requests_part_{batch_index}.jsonl")

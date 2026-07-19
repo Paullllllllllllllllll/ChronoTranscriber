@@ -1542,13 +1542,21 @@ async def check_and_wait_for_token_limit(
     print_info("Press Ctrl+C to cancel and exit.")
 
     try:
+        # Poll once a second so cancellation (Ctrl+C) and the reset check stay
+        # responsive, but only re-read the YAML-backed config every ~30 s: each
+        # config re-read builds a fresh ConfigLoader over two YAML files, and a
+        # daily-reset wait can last hours, so doing it every second churned the
+        # filesystem needlessly.
         sleep_interval = 1
+        config_refresh_interval = 30
         elapsed = 0
+        since_config_refresh = config_refresh_interval  # refresh on the first pass
 
         while elapsed < seconds_until_reset:
             interval = min(sleep_interval, max(0, seconds_until_reset - elapsed))
             await asyncio.sleep(interval)
             elapsed += interval
+            since_config_refresh += interval
 
             # Forced ledger refresh each poll so another tool's usage or its
             # midnight reset is observed while we wait. Runs off the event loop
@@ -1560,23 +1568,27 @@ async def check_and_wait_for_token_limit(
                 except Exception as exc:
                     logger.debug("Shared ledger refresh during wait failed: %s", exc)
 
-            # Live re-read of the configured daily limit and budget policy: a
-            # user raising daily_token_limit.daily_tokens (or changing scope /
-            # per_key_pool_caps) mid-wait takes effect without a restart. A read
-            # failure keeps the current values (debug-logged).
-            try:
-                new_limit = _read_configured_daily_limit()
-                if new_limit is not None:
-                    token_tracker.set_daily_limit(new_limit)
-            except Exception as exc:
-                logger.debug("Could not refresh daily token limit during wait: %s", exc)
-            _refresh_token_policy(token_tracker)
+            # Live re-read of the configured daily limit and budget policy, at
+            # most every ~30 s: a user raising daily_token_limit.daily_tokens (or
+            # changing scope / per_key_pool_caps) mid-wait takes effect without a
+            # restart. A read failure keeps the current values (debug-logged).
+            if since_config_refresh >= config_refresh_interval:
+                since_config_refresh = 0
+                try:
+                    new_limit = _read_configured_daily_limit()
+                    if new_limit is not None:
+                        token_tracker.set_daily_limit(new_limit)
+                except Exception as exc:
+                    logger.debug(
+                        "Could not refresh daily token limit during wait: %s", exc
+                    )
+                _refresh_token_policy(token_tracker)
 
-            # Re-resolve the OpenAI key mapping fresh so a mid-wait remap to a
-            # second key is at least surfaced (the provider caches its key, so a
-            # restart is needed to actually switch buckets).
-            if key_env:
-                _reresolve_openai_key_env(token_tracker, key_env)
+                # Re-resolve the OpenAI key mapping fresh so a mid-wait remap to a
+                # second key is at least surfaced (the provider caches its key, so
+                # a restart is needed to actually switch buckets).
+                if key_env:
+                    _reresolve_openai_key_env(token_tracker, key_env)
 
             if not _still_blocked():
                 logger.info("Token limit has been reset. Resuming processing.")

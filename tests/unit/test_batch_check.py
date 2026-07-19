@@ -92,6 +92,77 @@ def test_process_all_batches_routes_non_openai_provider(
     assert kwargs["batch_ids"] == {"batch_123"}
 
 
+@pytest.mark.unit
+def test_process_all_batches_skips_finalized_file(
+    monkeypatch: pytest.MonkeyPatch, temp_dir: Path
+) -> None:
+    """A temp JSONL bearing a ``finalized`` marker is skipped, not re-finalized.
+
+    Without this, a retained temp JSONL (the shipped default) is re-downloaded
+    and re-finalized on every run, reverting repair edits and eventually
+    reporting the job as pending forever.
+    """
+    root = temp_dir / "root"
+    root.mkdir()
+
+    lines = [
+        {"batch_session": {"status": "submitted", "provider": "anthropic"}},
+        {"batch_tracking": {"batch_id": "batch_1", "provider": "anthropic"}},
+        {"batch_session": {"status": "finalized"}},
+    ]
+    (root / "done.jsonl").write_text(
+        "\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(batch_check, "print_info", MagicMock())
+    monkeypatch.setattr(batch_check, "print_warning", MagicMock())
+    monkeypatch.setattr(batch_check, "print_error", MagicMock())
+    monkeypatch.setattr(batch_check, "print_success", MagicMock())
+    monkeypatch.setattr(batch_check, "display_batch_summary", MagicMock())
+    monkeypatch.setattr(batch_check, "list_all_batches", MagicMock(return_value=[]))
+    monkeypatch.setattr(batch_check, "supports_batch", MagicMock(return_value=True))
+
+    process_non_openai = MagicMock()
+    monkeypatch.setattr(batch_check, "_process_non_openai_batch", process_non_openai)
+
+    stats = batch_check.process_all_batches(
+        root_folder=root,
+        processing_settings={"retain_temporary_jsonl": True},
+        client=MagicMock(),
+        postprocessing_config=None,
+    )
+
+    process_non_openai.assert_not_called()
+    assert stats.skipped == 1
+    assert stats.finalized == 0
+    assert stats.pending == 0
+    assert stats.failed == 0
+    assert stats.had_failure is False
+
+
+@pytest.mark.unit
+def test_append_finalized_marker_roundtrips(temp_dir: Path) -> None:
+    """append_finalized_marker writes a marker that the parser surfaces."""
+    temp_file = temp_dir / "job.jsonl"
+    temp_file.write_text(
+        json.dumps({"batch_session": {"status": "submitted"}}) + "\n",
+        encoding="utf-8",
+    )
+
+    batch_check.append_finalized_marker(temp_file)
+
+    meta = batch_check._parse_temp_file_metadata(temp_file)
+    assert "finalized" in meta["batch_session_statuses"]
+
+
+@pytest.mark.unit
+def test_append_finalized_marker_noop_on_missing_file(temp_dir: Path) -> None:
+    """The marker is not written (nor the file resurrected) when it is absent."""
+    missing = temp_dir / "gone.jsonl"
+    batch_check.append_finalized_marker(missing)
+    assert not missing.exists()
+
+
 class TestStatusSubmodule:
     """Tests for functions from the status submodule."""
 

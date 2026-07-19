@@ -446,6 +446,78 @@ class TestBackupFileExtensions:
         assert ".bak." in backup.name
 
 
+class TestBlankRepairGuard:
+    """Item 5: an empty re-transcription must NOT overwrite a failure
+    placeholder; the write-back guard ``(text or "").strip()`` prevents a blank
+    line (cause "ok") from being miscounted as repaired.
+
+    The guard itself is inline in the large ``_repair_sync_mode`` /
+    ``_repair_batch_mode`` async flows; these tests lock the contract it relies
+    on using the real, importable helpers.
+    """
+
+    @pytest.mark.unit
+    def test_empty_text_formats_to_blank_line_counted_ok(self) -> None:
+        from modules.batch.repair import _count_unrepaired_lines
+        from modules.llm.response_parsing import (
+            detect_transcription_cause,
+            format_page_line,
+        )
+
+        # The hazard: an empty re-transcription formats to "" whose cause is "ok".
+        assert format_page_line("", 1, "p1.jpg") == ""
+        assert detect_transcription_cause("") == "ok"
+        # So a blanked targeted line would be (wrongly) counted as repaired.
+        assert _count_unrepaired_lines([""], [0]) == 0
+
+    @pytest.mark.unit
+    def test_preserved_placeholder_counts_as_unrepaired(self) -> None:
+        from modules.batch.repair import _count_unrepaired_lines
+        from modules.llm.response_parsing import format_page_line
+
+        # The fix leaves the placeholder untouched, keeping it counted failed.
+        placeholder = format_page_line("[transcription error: p1.jpg]", 1, "p1.jpg")
+        assert _count_unrepaired_lines([placeholder], [0]) == 1
+
+    @pytest.mark.unit
+    def test_guard_predicate_rejects_blank_texts(self) -> None:
+        # The exact predicate applied in both write-back loops.
+        for blank in ("", "   ", "\n", None):
+            assert not (blank or "").strip()
+        for real in ("text", "  x  "):
+            assert (real or "").strip()
+
+
+class TestSubsetIntersectionContract:
+    """Item 6: interactive subset selection must intersect the chosen indices
+    with the detected failures (as the CLI ``--indices`` path already does), so
+    a typo on a healthy line is not repaired and miscounted as success.
+
+    The intersection is inline in the interactive ``main()`` flow; this locks
+    the predicate contract.
+    """
+
+    @pytest.mark.unit
+    def test_intersection_drops_non_failure_and_out_of_range(self) -> None:
+        detected_failures = {1, 3, 5}
+        final_lines = ["a"] * 10
+        chosen = [1, 2, 5, 99]
+        result = [
+            i for i in chosen if i in detected_failures and 0 <= i < len(final_lines)
+        ]
+        assert result == [1, 5]
+
+    @pytest.mark.unit
+    def test_intersection_empty_when_no_overlap(self) -> None:
+        detected_failures = {1, 3}
+        final_lines = ["a"] * 5
+        chosen = [0, 2, 4]
+        result = [
+            i for i in chosen if i in detected_failures and 0 <= i < len(final_lines)
+        ]
+        assert result == []
+
+
 class TestCorrelateRepairTargets:
     """B7: repair results must correlate to targets by custom_id index,
     not by fragile positional zip, so a skipped (failed-to-encode) metadata

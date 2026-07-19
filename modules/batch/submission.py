@@ -301,7 +301,10 @@ async def submit_batch(
             e,
         )
 
-    print_success(f"Batch submitted for '{source_name}' in {len(handles)} part(s).")
+    print_success(
+        f"Batch submitted for '{source_name}' in {len(handles)} part(s): "
+        f"{', '.join(h.batch_id for h in handles)}"
+    )
     print_info(
         "The batch will be processed asynchronously."
         " Use 'check_batches.py' to monitor status."

@@ -703,14 +703,12 @@ async def _repair_sync_mode(
         # back, so the placeholders remain. Report them as failed (not zero) so
         # the caller does not declare success over an untouched file.
         print_warning(
-            f"[WARN] No repair targets could be resolved for '{job.identifier}';"
+            f"No repair targets could be resolved for '{job.identifier}';"
             f" {len(failure_indices)} line(s) left unrepaired."
         )
         return (0, len(failure_indices))
 
-    print_info(
-        f"[INFO] Synchronous repair of {len(targets)} page(s) for '{job.identifier}'."
-    )
+    print_info(f"Synchronous repair of {len(targets)} page(s) for '{job.identifier}'.")
 
     async def worker(
         target: RepairTarget, transcriber: Any
@@ -755,7 +753,7 @@ async def _repair_sync_mode(
     env_var = resolve_api_key_env_var(provider_type)
     if env_var and not os.getenv(env_var):
         print_error(
-            f"[ERROR] {env_var} is required for synchronous repair with provider"
+            f"{env_var} is required for synchronous repair with provider"
             f" '{provider_type.value}'. Aborting."
         )
         return (0, len(targets))
@@ -847,7 +845,7 @@ async def _repair_sync_mode(
 
             made_progress = len(deferred) < len(remaining)
             print_warning(
-                f"[WARN] Daily token budget reached; {len(deferred)} repair "
+                f"Daily token budget reached; {len(deferred)} repair "
                 f"page(s) deferred. Waiting for daily reset..."
             )
             # Reservation-aware: admission control defers pages on a per-page
@@ -858,7 +856,7 @@ async def _repair_sync_mode(
             if not await check_and_wait_for_token_limit(
                 conc, reservation_aware=True, stamp=repair_stamp
             ):
-                print_info("[INFO] Wait cancelled; remaining pages left unrepaired.")
+                print_info("Wait cancelled; remaining pages left unrepaired.")
                 break
 
             # Safeguard: if a full day's reset yields no progress twice running, a
@@ -867,7 +865,7 @@ async def _repair_sync_mode(
                 stalled_resets += 1
                 if stalled_resets >= 2:
                     print_warning(
-                        "[WARN] A single page appears to exceed the entire daily "
+                        "A single page appears to exceed the entire daily "
                         "token budget; stopping. Raise daily_tokens to repair the "
                         "remaining pages."
                     )
@@ -883,7 +881,11 @@ async def _repair_sync_mode(
     for line_index, text, _raw in results:
         if 0 <= line_index < len(final_lines):
             t = target_by_line.get(line_index)
-            if t:
+            # Only patch when the re-transcription produced non-empty text: an
+            # empty string formats to an empty line (cause "ok"), which would
+            # replace the failure placeholder and be miscounted as repaired.
+            # Leaving the placeholder keeps it correctly counted as still-failed.
+            if t and (text or "").strip():
                 pn = (
                     t.page_number
                     if isinstance(t.page_number, int)
@@ -906,12 +908,12 @@ async def _repair_sync_mode(
     repaired = len(failure_indices) - failed
     if failed == 0:
         print_success(
-            f"[SUCCESS] Synchronous repair complete for '{job.identifier}'. "
+            f"Synchronous repair complete for '{job.identifier}'. "
             f"Backup written to: {backup.name}"
         )
     else:
         print_warning(
-            f"[WARN] Synchronous repair for '{job.identifier}' left {failed} of "
+            f"Synchronous repair for '{job.identifier}' left {failed} of "
             f"{len(failure_indices)} line(s) unrepaired. "
             f"Backup written to: {backup.name}"
         )
@@ -927,6 +929,7 @@ def _await_batches_blocking(
     start = time.time()
     status_map: dict[str, str] = {}
     terminal = {"completed", "failed", "expired", "cancelled"}
+    last_status_print = 0.0
 
     while True:
         all_terminal = True
@@ -944,8 +947,23 @@ def _await_batches_blocking(
         if all_terminal:
             return True, status_map
 
-        if time.time() - start > timeout_seconds:
+        elapsed = time.time() - start
+        if elapsed > timeout_seconds:
             return False, status_map
+
+        # Periodic progress so an interactive user is not left staring at a
+        # silent terminal during the up-to-2 h wait: one compact status-count
+        # line roughly every 60 s.
+        if elapsed - last_status_print >= 60.0:
+            last_status_print = elapsed
+            counts: dict[str, int] = {}
+            for st in status_map.values():
+                key = st.split(":", 1)[0].strip() or "unknown"
+                counts[key] = counts.get(key, 0) + 1
+            summary = ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+            print_info(
+                f"Repair batches still running ({int(elapsed)}s elapsed): {summary}"
+            )
 
         time.sleep(max(1.0, poll_seconds))
 
@@ -1034,7 +1052,7 @@ async def _repair_batch_mode(
         # them as failed so the caller does not declare success over an
         # untouched file.
         print_warning(
-            f"[WARN] No repair targets could be resolved for '{job.identifier}';"
+            f"No repair targets could be resolved for '{job.identifier}';"
             f" {len(failure_indices)} line(s) left unrepaired."
         )
         return (0, len(failure_indices))
@@ -1060,13 +1078,13 @@ async def _repair_batch_mode(
 
     if provider_type != ProviderType.OPENAI:
         print_error(
-            f"[ERROR] Batch repair is only supported for the OpenAI provider;"
+            f"Batch repair is only supported for the OpenAI provider;"
             f" configured provider is '{provider_type.value}'. Re-run repair in"
             f" synchronous mode instead."
         )
         return (0, len(targets))
 
-    print_info(f"[INFO] Batch repair of {len(targets)} page(s) for '{job.identifier}'.")
+    print_info(f"Batch repair of {len(targets)} page(s) for '{job.identifier}'.")
 
     from modules.batch import requests as batching
 
@@ -1081,7 +1099,7 @@ async def _repair_batch_mode(
         )
     except Exception as e:
         logger.exception("Error submitting repair batch: %s", e)
-        print_error("[ERROR] Failed to submit repair batch.")
+        print_error("Failed to submit repair batch.")
         return (0, len(targets))
 
     # Persist metadata and batch tracking in repair JSONL
@@ -1108,14 +1126,29 @@ async def _repair_batch_mode(
             pass
 
     if not batch_ids:
-        print_error("[ERROR] No batch IDs returned for repair submission.")
+        print_error("No batch IDs returned for repair submission.")
         return (0, len(targets))
 
     client = OpenAI()
-    print_info("[INFO] Waiting for repair batches to complete...")
-    _ = await asyncio.to_thread(
+    print_info("Waiting for repair batches to complete...")
+    all_terminal, status_map = await asyncio.to_thread(
         _await_batches_blocking, client, batch_ids, 10.0, 7200.0
     )
+    if not all_terminal:
+        terminal_states = {"completed", "failed", "expired", "cancelled"}
+        non_terminal = [
+            bid for bid in batch_ids if status_map.get(bid, "") not in terminal_states
+        ]
+        # On timeout the still-running batches below are counted failed, and
+        # their (already paid-for) results are NOT reachable via check_batches,
+        # which skips repairs/*_temporary_repair.jsonl. Name them so the user can
+        # cancel or re-check them manually.
+        print_warning(
+            "Repair batches did not all finish within the 2-hour timeout. The "
+            "following are still non-terminal and will be counted as failed; "
+            "their results are not recoverable via check_batches, so cancel or "
+            f"re-check them manually: {', '.join(non_terminal) or '(none)'}"
+        )
 
     batches = []
     for bid in batch_ids:
@@ -1180,7 +1213,11 @@ async def _repair_batch_mode(
                 }
             },
         )
-        if isinstance(li, int) and 0 <= li < len(final_lines):
+        # Only patch when the batch produced non-empty text: an empty string
+        # formats to an empty line (cause "ok"), which would replace the failure
+        # placeholder and be miscounted as repaired. Leaving the placeholder
+        # keeps it correctly counted as still-failed.
+        if isinstance(li, int) and 0 <= li < len(final_lines) and (text or "").strip():
             # Compute best-effort page number
             pn = None
             if isinstance(oi, int) and oi >= 0:
@@ -1197,12 +1234,12 @@ async def _repair_batch_mode(
     repaired = len(failure_indices) - failed
     if failed == 0:
         print_success(
-            f"[SUCCESS] Batch repair complete for '{job.identifier}'. "
+            f"Batch repair complete for '{job.identifier}'. "
             f"Backup written to: {backup.name}"
         )
     else:
         print_warning(
-            f"[WARN] Batch repair for '{job.identifier}' left {failed} of "
+            f"Batch repair for '{job.identifier}' left {failed} of "
             f"{len(failure_indices)} line(s) unrepaired. "
             f"Backup written to: {backup.name}"
         )
@@ -1325,6 +1362,11 @@ async def main() -> None:
             PromptStyle.INFO,
         )
 
+        # Restrict the subset to lines actually detected as failures: a typo
+        # targeting a healthy line would otherwise be counted as "repaired" (its
+        # cause is "ok"), overstating success. Mirrors the CLI --indices path.
+        detected_failures = set(failure_indices)
+
         while True:
             indices_result = prompt_text(
                 "Line indices:", allow_empty=False, allow_back=False
@@ -1338,13 +1380,17 @@ async def main() -> None:
                         if x.strip()
                     )
                 )
-                failure_indices = [i for i in chosen if 0 <= i < len(final_lines)]
+                failure_indices = [
+                    i
+                    for i in chosen
+                    if i in detected_failures and 0 <= i < len(final_lines)
+                ]
                 if failure_indices:
                     print_success(
                         f"Selected {len(failure_indices)} line(s) for repair."
                     )
                     break
-                print_error("No valid indices provided.")
+                print_error("None of the given indices match detected failures.")
             except Exception:
                 print_error("Invalid format. Please use comma-separated numbers.")
 

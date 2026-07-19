@@ -16,11 +16,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
 import modules.batch.results as batch_results
+from modules.batch.backends import BatchStatus
 
 # ---------------------------------------------------------------------------
 # _sort_transcriptions
@@ -388,3 +391,164 @@ class TestOpenAIErrorFileReconciliation:
         # Page missing from BOTH output and error files is reconciled.
         assert by_id["req-3"].get("error") is True
         assert "[transcription error" in by_id["req-3"]["transcription"]
+
+
+# ---------------------------------------------------------------------------
+# _process_non_openai_batch — reconciliation, finalized marker, terminal states
+# ---------------------------------------------------------------------------
+
+
+def _make_backend_result(custom_id: str, content: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        custom_id=custom_id,
+        success=True,
+        content=content,
+        parsed_output=None,
+        error=None,
+        error_code=None,
+        no_transcribable_text=False,
+        transcription_not_possible=False,
+    )
+
+
+class _FakeBackend:
+    def __init__(self, status: BatchStatus, results: list[SimpleNamespace]) -> None:
+        self._status = status
+        self._results = results
+
+    def get_status(self, handle: Any) -> SimpleNamespace:
+        return SimpleNamespace(status=self._status, error_message=None)
+
+    def download_results(self, handle: Any) -> list[SimpleNamespace]:
+        return list(self._results)
+
+
+def _silence_non_openai_ui(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "print_info",
+        "print_warning",
+        "print_error",
+        "print_success",
+        "print_transcription_item_error",
+        "print_no_transcribable_text",
+        "print_transcription_not_possible",
+        "display_batch_processing_progress",
+    ):
+        monkeypatch.setattr(batch_results, name, MagicMock())
+
+
+def _write_non_openai_temp(tmp_path: Path) -> Path:
+    temp_file = tmp_path / "job.jsonl"
+    lines = [
+        {"batch_session": {"status": "submitted", "provider": "google"}},
+        {"batch_tracking": {"batch_id": "batch_1", "provider": "google"}},
+        {
+            "image_metadata": {
+                "custom_id": "req-1",
+                "image_name": "p1.jpg",
+                "order_index": 0,
+                "page_number": 1,
+            }
+        },
+        {
+            "image_metadata": {
+                "custom_id": "req-2",
+                "image_name": "p2.jpg",
+                "order_index": 1,
+                "page_number": 2,
+            }
+        },
+        {
+            "image_metadata": {
+                "custom_id": "req-3",
+                "image_name": "p3.jpg",
+                "order_index": 2,
+                "page_number": 3,
+            }
+        },
+    ]
+    temp_file.write_text(
+        "\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8"
+    )
+    return temp_file
+
+
+class TestProcessNonOpenAIBatch:
+    @pytest.mark.unit
+    def test_missing_page_is_reconciled_and_marker_written(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A page absent from download_results gets a placeholder (parity, item 3)
+        and the retained temp JSONL is marked finalized (item 1)."""
+        _silence_non_openai_ui(monkeypatch)
+        temp_file = _write_non_openai_temp(tmp_path)
+
+        # Backend returns only req-1 and req-2; req-3 is dropped.
+        backend = _FakeBackend(
+            BatchStatus.COMPLETED,
+            [
+                _make_backend_result("req-1", "Page one"),
+                _make_backend_result("req-2", "Page two"),
+            ],
+        )
+        monkeypatch.setattr(
+            batch_results, "get_batch_backend", lambda provider: backend
+        )
+
+        captured: dict[str, Any] = {}
+
+        def fake_writer(pages: list[dict[str, Any]], path: Path, **kwargs: Any) -> Path:
+            captured["pages"] = pages
+            return path
+
+        monkeypatch.setattr(batch_results, "write_transcription_output", fake_writer)
+
+        outcome = batch_results._process_non_openai_batch(
+            temp_file=temp_file,
+            batch_ids={"batch_1"},
+            batch_provider="google",
+            batch_tracking_records=[
+                {"batch_id": "batch_1", "provider": "google", "metadata": {}}
+            ],
+            processing_settings={"retain_temporary_jsonl": True},
+        )
+
+        assert outcome == "finalized"
+        pages = captured["pages"]
+        # All three expected pages survive into the output.
+        assert len(pages) == 3
+        texts = [p["text"] for p in pages]
+        assert "Page one" in texts
+        assert "Page two" in texts
+        assert any("no result returned" in t for t in texts)
+
+        # Retained temp JSONL now bears the finalized marker.
+        content = temp_file.read_text(encoding="utf-8")
+        assert '"status": "finalized"' in content
+
+    @pytest.mark.unit
+    def test_cancelled_batch_returns_failed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A CANCELLED batch is counted as failed, not left pending forever
+        (item 4)."""
+        _silence_non_openai_ui(monkeypatch)
+        temp_file = _write_non_openai_temp(tmp_path)
+
+        backend = _FakeBackend(BatchStatus.CANCELLED, [])
+        monkeypatch.setattr(
+            batch_results, "get_batch_backend", lambda provider: backend
+        )
+        monkeypatch.setattr(batch_results, "write_transcription_output", MagicMock())
+
+        outcome = batch_results._process_non_openai_batch(
+            temp_file=temp_file,
+            batch_ids={"batch_1"},
+            batch_provider="google",
+            batch_tracking_records=[
+                {"batch_id": "batch_1", "provider": "google", "metadata": {}}
+            ],
+            processing_settings={"retain_temporary_jsonl": True},
+        )
+
+        assert outcome == "failed"

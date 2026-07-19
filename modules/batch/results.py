@@ -35,6 +35,37 @@ from modules.ui.batch_display import (
 logger = setup_logger(__name__)
 
 
+def append_finalized_marker(temp_file: Path) -> None:
+    """Append a ``finalized`` batch_session marker to a retained temp JSONL.
+
+    Written AFTER the final output so the results are safely on disk first. On
+    the next ``check_batches`` run, ``_parse_temp_file_metadata`` surfaces this
+    status and ``process_all_batches`` skips the file; without it a retained
+    temp JSONL (the shipped ``retain_temporary_jsonl: true`` default) is
+    re-downloaded and re-finalized on every run, silently reverting any manual
+    ``repair_transcriptions`` edits to the final ``.txt`` and — once the
+    provider's output files expire — reporting long-finalized jobs as "pending"
+    forever. The marker carries only a ``status`` (no provider), and
+    ``batch_session`` is a recognized metadata key, so it is inert to every
+    downstream JSONL reader (custom_id mapping, transcription extraction, repair
+    discovery). No-op when the temp file was already deleted (``retain`` False),
+    so it never resurrects a cleaned-up file. Best-effort: a write failure is
+    warned and swallowed.
+    """
+    if not temp_file.exists():
+        return
+    try:
+        with temp_file.open("a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {"batch_session": {"status": "finalized"}}, ensure_ascii=False
+                )
+                + "\n"
+            )
+    except OSError as e:
+        logger.warning("Could not append finalized marker to %s: %s", temp_file.name, e)
+
+
 def _process_non_openai_batch(
     temp_file: Path,
     batch_ids: set[str],
@@ -96,6 +127,10 @@ def _process_non_openai_batch(
             err_msg = status_info.error_message or "Unknown error"
             print_warning(f"Batch {batch_id} failed: {err_msg}")
         elif status_info.status in (BatchStatus.CANCELLED, BatchStatus.EXPIRED):
+            # Terminal non-success states: they never progress, so count them as
+            # failures rather than leaving the file to report "pending" forever
+            # on every run (matches the OpenAI-side B6 semantics in status.py).
+            failed_count += 1
             all_completed = False
             print_warning(f"Batch {batch_id} was {status_info.status.value}")
         else:
@@ -232,6 +267,16 @@ def _process_non_openai_batch(
         print_warning(f"No transcriptions extracted for {temp_file.name}. Skipping.")
         return "pending"
 
+    # Completeness reconciliation (parity with the OpenAI path, decision 2): emit
+    # placeholders for any expected page (from the image_metadata custom_id map)
+    # that produced neither an output nor an error entry, so a page dropped by
+    # backend.download_results() does not silently vanish from the final output.
+    if custom_id_map:
+        seen = {cid for cid in (t.get("custom_id") for t in all_transcriptions) if cid}
+        all_transcriptions.extend(
+            _reconcile_missing_custom_ids(custom_id_map, batch_order, seen)
+        )
+
     # Sort transcriptions by order
     def get_sorting_key(entry: dict[str, Any]) -> tuple[int, Any]:
         order_info = entry.get("order_info")
@@ -285,6 +330,11 @@ def _process_non_openai_batch(
             print_info(f"Deleted temporary file: {temp_file.name}")
         except OSError as e:
             logger.warning(f"Could not delete temp file {temp_file.name}: {e}")
+
+    # Mark the retained temp JSONL finalized so a later check_batches run skips
+    # it instead of re-downloading and re-finalizing (which would clobber repair
+    # edits). No-op when the file was just deleted above.
+    append_finalized_marker(temp_file)
 
     return "finalized"
 

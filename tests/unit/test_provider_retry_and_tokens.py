@@ -134,6 +134,70 @@ def test_classify_status_none() -> None:
     assert _classify_status(Exception("no status")) == (False, False)
 
 
+@pytest.mark.unit
+def test_classify_status_int_code_on_cause() -> None:
+    """A wrapped cause whose int ``.code`` is a 5xx is server-error-retryable.
+
+    Mirrors google.genai APIError, which carries the HTTP code on ``.code``.
+    """
+    cause = Exception("google api error")
+    cause.code = 503  # type: ignore[attr-defined]
+    wrapper = Exception("wrapped")
+    wrapper.__cause__ = cause
+    assert _classify_status(wrapper) == (False, True)
+
+
+@pytest.mark.unit
+def test_classify_status_wrapper_no_attrs_cause_429() -> None:
+    """langchain_google_genai wraps a 429 with no status attrs on the wrapper.
+
+    The int ``.code`` on ``__cause__`` must still be found and classified.
+    """
+    cause = Exception("rate limited")
+    cause.code = 429  # type: ignore[attr-defined]
+    wrapper = Exception("ChatGoogleGenerativeAIError")  # no status attributes
+    wrapper.__cause__ = cause
+    assert _classify_status(wrapper) == (True, False)
+
+
+@pytest.mark.unit
+def test_classify_status_string_status_ignored_int_code_used() -> None:
+    """A STRING ``.status`` is ignored; the int ``.code`` at the same level wins.
+
+    google.genai APIError exposes ``.status`` as a string (e.g.
+    "RESOURCE_EXHAUSTED") alongside the numeric ``.code``.
+    """
+    exc = Exception("boom")
+    exc.status = "RESOURCE_EXHAUSTED"  # type: ignore[attr-defined]
+    exc.code = 429  # type: ignore[attr-defined]
+    assert _classify_status(exc) == (True, False)
+
+
+@pytest.mark.unit
+def test_classify_status_string_status_alone_not_retryable() -> None:
+    exc = Exception("boom")
+    exc.status = "RESOURCE_EXHAUSTED"  # type: ignore[attr-defined]
+    assert _classify_status(exc) == (False, False)
+
+
+@pytest.mark.unit
+def test_classify_status_non_http_int_code_ignored() -> None:
+    """A non-HTTP int code (e.g. gRPC status 8) is outside 100-599 and ignored."""
+    exc = Exception("grpc resource exhausted")
+    exc.code = 8  # type: ignore[attr-defined]
+    assert _classify_status(exc) == (False, False)
+
+
+@pytest.mark.unit
+def test_classify_status_cycle_safe() -> None:
+    """A cyclic cause chain terminates rather than looping forever."""
+    a = Exception("a")
+    b = Exception("b")
+    a.__cause__ = b
+    b.__context__ = a
+    assert _classify_status(a) == (False, False)
+
+
 # --------------------------------------------------------------------------- #
 # parse_retry_after
 # --------------------------------------------------------------------------- #

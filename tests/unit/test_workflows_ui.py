@@ -8,9 +8,25 @@ image_processing key access from display_processing_summary().
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+from modules.transcribe.user_config import UserConfiguration
+from modules.ui.prompts import NavigationAction, PromptResult
+from modules.ui.workflows import WorkflowUI
+
+
+def _continue(value: Any) -> PromptResult:
+    """Build a CONTINUE PromptResult carrying *value*."""
+    return PromptResult(action=NavigationAction.CONTINUE, value=value)
+
+
+def _back() -> PromptResult:
+    """Build a BACK PromptResult."""
+    return PromptResult(action=NavigationAction.BACK)
 
 
 class TestDisplayProcessingSummaryConcurrencyConfig:
@@ -138,3 +154,326 @@ class TestWorkflowUIOptions:
         values = [v for v, _ in options]
         assert "yes" in values
         assert "no" in values
+
+    @pytest.mark.unit
+    def test_processing_type_includes_mobis(self) -> None:
+        """MOBI processing type is offered (wizard parity with CLI --type mobis)."""
+        values = [v for v, _ in WorkflowUI.get_processing_type_options()]
+        assert "mobis" in values
+
+    @pytest.mark.unit
+    def test_get_method_options_for_mobis_is_native_only(self) -> None:
+        """MOBI processing offers only the native extraction method."""
+        options = WorkflowUI.get_method_options("mobis")
+        values = [v for v, _ in options]
+        assert values == ["native"]
+
+    @pytest.mark.unit
+    def test_get_method_options_for_epubs_is_native_only(self) -> None:
+        """EPUB processing offers only the native extraction method."""
+        options = WorkflowUI.get_method_options("epubs")
+        values = [v for v, _ in options]
+        assert values == ["native"]
+
+
+class TestConfigureResumeMode:
+    """Tests for the resume/overwrite/retry-errors prompt (D2)."""
+
+    @pytest.mark.unit
+    def test_retry_errors_option_present_in_choices(self) -> None:
+        """The prompt offers a third 'retry_errors' option."""
+        config = UserConfiguration()
+        with patch(
+            "modules.ui.workflows.prompt_select", return_value=_continue("skip")
+        ) as mock_select:
+            WorkflowUI.configure_resume_mode(config)
+        choices = mock_select.call_args.args[1]
+        assert "retry_errors" in [value for value, _ in choices]
+
+    @pytest.mark.unit
+    def test_retry_errors_maps_to_skip_plus_flag(self) -> None:
+        """Selecting retry_errors sets resume_mode=skip and retry_errors=True."""
+        config = UserConfiguration()
+        with patch(
+            "modules.ui.workflows.prompt_select",
+            return_value=_continue("retry_errors"),
+        ):
+            ok = WorkflowUI.configure_resume_mode(config)
+        assert ok is True
+        assert config.resume_mode == "skip"
+        assert config.retry_errors is True
+
+    @pytest.mark.unit
+    def test_overwrite_clears_retry_errors(self) -> None:
+        """Overwrite clears any previously-set retry_errors flag."""
+        config = UserConfiguration(retry_errors=True)
+        with patch(
+            "modules.ui.workflows.prompt_select", return_value=_continue("overwrite")
+        ):
+            ok = WorkflowUI.configure_resume_mode(config)
+        assert ok is True
+        assert config.resume_mode == "overwrite"
+        assert config.retry_errors is False
+
+    @pytest.mark.unit
+    def test_skip_clears_retry_errors(self) -> None:
+        """Skip clears any previously-set retry_errors flag."""
+        config = UserConfiguration(retry_errors=True)
+        with patch(
+            "modules.ui.workflows.prompt_select", return_value=_continue("skip")
+        ):
+            WorkflowUI.configure_resume_mode(config)
+        assert config.resume_mode == "skip"
+        assert config.retry_errors is False
+
+    @pytest.mark.unit
+    def test_back_returns_false(self) -> None:
+        """A BACK action returns False without mutating resume_mode."""
+        config = UserConfiguration()
+        with patch("modules.ui.workflows.prompt_select", return_value=_back()):
+            ok = WorkflowUI.configure_resume_mode(config)
+        assert ok is False
+
+
+class TestConfigureBatchProcessingMissingKey:
+    """Missing API key steps back instead of raising mid-wizard (fix F)."""
+
+    @pytest.mark.unit
+    def test_missing_api_key_returns_false(self) -> None:
+        """When no API key resolves, the wizard prints an error and returns False."""
+        config = UserConfiguration(transcription_method="gpt")
+        fake_service = MagicMock()
+        fake_service.get_model_config.return_value = {
+            "transcription_model": {"provider": "openai", "name": "gpt-4o"}
+        }
+        with (
+            patch(
+                "modules.config.service.get_config_service",
+                return_value=fake_service,
+            ),
+            patch(
+                "modules.llm.providers.factory.resolve_api_key_optional",
+                return_value=None,
+            ),
+            patch("modules.ui.workflows.print_error") as mock_error,
+        ):
+            ok = WorkflowUI.configure_batch_processing(config)
+        assert ok is False
+        mock_error.assert_called_once()
+
+
+class TestSelectMobiFiles:
+    """Tests for the MOBI selection helper (D1)."""
+
+    @pytest.mark.unit
+    def test_select_all_mobis(self, tmp_path: Path) -> None:
+        """'all' selects every MOBI/AZW file, recursively."""
+        (tmp_path / "a.mobi").write_bytes(b"")
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "b.azw3").write_bytes(b"")
+        config = UserConfiguration(processing_type="mobis")
+        with patch("modules.ui.workflows.prompt_select", return_value=_continue("all")):
+            ok = WorkflowUI._select_mobi_files(config, tmp_path)
+        assert ok is True
+        assert config.process_all is True
+        assert {p.name for p in (config.selected_items or [])} == {"a.mobi", "b.azw3"}
+
+    @pytest.mark.unit
+    def test_no_mobis_found_returns_false(self, tmp_path: Path) -> None:
+        """An empty directory yields a graceful False."""
+        config = UserConfiguration(processing_type="mobis")
+        with patch("modules.ui.workflows.prompt_select", return_value=_continue("all")):
+            ok = WorkflowUI._select_mobi_files(config, tmp_path)
+        assert ok is False
+
+
+class TestDisplayCompletionSummary:
+    """Tests for the comprehensive completion overview (E1/E4)."""
+
+    @staticmethod
+    def _service(paths_config: dict[str, Any]) -> MagicMock:
+        svc = MagicMock()
+        svc.get_paths_config.return_value = paths_config
+        return svc
+
+    @pytest.mark.unit
+    def test_output_format_and_skipped_reported(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Output extension follows config.output_format; skipped count shown."""
+        config = UserConfiguration(processing_type="pdfs", output_format="md")
+        paths = {
+            "general": {"input_paths_is_output_path": False},
+            "file_paths": {"PDFs": {"output": str(tmp_path / "pdfs_out")}},
+        }
+        with patch(
+            "modules.config.service.get_config_service",
+            return_value=self._service(paths),
+        ):
+            WorkflowUI.display_completion_summary(
+                config, processed_count=2, failed_count=0, skipped=3
+            )
+        out = capsys.readouterr().out
+        assert "Skipped (already complete): 3" in out
+        assert ".md files" in out
+        assert ".txt files" not in out
+
+    @pytest.mark.unit
+    def test_batch_reports_submitted_and_failed(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Batch branch reports processed as submitted plus a failure line."""
+        config = UserConfiguration(
+            processing_type="pdfs",
+            transcription_method="gpt",
+            use_batch_processing=True,
+        )
+        paths: dict[str, Any] = {"general": {}, "file_paths": {}}
+        with patch(
+            "modules.config.service.get_config_service",
+            return_value=self._service(paths),
+        ):
+            WorkflowUI.display_completion_summary(
+                config, processed_count=3, failed_count=2
+            )
+        out = capsys.readouterr().out
+        assert "Jobs submitted: 3" in out
+        assert "Failed submissions: 2" in out
+
+    @pytest.mark.unit
+    def test_auto_output_location_resolved(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Auto mode reports the resolved Auto output directory."""
+        config = UserConfiguration(processing_type="auto")
+        auto_out = tmp_path / "auto_out"
+        paths = {
+            "general": {"input_paths_is_output_path": False},
+            "file_paths": {"Auto": {"output": str(auto_out)}},
+        }
+        with patch(
+            "modules.config.service.get_config_service",
+            return_value=self._service(paths),
+        ):
+            WorkflowUI.display_completion_summary(config, processed_count=1)
+        out = capsys.readouterr().out
+        assert str(auto_out.resolve()) in out
+
+    @pytest.mark.unit
+    def test_token_usage_shown_when_enabled(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Daily token usage line appears only when the daily limit is enabled."""
+        config = UserConfiguration(processing_type="pdfs")
+        paths: dict[str, Any] = {"general": {}, "file_paths": {}}
+        tracker = MagicMock()
+        tracker.get_stats.return_value = {
+            "tokens_used_today": 1000,
+            "daily_limit": 5000,
+            "usage_percentage": 20.0,
+        }
+        with (
+            patch(
+                "modules.config.service.get_config_service",
+                return_value=self._service(paths),
+            ),
+            patch(
+                "modules.infra.token_budget.get_token_tracker",
+                return_value=tracker,
+            ),
+        ):
+            WorkflowUI.display_completion_summary(
+                config,
+                processed_count=1,
+                concurrency_config={"daily_token_limit": {"enabled": True}},
+            )
+        out = capsys.readouterr().out
+        assert "Daily token usage: 1,000/5,000 (20.0%)" in out
+
+    @pytest.mark.unit
+    def test_token_usage_hidden_when_disabled(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """No token line when the daily limit is disabled or config absent."""
+        config = UserConfiguration(processing_type="pdfs")
+        paths: dict[str, Any] = {"general": {}, "file_paths": {}}
+        with patch(
+            "modules.config.service.get_config_service",
+            return_value=self._service(paths),
+        ):
+            WorkflowUI.display_completion_summary(config, processed_count=1)
+        out = capsys.readouterr().out
+        assert "Daily token usage" not in out
+
+
+class TestAutoWizardStepOrder:
+    """The auto-mode state machine visits resume_mode before item selection."""
+
+    @pytest.mark.asyncio
+    async def test_auto_flow_step_order(self, tmp_path: Path) -> None:
+        from main import unified_transcriber as ut
+
+        calls: list[str] = []
+
+        def _proc_type(config: UserConfiguration) -> bool:
+            calls.append("processing_type")
+            config.processing_type = "auto"
+            return True
+
+        def _resume(config: UserConfiguration) -> bool:
+            calls.append("resume_mode")
+            return True
+
+        def _select(
+            config: UserConfiguration,
+            base_dir: Path,
+            paths_config: Any = None,
+        ) -> bool:
+            calls.append("item_selection")
+            # No GPT decisions -> auto_schema_selection is a no-op step.
+            config.auto_decisions = []
+            return True
+
+        def _schema(config: UserConfiguration) -> bool:
+            calls.append("auto_schema_selection")
+            return True
+
+        def _page(config: UserConfiguration) -> bool:
+            calls.append("page_range")
+            return True
+
+        def _summary(config: UserConfiguration) -> bool:
+            calls.append("summary")
+            return True
+
+        with (
+            patch.object(WorkflowUI, "display_welcome"),
+            patch.object(
+                WorkflowUI, "configure_processing_type", side_effect=_proc_type
+            ),
+            patch.object(WorkflowUI, "configure_resume_mode", side_effect=_resume),
+            patch.object(
+                WorkflowUI, "select_items_for_processing", side_effect=_select
+            ),
+            patch.object(WorkflowUI, "configure_auto_mode_schema", side_effect=_schema),
+            patch.object(WorkflowUI, "configure_page_range", side_effect=_page),
+            patch.object(
+                WorkflowUI, "display_processing_summary", side_effect=_summary
+            ),
+        ):
+            config = await ut.configure_user_workflow_interactive(
+                tmp_path, tmp_path, tmp_path, tmp_path, tmp_path, {}
+            )
+
+        assert config.processing_type == "auto"
+        # resume_mode precedes item_selection in the reordered auto flow.
+        assert calls.index("resume_mode") < calls.index("item_selection")
+        assert calls == [
+            "processing_type",
+            "resume_mode",
+            "item_selection",
+            "auto_schema_selection",
+            "page_range",
+            "summary",
+        ]

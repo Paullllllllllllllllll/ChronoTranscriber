@@ -6,6 +6,7 @@ prompting utilities for a consistent and navigable user experience.
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,7 @@ class WorkflowUI:
             ),
             ("pdfs", "PDF Documents — Process PDF files or scanned documents"),
             ("epubs", "EPUB Documents — Extract text directly from EPUB ebooks"),
+            ("mobis", "MOBI Documents — Extract text from MOBI/AZW ebooks"),
         ]
 
     @staticmethod
@@ -82,6 +84,13 @@ class WorkflowUI:
                 (
                     "native",
                     "Native EPUB Extraction — Extract XHTML text from EPUB chapters",
+                ),
+            ]
+        if processing_type == "mobis":
+            return [
+                (
+                    "native",
+                    "Native MOBI Extraction — Extract text from MOBI/AZW ebooks",
                 ),
             ]
         return [
@@ -191,10 +200,14 @@ class WorkflowUI:
             provider_type = ProviderType.OPENAI
 
         if resolve_api_key_optional(provider_type) is None:
-            raise ValueError(
+            # In the wizard a raised ValueError surfaces as an "Unexpected error"
+            # exit; instead report it and step back so the user can pick another
+            # method or fix the key.
+            print_error(
                 f"An API key is required for {provider_type.value.upper()}"
                 f" transcription."
             )
+            return False
 
         # Ask about batch processing
         result = prompt_select(
@@ -541,6 +554,11 @@ class WorkflowUI:
                     "overwrite",
                     "Overwrite — Reprocess all files, overwriting existing output",
                 ),
+                (
+                    "retry_errors",
+                    "Retry errors — Resume, but re-process pages that"
+                    " previously failed",
+                ),
             ],
             allow_back=True,
         )
@@ -548,12 +566,29 @@ class WorkflowUI:
         if result.action == NavigationAction.BACK:
             return False
 
-        config.resume_mode = result.value or "skip"
-        if config.resume_mode == "overwrite":
+        # "retry_errors" is not a resume_mode value; it maps to skip + the
+        # retry_errors flag, matching create_config_from_cli_args' handling of
+        # --retry-errors. The other two options clear the flag.
+        if result.value == "retry_errors":
+            config.resume_mode = "skip"
+            config.retry_errors = True
+            print_info(
+                "Retry-errors mode: resuming, but pages whose prior output was"
+                " a transcription-error placeholder will be re-processed."
+            )
+        elif result.value == "overwrite":
+            config.resume_mode = "overwrite"
+            config.retry_errors = False
             print_info("Overwrite mode: all files will be reprocessed.")
         else:
+            config.resume_mode = "skip"
+            config.retry_errors = False
             print_info("Resume mode: files with existing output will be skipped.")
-        logger.info(f"User selected resume mode: {config.resume_mode}")
+        logger.info(
+            "User selected resume mode: %s (retry_errors=%s)",
+            config.resume_mode,
+            config.retry_errors,
+        )
         return True
 
     @staticmethod
@@ -602,6 +637,8 @@ class WorkflowUI:
             return WorkflowUI._select_image_folders(config, base_dir)
         if config.processing_type == "pdfs":
             return WorkflowUI._select_pdf_files(config, base_dir)
+        if config.processing_type == "mobis":
+            return WorkflowUI._select_mobi_files(config, base_dir)
         return WorkflowUI._select_epub_files(config, base_dir)
 
     @staticmethod
@@ -654,6 +691,67 @@ class WorkflowUI:
         config.selected_items = selected_paths
         config.process_all = len(selected_paths) == len(epub_files)
         print_success(f"Selected {len(selected_paths)} EPUB file(s) for processing.")
+        return True
+
+    @staticmethod
+    def _select_mobi_files(config: UserConfiguration, mobi_dir: Path) -> bool:
+        """Select MOBI/AZW files for processing."""
+        from modules.config.constants import SUPPORTED_MOBI_EXTENSIONS
+
+        def _list_mobis(recursive: bool) -> list[Path]:
+            globber = mobi_dir.rglob if recursive else mobi_dir.glob
+            found: list[Path] = []
+            for ext in sorted(SUPPORTED_MOBI_EXTENSIONS):
+                found.extend(globber(f"*{ext}"))
+            return sorted(set(found))
+
+        result = prompt_select(
+            "How would you like to select MOBI files for processing?",
+            [
+                ("all", "Process all MOBI files (including subfolders)"),
+                ("specific", "Select specific MOBI files"),
+            ],
+            allow_back=True,
+        )
+
+        if result.action == NavigationAction.BACK:
+            return False
+
+        if result.value == "all":
+            all_mobis = _list_mobis(recursive=True)
+            if not all_mobis:
+                print_error(f"No MOBI files found in {mobi_dir} or its subfolders.")
+                return False
+            config.selected_items = all_mobis
+            config.process_all = True
+            print_success(f"Selected all {len(all_mobis)} MOBI file(s) for processing.")
+            return True
+
+        # Select specific MOBI files
+        mobi_files = _list_mobis(recursive=False)
+        if not mobi_files:
+            print_error(f"No MOBI files found in {mobi_dir}.")
+            return False
+
+        file_items = [(str(f), f.name) for f in mobi_files]
+        selection_result = prompt_multiselect(
+            f"Select MOBI files to process ({len(mobi_files)} available):",
+            file_items,
+            allow_all=True,
+            allow_back=True,
+        )
+
+        if selection_result.action == NavigationAction.BACK:
+            return False
+
+        selected_paths = [Path(p) for p in selection_result.value]
+        if not selected_paths:
+            print_warning("No MOBI files selected. Nothing to process.")
+            return False
+
+        config.selected_items = selected_paths
+        config.process_all = len(selected_paths) == len(mobi_files)
+        print_success(f"Selected {len(selected_paths)} MOBI file(s) for processing.")
         return True
 
     @staticmethod
@@ -860,17 +958,31 @@ class WorkflowUI:
             from modules.transcribe.resume import ProcessingState, ResumeChecker
 
             pc = PathConfig.from_paths_config(paths_config or {})
+            # Interactive auto-mode output is redirected to the single Auto
+            # output root (process_auto_mode re-points every per-type dir there
+            # unless output is co-located with input). Mirror that here so the
+            # pre-filter checks where auto output actually lands; otherwise it
+            # both wrongly skips files with stale per-type outputs and never
+            # matches genuine auto outputs (CT-11, same as config_builder.py).
+            if pc.use_input_as_output:
+                pdf_out = pc.pdf_output_dir
+                image_out = pc.image_output_dir
+                epub_out = pc.epub_output_dir
+                mobi_out = pc.mobi_output_dir
+            else:
+                pdf_out = image_out = epub_out = mobi_out = pc.auto_output_dir
             checker = ResumeChecker(
                 resume_mode=config.resume_mode,
                 paths_config=paths_config or {},
                 use_input_as_output=pc.use_input_as_output,
-                pdf_output_dir=pc.pdf_output_dir,
-                image_output_dir=pc.image_output_dir,
-                epub_output_dir=pc.epub_output_dir,
-                mobi_output_dir=pc.mobi_output_dir,
+                pdf_output_dir=pdf_out,
+                image_output_dir=image_out,
+                epub_output_dir=epub_out,
+                mobi_output_dir=mobi_out,
                 output_format=getattr(config, "output_format", "txt"),
                 output_mode=getattr(config, "output_mode", "hash"),
                 input_root=getattr(config, "input_root", None),
+                retry_errors=getattr(config, "retry_errors", False),
             )
             total_before = len(decisions)
             decisions = [
@@ -997,7 +1109,6 @@ class WorkflowUI:
     @staticmethod
     def _build_model_config_lines(
         model_config: dict[str, Any],
-        concurrency_config: dict[str, Any],
     ) -> None:
         """Display the 'Model Configuration' section.
 
@@ -1098,6 +1209,8 @@ class WorkflowUI:
                 output_dir = file_paths.get("PDFs", {}).get("output", "pdfs_out")
             elif config.processing_type == "epubs":
                 output_dir = file_paths.get("EPUBs", {}).get("output", "epubs_out")
+            elif config.processing_type == "mobis":
+                output_dir = file_paths.get("MOBIs", {}).get("output", "mobis_out")
             else:
                 output_dir = "configured output directory"
             ui_print(f"    • Output directory: {output_dir}", PromptStyle.INFO)
@@ -1128,17 +1241,28 @@ class WorkflowUI:
         # output_format the checker defaults to ".txt" and mis-reports skips
         # for md/json output.
         pc = PathConfig.from_paths_config(paths_config)
+        # Auto-mode output is redirected to the single Auto output root (unless
+        # co-located with input), so the resume preview must check there too —
+        # the same CT-11 rule applied in _configure_auto_mode and config_builder.
+        if is_auto and not pc.use_input_as_output:
+            pdf_out = image_out = epub_out = mobi_out = pc.auto_output_dir
+        else:
+            pdf_out = pc.pdf_output_dir
+            image_out = pc.image_output_dir
+            epub_out = pc.epub_output_dir
+            mobi_out = pc.mobi_output_dir
         resume_checker = ResumeChecker(
             resume_mode=config.resume_mode,
             paths_config=paths_config,
             use_input_as_output=pc.use_input_as_output,
-            pdf_output_dir=pc.pdf_output_dir,
-            image_output_dir=pc.image_output_dir,
-            epub_output_dir=pc.epub_output_dir,
-            mobi_output_dir=pc.mobi_output_dir,
+            pdf_output_dir=pdf_out,
+            image_output_dir=image_out,
+            epub_output_dir=epub_out,
+            mobi_output_dir=mobi_out,
             output_format=getattr(config, "output_format", "txt"),
             output_mode=getattr(config, "output_mode", "hash"),
             input_root=getattr(config, "input_root", None),
+            retry_errors=getattr(config, "retry_errors", False),
         )
         # For auto mode, derive processing_type from each decision's file_type;
         # use "pdfs" as a reasonable default since most auto items are PDFs.
@@ -1222,6 +1346,8 @@ class WorkflowUI:
                 item_type = "PDF file(s)"
             elif config.processing_type == "epubs":
                 item_type = "EPUB file(s)"
+            elif config.processing_type == "mobis":
+                item_type = "MOBI file(s)"
             else:
                 item_type = "file(s)"
             ui_print("  Ready to process ", PromptStyle.INFO, end="")
@@ -1235,7 +1361,7 @@ class WorkflowUI:
 
         # === Model & Concurrency Configuration (when GPT is involved) ===
         if has_gpt:
-            WorkflowUI._build_model_config_lines(model_config, concurrency_config)
+            WorkflowUI._build_model_config_lines(model_config)
             WorkflowUI._build_concurrency_config_lines(concurrency_config)
 
         # === Output Location ===
@@ -1283,6 +1409,9 @@ class WorkflowUI:
         processed_count: int = 0,
         failed_count: int = 0,
         duration_seconds: float = 0.0,
+        *,
+        skipped: int = 0,
+        concurrency_config: dict[str, Any] | None = None,
     ) -> None:
         """Display detailed completion summary.
 
@@ -1291,6 +1420,11 @@ class WorkflowUI:
             processed_count: Number of successfully processed items
             failed_count: Number of failed items
             duration_seconds: Total processing duration in seconds
+            skipped: Number of items skipped by resume filtering (already
+                complete). Shown only when greater than zero.
+            concurrency_config: Optional concurrency config. When provided and
+                the daily token limit is enabled, the day's token usage is
+                reported (mirrors WorkflowManager._log_token_usage gating).
         """
         from modules.config.service import get_config_service
 
@@ -1300,6 +1434,7 @@ class WorkflowUI:
         print_header("PROCESSING COMPLETE", "")
 
         total_count = processed_count + failed_count
+        is_auto = config.processing_type == "auto"
 
         # === Results Section ===
         ui_print("  Results:", PromptStyle.HIGHLIGHT)
@@ -1307,7 +1442,11 @@ class WorkflowUI:
 
         if config.use_batch_processing and config.transcription_method == "gpt":
             print_success("Batch processing jobs have been submitted!")
-            ui_print(f"    • Jobs submitted: {total_count}", PromptStyle.INFO)
+            ui_print(f"    • Jobs submitted: {processed_count}", PromptStyle.INFO)
+            if failed_count > 0:
+                ui_print(
+                    f"    • Failed submissions: {failed_count}", PromptStyle.WARNING
+                )
         else:
             if failed_count == 0 and processed_count > 0:
                 print_success(f"All {processed_count} item(s) processed successfully!")
@@ -1320,8 +1459,30 @@ class WorkflowUI:
                     ui_print(
                         f"    • Failed: {failed_count} item(s)", PromptStyle.WARNING
                     )
+            elif failed_count > 0:
+                ui_print(f"    • Failed: {failed_count} item(s)", PromptStyle.WARNING)
+            elif skipped > 0:
+                print_success("Nothing to process — all items already complete.")
             else:
                 ui_print("    • No items were processed.", PromptStyle.WARNING)
+
+        # Skipped/resumed items (item-level resume filtering)
+        if skipped > 0:
+            ui_print(f"    • Skipped (already complete): {skipped}", PromptStyle.INFO)
+
+        # Daily token usage (only when the daily token limit is active)
+        if concurrency_config is not None:
+            token_cfg = concurrency_config.get("daily_token_limit", {})
+            if token_cfg.get("enabled", False):
+                from modules.infra.token_budget import get_token_tracker
+
+                stats = get_token_tracker().get_stats()
+                ui_print(
+                    f"    • Daily token usage: {stats['tokens_used_today']:,}/"
+                    f"{stats['daily_limit']:,} "
+                    f"({stats['usage_percentage']:.1f}%)",
+                    PromptStyle.INFO,
+                )
 
         # Duration
         if duration_seconds > 0:
@@ -1348,16 +1509,24 @@ class WorkflowUI:
             ui_print("    • Location: Same directory as input files", PromptStyle.INFO)
         else:
             file_paths = paths_config.get("file_paths", {})
-            if config.processing_type == "images":
+            if is_auto:
+                output_dir = file_paths.get("Auto", {}).get("output", "auto_out")
+            elif config.processing_type == "images":
                 output_dir = file_paths.get("Images", {}).get("output", "images_out")
             elif config.processing_type == "pdfs":
                 output_dir = file_paths.get("PDFs", {}).get("output", "pdfs_out")
             elif config.processing_type == "epubs":
                 output_dir = file_paths.get("EPUBs", {}).get("output", "epubs_out")
+            elif config.processing_type == "mobis":
+                output_dir = file_paths.get("MOBIs", {}).get("output", "mobis_out")
             else:
                 output_dir = "configured output directory"
+            # Resolve to an absolute path so the location is unambiguous.
+            with contextlib.suppress(OSError):
+                output_dir = str(Path(output_dir).resolve())
             ui_print(f"    • Location: {output_dir}", PromptStyle.INFO)
-        ui_print("    • Transcriptions: .txt files", PromptStyle.INFO)
+        output_format = getattr(config, "output_format", "txt") or "txt"
+        ui_print(f"    • Transcriptions: .{output_format} files", PromptStyle.INFO)
         print_separator(PromptStyle.LIGHT_LINE, 80)
 
         # === Next Steps (for batch mode) ===

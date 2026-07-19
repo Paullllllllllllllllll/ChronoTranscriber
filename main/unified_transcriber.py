@@ -44,6 +44,7 @@ from modules.transcribe.user_config import UserConfiguration  # noqa: E402
 from modules.ui import (  # noqa: E402
     WorkflowUI,
     print_error,
+    print_header,
     print_info,
     print_success,
     print_warning,
@@ -87,6 +88,7 @@ async def configure_user_workflow_interactive(
     pdf_input_dir: Path,
     image_input_dir: Path,
     epub_input_dir: Path,
+    mobi_input_dir: Path,
     auto_input_dir: Path,
     paths_config: dict[str, Any],
 ) -> UserConfiguration:
@@ -97,25 +99,40 @@ async def configure_user_workflow_interactive(
         pdf_input_dir: PDF input directory
         image_input_dir: Image input directory
         epub_input_dir: EPUB input directory
+        mobi_input_dir: MOBI input directory
         auto_input_dir: Auto mode input directory
 
     Returns:
         UserConfiguration object with all settings
     """
     config = UserConfiguration()
+    # Mirror the CLI's config-fallback for output_format (interactive mode has
+    # no output-format prompt). Set here — rather than after the wizard — so the
+    # auto-mode resume pre-filter inside _configure_auto_mode checks the correct
+    # output extension instead of the "txt" default.
+    config.output_format = paths_config.get("general", {}).get("output_format", "txt")
 
     # Display welcome banner
     WorkflowUI.display_welcome()
 
-    # Navigation state machine
+    # Navigation state machine.
+    #
+    # Auto flow:     processing_type -> resume_mode -> item_selection ->
+    #                auto_schema_selection -> page_range -> summary
+    # Non-auto flow: processing_type -> transcription_method -> batch_processing ->
+    #                item_selection -> page_range -> resume_mode -> summary
+    #
+    # Auto mode chooses resume_mode BEFORE item_selection so that the resume
+    # pre-filter in _configure_auto_mode uses the real mode instead of the
+    # dataclass default "skip" (files dropped under "skip" cannot be restored
+    # by a later "Overwrite" choice).
     current_step = "processing_type"
 
     while True:
         if current_step == "processing_type":
             if WorkflowUI.configure_processing_type(config):
-                # Auto mode skips method/batch selection
                 if config.processing_type == "auto":
-                    current_step = "item_selection"
+                    current_step = "resume_mode"
                 else:
                     current_step = "transcription_method"
             else:
@@ -133,6 +150,20 @@ async def configure_user_workflow_interactive(
             else:
                 current_step = "transcription_method"
 
+        elif current_step == "resume_mode":
+            if WorkflowUI.configure_resume_mode(config):
+                # Auto: resume precedes item selection; non-auto: precedes summary.
+                if config.processing_type == "auto":
+                    current_step = "item_selection"
+                else:
+                    current_step = "summary"
+            else:
+                # Back target differs by flow order.
+                if config.processing_type == "auto":
+                    current_step = "processing_type"
+                else:
+                    current_step = "page_range"
+
         elif current_step == "item_selection":
             if config.processing_type == "auto":
                 base_dir = auto_input_dir
@@ -140,6 +171,8 @@ async def configure_user_workflow_interactive(
                 base_dir = image_input_dir
             elif config.processing_type == "pdfs":
                 base_dir = pdf_input_dir
+            elif config.processing_type == "mobis":
+                base_dir = mobi_input_dir
             else:
                 base_dir = epub_input_dir
 
@@ -150,12 +183,16 @@ async def configure_user_workflow_interactive(
                 else:
                     current_step = "page_range"
             else:
-                # Auto mode goes back to processing_type, others to batch_processing
-                current_step = (
-                    "processing_type"
-                    if config.processing_type == "auto"
-                    else "batch_processing"
-                )
+                # Back target: auto -> resume_mode (new order); gpt ->
+                # batch_processing; other methods -> transcription_method (a
+                # non-gpt method makes configure_batch_processing a no-op that
+                # would bounce straight back here).
+                if config.processing_type == "auto":
+                    current_step = "resume_mode"
+                elif config.transcription_method == "gpt":
+                    current_step = "batch_processing"
+                else:
+                    current_step = "transcription_method"
 
         elif current_step == "auto_schema_selection":
             # Schema selection for auto mode (when GPT files are detected)
@@ -166,26 +203,34 @@ async def configure_user_workflow_interactive(
 
         elif current_step == "page_range":
             if WorkflowUI.configure_page_range(config):
-                current_step = "resume_mode"
-            else:
-                # Go back to the previous step
+                # Auto: page_range precedes summary; non-auto: precedes resume.
                 if config.processing_type == "auto":
-                    current_step = "auto_schema_selection"
+                    current_step = "summary"
+                else:
+                    current_step = "resume_mode"
+            else:
+                # Back target. For auto, skip auto_schema_selection when it has
+                # no GPT decisions to show (it returns immediately and would
+                # otherwise bounce straight back here).
+                if config.processing_type == "auto":
+                    decisions = config.auto_decisions or []
+                    if any(d.method == "gpt" for d in decisions):
+                        current_step = "auto_schema_selection"
+                    else:
+                        current_step = "item_selection"
                 else:
                     current_step = "item_selection"
-
-        elif current_step == "resume_mode":
-            if WorkflowUI.configure_resume_mode(config):
-                current_step = "summary"
-            else:
-                current_step = "page_range"
 
         elif current_step == "summary":
             confirmed = WorkflowUI.display_processing_summary(config)
             if confirmed:
                 return config
             else:
-                current_step = "resume_mode"
+                # Back to the step immediately preceding summary in each flow.
+                if config.processing_type == "auto":
+                    current_step = "page_range"
+                else:
+                    current_step = "resume_mode"
 
 
 async def process_auto_mode(
@@ -194,6 +239,8 @@ async def process_auto_mode(
     model_config: dict[str, Any],
     concurrency_config: dict[str, Any],
     image_processing_config: dict[str, Any],
+    *,
+    print_decision_summary: bool = True,
 ) -> ProcessingSummary:
     """Process documents in auto mode with per-file method decisions.
 
@@ -203,9 +250,12 @@ async def process_auto_mode(
         model_config: Model configuration
         concurrency_config: Concurrency configuration
         image_processing_config: Image processing configuration
+        print_decision_summary: When True, print the AUTO MODE DECISIONS table.
+            The interactive wizard already prints it during selection, so it
+            passes False here to avoid a duplicate; CLI mode keeps it True.
     """
 
-    print_info("AUTO MODE", "Processing files with automatic method selection...")
+    print_header("AUTO MODE", "Processing files with automatic method selection...")
 
     summary = ProcessingSummary()
     decisions = user_config.auto_decisions or []
@@ -218,7 +268,8 @@ async def process_auto_mode(
 
     selector = user_config.auto_selector or AutoSelector(paths_config)
     user_config.auto_selector = selector
-    selector.print_decision_summary(decisions)
+    if print_decision_summary:
+        selector.print_decision_summary(decisions)
 
     pc = PathConfig.from_paths_config(paths_config)
 
@@ -299,6 +350,7 @@ async def process_auto_mode(
         summary.processed += group_summary.processed
         summary.failed += group_summary.failed
         summary.total += group_summary.total
+        summary.skipped += group_summary.skipped
 
     print_success("Auto mode processing complete!")
     return summary
@@ -324,7 +376,7 @@ async def process_documents(
     Returns:
         A `ProcessingSummary` with the real success/failure counts.
     """
-    print_info("PROCESSING", "Starting document processing...")
+    print_info("Starting document processing...")
 
     # Create workflow manager
     workflow_manager = WorkflowManager(
@@ -355,12 +407,18 @@ async def transcribe_interactive() -> None:
     paths_config = config_service.get_paths_config()
     pc = PathConfig.from_paths_config(paths_config)
     pc.ensure_input_dirs()
+    # ensure_input_dirs() does not cover the MOBI input directory; create it so
+    # interactive MOBI selection can scan an existing folder.
+    pc.mobi_input_dir.mkdir(parents=True, exist_ok=True)
+
+    concurrency_config = config_service.get_concurrency_config()
 
     # Create user configuration through interactive workflow
     user_config = await configure_user_workflow_interactive(
         pc.pdf_input_dir,
         pc.image_input_dir,
         pc.epub_input_dir,
+        pc.mobi_input_dir,
         pc.auto_input_dir,
         paths_config,
     )
@@ -373,33 +431,38 @@ async def transcribe_interactive() -> None:
     if user_config.processing_type == "auto":
         # Override output directory with Auto output
         user_config.selected_items = [pc.auto_output_dir]
-        await process_auto_mode(
+        summary = await process_auto_mode(
             user_config,
             paths_config,
             config_service.get_model_config(),
-            config_service.get_concurrency_config(),
+            concurrency_config,
             config_service.get_image_processing_config(),
+            # The wizard already displayed the AUTO MODE DECISIONS table during
+            # selection; suppress the duplicate here.
+            print_decision_summary=False,
         )
     else:
         summary = await process_documents(
             user_config,
             paths_config,
             config_service.get_model_config(),
-            config_service.get_concurrency_config(),
+            concurrency_config,
             config_service.get_image_processing_config(),
         )
 
     # Calculate duration
     duration_seconds = time.time() - start_time
 
-    # Display completion summary with real success/failure counts
-    if user_config.processing_type != "auto" and summary is not None:
-        # Auto mode prints its own summary
+    # Display a comprehensive completion summary with real counts for both the
+    # auto and non-auto paths.
+    if summary is not None:
         WorkflowUI.display_completion_summary(
             user_config,
             processed_count=summary.processed,
             failed_count=summary.failed,
             duration_seconds=duration_seconds,
+            skipped=summary.skipped,
+            concurrency_config=concurrency_config,
         )
 
 

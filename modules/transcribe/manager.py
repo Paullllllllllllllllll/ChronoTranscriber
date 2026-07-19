@@ -67,11 +67,15 @@ class ProcessingSummary:
     counts items that raised during processing. `total` is the number of
     items actually selected for processing (after resume filtering), so
     `processed + failed` may be less than `total` when the run is interrupted.
+
+    `skipped` counts items excluded by item-level resume filtering (already
+    complete); these are not part of `total`.
     """
 
     processed: int = 0
     failed: int = 0
     total: int = 0
+    skipped: int = 0
 
 
 def _relative_key(item: Path, input_root: Path | None) -> str | None:
@@ -347,10 +351,12 @@ class WorkflowManager:
         # intentional — this one avoids re-entering the pipeline entirely,
         # while the inner one allows resuming partially-transcribed items.
         processing_type = self.user_config.processing_type or ""
+        skipped_count = 0
         if self.resume_mode != "overwrite" and processing_type:
             selected, skipped = self.resume_checker.filter_items(
                 selected, processing_type
             )
+            skipped_count = len(skipped)
             if skipped:
                 print_info(f"Resume: skipping {len(skipped)} already-processed item(s)")
                 for sr in skipped:
@@ -445,7 +451,10 @@ class WorkflowManager:
         self._log_token_usage("Final")
 
         return ProcessingSummary(
-            processed=processed_count, failed=failed_count, total=total_items
+            processed=processed_count,
+            failed=failed_count,
+            total=total_items,
+            skipped=skipped_count,
         )
 
     async def process_single_epub(self, epub_path: Path) -> None:

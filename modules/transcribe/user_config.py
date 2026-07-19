@@ -1,4 +1,4 @@
-# modules/ui/core.py
+# modules/transcribe/user_config.py
 """Core UI data structures.
 
 This module contains the UserConfiguration dataclass which stores user's

@@ -343,3 +343,24 @@ class TestAsyncDualModeScriptExecuteErrorHandling:
             m_stdin.isatty.return_value = True
             script.execute()
         assert exc_info.value.code == 1
+
+    def test_execute_wraps_keyboard_interrupt_from_asyncio_run(self) -> None:
+        """A KeyboardInterrupt escaping asyncio.run (loop startup/teardown)
+        lands OUTSIDE the coroutine's try/except and must still exit 130."""
+        script = _AsyncScript("test_async")
+
+        def raise_ki(coro):
+            # Close the coroutine we were handed so it is not left un-awaited,
+            # then simulate the interrupt escaping the event-loop machinery.
+            coro.close()
+            raise KeyboardInterrupt
+
+        with (
+            patch(
+                "modules.transcribe.dual_mode.asyncio.run",
+                side_effect=raise_ki,
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            script.execute()
+        assert exc_info.value.code == 130

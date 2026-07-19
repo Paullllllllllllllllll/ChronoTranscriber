@@ -139,9 +139,19 @@ class EPUBProcessor:
             return ordered
         return list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
 
-    def prepare_output_folder(self, epub_output_dir: Path) -> tuple[Path, Path]:
-        """Prepare a deterministic output folder and text file path for this EPUB."""
-        safe_dir_name = create_safe_directory_name(self.epub_path.stem)
+    def prepare_output_folder(
+        self, epub_output_dir: Path, relative_key: str | None = None
+    ) -> tuple[Path, Path]:
+        """Prepare a deterministic output folder and text file path for this EPUB.
+
+        Args:
+            epub_output_dir: Base output directory for EPUB transcriptions.
+            relative_key: Optional input-relative path used for the directory
+                hash instead of the bare stem, so same-stem ebooks in different
+                subdirectories do not collide (mirror of the PDF path).
+        """
+        key = relative_key if relative_key is not None else self.epub_path.stem
+        safe_dir_name = create_safe_directory_name(key)
         parent_folder = epub_output_dir / safe_dir_name
         parent_folder.mkdir(parents=True, exist_ok=True)
 

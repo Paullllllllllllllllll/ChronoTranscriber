@@ -72,6 +72,37 @@ def test_prepare_output_folder_creates_folder_and_returns_paths(temp_dir: Path) 
 
 
 @pytest.mark.unit
+def test_prepare_output_folder_relative_key_avoids_stem_collision(
+    temp_dir: Path,
+) -> None:
+    """Same-stem ebooks in different subdirs get distinct output folders when a
+    relative_key is supplied (mirror of the PDF mirror-mode collision fix)."""
+    out_dir = temp_dir / "epub_out"
+    out_dir.mkdir()
+
+    a = temp_dir / "A" / "book.epub"
+    b = temp_dir / "B" / "book.epub"
+    a.parent.mkdir()
+    b.parent.mkdir()
+    a.write_bytes(b"x")
+    b.write_bytes(b"y")
+
+    parent_a, _ = EPUBProcessor(a).prepare_output_folder(
+        out_dir, relative_key="A/book.epub"
+    )
+    parent_b, _ = EPUBProcessor(b).prepare_output_folder(
+        out_dir, relative_key="B/book.epub"
+    )
+
+    assert parent_a != parent_b
+
+    # Without a relative_key the two collide (documents the pre-fix behavior).
+    parent_a2, _ = EPUBProcessor(a).prepare_output_folder(out_dir)
+    parent_b2, _ = EPUBProcessor(b).prepare_output_folder(out_dir)
+    assert parent_a2 == parent_b2
+
+
+@pytest.mark.unit
 def test_extract_text_uses_metadata_and_collects_sections(
     monkeypatch: pytest.MonkeyPatch, temp_dir: Path
 ) -> None:

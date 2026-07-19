@@ -10,6 +10,7 @@ import asyncio
 import datetime
 import hashlib
 import json
+import re
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,33 @@ from modules.postprocess.writer import write_transcription_output
 from modules.ui import print_error, print_info, print_success, print_warning
 
 logger = setup_logger(__name__)
+
+# PDF-derived Tesseract page images are named with their ABSOLUTE page number
+# (see PDFProcessor.process_images_for_tesseract:
+# ``page_{i + 1:04d}_tess_preprocessed<ext>`` with i drawn from the absolute
+# page_indices), so the page number can be recovered from the filename.
+_TESS_PAGE_RE = re.compile(r"^page_(\d+)_tess_preprocessed\.", re.IGNORECASE)
+
+
+def _absolute_order_index(image_files: list[Path]) -> dict[str, int]:
+    """Map each image name to a stable, absolute 0-based order index.
+
+    For PDF Tesseract images the index is parsed from the filename's absolute
+    page number, so a resumed run over a DIFFERENT page subset (page ranges
+    applied upstream, or render failures dropping entries) keeps each page at
+    its true position instead of colliding with another page's positional
+    index and interleaving the merged output. Image-folder sources carry
+    source-derived names with no page number, so they fall back to the
+    positional index (acceptable: a folder's file set is stable across runs).
+    """
+    mapping: dict[str, int] = {}
+    for idx, img in enumerate(image_files):
+        match = _TESS_PAGE_RE.match(img.name)
+        if match:
+            mapping[img.name] = int(match.group(1)) - 1
+        else:
+            mapping[img.name] = idx
+    return mapping
 
 
 def _provider_token_stamp(
@@ -76,6 +104,23 @@ class PageTranscriptionError(Exception):
             f"{failed_pages} of {total_pages} page(s) failed to transcribe "
             f"for '{source_name}'"
         )
+
+
+class OutputWriteError(Exception):
+    """Raised when the final combined output could not be written from the JSONL.
+
+    ``write_output_from_jsonl`` returns ``False`` on any failure (disk full, a
+    permissions error, or no valid records). Historically callers ignored that
+    boolean and then ran cleanup that could unlink the temp JSONL — the only
+    surviving copy of the transcriptions — while marking the item complete,
+    destroying the resume artifact on a failed write. Raising instead makes the
+    item count as failed and stops that cleanup BEFORE it runs, preserving the
+    JSONL so a later run rebuilds the output.
+    """
+
+    def __init__(self, source_name: str) -> None:
+        self.source_name = source_name
+        super().__init__(f"Failed to write final output for '{source_name}'")
 
 
 class BudgetExhaustedError(Exception):
@@ -443,13 +488,17 @@ async def run_streaming_transcription_pipeline(
     # file on disk, where resume/ResumeChecker sees non-empty output and marks
     # the item COMPLETE (CT-7, silent data loss). The JSONL preserves every
     # completed page, so a non-exhausting resume pass rebuilds the full output.
-    if exhausted is None or not exhausted.is_set():
-        write_output_from_jsonl(
-            temp_jsonl_path,
-            output_txt_path,
-            postprocessing_config,
-            output_format=output_format,
-        )
+    # When the budget was exhausted the write is intentionally skipped (the
+    # output would be truncated); otherwise a failed write must propagate so the
+    # item counts failed and the temp JSONL is preserved for resume rather than
+    # being cleaned up while the item is (falsely) marked complete.
+    if (exhausted is None or not exhausted.is_set()) and not write_output_from_jsonl(
+        temp_jsonl_path,
+        output_txt_path,
+        postprocessing_config,
+        output_format=output_format,
+    ):
+        raise OutputWriteError(source_name)
 
     # Page-level failures must surface as an item failure (CT-2). Raised only
     # after the output was written, so partial results survive for resume.
@@ -497,7 +546,7 @@ async def run_transcription_pipeline(
     # order_index it would have had on a single pass (see B2). Assigning the
     # index by position in the *filtered* list collides run-2 indices with
     # run-1's and scrambles the merged output.
-    absolute_index = {img.name: idx for idx, img in enumerate(image_files)}
+    absolute_index = _absolute_order_index(image_files)
 
     # One parse shared by every read that observes the pre-transcription file
     # state: verify_resume_compatible, get_processed_image_names, the
@@ -543,13 +592,14 @@ async def run_transcription_pipeline(
         )
         # No transcription runs on this path, so the file is unchanged since
         # cached_records was parsed (None in overwrite mode -> fresh read).
-        write_output_from_jsonl(
+        if not write_output_from_jsonl(
             temp_jsonl_path,
             output_txt_path,
             postprocessing_config,
             output_format=output_format,
             records=cached_records,
-        )
+        ):
+            raise OutputWriteError(source_name)
         return
 
     # Build args list for concurrent dispatch
@@ -618,12 +668,15 @@ async def run_transcription_pipeline(
     # plus any completed in earlier resumed runs), ordered by absolute
     # order_index. Writing only from this run's `results` would drop pages
     # transcribed on a previous run and scramble page order (B2).
-    write_output_from_jsonl(
+    if not write_output_from_jsonl(
         temp_jsonl_path,
         output_txt_path,
         postprocessing_config,
         output_format=output_format,
-    )
+    ):
+        # Propagate so the item counts failed and the JSONL survives for resume
+        # instead of being cleaned up under a false "complete" status.
+        raise OutputWriteError(source_name)
 
     # Page-level failures must surface as an item failure (CT-2). Raised only
     # after the output was written, so partial results survive for resume.

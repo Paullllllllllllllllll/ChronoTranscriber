@@ -74,11 +74,33 @@ def ensure_resume_marker(
             parsed); pass None to read fresh. The read-then-maybe-append
             behavior is unchanged: the append still targets ``jsonl_path``.
     """
+    # Heal a crash-truncated trailing line before anything appends to the file.
+    # A streamed append that died mid-write can leave a final line with no
+    # newline; the tolerant reader skips it, but the NEXT append would glue onto
+    # it, fusing two records into one unparseable line that silently swallows a
+    # COMPLETE valid transcription (the page then vanishes from the output while
+    # the run reports success). Appending the missing newline isolates the
+    # partial line so only it is discarded. Both streaming pipelines call this
+    # before opening their append handle, so it always runs first.
+    _heal_trailing_newline(jsonl_path)
     if records is None:
         records = read_jsonl_records(jsonl_path)
     if read_resume_version(records) is not None:
         return
     write_jsonl_record(jsonl_path, resume_marker_record())
+
+
+def _heal_trailing_newline(jsonl_path: Path) -> None:
+    """Ensure a non-empty JSONL file ends with a newline (crash-safety)."""
+    try:
+        if not jsonl_path.exists() or jsonl_path.stat().st_size == 0:
+            return
+        with jsonl_path.open("rb+") as f:
+            f.seek(-1, 2)
+            if f.read(1) != b"\n":
+                f.write(b"\n")
+    except OSError:
+        pass
 
 
 def verify_resume_compatible(

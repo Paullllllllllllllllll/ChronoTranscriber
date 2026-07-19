@@ -95,9 +95,18 @@ async def run_concurrent_transcription_tasks(
                     try:
                         await on_result(result)
                     except Exception as cb_exc:
+                        # A callback failure is typically a JSONL write failure
+                        # (e.g. disk full): the page never reaches the resume
+                        # artifact, yet the final output is regenerated FROM the
+                        # JSONL. Keeping the successful result here would count
+                        # the page done while it silently vanishes from the
+                        # output. Record the slot as failed (matching the
+                        # task-failure convention) so count_failed_page_results
+                        # surfaces it as a page failure and resume re-runs it.
                         logger.error(
                             f"on_result callback failed for args {args}: {cb_exc}"
                         )
+                        results[i] = None
             except Exception as e:
                 logger.error(f"Transcription task failed with arguments {args}: {e}")
                 results[i] = None
@@ -205,11 +214,20 @@ async def run_streaming_transcription_tasks(
                     results.append(None)
                     continue
                 results.append(result)
+                # Capture the slot NOW: the await below yields, letting other
+                # workers append, so results[-1] may no longer be this result.
+                slot = len(results) - 1
                 if on_result is not None:
                     try:
                         await on_result(result)
                     except Exception as cb_exc:
+                        # Callback failure (e.g. a failed JSONL append) means the
+                        # page is absent from the resume artifact from which the
+                        # final output is rebuilt. Mark the slot failed so
+                        # count_failed_page_results surfaces it as a page failure
+                        # and resume re-runs the page instead of dropping it.
                         logger.error(f"on_result callback failed: {cb_exc}")
+                        results[slot] = None
             finally:
                 if reserved:
                     tracker.release(

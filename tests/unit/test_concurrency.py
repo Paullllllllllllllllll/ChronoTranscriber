@@ -79,7 +79,14 @@ class TestRunConcurrentTranscriptionTasks:
         assert sorted(collected) == [10, 20, 30]
         assert sorted(results) == [10, 20, 30]
 
-    async def test_on_result_callback_error_does_not_crash(self) -> None:
+    async def test_on_result_callback_error_marks_slot_failed(self) -> None:
+        """A callback failure must not crash the run AND must mark the slot None.
+
+        The callback is the JSONL write; if it fails the page never reaches the
+        resume artifact, so keeping the successful result would silently drop the
+        page from the final output. The slot is recorded failed instead.
+        """
+
         async def identity(x):
             return x
 
@@ -90,8 +97,27 @@ class TestRunConcurrentTranscriptionTasks:
         results = await run_concurrent_transcription_tasks(
             identity, args_list, concurrency_limit=5, on_result=bad_callback
         )
-        # Results should still be returned despite callback failures
-        assert sorted(results) == [1, 2]
+        # No crash, but every slot whose callback failed is marked None.
+        assert results == [None, None]
+
+    async def test_on_result_partial_failure_marks_only_failed_slot(self) -> None:
+        """Only the slot whose callback raised is nulled; others keep results."""
+
+        async def identity(x):
+            return x
+
+        async def selective_callback(result):
+            if result == 2:
+                raise ValueError("callback error for 2")
+
+        args_list = [(1,), (2,), (3,)]
+        results = await run_concurrent_transcription_tasks(
+            identity,
+            args_list,
+            concurrency_limit=1,
+            on_result=selective_callback,
+        )
+        assert results == [1, None, 3]
 
     async def test_task_exception_returns_none(self) -> None:
         async def fail_on_two(x):
@@ -239,6 +265,34 @@ class TestStreamingBudgetGate:
 
         assert not exhausted.is_set()
         assert sorted(processed) == [0, 1, 2, 3, 4]
+
+
+@pytest.mark.asyncio
+class TestStreamingCallbackFailure:
+    """A failed on_result callback nulls the affected slot (page failure)."""
+
+    async def test_callback_failure_records_none(self) -> None:
+        async def producer():
+            for i in range(4):
+                yield i
+                await asyncio.sleep(0)
+
+        async def handler(item):
+            return item
+
+        async def bad_callback(result):
+            # Only the odd items' JSONL writes fail.
+            if result % 2 == 1:
+                raise OSError("disk full")
+
+        results = await run_streaming_transcription_tasks(
+            producer(),
+            handler,
+            concurrency_limit=1,
+            on_result=bad_callback,
+        )
+        # concurrency_limit=1 keeps ordering deterministic; odd slots are None.
+        assert results == [0, None, 2, None]
 
 
 @pytest.mark.asyncio

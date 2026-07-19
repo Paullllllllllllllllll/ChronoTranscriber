@@ -394,11 +394,15 @@ class ResumeChecker:
         )
 
     def _check_epub(self, epub_path: Path) -> ResumeResult:
+        # Hash by the input-relative key so same-stem ebooks in different
+        # subdirectories map to distinct output dirs (mirror of the PDF path);
+        # otherwise both would resume COMPLETE off the first one's output.
         return self._check_output_exists(
             epub_path,
             epub_path.stem,
             self.epub_output_dir,
             supports_partial_jsonl=False,
+            hash_key=self._relative_key(epub_path),
         )
 
     def _check_mobi(self, mobi_path: Path) -> ResumeResult:
@@ -407,4 +411,5 @@ class ResumeChecker:
             mobi_path.stem,
             self.mobi_output_dir,
             supports_partial_jsonl=False,
+            hash_key=self._relative_key(mobi_path),
         )

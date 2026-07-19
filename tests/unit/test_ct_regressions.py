@@ -735,7 +735,9 @@ def _make_fake_ebook_processor(n_sections: int) -> Any:
             # The manager now extracts ALL sections and slices afterward.
             return _FakeExtraction([f"section {i}" for i in range(n_sections)])
 
-        def prepare_output_folder(self, out_dir: Path) -> tuple[Path, Path]:
+        def prepare_output_folder(
+            self, out_dir: Path, relative_key: str | None = None
+        ) -> tuple[Path, Path]:
             parent = out_dir / "book"
             parent.mkdir(parents=True, exist_ok=True)
             return parent, parent / "book.txt"
@@ -749,6 +751,7 @@ def _make_ebook_manager(page_range: Any) -> Any:
     mgr = WorkflowManager.__new__(WorkflowManager)
     mgr.use_input_as_output = False
     mgr.postprocessing_config = {}
+    mgr.input_root = None
     mgr.user_config = SimpleNamespace(page_range=page_range, output_format="txt")
     return mgr
 

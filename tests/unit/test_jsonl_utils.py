@@ -11,12 +11,60 @@ from pathlib import Path
 import pytest
 
 from modules.batch.jsonl import (
+    ensure_resume_marker,
     extract_batch_ids,
     extract_image_metadata,
     is_batch_jsonl,
     read_jsonl_records,
     write_jsonl_record,
 )
+
+
+class TestHealTrailingNewline:
+    """ensure_resume_marker heals a crash-truncated final line (no newline)."""
+
+    @pytest.mark.unit
+    def test_truncated_last_line_does_not_swallow_next_record(
+        self, temp_dir: Path
+    ) -> None:
+        """A partial final line (no newline) must not fuse with the next append.
+
+        Without healing, the next append glues onto the truncated line, producing
+        one unparseable line that silently discards a COMPLETE valid record.
+        """
+        jsonl_path = temp_dir / "resume.jsonl"
+        # A complete record, then a crash-truncated record with NO trailing "\n".
+        good = {"image_name": "p1.jpg", "text_chunk": "page one", "order_index": 0}
+        with jsonl_path.open("w", encoding="utf-8") as f:
+            f.write(json.dumps(good, ensure_ascii=False) + "\n")
+            f.write('{"image_name": "p2.jpg", "text_chunk": "partial')  # truncated
+
+        ensure_resume_marker(jsonl_path)
+        new_rec = {"image_name": "p3.jpg", "text_chunk": "page three", "order_index": 2}
+        write_jsonl_record(jsonl_path, new_rec)
+
+        records = read_jsonl_records(jsonl_path)
+        names = [r.get("image_name") for r in records if "image_name" in r]
+        # The good first record and the freshly-appended record both parse; only
+        # the truncated middle line is discarded.
+        assert "p1.jpg" in names
+        assert "p3.jpg" in names
+
+    @pytest.mark.unit
+    def test_healed_file_ends_with_single_newline(self, temp_dir: Path) -> None:
+        jsonl_path = temp_dir / "resume.jsonl"
+        jsonl_path.write_bytes(b'{"image_name": "p1.jpg", "text_chunk": "x"}')
+        ensure_resume_marker(jsonl_path)
+        raw = jsonl_path.read_bytes()
+        # The healed newline isolates the first line; the marker append follows.
+        assert b'{"image_name": "p1.jpg", "text_chunk": "x"}\n' in raw
+
+    @pytest.mark.unit
+    def test_empty_and_missing_files_are_noops(self, temp_dir: Path) -> None:
+        missing = temp_dir / "missing.jsonl"
+        ensure_resume_marker(missing)  # must not raise
+        # A marker record is created for a missing file.
+        assert read_jsonl_records(missing)
 
 
 class TestReadJsonlRecords:

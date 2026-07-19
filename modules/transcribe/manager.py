@@ -46,6 +46,7 @@ from modules.infra.token_budget import (
 from modules.postprocess.writer import resolve_output_path, write_transcription_output
 from modules.transcribe.pipeline import (
     BudgetExhaustedError,
+    OutputWriteError,
     PageTranscriptionError,
     build_file_provenance,
     run_streaming_transcription_pipeline,
@@ -543,8 +544,13 @@ class WorkflowManager:
                 file_path.stem, ".txt", file_path.parent
             )
         else:
+            # Key the output folder by the input-relative path (not the bare
+            # stem) so two same-stem ebooks in different subdirectories under a
+            # recursive --input do not overwrite each other's output (and later
+            # both resume COMPLETE). Mirrors the PDF/image-folder path.
+            rel_key = _relative_key(file_path, self.input_root)
             _parent_folder, output_txt_path = processor.prepare_output_folder(
-                default_output_dir
+                default_output_dir, relative_key=rel_key
             )
         output_txt_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -806,12 +812,17 @@ class WorkflowManager:
             print_info(
                 "All pages already processed. Regenerating output file from JSONL..."
             )
-            write_output_from_jsonl(
+            if not write_output_from_jsonl(
                 temp_jsonl_path,
                 output_txt_path,
                 self.postprocessing_config,
                 output_format=output_format,
-            )
+            ):
+                # Raise BEFORE cleanup/mark-complete: a failed regeneration must
+                # not delete the temp JSONL (the only copy of the transcriptions)
+                # nor file the item as complete. Propagating counts it failed and
+                # leaves the JSONL for the next resume run.
+                raise OutputWriteError(source_name)
             self._cleanup_temp_jsonl(temp_jsonl_path, "gpt")
             self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
             return
@@ -1099,7 +1110,7 @@ class WorkflowManager:
                         "text_chunk": text,
                         "pre_processed_image": None,
                     }
-                    await jfile.write(json.dumps(record) + "\n")
+                    await jfile.write(json.dumps(record, ensure_ascii=False) + "\n")
                 # Write output using central writer
                 pages = [{"text": text, "page_number": None, "image_name": None}]
                 actual_path = write_transcription_output(
@@ -1118,6 +1129,10 @@ class WorkflowManager:
                     f"Error writing native extraction output for {pdf_path.name}: {e}"
                 )
                 print_error(f"Failed to write output: {e}")
+                # Propagate so the item counts failed and cleanup/mark-complete
+                # below is skipped, preserving the temp JSONL for resume rather
+                # than filing a broken item as processed.
+                raise
 
             self._cleanup_temp_jsonl(temp_jsonl_path, method)
             # Mark JSONL as complete (successfully processed)

@@ -221,6 +221,33 @@ class TestMOBIProcessorPrepareOutputFolder:
         assert out_txt.parent == parent
         assert out_txt.suffix == ".txt"
 
+    @pytest.mark.unit
+    def test_relative_key_avoids_stem_collision(self, tmp_path: Path) -> None:
+        """Same-stem MOBIs in different subdirs get distinct output folders when
+        a relative_key is supplied."""
+        out_dir = tmp_path / "mobi_out"
+        out_dir.mkdir()
+
+        a = tmp_path / "A" / "book.mobi"
+        b = tmp_path / "B" / "book.mobi"
+        a.parent.mkdir()
+        b.parent.mkdir()
+        a.write_bytes(b"x")
+        b.write_bytes(b"y")
+
+        parent_a, _ = MOBIProcessor(a).prepare_output_folder(
+            out_dir, relative_key="A/book.mobi"
+        )
+        parent_b, _ = MOBIProcessor(b).prepare_output_folder(
+            out_dir, relative_key="B/book.mobi"
+        )
+        assert parent_a != parent_b
+
+        # Without a relative_key the two collide (pre-fix behavior).
+        parent_a2, _ = MOBIProcessor(a).prepare_output_folder(out_dir)
+        parent_b2, _ = MOBIProcessor(b).prepare_output_folder(out_dir)
+        assert parent_a2 == parent_b2
+
 
 # ---------------------------------------------------------------------------
 # Module-level helper: _normalize_text

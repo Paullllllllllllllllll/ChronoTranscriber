@@ -12,6 +12,8 @@ inlining their own file-writing logic.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +22,35 @@ from modules.llm.response_parsing import format_page_line
 from modules.postprocess.text import postprocess_transcription
 
 logger = setup_logger(__name__)
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Write *content* to *path* atomically (temp file + ``os.replace``).
+
+    A crash mid-write must never leave a truncated final output on disk: an
+    item-level resume treats any existing, non-empty output as COMPLETE and
+    would skip re-transcription, silently losing the tail of the document. By
+    writing to a sibling temp file first and atomically renaming it into place,
+    the target file either holds the previous content or the complete new
+    content, never a partial write. UTF-8 encoding and ``\\n`` newlines are
+    preserved so the on-disk bytes match the previous ``Path.write_text``.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(content)
+        os.replace(tmp_path, path)
+    except BaseException:
+        # Never leave the temp artifact behind on a failed write/replace.
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except OSError:
+            pass
+        raise
+
 
 VALID_OUTPUT_FORMATS = {"txt", "md", "json"}
 
@@ -103,7 +134,7 @@ def _write_txt(
     combined = "\n".join(lines)
     if postprocess:
         combined = postprocess_transcription(combined, config or {})
-    path.write_text(combined, encoding="utf-8", newline="\n")
+    _atomic_write_text(path, combined)
 
 
 def _write_md(
@@ -131,7 +162,7 @@ def _write_md(
     combined = "\n\n".join(blocks)
     if postprocess:
         combined = postprocess_transcription(combined, config or {})
-    path.write_text(combined, encoding="utf-8", newline="\n")
+    _atomic_write_text(path, combined)
 
 
 def _write_json(pages: list[dict[str, Any]], path: Path) -> None:
@@ -145,8 +176,4 @@ def _write_json(pages: list[dict[str, Any]], path: Path) -> None:
                 "transcription": page.get("text", ""),
             }
         )
-    path.write_text(
-        json.dumps(records, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-        newline="\n",
-    )
+    _atomic_write_text(path, json.dumps(records, ensure_ascii=False, indent=2))

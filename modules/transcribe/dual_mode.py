@@ -215,7 +215,14 @@ class AsyncDualModeScript(_DualModeBase, ABC):
 
     def execute(self) -> None:
         """Main entry point that wraps the async execution in asyncio.run()."""
-        asyncio.run(self._execute_async())
+        # A Ctrl+C raised while asyncio.run is starting up or tearing down the
+        # event loop lands OUTSIDE the coroutine's own try/except, so without
+        # this guard it would escape as an uncaught KeyboardInterrupt (traceback
+        # + arbitrary exit code) instead of the graceful exit 130.
+        try:
+            asyncio.run(self._execute_async())
+        except KeyboardInterrupt:
+            self._handle_interrupt()
 
     async def _execute_async(self) -> None:
         """Internal async execution handler."""

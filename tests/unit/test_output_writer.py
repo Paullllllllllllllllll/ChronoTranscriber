@@ -10,7 +10,9 @@ from pathlib import Path
 
 import pytest
 
+from modules.postprocess import writer as writer_mod
 from modules.postprocess.writer import (
+    _atomic_write_text,
     resolve_output_path,
     write_transcription_output,
 )
@@ -397,3 +399,52 @@ class TestLineEndings:
         raw = path.read_bytes()
         assert b"\r\n" not in raw
         assert b"\n" in raw
+
+
+# =============================================================================
+# TestAtomicWrite
+# =============================================================================
+
+
+class TestAtomicWrite:
+    """Outputs are written atomically (temp file + os.replace)."""
+
+    @pytest.mark.unit
+    def test_writes_correct_bytes_and_no_tmp_left(self, tmp_path: Path) -> None:
+        """Content round-trips exactly and no .tmp artifact remains."""
+        target = tmp_path / "out.txt"
+        content = "Zürich café — naïve\nSecond line."
+        _atomic_write_text(target, content)
+        assert target.read_text(encoding="utf-8") == content
+        # LF preserved, no CRLF translation.
+        assert b"\r\n" not in target.read_bytes()
+        # The temp file was renamed onto the target, so nothing is left behind.
+        assert list(tmp_path.glob("*.tmp")) == []
+
+    @pytest.mark.unit
+    def test_overwrites_existing_file(self, tmp_path: Path) -> None:
+        target = tmp_path / "out.txt"
+        target.write_text("stale content", encoding="utf-8")
+        _atomic_write_text(target, "fresh content")
+        assert target.read_text(encoding="utf-8") == "fresh content"
+        assert list(tmp_path.glob("*.tmp")) == []
+
+    @pytest.mark.unit
+    def test_failed_replace_cleans_tmp_and_preserves_target(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A crash during replace leaves no .tmp file and no truncated target."""
+        target = tmp_path / "out.txt"
+        target.write_text("previous good output", encoding="utf-8")
+
+        def boom(src: str, dst: str) -> None:
+            raise OSError("simulated crash during replace")
+
+        monkeypatch.setattr(writer_mod.os, "replace", boom)
+        with pytest.raises(OSError):
+            _atomic_write_text(target, "new content that never lands")
+
+        # Target still holds the previous complete content (never truncated).
+        assert target.read_text(encoding="utf-8") == "previous good output"
+        # The temp artifact was cleaned up on the failure path.
+        assert list(tmp_path.glob("*.tmp")) == []

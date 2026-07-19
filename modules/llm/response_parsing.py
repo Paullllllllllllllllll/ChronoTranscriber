@@ -417,7 +417,11 @@ def process_batch_output(file_content: bytes) -> list[str]:
             continue
 
         transcription = extract_transcribed_text(data, obj.get("image_name", ""))
-        if transcription:
-            transcriptions.append(transcription)
+        # Always append one entry per parsed line: callers correlate this
+        # list positionally with the per-line custom_ids collected from the
+        # same content (results._build_fallback_entry), so skipping an empty
+        # transcription would shift every subsequent page onto the wrong
+        # custom_id. An empty extraction becomes an error placeholder.
+        transcriptions.append(transcription or "[transcription error]")
 
     return transcriptions

@@ -343,6 +343,46 @@ class TestProcessBatchOutput:
         assert result[0] == "Array item"
 
     @pytest.mark.unit
+    def test_empty_transcription_keeps_positional_alignment(self) -> None:
+        """An empty extraction must yield a placeholder, not a skipped line.
+
+        Callers correlate the returned list positionally with per-line
+        custom_ids; dropping a line would shift every later page onto the
+        wrong custom_id.
+        """
+        lines = [
+            json.dumps(
+                {
+                    "response": {
+                        "body": {
+                            "transcription": "Page one",
+                            "no_transcribable_text": False,
+                            "transcription_not_possible": False,
+                        }
+                    }
+                }
+            ),
+            # Empty output_text extracts to "" -> placeholder expected.
+            json.dumps({"response": {"body": {"output_text": ""}}}),
+            json.dumps(
+                {
+                    "response": {
+                        "body": {
+                            "transcription": "Page three",
+                            "no_transcribable_text": False,
+                            "transcription_not_possible": False,
+                        }
+                    }
+                }
+            ),
+        ]
+        result = process_batch_output("\n".join(lines).encode())
+        assert len(result) == 3
+        assert result[0] == "Page one"
+        assert result[1] == "[transcription error]"
+        assert result[2] == "Page three"
+
+    @pytest.mark.unit
     def test_handles_bytes_input(self) -> None:
         """Test that bytes input is handled correctly."""
         content = (

@@ -76,8 +76,8 @@ preprocessing.
   transcription quality (`{name}_transcr_context_image.{ext}`
   convention; OpenAI provider)
 - **Batch processing** -- async batch APIs for OpenAI, Anthropic, and
-  Google with smart chunking (150 MB per chunk) and 50% cost savings
-  on OpenAI
+  Google with smart chunking under each provider's request-count and
+  byte limits, and 50% cost savings on OpenAI
 - **Multi-tier retry** -- exponential backoff for network errors;
   validation retries for malformed structured output; content-quality
   retries for hallucination loops, truncation, system-prompt bleed,
@@ -507,20 +507,30 @@ batch mode.
 **How it works:**
 
 1. Images are base64-encoded as data URLs
-2. Requests are split into chunks (max 150 MB each)
-3. Chunks are submitted as separate batch jobs with metadata tracking
+2. Requests are split into parts under each provider's request-count
+   and byte limits (OpenAI 150 MB, Anthropic 224 MB, Google 2 GB)
+3. Parts are submitted as separate batch jobs with metadata tracking
 4. A debug artifact (`*_batch_submission_debug.json`) is saved for
    repair and status recovery
 
 **Monitoring and cancellation:**
 
 ```bash
-# Check status, auto-download completed results
+# Check status and finalize completed results (OpenAI, Anthropic, Google)
 python main/check_batches.py
 
-# Cancel all non-terminal batch jobs
+# Cancel non-terminal batch jobs
 python main/cancel_batches.py
+
+# Cancel specific non-OpenAI batches by id
+python main/cancel_batches.py --batch-ids msgbatch_... batches/...
 ```
+
+`check_batches` finalizes batches for every supported provider by reading
+the provider recorded in each local tracking artifact. `cancel_batches`
+without arguments auto-lists and cancels only OpenAI batches; to cancel
+Anthropic (`msgbatch_...`) or Google (`batches/...`) batches, pass their ids
+via `--batch-ids`, which are routed to the correct provider by id shape.
 
 Batch processing typically completes within 24 hours.
 

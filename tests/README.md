@@ -1,14 +1,14 @@
 # ChronoTranscriber Test Suite
 
 Test suite for the ChronoTranscriber document transcription application:
-roughly 1,500 tests across 71 files.
+roughly 1,700 tests across 76 files.
 
 ## Layout
 
 ```
 tests/
 ├── conftest.py       # Shared fixtures and pytest configuration
-├── unit/             # 68 files: fast, isolated tests covering all
+├── unit/             # 73 files: fast, isolated tests covering all
 │                     # modules/ packages (providers, batch backends,
 │                     # config, documents, images, infra, postprocess,
 │                     # transcribe pipeline, UI) and the main/ CLIs

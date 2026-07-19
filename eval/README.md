@@ -9,6 +9,7 @@ The evaluation computes **Character Error Rate (CER)** and **Word Error Rate (WE
 ### Page-Level Evaluation
 
 Metrics are computed **page-by-page** using the temporary JSONL files produced by the transcriber. This approach:
+
 - **Eliminates formatting penalties** from whitespace differences in final TXT output
 - **Enables accurate per-page error attribution** for debugging
 - **Isolates transcription quality** from post-processing effects
@@ -77,29 +78,32 @@ Run transcriptions for each model and category. The
 `--output` directory name must match the `name` field in `eval_config.yaml`.
 
 **address_books** (images folder — pass the folder as `--input`):
+
 ```bash
 # Tesseract baseline
-python main/unified_transcriber.py --input eval/test_data/input/address_books \
+uv run python main/unified_transcriber.py --input eval/test_data/input/address_books \
     --output eval/test_data/output/address_books/tesseract \
     --type images --method tesseract
 
 # GPT-5.2 (medium reasoning)
-python main/unified_transcriber.py --input eval/test_data/input/address_books \
+uv run python main/unified_transcriber.py --input eval/test_data/input/address_books \
     --output eval/test_data/output/address_books/gpt_5.2_medium \
     --type images --method gpt --model gpt-5.2
 ```
 
 **bibliography** (single PDF):
+
 ```bash
-python main/unified_transcriber.py \
+uv run python main/unified_transcriber.py \
     --input eval/test_data/input/bibliography/Whitaker_1913_English_Cookery_Books_to_the_Year_1850.pdf \
     --output eval/test_data/output/bibliography/gpt_5.2_medium \
     --type pdfs --method gpt --model gpt-5.2
 ```
 
 **military_records** (each PDF separately, or the whole folder):
+
 ```bash
-python main/unified_transcriber.py --input eval/test_data/input/military_records \
+uv run python main/unified_transcriber.py --input eval/test_data/input/military_records \
     --output eval/test_data/output/military_records/gpt_5.2_medium \
     --type pdfs --method gpt --model gpt-5.2
 ```
@@ -112,11 +116,11 @@ with per-page transcriptions that will be used for evaluation.
 Open and run `transcription_eval.ipynb` in Jupyter:
 
 ```bash
-cd eval
-jupyter notebook transcription_eval.ipynb
+uv run jupyter notebook eval/transcription_eval.ipynb
 ```
 
 The notebook will:
+
 - Discover available outputs and ground truth JSONL files
 - Compute CER/WER page-by-page for each model/category combination
 - Generate summary tables and per-page rankings
@@ -171,6 +175,7 @@ After running the evaluation:
 ## Configuration
 
 Edit `eval_config.yaml` to:
+
 - Add or remove models from evaluation
 - Change dataset paths
 - Adjust normalization settings
@@ -178,11 +183,9 @@ Edit `eval_config.yaml` to:
 
 ## Dependencies
 
-The evaluation uses standard Python libraries plus:
-- `pyyaml` - Configuration loading
-- `matplotlib` (optional) - Visualization
+Evaluation-only dependencies (`pandas`, `matplotlib`, `jupyter`) live in
+the `eval` extra of `pyproject.toml`. Install with:
 
-Install with:
 ```bash
-pip install pyyaml matplotlib
+uv sync --extra eval
 ```

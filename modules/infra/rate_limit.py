@@ -146,7 +146,8 @@ class RateLimiter:
                     self.total_wait_time += total_wait
                     return total_wait
 
-            # Sleep with jitter to avoid a thundering herd of retries.
+            # Sleep the outstanding wait plus a small buffer, capped at
+            # MAX_SLEEP_TIME so long waits re-check the windows periodically.
             sleep_time = min(wait_time + MIN_SLEEP_TIME, MAX_SLEEP_TIME)
             time.sleep(sleep_time)
 

@@ -1,4 +1,4 @@
-# ChronoTranscriber v2.1.0
+# ChronoTranscriber v2.2.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -731,6 +731,31 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v2.2.0** (19 July 2026) -- Correctness and interactive-mode release from a
+    full maintenance sweep. Output integrity: final txt/md/json outputs are
+    written atomically; a crash-truncated JSONL line no longer swallows the
+    next resume run's first record; failed output regeneration now fails the
+    item and preserves the temp JSONL instead of deleting the only copy of
+    paid transcriptions; failed streaming JSONL appends surface as page
+    failures; Tesseract page order is derived from absolute page numbers
+    across resumed subsets; same-stem EPUBs/MOBIs in different subdirectories
+    no longer collide. Batch: finalized temp JSONLs carry a marker so re-check
+    runs are idempotent and no longer revert repairs; non-OpenAI results are
+    reconciled for missing pages and cancelled/expired batches count as
+    failed; Gemini 429/5xx errors are now retried (cause-chain status
+    classification); repair never blanks a placeholder with an empty
+    re-transcription; batch fallback parsing keeps positional custom_id
+    alignment; plain text containing an embedded code fence is no longer
+    reduced to the fence content. Interactive mode: cancellation now requires
+    confirmation; resume mode is chosen before auto-mode filtering and the
+    filter targets the real auto output root; the configured output format is
+    honored; MOBI processing and a retry-errors resume option join the
+    wizard; back-navigation dead loops and value corruption in the
+    postprocess wizard are fixed; completion output is a comprehensive
+    overview (real counts, skipped items, failed submissions, token usage,
+    absolute output paths, batch job IDs); prompts exit 130 on Ctrl+C. CLI
+    argument definitions are unchanged.
 
 - **v2.1.0** (17 July 2026) -- Performance and robustness release; API
     behavior and LLM payloads for in-cap pages are unchanged. The

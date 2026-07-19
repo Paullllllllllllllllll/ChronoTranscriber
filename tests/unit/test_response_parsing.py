@@ -538,9 +538,21 @@ class TestStripCodeFences:
         assert _strip_code_fences(text) == '{"transcription": "real"}'
 
     @pytest.mark.unit
-    def test_fence_with_surrounding_prose(self) -> None:
+    def test_fence_with_leading_prose_passes_through(self) -> None:
+        # A response that does not START with a fence must pass through
+        # unchanged: stripping would discard the surrounding text. JSON
+        # extraction for prose-wrapped fenced JSON is handled downstream by
+        # _normalize_llm_text's brace isolation (covered below).
         text = 'Here is the result:\n```json\n{"transcription": "hello"}\n```\nDone!'
-        assert _strip_code_fences(text) == '{"transcription": "hello"}'
+        assert _strip_code_fences(text) == text
+
+    @pytest.mark.unit
+    def test_plain_text_with_embedded_fence_preserved(self) -> None:
+        # Regression: a plain-text transcription legitimately containing a
+        # fenced block (e.g. tabular content) must not be reduced to the
+        # fence content.
+        text = "Chapter I opens here.\n```\ncol1 col2\n```\nProse continues."
+        assert _strip_code_fences(text) == text
 
 
 class TestNormalizeLlmText:
@@ -557,6 +569,19 @@ class TestNormalizeLlmText:
         result = _normalize_llm_text(text)
         assert result.startswith("{")
         assert json.loads(result)["transcription"] == "hello"
+
+    @pytest.mark.unit
+    def test_prose_wrapped_fenced_json_still_extracted(self) -> None:
+        # With _strip_code_fences now requiring a leading fence, JSON wrapped
+        # in prose plus a fence is still isolated by the brace-scan fallback.
+        text = 'Here is the result:\n```json\n{"transcription": "hello"}\n```\nDone!'
+        result = _normalize_llm_text(text)
+        assert json.loads(result)["transcription"] == "hello"
+
+    @pytest.mark.unit
+    def test_plain_text_with_embedded_fence_not_reduced(self) -> None:
+        text = "Chapter I opens here.\n```\ncol1 col2\n```\nProse continues."
+        assert _normalize_llm_text(text) == text
 
     @pytest.mark.unit
     def test_preamble_postamble(self) -> None:

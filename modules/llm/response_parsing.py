@@ -118,10 +118,17 @@ def _strip_code_fences(text: str) -> str:
         {"transcription": "..."}
         ```
 
-    If one or more fenced blocks are found, returns the last one (models
+    Only applies when the response *starts* with a fence (i.e. the model
+    wrapped its whole answer): a plain-text transcription that merely
+    *contains* an embedded fenced block (e.g. tabular content quoted in
+    running prose) must pass through unchanged, since reducing it to the
+    fence content would silently discard the surrounding transcription.
+    If the text starts with a fence, returns the last fenced block (models
     sometimes emit a "thinking" block followed by the real output).
-    If no fences are found, returns the original text unchanged.
+    Otherwise returns the original text unchanged.
     """
+    if not text.lstrip().startswith("```"):
+        return text
     matches = _CODE_FENCE_RE.findall(text)
     if matches:
         return str(matches[-1]).strip()

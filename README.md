@@ -1,4 +1,4 @@
-# ChronoTranscriber v2.3.0
+# ChronoTranscriber v2.4.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -742,6 +742,17 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v2.4.0** (19 July 2026) -- Dependency and documentation release from the
+    third maintenance sweep. Raise all direct dependency floors to current
+    stable releases (langchain stack, openai 2.46, anthropic 0.117,
+    google-genai 2.12, PyMuPDF 1.28, pillow 12.3, numpy 2.5) and regenerate
+    the lockfile; hold opencv-python below the freshly released 5.0 major
+    until it stabilizes. Verify the google-genai inline-batch request shape
+    and langchain-openai disabled_params semantics against the upgraded SDKs;
+    make the deep-nesting JSON parse test robust on Python 3.14. Documentation:
+    describe per-provider batch chunk limits and id-shape cancel/status
+    routing in the README, refresh test-suite counts, move eval docs to the
+    uv workflow, and correct a stale rate-limiter comment.
 - **v2.3.0** (19 July 2026) -- Batch-backend and provider-correctness release
     from the second maintenance sweep. Batch: Google inline submission now
     builds SDK-valid requests (it previously failed validation before any

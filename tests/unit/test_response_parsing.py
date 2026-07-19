@@ -570,8 +570,12 @@ class TestSalvageLastJsonObject:
         """A deeply nested valid-JSON string must not raise RecursionError."""
         depth = 6000
         deep = '{"a":' * depth + "1" + "}" * depth
-        # Must degrade to None (unparseable at this depth), not crash.
-        assert _try_parse_json(deep) is None
+        # Must not crash. On CPython 3.13 the C scanner exhausts its recursion
+        # budget at this depth and the helper degrades to None; on 3.14+ the
+        # adaptive recursion limit parses the document, so a dict is equally
+        # acceptable.
+        result = _try_parse_json(deep)
+        assert result is None or isinstance(result, dict)
 
     @pytest.mark.unit
     def test_thousands_of_unbalanced_braces_degrade_fast(self) -> None:

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chronotranscriber"
-version = "2.3.0"
+version = "2.4.0"
 description = "LLM-assisted document transcription tool for researchers and archivists"
 readme = "README.md"
 license = "MIT"
@@ -22,26 +22,29 @@ classifiers = [
 
 dependencies = [
     # LLM integration (LangChain abstraction layer)
-    "langchain-core>=1.4.8",
-    "langchain-openai>=1.3.2",
-    "langchain-anthropic>=1.4.6",
-    "langchain-google-genai>=4.2.5",
+    "langchain-core>=1.4.9",
+    "langchain-openai>=1.3.5",
+    "langchain-anthropic>=1.4.8",
+    "langchain-google-genai>=4.2.7",
     # Direct SDK usage (batch API backends)
-    "openai>=2.43",
-    "anthropic>=0.111",
-    "google-genai>=2",
+    "openai>=2.46",
+    "anthropic>=0.117",
+    "google-genai>=2.12",
     # Document processing
-    "PyMuPDF>=1.27",
+    "PyMuPDF>=1.28",
     "EbookLib>=0.20",
     "mobi>=0.4.1",
     "lxml>=6.1.1",
     "pytesseract>=0.3.13",
     # Image processing
-    "pillow>=12.2.0",
-    "opencv-python>=4.13",
+    "pillow>=12.3",
+    # OpenCV 5.0 (released 07.2026) is a fresh major of a native vision library;
+    # the preprocessing pipeline's numerics are not exhaustively covered by tests,
+    # so hold the 4.x series until 5.x has stabilized.
+    "opencv-python>=4.13,<5",
     "deskew>=1.6.1",
     "scikit-image>=0.26",
-    "numpy>=2.4.6",
+    "numpy>=2.5",
     # Configuration and validation
     "pydantic>=2.13",
     "PyYAML>=6.0",

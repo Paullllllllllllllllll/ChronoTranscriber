@@ -443,10 +443,17 @@ def postprocess_interactive() -> int:
             elif output_mode == "new_file":
                 postprocess_file(file_path, output_path=output_path, config=config)
             else:
-                # new_dir
+                # new_dir: mirror the input tree under the output directory so
+                # same-named files in different subdirectories do not overwrite
+                # each other (CT-10, matching the CLI path exactly). Flat naming
+                # applies only when the input was a single file.
                 if output_path is None:
                     raise ValueError("output_path is required for new_dir mode")
-                out_file = output_path / file_path.name
+                if is_dir:
+                    out_file = output_path / file_path.relative_to(input_path)
+                    out_file.parent.mkdir(parents=True, exist_ok=True)
+                else:
+                    out_file = output_path / file_path.name
                 postprocess_file(file_path, output_path=out_file, config=config)
 
             print_success(f"Processed: {file_path.name}")

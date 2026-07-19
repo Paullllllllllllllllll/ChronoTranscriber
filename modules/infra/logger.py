@@ -1,6 +1,7 @@
 """Logging infrastructure for the application.
 
-Provides centralized logger configuration with file and console handlers.
+Provides centralized, file-only logger configuration (the interactive UI
+helpers own the console; see ``_ensure_root_handlers``).
 
 All module loggers share a single ``RotatingFileHandler`` attached to a
 common ancestor logger (``"modules"``).  This avoids opening the same log
@@ -23,7 +24,13 @@ _initialized = False
 
 
 def _ensure_root_handlers() -> None:
-    """Attach file and console handlers to the shared app logger once."""
+    """Attach the shared file handler to the app logger once.
+
+    Logging is file-only by design: the interactive UI helpers in
+    ``modules/ui/prompts.py`` own the console. A console log handler here would
+    echo every ``logger.warning``/``logger.error`` next to the matching
+    ``print_warning``/``print_error`` call, printing user-facing errors twice.
+    """
     global _initialized  # noqa: PLW0603
     if _initialized:
         return
@@ -60,12 +67,6 @@ def _ensure_root_handlers() -> None:
     file_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     file_handler.setFormatter(file_formatter)
     root.addHandler(file_handler)
-
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.WARNING)
-    console_formatter = logging.Formatter("%(levelname)s: %(message)s")
-    console_handler.setFormatter(console_formatter)
-    root.addHandler(console_handler)
 
 
 def setup_logger(name: str) -> logging.Logger:

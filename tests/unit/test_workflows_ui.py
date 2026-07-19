@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -260,6 +261,94 @@ class TestConfigureBatchProcessingMissingKey:
             ok = WorkflowUI.configure_batch_processing(config)
         assert ok is False
         mock_error.assert_called_once()
+
+
+class TestConfigureBatchProcessingUnsupportedProvider:
+    """Item 8a: providers without a batch API are not offered batch processing;
+    the wizard forces synchronous mode rather than silently falling back to
+    full-price sync at submission time."""
+
+    @staticmethod
+    def _service(provider: str, name: str) -> MagicMock:
+        svc = MagicMock()
+        svc.get_model_config.return_value = {
+            "transcription_model": {"provider": provider, "name": name}
+        }
+        return svc
+
+    @pytest.mark.unit
+    def test_unsupported_provider_skips_batch_prompt(self) -> None:
+        config = UserConfiguration(transcription_method="gpt")
+        with (
+            patch(
+                "modules.config.service.get_config_service",
+                return_value=self._service("openrouter", "some-model"),
+            ),
+            patch(
+                "modules.llm.providers.factory.resolve_api_key_optional",
+                return_value="key",
+            ),
+            patch("modules.ui.workflows.prompt_select") as mock_select,
+            patch.object(WorkflowUI, "configure_schema_selection", return_value=True),
+            patch.object(WorkflowUI, "configure_additional_context", return_value=True),
+            patch.object(
+                WorkflowUI, "configure_additional_context_image", return_value=True
+            ),
+        ):
+            ok = WorkflowUI.configure_batch_processing(config)
+        assert ok is True
+        assert config.use_batch_processing is False
+        mock_select.assert_not_called()
+
+    @pytest.mark.unit
+    def test_supported_provider_still_prompts(self) -> None:
+        config = UserConfiguration(transcription_method="gpt")
+        with (
+            patch(
+                "modules.config.service.get_config_service",
+                return_value=self._service("openai", "gpt-4o"),
+            ),
+            patch(
+                "modules.llm.providers.factory.resolve_api_key_optional",
+                return_value="key",
+            ),
+            patch(
+                "modules.ui.workflows.prompt_select",
+                return_value=_continue("yes"),
+            ) as mock_select,
+            patch.object(WorkflowUI, "configure_schema_selection", return_value=True),
+            patch.object(WorkflowUI, "configure_additional_context", return_value=True),
+            patch.object(
+                WorkflowUI, "configure_additional_context_image", return_value=True
+            ),
+        ):
+            ok = WorkflowUI.configure_batch_processing(config)
+        assert ok is True
+        assert config.use_batch_processing is True
+        mock_select.assert_called_once()
+
+
+class TestConfigureAutoModeSingleConfirm:
+    """Item 3: auto mode must not double-confirm. _configure_auto_mode persists
+    decisions and returns True without its own Proceed prompt; the generic
+    summary step owns the single confirmation."""
+
+    @pytest.mark.unit
+    def test_no_auto_specific_confirm(self, tmp_path: Path) -> None:
+        # resume_mode=overwrite bypasses the resume-skip filtering branch.
+        config = UserConfiguration(processing_type="auto", resume_mode="overwrite")
+        selector = MagicMock()
+        decision = SimpleNamespace(file_path=tmp_path / "a.pdf")
+        selector.create_decisions.return_value = [decision]
+        config.auto_selector = selector
+
+        with patch("modules.ui.workflows.prompt_yes_no") as mock_confirm:
+            ok = WorkflowUI._configure_auto_mode(config, tmp_path, {})
+
+        assert ok is True
+        mock_confirm.assert_not_called()
+        assert config.auto_decisions == [decision]
+        assert config.selected_items == [tmp_path]
 
 
 class TestSelectMobiFiles:

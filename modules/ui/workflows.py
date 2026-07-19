@@ -209,17 +209,30 @@ class WorkflowUI:
             )
             return False
 
-        # Ask about batch processing
-        result = prompt_select(
-            "Would you like to use batch processing for GPT transcription?",
-            WorkflowUI.get_batch_options(),
-            allow_back=True,
-        )
+        # Only offer batch processing for providers that actually have a batch
+        # API. Offering it for a provider without one (e.g. OpenRouter, Custom)
+        # leads to a silent full-price synchronous fallback at submission time,
+        # so force synchronous mode up front instead.
+        from modules.batch.backends.factory import supports_batch
 
-        if result.action == NavigationAction.BACK:
-            return False
+        if supports_batch(provider_type.value):
+            # Ask about batch processing
+            result = prompt_select(
+                "Would you like to use batch processing for GPT transcription?",
+                WorkflowUI.get_batch_options(),
+                allow_back=True,
+            )
 
-        config.use_batch_processing = result.value == "yes"
+            if result.action == NavigationAction.BACK:
+                return False
+
+            config.use_batch_processing = result.value == "yes"
+        else:
+            config.use_batch_processing = False
+            print_info(
+                f"Provider '{provider_type.value}' does not support batch"
+                f" processing; using synchronous mode."
+            )
         logger.info(f"User selected batch processing: {config.use_batch_processing}")
 
         # Configure schema
@@ -1004,23 +1017,14 @@ class WorkflowUI:
         # Display decision summary
         selector.print_decision_summary(decisions)
 
-        # Confirm with user
-        result = prompt_yes_no(
-            f"Proceed with processing {len(decisions)} file(s) using auto mode?",
-            default=True,
-            allow_back=True,
-        )
-
-        if result.action == NavigationAction.BACK:
-            return False
-
-        if result.action == NavigationAction.CONTINUE and result.value:
-            # Store decisions and output directory
-            config.auto_decisions = decisions
-            config.selected_items = [base_dir]  # Will be used as output dir
-            return True
-
-        return False
+        # Persist decisions and the output base directory. The generic summary
+        # step (display_processing_summary) owns the single "Proceed with
+        # processing?" confirmation for every flow; a second auto-specific
+        # confirm here double-prompted the auto path relative to the non-auto
+        # flows. Back-navigation remains available at the summary step.
+        config.auto_decisions = decisions
+        config.selected_items = [base_dir]  # Will be used as output dir
+        return True
 
     @staticmethod
     def _build_processing_config_lines(

@@ -186,6 +186,56 @@ class TestPostprocessInteractive:
         # No key was left as None by a stray BACK result.
         assert None not in captured.values()
 
+    @pytest.mark.unit
+    def test_new_dir_mirrors_input_tree(self, temp_dir: Path) -> None:
+        """Item 5: 'Save to a new directory' mirrors the input tree so
+        same-named files in different subdirectories do not overwrite each
+        other (CT-10, matching the CLI path)."""
+        input_dir = temp_dir / "in"
+        (input_dir / "sub1").mkdir(parents=True)
+        (input_dir / "sub2").mkdir(parents=True)
+        (input_dir / "sub1" / "page.txt").write_text("a", encoding="utf-8")
+        (input_dir / "sub2" / "page.txt").write_text("b", encoding="utf-8")
+        output_dir = temp_dir / "out"
+
+        seen: list[Path] = []
+
+        def _capture(path: Path, **kwargs: Any) -> None:
+            seen.append(kwargs["output_path"])
+
+        with (
+            patch(
+                "main.postprocess_transcriptions.get_config_service",
+                return_value=self._config_service(),
+            ),
+            patch(
+                "main.postprocess_transcriptions.prompt_text",
+                side_effect=[_cont(str(input_dir)), _cont(str(output_dir))],
+            ),
+            patch(
+                "main.postprocess_transcriptions.prompt_yes_no",
+                # recursive=True, use-config=False, merge=False, proceed=True
+                side_effect=[_cont(True), _cont(False), _cont(False), _cont(True)],
+            ),
+            patch(
+                "main.postprocess_transcriptions.prompt_select",
+                # wrap mode = "no", output mode = "new_dir"
+                side_effect=[_cont("no"), _cont("new_dir")],
+            ),
+            patch(
+                "main.postprocess_transcriptions.postprocess_file",
+                side_effect=_capture,
+            ),
+        ):
+            rc = postprocess_interactive()
+
+        assert rc == 0
+        # Two distinct mirrored output paths, not one flattened collision.
+        assert len(seen) == 2
+        assert len(set(seen)) == 2
+        rel = {p.relative_to(output_dir).as_posix() for p in seen}
+        assert rel == {"sub1/page.txt", "sub2/page.txt"}
+
 
 class TestPostprocessCliExitCodes:
     """Tests for honest exit codes on partial failure (Finding 5)."""

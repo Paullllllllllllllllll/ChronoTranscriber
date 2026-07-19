@@ -93,19 +93,37 @@ class CancelBatchesScript(DualModeScript):
         cancelled_batches = []  # (batch_id, status, success)
         skipped_batches = []  # (batch_id, status)
 
-        print_info("Processing cancellations...")
+        # Partition batches: terminal ones are skipped, the rest are eligible for
+        # cancellation. This mirrors the CLI path, which only targets
+        # non-terminal batches.
+        non_terminal: list[tuple[str, str]] = []
         for b in batches:
             batch_id, status = _extract_batch_id_and_status(b)
             if not batch_id:
                 continue
-
             if status in TERMINAL_BATCH_STATUSES:
                 self.logger.info(
                     f"Skipping batch {batch_id} with terminal status '{status}'."
                 )
                 skipped_batches.append((batch_id, status))
-                continue
+            else:
+                non_terminal.append((batch_id, status))
 
+        if not non_terminal:
+            print_info("No non-terminal batches to cancel.")
+            return
+
+        # Interactive mode must confirm before cancelling, matching the CLI path
+        # (which requires confirm_action unless --force).
+        if not confirm_action(
+            f"Cancel all {len(non_terminal)} non-terminal batch(es)?",
+            default=False,
+        ):
+            print_info("Cancellation aborted.")
+            return
+
+        print_info("Processing cancellations...")
+        for batch_id, status in non_terminal:
             if cancel_batch_by_id("openai", batch_id):
                 self.logger.info(f"Batch {batch_id} cancelled.")
                 cancelled_batches.append((batch_id, status, True))

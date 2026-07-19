@@ -30,7 +30,6 @@ from modules.postprocess.text import (
 )
 from modules.transcribe.dual_mode import DualModeScript
 from modules.ui import (
-    NavigationAction,
     print_error,
     print_info,
     print_success,
@@ -282,15 +281,18 @@ def postprocess_interactive() -> int:
     base_config = image_processing_config.get("postprocessing", {})
 
     # Step 1: Get input path
+    #
+    # NOTE: These prompts intentionally use allow_back=False. There is no
+    # back-handling state machine in this linear flow, so navigating "back"
+    # would leave downstream values unset (a prior bug read result.value on a
+    # BACK result, corrupting the config). Prompt helpers sys.exit(0) on 'q',
+    # so with allow_back=False every result is NavigationAction.CONTINUE and the
+    # value can be used directly.
     while True:
         result = prompt_text(
             "Enter the path to a transcription file or directory:",
             allow_back=False,
         )
-        if result.action == NavigationAction.QUIT:
-            print_info("Cancelled.")
-            return 0
-
         input_path = Path(result.value).resolve()
         if input_path.exists():
             break
@@ -302,16 +304,13 @@ def postprocess_interactive() -> int:
         result = prompt_yes_no(
             "Search subdirectories recursively?",
             default=False,
-            allow_back=True,
+            allow_back=False,
         )
-        if result.action == NavigationAction.QUIT:
-            print_info("Cancelled.")
-            return 0
         recursive = result.value
 
         files = collect_transcription_files(input_path, recursive)
         if not files:
-            print_warning(f"No *_transcription.txt files found in: {input_path}")
+            print_warning(f"No transcription .txt files found in: {input_path}")
             return 1
 
         print_info(f"Found {len(files)} transcription file(s):")
@@ -331,11 +330,8 @@ def postprocess_interactive() -> int:
     result = prompt_yes_no(
         "Use settings from config file as base?",
         default=bool(base_config.get("enabled", False)),
-        allow_back=True,
+        allow_back=False,
     )
-    if result.action == NavigationAction.QUIT:
-        print_info("Cancelled.")
-        return 0
 
     config: dict[str, Any] = dict(base_config) if result.value else {}
     config["enabled"] = True
@@ -344,11 +340,8 @@ def postprocess_interactive() -> int:
     result = prompt_yes_no(
         "Merge hyphenated line breaks? (e.g., 'politi-\\nche' -> 'politiche')",
         default=config.get("merge_hyphenation", False),
-        allow_back=True,
+        allow_back=False,
     )
-    if result.action == NavigationAction.QUIT:
-        print_info("Cancelled.")
-        return 0
     config["merge_hyphenation"] = result.value
 
     # Line wrapping
@@ -360,11 +353,8 @@ def postprocess_interactive() -> int:
     result = prompt_select(
         "Line wrapping mode:",
         wrap_options,
-        allow_back=True,
+        allow_back=False,
     )
-    if result.action == NavigationAction.QUIT:
-        print_info("Cancelled.")
-        return 0
 
     if result.value == "no":
         config["wrap_lines"] = False
@@ -377,11 +367,8 @@ def postprocess_interactive() -> int:
         result = prompt_text(
             "Enter wrap width (characters) [default: 80]:",
             allow_empty=True,
-            allow_back=True,
+            allow_back=False,
         )
-        if result.action == NavigationAction.QUIT:
-            print_info("Cancelled.")
-            return 0
         try:
             config["wrap_width"] = int(result.value) if result.value else 80
         except ValueError:
@@ -399,11 +386,8 @@ def postprocess_interactive() -> int:
     result = prompt_select(
         "Output mode:",
         output_options,
-        allow_back=True,
+        allow_back=False,
     )
-    if result.action == NavigationAction.QUIT:
-        print_info("Cancelled.")
-        return 0
 
     output_mode = result.value
     output_path: Path | None = None
@@ -411,11 +395,8 @@ def postprocess_interactive() -> int:
     if output_mode == "new_dir":
         result = prompt_text(
             "Enter output directory path:",
-            allow_back=True,
+            allow_back=False,
         )
-        if result.action == NavigationAction.QUIT:
-            print_info("Cancelled.")
-            return 0
         output_path = Path(result.value).resolve()
         output_path.mkdir(parents=True, exist_ok=True)
     elif output_mode == "new_file":
@@ -423,11 +404,8 @@ def postprocess_interactive() -> int:
         result = prompt_text(
             f"Enter output file path [default: {default_out}]:",
             allow_empty=True,
-            allow_back=True,
+            allow_back=False,
         )
-        if result.action == NavigationAction.QUIT:
-            print_info("Cancelled.")
-            return 0
         output_path = Path(result.value if result.value else default_out).resolve()
 
     # Step 5: Confirm and process
@@ -445,9 +423,9 @@ def postprocess_interactive() -> int:
     print_info("")
 
     result = prompt_yes_no(
-        "Proceed with post-processing?", default=True, allow_back=True
+        "Proceed with post-processing?", default=True, allow_back=False
     )
-    if result.action == NavigationAction.QUIT or not result.value:
+    if not result.value:
         print_info("Cancelled.")
         return 0
 

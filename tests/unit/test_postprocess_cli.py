@@ -17,7 +17,9 @@ import pytest
 from main.postprocess_transcriptions import (
     collect_transcription_files,
     postprocess_cli,
+    postprocess_interactive,
 )
+from modules.ui.prompts import NavigationAction, PromptResult
 
 
 def _cli_args(input_path: Path, **overrides: Any) -> SimpleNamespace:
@@ -95,6 +97,94 @@ class TestCollectTranscriptionFiles:
         nested.write_text("x", encoding="utf-8")
         assert nested in collect_transcription_files(temp_dir, recursive=True)
         assert nested not in collect_transcription_files(temp_dir, recursive=False)
+
+
+def _cont(value: Any) -> PromptResult:
+    """Build a CONTINUE prompt result (the only outcome once allow_back=False)."""
+    return PromptResult(NavigationAction.CONTINUE, value)
+
+
+class TestPostprocessInteractive:
+    """Tests for the interactive flow (allow_back=False correctness fix)."""
+
+    @staticmethod
+    def _config_service() -> MagicMock:
+        fake = MagicMock()
+        fake.get_image_processing_config.return_value = {"postprocessing": {}}
+        return fake
+
+    @pytest.mark.unit
+    def test_empty_dir_reports_reworded_message(
+        self, temp_dir: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """An empty directory returns 1 with the reworded warning."""
+        with (
+            patch(
+                "main.postprocess_transcriptions.get_config_service",
+                return_value=self._config_service(),
+            ),
+            patch(
+                "main.postprocess_transcriptions.prompt_text",
+                return_value=_cont(str(temp_dir)),
+            ),
+            patch(
+                "main.postprocess_transcriptions.prompt_yes_no",
+                return_value=_cont(False),
+            ),
+        ):
+            rc = postprocess_interactive()
+
+        assert rc == 1
+        assert "No transcription .txt files found" in capsys.readouterr().out
+
+    @pytest.mark.unit
+    def test_full_flow_builds_config_without_corruption(self, temp_dir: Path) -> None:
+        """A scripted single-file run passes a fully-populated config downstream.
+
+        Previously, pressing 'b' returned a BACK result whose ``value`` was
+        None and silently corrupted the config; with allow_back=False the
+        selected values flow through intact.
+        """
+        target = temp_dir / "doc.txt"
+        target.write_text("x", encoding="utf-8")
+
+        captured: dict[str, Any] = {}
+
+        def _fake_postprocess_file(path: Path, **kwargs: Any) -> None:
+            captured.update(kwargs.get("config", {}))
+
+        with (
+            patch(
+                "main.postprocess_transcriptions.get_config_service",
+                return_value=self._config_service(),
+            ),
+            patch(
+                "main.postprocess_transcriptions.prompt_text",
+                return_value=_cont(str(target)),
+            ),
+            patch(
+                "main.postprocess_transcriptions.prompt_yes_no",
+                # use-config-base=False, merge-hyphenation=True, proceed=True
+                side_effect=[_cont(False), _cont(True), _cont(True)],
+            ),
+            patch(
+                "main.postprocess_transcriptions.prompt_select",
+                # wrap mode = "no", output mode = "in_place"
+                side_effect=[_cont("no"), _cont("in_place")],
+            ),
+            patch(
+                "main.postprocess_transcriptions.postprocess_file",
+                side_effect=_fake_postprocess_file,
+            ),
+        ):
+            rc = postprocess_interactive()
+
+        assert rc == 0
+        assert captured["enabled"] is True
+        assert captured["merge_hyphenation"] is True
+        assert captured["wrap_lines"] is False
+        # No key was left as None by a stray BACK result.
+        assert None not in captured.values()
 
 
 class TestPostprocessCliExitCodes:

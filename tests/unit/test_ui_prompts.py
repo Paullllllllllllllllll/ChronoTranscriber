@@ -17,6 +17,7 @@ from modules.ui.prompts import (
     print_separator,
     print_success,
     print_warning,
+    ui_input,
     ui_print,
 )
 
@@ -70,6 +71,27 @@ class TestUiPrint:
         captured = capsys.readouterr()
         # Should still print newline
         assert captured.out == "\n"
+
+
+class TestUiInputInterrupt:
+    """Tests for ui_input interrupt handling (exit-code contract)."""
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("exc", [EOFError, KeyboardInterrupt])
+    def test_interrupt_exits_130(
+        self,
+        exc: type[BaseException],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """EOF/interrupt exits 130 (128 + SIGINT), not a fake-success 0."""
+
+        def _raise(_prompt: str) -> str:
+            raise exc
+
+        monkeypatch.setattr("builtins.input", _raise)
+        with pytest.raises(SystemExit) as exc_info:
+            ui_input("prompt: ")
+        assert exc_info.value.code == 130
 
 
 class TestPrintHeader:

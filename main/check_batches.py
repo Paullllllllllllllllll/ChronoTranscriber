@@ -26,6 +26,7 @@ from modules.core.cli_args import (  # noqa: E402
     validate_input_path,
 )
 from modules.transcribe.dual_mode import DualModeScript  # noqa: E402
+from modules.ui import print_info  # noqa: E402
 
 
 class CheckBatchesScript(DualModeScript):
@@ -40,7 +41,12 @@ class CheckBatchesScript(DualModeScript):
 
     def run_interactive(self) -> None:
         """Check batches in interactive mode with diagnostics enabled."""
-        run_batch_finalization(run_diagnostics=True)
+        fmt = self.paths_config.get("general", {}).get("output_format", "txt")
+        stats = run_batch_finalization(run_diagnostics=True, output_format=fmt)
+        print_info(
+            f"Batch check complete: {stats.finalized} finalized, "
+            f"{stats.pending} pending, {stats.failed} failed."
+        )
 
     def run_cli(self, args: Namespace) -> None:
         """Check batches in CLI mode with command-line arguments.

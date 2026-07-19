@@ -113,7 +113,9 @@ def ui_input(prompt: str, style: str = PromptStyle.PROMPT) -> str:
         return input(styled_prompt).strip()
     except (EOFError, KeyboardInterrupt):
         ui_print("\n[INFO] Operation cancelled by user.", PromptStyle.INFO)
-        sys.exit(0)
+        # Exit 130 (128 + SIGINT) matches the interrupt contract used elsewhere
+        # (AsyncDualModeScript._handle_interrupt); exit 0 would fake success.
+        sys.exit(130)
     except Exception as e:
         logger.error(f"Error reading input: {e}")
         ui_print("[ERROR] Unable to read input.", PromptStyle.ERROR)

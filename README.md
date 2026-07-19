@@ -1,4 +1,4 @@
-# ChronoTranscriber v2.2.0
+# ChronoTranscriber v2.3.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -731,6 +731,30 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v2.3.0** (19 July 2026) -- Batch-backend and provider-correctness release
+    from the second maintenance sweep. Batch: Google inline submission now
+    builds SDK-valid requests (it previously failed validation before any
+    network call); batch-id recovery runs on partial tracking loss and
+    restores provider and correlation metadata; items resubmitted after
+    finalization stay reachable via their new batch ids; duplicate
+    submissions can no longer double every page of the output; repaired
+    pages are merged back into the temp JSONL so regeneration keeps repairs;
+    interactive repair discovery covers all output roots, honors co-located
+    outputs, and skips backup/cleaned sidecars; cancellation routes
+    Anthropic and Google ids to the right provider; providers without a
+    batch API are no longer offered batch and fall under the explicit
+    sync-fallback policy. Providers: OpenRouter sampler parameters and
+    context-image details respect model capabilities; Anthropic thinking
+    budgets are clamped to max_tokens; Gemini 2.x no longer receives
+    thinking_level; context images now reach Anthropic, Google, and
+    OpenRouter; truncation is detected across all three response shapes;
+    null transcriptions no longer become the literal "None". Transcription
+    core: live progress reporting during synchronous runs; image-folder
+    Tesseract keeps absolute page order across resumed subsets; dropped
+    preprocessing pages fail loudly; Ctrl+C interrupts budget waits; EPUB
+    chapter filtering no longer discards real chapters; the console prints
+    each warning once. CLI argument definitions are unchanged.
 
 - **v2.2.0** (19 July 2026) -- Correctness and interactive-mode release from a
     full maintenance sweep. Output integrity: final txt/md/json outputs are

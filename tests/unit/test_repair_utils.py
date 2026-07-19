@@ -419,6 +419,81 @@ class TestDiscoverJobs:
         assert "book.txt" in names
         assert "book.md" in names
 
+    @pytest.mark.unit
+    def test_scans_auto_output_root(self, temp_dir: Path) -> None:
+        """Item 1: the Auto output root is scanned (it can hold repairable
+        GPT PDF/image transcriptions)."""
+        from modules.batch.repair import discover_jobs
+
+        auto_out = temp_dir / "auto_output"
+        auto_out.mkdir()
+        (auto_out / "mixed.txt").write_text("content", encoding="utf-8")
+
+        config = {"file_paths": {"Auto": {"output": str(auto_out)}}}
+        jobs = discover_jobs(config)
+        assert any(j.final_txt_path.name == "mixed.txt" for j in jobs)
+        assert any(j.kind == "Auto" for j in jobs)
+
+    @pytest.mark.unit
+    def test_scans_input_when_input_is_output(self, temp_dir: Path) -> None:
+        """Item 1: with input_paths_is_output_path, outputs are co-located with
+        inputs, so discovery scans the input dir (the output dir is empty)."""
+        from modules.batch.repair import discover_jobs
+
+        pdf_in = temp_dir / "pdf_input"
+        pdf_in.mkdir()
+        (pdf_in / "book.txt").write_text("content", encoding="utf-8")
+        pdf_out = temp_dir / "pdf_output"  # deliberately left empty
+        pdf_out.mkdir()
+
+        config = {
+            "general": {"input_paths_is_output_path": True},
+            "file_paths": {"PDFs": {"input": str(pdf_in), "output": str(pdf_out)}},
+        }
+        jobs = discover_jobs(config)
+        assert any(j.final_txt_path.name == "book.txt" for j in jobs)
+
+    @pytest.mark.unit
+    def test_does_not_scan_ebook_roots(self, temp_dir: Path) -> None:
+        """Item 1 decision: EPUB/MOBI native extractions have no page images to
+        re-render, so their output roots are not scanned for repair."""
+        from modules.batch.repair import discover_jobs
+
+        epub_out = temp_dir / "epub_output"
+        epub_out.mkdir()
+        (epub_out / "ebook.txt").write_text("content", encoding="utf-8")
+        mobi_out = temp_dir / "mobi_output"
+        mobi_out.mkdir()
+        (mobi_out / "kindle.txt").write_text("content", encoding="utf-8")
+
+        config = {
+            "file_paths": {
+                "EPUBs": {"output": str(epub_out)},
+                "MOBIs": {"output": str(mobi_out)},
+            }
+        }
+        jobs = discover_jobs(config)
+        names = {j.final_txt_path.name for j in jobs}
+        assert "ebook.txt" not in names
+        assert "kindle.txt" not in names
+
+    @pytest.mark.unit
+    def test_skips_bak_and_cleaned_sidecars(self, temp_dir: Path) -> None:
+        """Item 2: repair backups (*.bak.*) and postprocess outputs
+        (*.cleaned.*) are skipped, not listed as phantom repair jobs."""
+        from modules.batch.repair import discover_jobs
+
+        out = temp_dir / "output"
+        out.mkdir()
+        (out / "book.txt").write_text("real", encoding="utf-8")
+        (out / "book.bak.20240101-120000.txt").write_text("backup", encoding="utf-8")
+        (out / "book.cleaned.txt").write_text("cleaned", encoding="utf-8")
+
+        config = {"file_paths": {"PDFs": {"output": str(out)}}}
+        jobs = discover_jobs(config)
+        names = {j.final_txt_path.name for j in jobs}
+        assert names == {"book.txt"}
+
 
 class TestBackupFileExtensions:
     """Tests for backup_file function — extension preservation."""

@@ -31,6 +31,21 @@ from modules.ui.batch_display import (
 )
 
 
+def _infer_provider_from_batch_id(batch_id: str) -> str:
+    """Infer the batch provider from the id's shape.
+
+    Anthropic message-batch ids start with ``msgbatch_``; Google batch ids
+    start with ``batches/``; every other shape is treated as OpenAI. This lets a
+    bare id passed via ``--batch-ids`` be routed to the correct provider facade
+    instead of always being sent to OpenAI (which fails for non-OpenAI ids).
+    """
+    if batch_id.startswith("msgbatch_"):
+        return "anthropic"
+    if batch_id.startswith("batches/"):
+        return "google"
+    return "openai"
+
+
 def _extract_batch_id_and_status(b: object) -> tuple[str | None, str]:
     """Return the (batch_id, lowercased status) for an SDK batch object.
 
@@ -75,6 +90,11 @@ class CancelBatchesScript(DualModeScript):
 
         client = OpenAI()
         print_info("Retrieving list of batches from OpenAI (with pagination)...")
+        print_info(
+            "Note: only OpenAI batches are listed here. Anthropic (msgbatch_...)"
+            " and Google (batches/...) batches must be cancelled by explicit id"
+            " via --batch-ids."
+        )
 
         try:
             batches = list_all_batches(client)
@@ -124,7 +144,7 @@ class CancelBatchesScript(DualModeScript):
 
         print_info("Processing cancellations...")
         for batch_id, status in non_terminal:
-            if cancel_batch_by_id("openai", batch_id):
+            if cancel_batch_by_id(_infer_provider_from_batch_id(batch_id), batch_id):
                 self.logger.info(f"Batch {batch_id} cancelled.")
                 cancelled_batches.append((batch_id, status, True))
             else:
@@ -173,6 +193,10 @@ class CancelBatchesScript(DualModeScript):
         else:
             # Cancel all non-terminal batches
             print_info("Retrieving list of batches from OpenAI...")
+            print_info(
+                "Note: only OpenAI batches are listed. Anthropic/Google batches"
+                " must be cancelled by explicit id via --batch-ids."
+            )
             try:
                 batches = list_all_batches(client)
             except Exception as e:
@@ -213,7 +237,7 @@ class CancelBatchesScript(DualModeScript):
         fail_count = 0
 
         for batch_id in batch_ids_to_cancel:
-            if cancel_batch_by_id("openai", batch_id):
+            if cancel_batch_by_id(_infer_provider_from_batch_id(batch_id), batch_id):
                 self.logger.info(f"Batch {batch_id} cancelled.")
                 print_success(f"Cancelled: {batch_id}")
                 success_count += 1

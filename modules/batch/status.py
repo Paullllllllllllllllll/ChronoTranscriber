@@ -56,7 +56,14 @@ def _parse_temp_file_metadata(
     Returns a dict with keys:
         batch_ids, batch_provider, batch_tracking_records, has_batch_session,
         has_batch_request, has_batch_metadata, image_metadata_count,
-        batch_request_count, batch_session_statuses.
+        batch_request_count, batch_session_statuses,
+        post_finalize_batch_ids, post_finalize_tracking_records.
+
+    ``post_finalize_batch_ids``/``post_finalize_tracking_records`` cover only
+    batch_tracking records appended AFTER the last ``finalized`` session
+    marker (a resubmission of an already-finalized item). Callers use them to
+    process the new submission instead of skipping the file as finalized —
+    otherwise the freshly paid batch results would be unreachable forever.
     """
     batch_ids: set[str] = set()
     batch_provider: str | None = None
@@ -67,6 +74,9 @@ def _parse_temp_file_metadata(
     image_metadata_count = 0
     batch_request_count = 0
     batch_session_statuses: set[str] = set()
+    post_finalize_batch_ids: set[str] = set()
+    post_finalize_tracking_records: list[dict[str, Any]] = []
+    finalized_seen = False
 
     with temp_file.open("r", encoding="utf-8") as f:
         for line in f:
@@ -79,6 +89,9 @@ def _parse_temp_file_metadata(
                     if batch_id:
                         batch_ids.add(batch_id)
                         batch_tracking_records.append(tracking)
+                        if finalized_seen:
+                            post_finalize_batch_ids.add(batch_id)
+                            post_finalize_tracking_records.append(tracking)
                         # Extract provider if present (new format)
                         if tracking.get("provider"):
                             batch_provider = tracking["provider"]
@@ -90,7 +103,14 @@ def _parse_temp_file_metadata(
                     session = record["batch_session"]
                     status_val = session.get("status")
                     if isinstance(status_val, str):
-                        batch_session_statuses.add(status_val.lower().strip())
+                        status_norm = status_val.lower().strip()
+                        batch_session_statuses.add(status_norm)
+                        if status_norm == "finalized":
+                            # Only records after the LAST finalized marker
+                            # count as a fresh resubmission.
+                            finalized_seen = True
+                            post_finalize_batch_ids = set()
+                            post_finalize_tracking_records = []
                     # Extract provider from session if present
                     if session.get("provider"):
                         batch_provider = session["provider"]
@@ -126,6 +146,8 @@ def _parse_temp_file_metadata(
         "image_metadata_count": image_metadata_count,
         "batch_request_count": batch_request_count,
         "batch_session_statuses": batch_session_statuses,
+        "post_finalize_batch_ids": post_finalize_batch_ids,
+        "post_finalize_tracking_records": post_finalize_tracking_records,
     }
 
 
@@ -134,6 +156,7 @@ def _recover_batch_ids(
     identifier: str,
     batch_ids: set[str],
     processing_settings: dict[str, Any],
+    tracking_records: list[dict[str, Any]] | None = None,
 ) -> set[str]:
     """Attempt to recover missing batch IDs from the debug artifact file.
 
@@ -141,11 +164,19 @@ def _recover_batch_ids(
     temp file, reads any batch IDs stored there, and optionally persists them
     back into the JSONL for future runs.
 
+    Recovery runs even when *batch_ids* is non-empty: a crash can lose the
+    tracking write for one part of a multi-part submission while another part
+    was recorded, and finalizing from the tracked parts alone would brand the
+    untracked part's pages as permanent errors while its paid results expire
+    unread.
+
+    When *tracking_records* is given, reconstructed tracking records
+    (including any per-part provider/metadata stored in the debug artifact,
+    e.g. the ``custom_id_map`` Google inline results need for correlation)
+    are appended to it so the current run can use them, not just future runs.
+
     Returns the (potentially augmented) *batch_ids* set.
     """
-    if batch_ids:
-        return batch_ids
-
     debug_artifact = temp_file.parent / f"{identifier}_batch_submission_debug.json"
     if not debug_artifact.exists():
         return batch_ids
@@ -153,28 +184,43 @@ def _recover_batch_ids(
     try:
         dbg = json.loads(debug_artifact.read_text(encoding="utf-8"))
         dbg_ids = [bid for bid in (dbg.get("batch_ids") or []) if isinstance(bid, str)]
+        provider = dbg.get("provider") if isinstance(dbg.get("provider"), str) else None
+        parts_info: dict[str, dict[str, Any]] = {}
+        for part in dbg.get("parts") or []:
+            if isinstance(part, dict) and isinstance(part.get("batch_id"), str):
+                parts_info[part["batch_id"]] = part
         to_add = [bid for bid in dbg_ids if bid not in batch_ids]
         if to_add:
             print_info(
                 f"Recovered {len(to_add)} missing batch id(s) for"
                 f" {temp_file.name} from debug artifact."
             )
+            recovered_records: list[dict[str, Any]] = []
             for bid in to_add:
                 batch_ids.add(bid)
+                info = parts_info.get(bid, {})
+                tracking: dict[str, Any] = {
+                    "batch_id": bid,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "batch_file": str(bid),
+                }
+                part_provider = info.get("provider") or provider
+                if isinstance(part_provider, str) and part_provider:
+                    tracking["provider"] = part_provider
+                metadata = info.get("metadata")
+                if isinstance(metadata, dict):
+                    tracking["metadata"] = metadata
+                recovered_records.append(tracking)
+            if tracking_records is not None:
+                tracking_records.extend(recovered_records)
             # Best-effort persist into the JSONL so future runs have them
             persist = bool(processing_settings.get("persist_recovered_batch_ids", True))
             if persist:
                 try:
                     with temp_file.open("a", encoding="utf-8") as wf:
-                        for bid in to_add:
-                            rec = {
-                                "batch_tracking": {
-                                    "batch_id": bid,
-                                    "timestamp": datetime.now(UTC).isoformat(),
-                                    "batch_file": str(bid),
-                                }
-                            }
-                            wf.write(json.dumps(rec) + "\n")
+                        for tracking in recovered_records:
+                            rec = {"batch_tracking": tracking}
+                            wf.write(json.dumps(rec, ensure_ascii=False) + "\n")
                     print_info(
                         f"Persisted {len(to_add)} recovered batch id(s)"
                         f" into {temp_file.name}."
@@ -270,9 +316,16 @@ def diagnose_api_issues() -> None:
     env_var = resolve_api_key_env_var(ProviderType.OPENAI) or "OPENAI_API_KEY"
     api_key = os.environ.get(env_var)
     if not api_key:
-        print_error("No OpenAI API key found in environment variables")
-    else:
-        print_info("OpenAI API key present: True")
+        # These diagnostics probe only the OpenAI API. On an Anthropic- or
+        # Google-only setup no OpenAI key is present, so reporting an "error"
+        # and running live probes (which would fail) is misleading. Report it as
+        # informational and skip the probes to keep the diagnostic cheap.
+        print_info(
+            "No OpenAI API key found; skipping OpenAI connectivity checks."
+            " (These diagnostics currently cover only the OpenAI API.)"
+        )
+        return
+    print_info("OpenAI API key present: True")
 
     # Check for common model issues using SDK
     try:

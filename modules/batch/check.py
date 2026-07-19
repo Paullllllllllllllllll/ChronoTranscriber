@@ -118,8 +118,17 @@ def process_all_batches(
     """
     stats = BatchCheckStats()
     print_info(f"Scanning directory '{root_folder}' for temporary batch files...")
-    # Search for both new format (*.jsonl) and legacy format (*_transcription.jsonl)
-    temp_files = list(root_folder.rglob("*.jsonl"))
+    # Search for both new format (*.jsonl) and legacy format (*_transcription.jsonl).
+    # Exclude known sidecar artifacts that are never batch temp files: saved
+    # OpenAI error files (errors_*.jsonl) and repair-run scratch JSONLs
+    # (*_temporary_repair.jsonl); scanning them only produced recurring
+    # "batch_tracking entries but no batch_session marker" warnings.
+    temp_files = [
+        p
+        for p in root_folder.rglob("*.jsonl")
+        if not p.name.startswith("errors_")
+        and not p.name.endswith("_temporary_repair.jsonl")
+    ]
     if not temp_files:
         print_info(f"No temporary batch files found in {root_folder}.")
         logger.info(f"No temporary batch files found in {root_folder}.")
@@ -174,23 +183,53 @@ def process_all_batches(
         # outputs and rewrites the final .txt, silently reverting repair edits
         # and — once provider outputs expire — reporting finalized jobs as
         # pending forever. Finalization writes a ``finalized`` batch_session
-        # marker that _parse_temp_file_metadata surfaces here.
+        # marker that _parse_temp_file_metadata surfaces here. An item
+        # RESUBMITTED after finalization (batch_tracking records after the
+        # last finalized marker) must still be processed — restricted to the
+        # new batch ids, so expired pre-finalize batches cannot block the
+        # freshly paid results.
+        resubmitted_after_finalize = bool(meta["post_finalize_batch_ids"])
         if "finalized" in meta["batch_session_statuses"]:
-            print_info(f"{temp_file.name} already finalized; skipping.")
-            stats.skipped += 1
-            continue
+            if not resubmitted_after_finalize:
+                print_info(f"{temp_file.name} already finalized; skipping.")
+                stats.skipped += 1
+                continue
+            print_info(
+                f"{temp_file.name} was resubmitted after finalization;"
+                f" checking only the new batch(es)."
+            )
 
-        batch_ids: set[str] = meta["batch_ids"]
+        batch_ids: set[str]
+        batch_tracking_records: list[dict[str, Any]]
+        if resubmitted_after_finalize:
+            batch_ids = set(meta["post_finalize_batch_ids"])
+            batch_tracking_records = list(meta["post_finalize_tracking_records"])
+        else:
+            batch_ids = meta["batch_ids"]
+            batch_tracking_records = meta["batch_tracking_records"]
         batch_provider: str = meta["batch_provider"]
-        batch_tracking_records: list[dict[str, Any]] = meta["batch_tracking_records"]
         has_batch_session: bool = meta["has_batch_session"]
         has_batch_request: bool = meta["has_batch_request"]
         has_batch_metadata: bool = meta["has_batch_metadata"]
 
         # --- 2. Recover missing batch IDs from debug artifact ---
         batch_ids = _recover_batch_ids(
-            temp_file, identifier, batch_ids, processing_settings
+            temp_file,
+            identifier,
+            batch_ids,
+            processing_settings,
+            tracking_records=batch_tracking_records,
         )
+        # Recovered records may carry the true provider; without this a fully
+        # lost tracking write made Anthropic/Google batches default to the
+        # OpenAI path and fail status retrieval.
+        if batch_provider == "openai":
+            recovered_provider = next(
+                (t["provider"] for t in batch_tracking_records if t.get("provider")),
+                None,
+            )
+            if isinstance(recovered_provider, str) and recovered_provider:
+                batch_provider = recovered_provider
 
         # --- 3. Classification: is this a batched file? ---
         is_batched_file = has_batch_session and (

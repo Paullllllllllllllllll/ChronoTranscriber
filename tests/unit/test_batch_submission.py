@@ -129,18 +129,22 @@ class TestResolveAdditionalContext:
 class TestSubmitBatch:
     @pytest.mark.asyncio
     @patch("modules.batch.submission.supports_batch", return_value=False)
-    async def test_unsupported_provider_returns_none(
+    async def test_unsupported_provider_raises(
         self, mock_supports, tmp_path: Path
     ) -> None:
-        result = await submit_batch(
-            payloads=[_make_payload()],
-            temp_jsonl_path=tmp_path / "temp.jsonl",
-            parent_folder=tmp_path,
-            source_name="test",
-            model_config={"transcription_model": {"provider": "unknown"}},
-            user_config=MagicMock(),
-        )
-        assert result is None
+        # An unsupported provider must raise BatchSubmissionError (decision 8),
+        # not return None: returning None made the manager silently fall through
+        # to full-price synchronous processing. Raising lets the --sync-fallback
+        # policy decide (warned fallback vs. loud failure).
+        with pytest.raises(BatchSubmissionError):
+            await submit_batch(
+                payloads=[_make_payload()],
+                temp_jsonl_path=tmp_path / "temp.jsonl",
+                parent_folder=tmp_path,
+                source_name="test",
+                model_config={"transcription_model": {"provider": "unknown"}},
+                user_config=MagicMock(),
+            )
 
     @pytest.mark.asyncio
     @patch("modules.batch.submission.supports_batch", return_value=True)

@@ -111,7 +111,7 @@ class GoogleBatchBackend(BatchBackend):
 
         # Build inline requests (for smaller batches)
         # Each request is a GenerateContentRequest
-        inline_requests = []
+        inline_requests: list[dict[str, Any]] = []
         for req in requests:
             # Get image data
             if req.image_path:
@@ -163,14 +163,23 @@ class GoogleBatchBackend(BatchBackend):
                 len(inline_requests),
             )
 
-            # Convert to the format expected by the SDK
-            src_requests = []
+            # Convert to the format expected by the SDK. The SDK validates each
+            # entry as ``types.InlinedRequest`` (fields: model, contents,
+            # metadata, config; extra='forbid'), so the REST-style top-level
+            # ``system_instruction``/``generation_config`` keys used in the
+            # file-based JSONL path are rejected here; both must be folded into
+            # ``config`` (``GenerateContentConfig``).
+            src_requests: list[dict[str, Any]] = []
             for item in inline_requests:
+                inline_req: dict[str, Any] = item["request"]
+                gen_config: dict[str, Any] = dict(
+                    inline_req.get("generation_config") or {}
+                )
+                gen_config["system_instruction"] = final_prompt
                 src_requests.append(
                     {
-                        "contents": item["request"]["contents"],  # type: ignore[index]  # SDK stub types src as Collection[str]; runtime accepts dicts
-                        "system_instruction": item["request"].get("system_instruction"),  # type: ignore[attr-defined]  # SDK stub types src as Collection[str]; runtime accepts dicts
-                        "generation_config": item["request"].get("generation_config"),  # type: ignore[attr-defined]  # SDK stub types src as Collection[str]; runtime accepts dicts
+                        "contents": inline_req["contents"],
+                        "config": gen_config,
                     }
                 )
 
@@ -252,8 +261,10 @@ class GoogleBatchBackend(BatchBackend):
         # Map Google state to our enum
         state_name = batch_job.state.name if batch_job.state else ""
         status_map = {
+            "JOB_STATE_QUEUED": BatchStatus.PENDING,
             "JOB_STATE_PENDING": BatchStatus.PENDING,
             "JOB_STATE_RUNNING": BatchStatus.IN_PROGRESS,
+            "JOB_STATE_CANCELLING": BatchStatus.IN_PROGRESS,
             "JOB_STATE_SUCCEEDED": BatchStatus.COMPLETED,
             "JOB_STATE_FAILED": BatchStatus.FAILED,
             "JOB_STATE_CANCELLED": BatchStatus.CANCELLED,

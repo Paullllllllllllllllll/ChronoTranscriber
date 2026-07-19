@@ -28,9 +28,13 @@ from modules.llm.response_parsing import extract_transcribed_text
 
 logger = setup_logger(__name__)
 
-# Limits for Anthropic Message Batches API
+# Limits for Anthropic Message Batches API. The hard API limit is 256 MB;
+# the chunker's per-request overhead estimate (prompt + schema + JSON
+# envelope) is approximate, so pack against a safety margin below the hard
+# cap (matching the OpenAI backend's 150-of-200 MB approach) instead of
+# risking a rejected marginal batch.
 MAX_BATCH_REQUESTS = 100000
-MAX_BATCH_BYTES = 256 * 1024 * 1024  # 256 MB
+MAX_BATCH_BYTES = 224 * 1024 * 1024  # 224 MB (hard limit 256 MB)
 
 
 class AnthropicBatchBackend(BatchBackend):

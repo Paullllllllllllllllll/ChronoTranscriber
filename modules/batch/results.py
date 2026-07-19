@@ -267,6 +267,10 @@ def _process_non_openai_batch(
         print_warning(f"No transcriptions extracted for {temp_file.name}. Skipping.")
         return "pending"
 
+    # Collapse duplicate custom_ids from repeated submissions of the same item
+    # before reconciliation, so a doubled submission cannot double every page.
+    all_transcriptions = _dedupe_transcriptions_by_custom_id(all_transcriptions)
+
     # Completeness reconciliation (parity with the OpenAI path, decision 2): emit
     # placeholders for any expected page (from the image_metadata custom_id map)
     # that produced neither an output nor an error entry, so a page dropped by
@@ -832,12 +836,56 @@ def _download_and_parse_openai_results(
     return all_transcriptions, all_completed
 
 
+def _dedupe_transcriptions_by_custom_id(
+    all_transcriptions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Collapse duplicate ``custom_id`` entries to one entry per page.
+
+    Duplicates arise when the same item was submitted more than once (e.g. a
+    re-run before finalization resubmitted the whole document): every
+    submission reuses the same ``req-<n>`` ids, each downloaded batch yields
+    one entry per page, and the final output doubles every page. Keep a
+    single entry per custom_id, preferring a successful transcription over an
+    error placeholder; among equals the later entry wins. Entries without a
+    custom_id are kept as-is.
+    """
+    by_id: dict[str, int] = {}
+    deduped: list[dict[str, Any]] = []
+    for entry in all_transcriptions:
+        cid = entry.get("custom_id")
+        if not isinstance(cid, str) or not cid:
+            deduped.append(entry)
+            continue
+        pos = by_id.get(cid)
+        if pos is None:
+            by_id[cid] = len(deduped)
+            deduped.append(entry)
+            continue
+        if entry.get("error") and not deduped[pos].get("error"):
+            continue
+        deduped[pos] = entry
+    removed = len(all_transcriptions) - len(deduped)
+    if removed:
+        print_warning(
+            f"Collapsed {removed} duplicate page result(s) from repeated batch"
+            f" submissions of the same document."
+        )
+        logger.warning(
+            "Deduplicated %d duplicate custom_id entries across batches.", removed
+        )
+    return deduped
+
+
 def _sort_transcriptions(
     all_transcriptions: list[dict[str, Any]],
     batch_order: dict[str, Any],
     temp_file: Path,
 ) -> None:
     """Sort transcriptions in-place using the multi-level sorting strategy.
+
+    Duplicate ``custom_id`` entries (repeated submissions of the same item)
+    are collapsed first, so a doubled submission cannot double every page in
+    the final output.
 
     The strategy uses four priority tiers:
     1. ``order_info`` attached during parsing (authoritative).
@@ -847,6 +895,7 @@ def _sort_transcriptions(
 
     Also logs the final sort order for debugging.
     """
+    all_transcriptions[:] = _dedupe_transcriptions_by_custom_id(all_transcriptions)
     print_info("Arranging transcriptions in the correct order...")
     print_info(f"Found {len(all_transcriptions)} transcriptions to combine.")
     print_info(

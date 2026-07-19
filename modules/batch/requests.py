@@ -16,7 +16,9 @@ Note:
 
 from __future__ import annotations
 
+import contextlib
 import json
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -589,6 +591,10 @@ def process_batch_transcription(
     max_batch_size = 150 * 1024 * 1024
     batch_index = 1
 
+    # Stage part files in a private temp directory: CWD-relative names made
+    # concurrent runs clobber each other's parts before submission.
+    staging_dir = Path(tempfile.mkdtemp(prefix="ct_batch_requests_"))
+
     print_info(f"Processing {total_images} images in chunks of {chunk_size}...")
 
     # Compute the run-invariant request prep once (system prompt read, schema
@@ -672,7 +678,7 @@ def process_batch_transcription(
             line_bytes = len(line.encode("utf-8"))
 
             if current_size + line_bytes > max_batch_size and current_lines:
-                batch_file = Path(f"batch_requests_part_{batch_index}.jsonl")
+                batch_file = staging_dir / f"batch_requests_part_{batch_index}.jsonl"
                 write_batch_file(current_lines, batch_file)
                 attempted_parts += 1
                 if _submit_and_cleanup_batch_file(
@@ -688,12 +694,14 @@ def process_batch_transcription(
             current_size += line_bytes
 
         if current_lines:
-            batch_file = Path(f"batch_requests_part_{batch_index}.jsonl")
+            batch_file = staging_dir / f"batch_requests_part_{batch_index}.jsonl"
             write_batch_file(current_lines, batch_file)
             attempted_parts += 1
             if _submit_and_cleanup_batch_file(batch_file, batch_index, batch_responses):
                 submitted_parts += 1
             batch_index += 1
+    with contextlib.suppress(OSError):
+        staging_dir.rmdir()
     total_parts = attempted_parts
     if submitted_parts == total_parts and total_parts > 0:
         print_info(

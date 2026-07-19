@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import datetime
 import json
-import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -19,7 +18,7 @@ from modules.batch.backends import BatchHandle, BatchRequest, get_batch_backend
 from modules.batch.backends.factory import supports_batch
 from modules.batch.requests import get_batch_chunk_size
 from modules.infra.logger import setup_logger
-from modules.ui import print_error, print_info, print_success, print_warning
+from modules.ui import print_error, print_info, print_success
 
 if TYPE_CHECKING:
     from modules.images.page_stream import PagePayload
@@ -104,17 +103,19 @@ async def submit_batch(
     tm = model_config.get("transcription_model", {})
     provider = tm.get("provider", "openai")
 
-    # Check if provider supports batch processing
+    # Check if provider supports batch processing. Do NOT return None here: the
+    # manager treats None as "not submitted" and silently falls through to
+    # full-price synchronous processing with no signal. Raise instead so the
+    # existing --sync-fallback policy in manager._handle_batch_submission
+    # decides -- warned sync fallback when opted in, else the item fails loudly
+    # (decision 8).
     if not supports_batch(provider):
-        print_warning(
-            f"Provider '{provider}' does not support batch processing. "
-            f"Falling back to synchronous mode."
+        raise BatchSubmissionError(
+            f"Provider '{provider}' does not support batch processing"
         )
-        return None
 
     total_images = len(payloads)
     chunk_size = get_batch_chunk_size()
-    expected_batches = math.ceil(total_images / max(1, chunk_size))
 
     # Telemetry
     logger.info(
@@ -262,9 +263,23 @@ async def submit_batch(
             "source": source_name,
             "provider": provider,
             "submitted_at": datetime.datetime.now(datetime.UTC).isoformat(),
-            "expected_batches": int(expected_batches),
+            # Actual part count after provider-limit chunking (the old
+            # ceil(images / chunk_size) estimate ignored the real chunker and
+            # was misleading in the artifact).
+            "expected_batches": len(parts),
             "submitted_parts": len(handles),
             "batch_ids": [h.batch_id for h in handles],
+            # Per-part provider/metadata so _recover_batch_ids can rebuild
+            # full tracking records (custom_id_map etc.) after a lost
+            # tracking write, not just bare batch ids.
+            "parts": [
+                {
+                    "batch_id": h.batch_id,
+                    "provider": h.provider,
+                    "metadata": h.metadata,
+                }
+                for h in handles
+            ],
             "total_images": int(total_images),
             "chunk_size": int(chunk_size),
         }

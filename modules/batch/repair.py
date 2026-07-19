@@ -25,6 +25,7 @@ from typing import Any
 
 from openai import OpenAI
 
+from modules.batch.jsonl import _heal_trailing_newline
 from modules.config.service import get_config_service
 from modules.infra.concurrency import run_concurrent_transcription_tasks
 from modules.infra.logger import setup_logger
@@ -39,6 +40,7 @@ from modules.llm.response_parsing import (
     extract_transcribed_text,
     format_page_line,
 )
+from modules.postprocess.writer import _atomic_write_text
 from modules.ui import (
     NavigationAction,
     PromptStyle,
@@ -163,7 +165,7 @@ class Job:
     identifier: str
     final_txt_path: Path
     temp_jsonl_path: Path | None
-    kind: str  # "PDF" or "Images"
+    kind: str  # display label: "PDF", "Images", "Auto", or "manual_cli"
 
 
 def extract_image_name_from_failure_line(line: str) -> str | None:
@@ -425,6 +427,13 @@ def discover_jobs(paths_config: dict[str, Any]) -> list[Job]:
         # Scan for all .txt and .md files in output folders
         for ext in ("*.txt", "*.md"):
             for p in root_path.rglob(ext):
+                # Skip sidecar files that are not primary transcription
+                # outputs: repair backups ("<name>.bak.<timestamp>.txt" from
+                # backup_file) and postprocess outputs ("<name>.cleaned.txt").
+                # Both match the rglob and would otherwise appear as phantom
+                # repair jobs.
+                if ".bak." in p.name or ".cleaned." in p.name:
+                    continue
                 parent = p.parent
                 # Determine identifier (strip _transcription suffix if present)
                 identifier = p.stem.replace("_transcription", "").strip()
@@ -440,10 +449,29 @@ def discover_jobs(paths_config: dict[str, Any]) -> list[Job]:
                 )
 
     file_paths = paths_config.get("file_paths", {})
-    pdf_out = file_paths.get("PDFs", {}).get("output", None)
-    img_out = file_paths.get("Images", {}).get("output", None)
-    scan_root(pdf_out, "PDF")
-    scan_root(img_out, "Images")
+    # When outputs are co-located with inputs, the configured output dirs are
+    # typically empty and the transcriptions live beside the source files, so
+    # scan the input dir instead. Otherwise the interactive repair wizard finds
+    # nothing while the CLI (given an explicit file path) still works.
+    use_input_as_output = paths_config.get("general", {}).get(
+        "input_paths_is_output_path", False
+    )
+    key = "input" if use_input_as_output else "output"
+
+    def _root_for(section_name: str) -> str | None:
+        section = file_paths.get(section_name, {}) or {}
+        return section.get(key, None)
+
+    # PDFs and Images hold GPT/Tesseract page transcriptions whose failed pages
+    # can be re-rendered and repaired. The Auto root is scanned too because it
+    # can hold GPT-transcribed PDF/image outputs (repair re-renders from the
+    # source file recorded in the JSONL, regardless of which root the output
+    # lives in). EPUB/MOBI native extractions have no per-page images to
+    # re-render, so those roots are intentionally not scanned (nothing there is
+    # repairable).
+    scan_root(_root_for("PDFs"), "PDF")
+    scan_root(_root_for("Images"), "Images")
+    scan_root(_root_for("Auto"), "Auto")
     jobs.sort(key=lambda j: str(j.parent_folder))
     return jobs
 
@@ -640,12 +668,59 @@ def _persist_repaired_file(
     job: Job,
     final_lines: list[str],
 ) -> Path:
-    """Back up the original file and write updated lines. Returns backup path."""
+    """Back up the original file and write updated lines atomically.
+
+    Returns the backup path. The write goes through a same-directory temp
+    file + ``os.replace`` (as the main output writer does) so a crash
+    mid-write cannot leave a truncated final transcription behind.
+    """
     backup = backup_file(job.final_txt_path)
-    job.final_txt_path.write_text(
-        "\n".join(final_lines), encoding="utf-8", newline="\n"
-    )
+    _atomic_write_text(job.final_txt_path, "\n".join(final_lines))
     return backup
+
+
+def _merge_repairs_into_temp_jsonl(
+    job: Job,
+    repaired: list[tuple[str, int | None, str]],
+) -> None:
+    """Append repaired transcriptions to the item's temp JSONL.
+
+    *repaired* holds ``(image_name, order_index, text)`` triples for lines
+    whose repair produced a genuine transcription. Without this merge, any
+    later JSONL-driven regeneration of the final output (transcribe-time
+    resume with a missing output file, or a changed output format)
+    resurrects the old ``[transcription error]`` placeholders from the temp
+    JSONL, silently reverting the repair. ``extract_transcription_records``
+    deduplicates last-wins per image_name, so the appended records shadow
+    the stale ones.
+    """
+    if job.temp_jsonl_path is None or not job.temp_jsonl_path.exists():
+        return
+    records = [
+        {"image_name": name, "order_index": oi, "text_chunk": text}
+        for name, oi, text in repaired
+        if name
+        and isinstance(oi, int)
+        and oi >= 0
+        and (text or "").strip()
+        and detect_transcription_cause(text.strip()) == "ok"
+    ]
+    if not records:
+        return
+    try:
+        _heal_trailing_newline(job.temp_jsonl_path)
+        with job.temp_jsonl_path.open("a", encoding="utf-8", newline="\n") as f:
+            for record in records:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        logger.info(
+            "Merged %d repaired page(s) into %s.",
+            len(records),
+            job.temp_jsonl_path.name,
+        )
+    except OSError as e:
+        logger.warning(
+            "Could not merge repairs into %s: %s", job.temp_jsonl_path.name, e
+        )
 
 
 def _count_unrepaired_lines(final_lines: list[str], failure_indices: list[int]) -> int:
@@ -878,6 +953,7 @@ async def _repair_sync_mode(
 
     # Apply edits to final_lines with unified page-aware formatting.
     # target_by_line was built once above (before on_result) and is reused here.
+    merged_repairs: list[tuple[str, int | None, str]] = []
     for line_index, text, _raw in results:
         if 0 <= line_index < len(final_lines):
             t = target_by_line.get(line_index)
@@ -896,8 +972,10 @@ async def _repair_sync_mode(
                     )
                 )
                 final_lines[line_index] = format_page_line(text, pn, t.image_name)
+                merged_repairs.append((t.image_name, t.order_index, text))
 
     backup = _persist_repaired_file(job, final_lines)
+    _merge_repairs_into_temp_jsonl(job, merged_repairs)
 
     # Truthful outcome (CT-4): count placeholders that survived the write-back
     # rather than assuming every attempted page succeeded. This catches
@@ -1196,6 +1274,7 @@ async def _repair_batch_mode(
     )
 
     # Write parsed repair responses and patch final lines
+    merged_repairs: list[tuple[str, int | None, str]] = []
     for cid, text in fixed_text_by_custom.items():
         oi = order_by_custom.get(cid)
         li = line_index_by_custom.get(cid)
@@ -1223,8 +1302,10 @@ async def _repair_batch_mode(
             if isinstance(oi, int) and oi >= 0:
                 pn = oi + 1
             final_lines[li] = format_page_line(text, pn, img_name)
+            merged_repairs.append((img_name, oi if isinstance(oi, int) else None, text))
 
     backup = _persist_repaired_file(job, final_lines)
+    _merge_repairs_into_temp_jsonl(job, merged_repairs)
 
     # Truthful outcome (CT-4): count placeholders that survived the write-back
     # rather than assuming every submitted page succeeded. This catches

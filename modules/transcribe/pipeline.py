@@ -31,6 +31,7 @@ from modules.infra.concurrency import (
     run_streaming_transcription_tasks,
 )
 from modules.infra.logger import setup_logger
+from modules.infra.progress import ProgressTracker
 from modules.llm import transcribe_image_with_llm
 from modules.llm.response_parsing import (
     detect_transcription_cause,
@@ -48,25 +49,51 @@ logger = setup_logger(__name__)
 _TESS_PAGE_RE = re.compile(r"^page_(\d+)_tess_preprocessed\.", re.IGNORECASE)
 
 
-def _absolute_order_index(image_files: list[Path]) -> dict[str, int]:
+def _absolute_order_index(
+    image_files: list[Path],
+    order_override: dict[str, int] | None = None,
+) -> dict[str, int]:
     """Map each image name to a stable, absolute 0-based order index.
 
     For PDF Tesseract images the index is parsed from the filename's absolute
     page number, so a resumed run over a DIFFERENT page subset (page ranges
     applied upstream, or render failures dropping entries) keeps each page at
     its true position instead of colliding with another page's positional
-    index and interleaving the merged output. Image-folder sources carry
-    source-derived names with no page number, so they fall back to the
-    positional index (acceptable: a folder's file set is stable across runs).
+    index and interleaving the merged output.
+
+    Image-folder Tesseract sources carry source-derived names
+    (``{stem}_tess_preprocessed.png``) with no page number, so the preprocessor
+    supplies ``order_override`` — a ``{output_name: absolute_index}`` map keyed
+    to each file's position in the FULL sorted source listing — used in place of
+    the positional fallback so a resumed run over a different page subset keeps
+    each page at its true position. Names absent from the override fall back to
+    the positional index (a folder's file set is stable across runs).
     """
+    override = order_override or {}
     mapping: dict[str, int] = {}
     for idx, img in enumerate(image_files):
         match = _TESS_PAGE_RE.match(img.name)
         if match:
             mapping[img.name] = int(match.group(1)) - 1
+        elif img.name in override:
+            mapping[img.name] = override[img.name]
         else:
             mapping[img.name] = idx
     return mapping
+
+
+def _page_result_failed(result_tuple: Any) -> bool:
+    """True when a transcription result tuple represents a failed page.
+
+    A page counts as failed when its result is missing/malformed, its text is
+    None, or its text is a ``[transcription error: ...]`` placeholder. Shared by
+    :func:`count_failed_page_results` and the live progress classification so
+    both apply an identical rule.
+    """
+    if not isinstance(result_tuple, tuple) or len(result_tuple) < 5:
+        return True
+    text = result_tuple[2]
+    return text is None or detect_transcription_cause(str(text)) == "api_error"
 
 
 def _provider_token_stamp(
@@ -157,15 +184,7 @@ def count_failed_page_results(results: list[Any]) -> int:
     deferred by the token budget never appear in the streaming results list,
     so budget deferrals are not misclassified as failures.
     """
-    failed = 0
-    for result in results:
-        if not isinstance(result, tuple) or len(result) < 5:
-            failed += 1
-            continue
-        text = result[2]
-        if text is None or detect_transcription_cause(str(text)) == "api_error":
-            failed += 1
-    return failed
+    return sum(1 for result in results if _page_result_failed(result))
 
 
 async def transcribe_single_image(
@@ -407,6 +426,7 @@ async def run_streaming_transcription_pipeline(
     file_provenance: dict[str, Any] | None = None,
     tracker: Any = None,
     exhausted: asyncio.Event | None = None,
+    total_pages: int | None = None,
 ) -> None:
     """Execute the in-memory streaming transcription pipeline (GPT method).
 
@@ -427,6 +447,15 @@ async def run_streaming_transcription_pipeline(
     # Version the resume artifact before any streamed write (decision 1).
     ensure_resume_marker(temp_jsonl_path)
 
+    # Optional live progress reporting over the pages transcribed this pass.
+    progress: ProgressTracker | None = None
+    if total_pages is not None:
+        progress = ProgressTracker(
+            total=total_pages,
+            on_update=lambda s: print_info(s.format_summary()),
+            update_interval=10,
+        )
+
     write_lock = asyncio.Lock()
     async with aiofiles.open(temp_jsonl_path, "a", encoding="utf-8") as jfile:
         if file_provenance is not None:
@@ -439,6 +468,11 @@ async def run_streaming_transcription_pipeline(
         async def on_result_write(result_tuple: Any) -> None:
             if not result_tuple or len(result_tuple) < 5:
                 return
+            if progress is not None:
+                if _page_result_failed(result_tuple):
+                    await progress.increment_failed()
+                else:
+                    await progress.increment_completed()
             payload = result_tuple[0]
             record = _build_jsonl_record(
                 (
@@ -479,6 +513,9 @@ async def run_streaming_transcription_pipeline(
             logger.exception(f"Error in streaming transcription for {source_name}: {e}")
             print_error(f"Streaming transcription error for {source_name}.")
             raise
+
+    if progress is not None:
+        await progress.finalize()
 
     # Regenerate the combined output from the full JSONL so pages completed
     # in earlier (resumed) runs are included alongside this run's results.
@@ -521,6 +558,7 @@ async def run_transcription_pipeline(
     resume_mode: str = "skip",
     output_format: str = "txt",
     retry_errors: bool = False,
+    order_override: dict[str, int] | None = None,
 ) -> None:
     """Execute the full image transcription pipeline.
 
@@ -540,13 +578,17 @@ async def run_transcription_pipeline(
         is_folder: True when processing an image folder (affects JSONL key).
         resume_mode: ``"skip"`` to reuse cached JSONL results; ``"overwrite"``
             to clear the JSONL and reprocess all images from scratch.
+        order_override: Optional ``{output_name: absolute_index}`` map from the
+            folder-Tesseract preprocessor, so source-derived names keep their
+            true position across resumed page subsets instead of falling back to
+            the positional index.
     """
     # Absolute page ordering: index each image by its position in the FULL
     # sorted list BEFORE any resume filtering, so a resumed run keeps the same
     # order_index it would have had on a single pass (see B2). Assigning the
     # index by position in the *filtered* list collides run-2 indices with
     # run-1's and scrambles the merged output.
-    absolute_index = _absolute_order_index(image_files)
+    absolute_index = _absolute_order_index(image_files, order_override)
 
     # One parse shared by every read that observes the pre-transcription file
     # state: verify_resume_compatible, get_processed_image_names, the
@@ -631,11 +673,23 @@ async def run_transcription_pipeline(
     # file. The marker append itself is unchanged.
     ensure_resume_marker(temp_jsonl_path, records=cached_records)
 
+    # Live progress reporting over the images transcribed this run (total is
+    # the post-resume-filter count).
+    progress = ProgressTracker(
+        total=len(image_files),
+        on_update=lambda s: print_info(s.format_summary()),
+        update_interval=10,
+    )
+
     # Streaming JSONL writes as results arrive
     write_lock = asyncio.Lock()
     async with aiofiles.open(temp_jsonl_path, "a", encoding="utf-8") as jfile:
 
         async def on_result_write(result_tuple: Any) -> None:
+            if _page_result_failed(result_tuple):
+                await progress.increment_failed()
+            else:
+                await progress.increment_completed()
             record = _build_jsonl_record(
                 result_tuple, source_name, method, is_folder, transcriber
             )
@@ -663,6 +717,8 @@ async def run_transcription_pipeline(
             # succeeding with a partial output (B9). Results already streamed to
             # the JSONL survive for a later resume.
             raise
+
+    await progress.finalize()
 
     # Regenerate the combined output from the FULL JSONL (this run's results
     # plus any completed in earlier resumed runs), ordered by absolute

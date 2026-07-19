@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -14,6 +15,12 @@ from modules.infra.logger import setup_logger
 from modules.infra.paths import create_safe_directory_name, create_safe_filename
 
 logger = setup_logger(__name__)
+
+# Navigation/cover/toc documents to drop from the reading order. Anchored on the
+# basename stem so real chapters whose names merely CONTAIN these tokens
+# (discovery.xhtml, navarra.xhtml, coverage.xhtml) are not dropped by a loose
+# substring match (B17 follow-up).
+_NAV_DOC_RE = re.compile(r"^(nav|toc|cover)([._-]|$)")
 
 
 @dataclass(slots=True)
@@ -132,7 +139,7 @@ class EPUBProcessor:
                 get_name = getattr(item, "get_name", None)
                 if callable(get_name):
                     name = (get_name() or "").lower()
-                if any(k in name for k in ("nav", "toc", "cover")):
+                if _NAV_DOC_RE.match(Path(name).stem):
                     continue
                 ordered.append(item)
         if ordered:

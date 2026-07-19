@@ -271,6 +271,7 @@ def _make_fake_pipeline(budget_per_pass: int) -> Any:
         file_provenance: Any,
         tracker: Any,
         exhausted: Any,
+        total_pages: Any = None,
     ) -> None:
         ensure_resume_marker(temp_jsonl_path)
         written = 0
@@ -489,6 +490,7 @@ def _make_exhaust_and_fail_pipeline(budget_per_pass: int, fail_index: int) -> An
         file_provenance: Any,
         tracker: Any,
         exhausted: Any,
+        total_pages: Any = None,
     ) -> None:
         ensure_resume_marker(temp_jsonl_path)
         written = 0
@@ -559,6 +561,7 @@ def _make_fail_first_pass_then_clean_pipeline(
         file_provenance: Any,
         tracker: Any,
         exhausted: Any,
+        total_pages: Any = None,
     ) -> None:
         state["calls"] += 1
         first = state["calls"] == 1

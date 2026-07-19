@@ -168,7 +168,9 @@ class TestAutoSelectorIntegration:
         pdfs, images, epubs, mobis = selector.scan_directory(temp_dir)
 
         assert len(pdfs) == 1
-        assert len(images) == 1
+        # Loose image files are skipped in auto mode (no pipeline handles
+        # them); only image-containing subfolders are eligible.
+        assert len(images) == 0
         assert len(epubs) == 1
         assert len(mobis) == 1
 
@@ -189,7 +191,9 @@ class TestAutoSelectorIntegration:
             mock_processor.return_value.is_native_pdf.return_value = True
             decisions = selector.create_decisions(temp_dir)
 
-        assert len(decisions) == 2
+        # The loose image file is skipped (unsupported in auto mode); only
+        # the PDF yields a decision.
+        assert len(decisions) == 1
 
         # Each decision should have required fields
         for decision in decisions:

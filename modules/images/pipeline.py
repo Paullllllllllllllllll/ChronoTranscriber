@@ -607,7 +607,7 @@ class ImageProcessor:
         source_folder: Path,
         preprocessed_folder: Path,
         page_indices: list[int] | None = None,
-    ) -> list[Path]:
+    ) -> tuple[list[Path], dict[str, int]]:
         """
         Process images for Tesseract (lossless, full resolution) and save as PNG/TIFF.
 
@@ -616,6 +616,13 @@ class ImageProcessor:
             preprocessed_folder: Path to save processed images.
             page_indices: Optional 0-based indices into the sorted image list.
                 If None, all images are processed.
+
+        Returns:
+            A tuple of (successfully written output paths, order map). The order
+            map is ``{output_name: absolute_index}`` where the absolute index is
+            each file's position in the FULL sorted source listing (before the
+            page-range filter), so a resumed run over a different page subset
+            keeps every page at its true position in the merged output.
         """
         config_service = get_config_service()
         tip_cfg = config_service.get_image_processing_config().get(
@@ -636,7 +643,7 @@ class ImageProcessor:
             if p.is_file() and p.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
         ]
         if not image_files:
-            return []
+            return [], {}
 
         # Deterministic natural ordering by filename (B5): page_2 before page_10.
         image_files.sort(key=lambda p: natural_sort_key(p.name))
@@ -651,27 +658,33 @@ class ImageProcessor:
         stem_counts = Counter(p.stem for p in image_files)
         dup_stems = {stem for stem, n in stem_counts.items() if n > 1}
 
-        # Apply page-range filter
+        # Apply page-range filter, keeping each file's absolute index (its
+        # position in the FULL sorted listing) so the merged output can be
+        # ordered correctly even under a resumed page subset.
         if page_indices is not None:
-            image_files = [
-                image_files[i] for i in page_indices if 0 <= i < len(image_files)
+            selected = [
+                (i, image_files[i]) for i in page_indices if 0 <= i < len(image_files)
             ]
+        else:
+            selected = list(enumerate(image_files))
 
         preprocessed_folder.mkdir(parents=True, exist_ok=True)
         suffix = ".png" if output_format == "png" else ".tif"
-        out_paths: list[Path] = [
-            preprocessed_folder
-            / (
+
+        out_paths: list[Path] = []
+        order_map: dict[str, int] = {}
+        for abs_idx, img in selected:
+            out_path = preprocessed_folder / (
                 f"{img.name if img.stem in dup_stems else img.stem}"
                 f"_tess_preprocessed{suffix}"
             )
-            for img in image_files
-        ]
+            out_paths.append(out_path)
+            order_map[out_path.name] = abs_idx
 
         # Build args for multiprocessing
         args_list = [
             (img_path, out_path, preproc_cfg, output_format, target_dpi, embed_dpi)
-            for img_path, out_path in zip(image_files, out_paths, strict=False)
+            for (_abs_idx, img_path), out_path in zip(selected, out_paths, strict=False)
         ]
 
         # Run in process pool honoring concurrency config
@@ -681,8 +694,8 @@ class ImageProcessor:
             processes=processes,
         )
 
-        # Return files that were successfully written
-        return [p for p in out_paths if p.exists()]
+        # Return files that were successfully written, plus the order map.
+        return [p for p in out_paths if p.exists()], order_map
 
     @staticmethod
     def _tesseract_preprocess_image_task(

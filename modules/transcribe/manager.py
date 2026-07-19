@@ -18,6 +18,7 @@ from modules.documents.mobi import MOBIProcessor
 from modules.documents.pdf import PDFProcessor, native_extract_pdf_text
 from modules.images.page_stream import (
     PagePayload,
+    _raise_if_failure_rate_excessive,
     compute_folder_skip_names,
     compute_pdf_skip_indices,
     folder_image_name,
@@ -426,8 +427,8 @@ class WorkflowManager:
                     print_error(f"Failed to process '{item.name}': {e}")
                 else:
                     processed_count += 1
+                    print_info(f"Completed item {idx}/{total_items}")
 
-                print_info(f"Completed item {idx}/{total_items}")
                 self._log_token_usage("after", idx, total_items)
         except (KeyboardInterrupt, asyncio.CancelledError):
             interrupted = True
@@ -598,6 +599,58 @@ class WorkflowManager:
                     f"Error cleaning up preprocessed images for {source_name}: {e}"
                 )
 
+    def _skip_redundant_batch_submission(
+        self, temp_jsonl_path: Path, source_name: str
+    ) -> bool:
+        """Return True when a batch submission must be skipped for this item.
+
+        Two protected states, both detected from the item's temp JSONL:
+
+        - A batch is already pending (tracking records without a subsequent
+          ``finalized`` marker): resubmitting would pay for every page a
+          second time and append duplicate results.
+        - The JSONL was already finalized by check_batches (and not
+          resubmitted): batch page-level resume cannot subtract finalized
+          pages, so a resubmission (e.g. via ``--retry-errors``) would
+          resubmit ALL pages, not just failed ones.
+
+        Overwrite resume mode clears the temp JSONL before this point, so the
+        guard never blocks a deliberate redo.
+        """
+        if not temp_jsonl_path.exists():
+            return False
+        from modules.batch.status import _parse_temp_file_metadata
+
+        try:
+            meta = _parse_temp_file_metadata(temp_jsonl_path)
+        except OSError as e:
+            logger.warning(
+                "Could not inspect %s for pending batches: %s",
+                temp_jsonl_path.name,
+                e,
+            )
+            return False
+        finalized = "finalized" in meta["batch_session_statuses"]
+        has_pending = bool(meta["post_finalize_batch_ids"]) or (
+            not finalized and bool(meta["batch_ids"])
+        )
+        if has_pending:
+            print_warning(
+                f"A batch for '{source_name}' is already pending; skipping "
+                f"resubmission. Run check_batches to retrieve it, or use "
+                f"resume mode 'overwrite' to discard it and resubmit."
+            )
+            return True
+        if finalized:
+            print_warning(
+                f"'{source_name}' was already finalized from a batch run; "
+                f"skipping batch resubmission (it would resubmit every page). "
+                f"Use repair_transcriptions for failed pages, or resume mode "
+                f"'overwrite' to redo the whole item."
+            )
+            return True
+        return False
+
     async def _handle_batch_submission(
         self,
         payloads: list[PagePayload],
@@ -715,6 +768,17 @@ class WorkflowManager:
         batch submission or the synchronous streaming pipeline.
         """
         output_format = getattr(self.user_config, "output_format", "txt") or "txt"
+
+        # Guard a zero-page source (an empty/corrupt PDF, or a folder that lost
+        # its images) up front. Without it the resume path prints "All pages
+        # already processed. Regenerating..." and then raises OutputWriteError
+        # from an empty JSONL — a misleading failure. Mirror the folder-path
+        # "No images found" guard. (page_indices is always non-empty here; an
+        # empty page range is skipped by the callers before this point.)
+        resolved_total = len(page_indices) if page_indices is not None else total_units
+        if resolved_total == 0:
+            print_warning(f"No pages found in '{source_name}'.")
+            return
 
         # Overwrite mode: clear the stale JSONL before computing the skip-set.
         if self.resume_mode == "overwrite" and temp_jsonl_path.exists():
@@ -835,6 +899,13 @@ class WorkflowManager:
         # page by the producer), then submit via the batch backend. Batch is
         # exempt from token limiting (it is pre-priced and submitted whole).
         if self.user_config.use_batch_processing:
+            # Batch results are finalized by check_batches and never written
+            # back as per-page transcription records, so page-level resume
+            # cannot see them: without this guard a re-run before (or after)
+            # finalization resubmits the ENTIRE document as a second paid
+            # batch and doubles/clobbers the output.
+            if self._skip_redundant_batch_submission(temp_jsonl_path, source_name):
+                return
             print_info(
                 f"Streaming {len(needed)} page(s) with in-memory preprocessing..."
             )
@@ -887,6 +958,7 @@ class WorkflowManager:
                     file_provenance=first_provenance,
                     tracker=tracker,
                     exhausted=exhausted,
+                    total_pages=len(needed),
                 )
             except PageTranscriptionError as pte:
                 if not exhausted.is_set():
@@ -1083,6 +1155,12 @@ class WorkflowManager:
                 f"Page range: processing {len(page_indices)} of {total_pages} pages "
                 f"({self.user_config.page_range.describe()})"
             )
+            # Close the handle opened only to resolve the page range. The native
+            # path opens its own handle, the Tesseract preprocessor reopens as
+            # needed, and the GPT branch reopens below, so nothing downstream
+            # depends on this one staying open — leaving it open leaked the file
+            # handle on the native/Tesseract paths.
+            pdf_processor.close_pdf()
 
         if method == "tesseract" and not self._ensure_tesseract_available():
             return
@@ -1156,6 +1234,25 @@ class WorkflowManager:
                 preprocessed_folder, target_dpi, page_indices=page_indices
             )
             print_info(f"Extracted {len(processed_image_files)} page images from PDF.")
+
+            # A page that fails to render/preprocess is silently dropped by the
+            # PDF Tesseract preprocessor (it returns only the files that were
+            # written, and [] on wholesale failure). Without this guard the item
+            # would report success with pages permanently missing. Compare the
+            # expected page count against what was produced: below the threshold
+            # a warning is emitted, above it the item is raised as failed.
+            if page_indices is not None:
+                expected_pages = len(page_indices)
+            elif pdf_processor.doc is not None:
+                expected_pages = int(pdf_processor.doc.page_count)
+            else:
+                expected_pages = len(processed_image_files)
+            _raise_if_failure_rate_excessive(
+                pdf_path.name,
+                expected_pages,
+                expected_pages - len(processed_image_files),
+            )
+
             print_info(
                 f"Starting {method} transcription for"
                 f" {len(processed_image_files)} images..."
@@ -1308,8 +1405,21 @@ class WorkflowManager:
                 preprocessed_folder, folder.name
             )
             print_info("Preprocessing images for Tesseract...")
-            processed_files = ImageProcessor.process_and_save_images_for_tesseract(
-                folder, preprocessed_folder, page_indices=page_indices
+            processed_files, order_map = (
+                ImageProcessor.process_and_save_images_for_tesseract(
+                    folder, preprocessed_folder, page_indices=page_indices
+                )
+            )
+
+            # A source image that fails to preprocess is silently dropped (only
+            # the files actually written are returned), so guard the drop the
+            # same way the PDF path does: order_map has one entry per attempted
+            # image, so its length is the expected count. Below the threshold a
+            # warning fires; above it the item is raised as failed.
+            _raise_if_failure_rate_excessive(
+                folder.name,
+                len(order_map),
+                len(order_map) - len(processed_files),
             )
 
             if not processed_files:
@@ -1330,6 +1440,7 @@ class WorkflowManager:
                 output_txt_path,
                 folder.name,
                 is_folder=True,
+                order_override=order_map,
             )
 
             self._cleanup_preprocessed(preprocessed_folder, f"folder '{folder.name}'")
@@ -1378,6 +1489,7 @@ class WorkflowManager:
         output_txt_path: Path,
         source_name: str,
         is_folder: bool = False,
+        order_override: dict[str, int] | None = None,
     ) -> None:
         """Process images using the specified method.
 
@@ -1398,4 +1510,5 @@ class WorkflowManager:
             resume_mode=self.resume_mode,
             output_format=output_format,
             retry_errors=getattr(self.user_config, "retry_errors", False),
+            order_override=order_override,
         )

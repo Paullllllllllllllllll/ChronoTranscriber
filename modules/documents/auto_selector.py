@@ -134,6 +134,7 @@ class AutoSelector:
         # os.scandir() is used instead of Path.iterdir() so that DirEntry
         # caches is_file()/is_dir() from the OS scan and avoids a separate
         # stat() syscall per entry (significant on large directories).
+        loose_images = 0
         with os.scandir(input_dir) as it:
             for entry in it:
                 if entry.is_file(follow_symlinks=False):
@@ -145,7 +146,12 @@ class AutoSelector:
                     elif suffix in SUPPORTED_MOBI_EXTENSIONS:
                         mobis.append(Path(entry.path))
                     elif suffix in SUPPORTED_IMAGE_EXTENSIONS:
-                        images.append(Path(entry.path))
+                        # Loose image files have no pipeline in auto mode: the
+                        # router cannot transcribe a bare image, so emitting a
+                        # decision for one only produced a per-file "unknown
+                        # type" warning while the item counted as processed.
+                        # Skip them here and surface a single actionable notice.
+                        loose_images += 1
                 elif entry.is_dir(follow_symlinks=False):
                     # Check if it's an image folder (contains images)
                     has_images = False
@@ -162,6 +168,19 @@ class AutoSelector:
                         images.append(
                             Path(entry.path)
                         )  # Treat folder as a single image collection
+
+        if loose_images:
+            from modules.ui import print_warning
+
+            logger.warning(
+                "Skipped %d loose image file(s) in %s: unsupported in auto mode.",
+                loose_images,
+                input_dir,
+            )
+            print_warning(
+                "loose image files are not supported in auto mode; place them "
+                "in a subfolder to process the folder."
+            )
 
         logger.info(
             f"Scanned {input_dir}: found {len(pdfs)} PDFs, "

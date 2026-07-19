@@ -180,17 +180,22 @@ class TestAutoSelectorScanDirectory:
         assert all(p.suffix == ".pdf" for p in pdfs)
 
     @pytest.mark.unit
-    def test_finds_image_files(
+    def test_loose_image_files_are_skipped(
         self, mock_paths_config: dict[str, Any], temp_dir: Path, mock_env_no_api_keys
     ) -> None:
-        """Test finding image files."""
+        """Loose image files are unsupported in auto mode and dropped.
+
+        The router has no pipeline for a bare image, so scan_directory no longer
+        returns loose images (only image-containing folders); a single warning
+        directs the user to place them in a subfolder.
+        """
         (temp_dir / "image1.png").write_bytes(b"")
         (temp_dir / "image2.jpg").write_bytes(b"")
 
         selector = AutoSelector(mock_paths_config)
         pdfs, images, epubs, mobis = selector.scan_directory(temp_dir)
 
-        assert len(images) == 2
+        assert images == []
 
     @pytest.mark.unit
     def test_finds_image_folders(
@@ -398,11 +403,18 @@ class TestAutoSelectorCreateDecisions:
     def test_creates_decisions_for_all_files(
         self, mock_paths_config: dict[str, Any], temp_dir: Path, mock_env_no_api_keys
     ) -> None:
-        """Test creating decisions for mixed file types."""
+        """Test creating decisions for mixed file types.
+
+        A loose image file yields no decision (unsupported in auto mode); an
+        image folder does.
+        """
         # Create test files
         (temp_dir / "doc.pdf").write_bytes(b"%PDF")
         (temp_dir / "image.png").write_bytes(b"")
         (temp_dir / "book.epub").write_bytes(b"")
+        img_folder = temp_dir / "scans"
+        img_folder.mkdir()
+        (img_folder / "page1.png").write_bytes(b"")
 
         selector = AutoSelector(mock_paths_config)
 
@@ -412,11 +424,12 @@ class TestAutoSelectorCreateDecisions:
 
         assert len(decisions) == 3
 
-        # Verify decision types
+        # Verify decision types: the loose image is dropped, the folder kept.
         file_types = {d.file_type for d in decisions}
         assert "pdf" in file_types
-        assert "image" in file_types
+        assert "image_folder" in file_types
         assert "epub" in file_types
+        assert "image" not in file_types
 
     @pytest.mark.unit
     def test_empty_directory_no_decisions(

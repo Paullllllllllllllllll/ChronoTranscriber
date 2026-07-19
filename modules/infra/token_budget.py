@@ -1615,10 +1615,17 @@ async def check_and_wait_for_token_limit(
         print_success("Token limit has been reset. Resuming processing.")
         return True
 
-    except (KeyboardInterrupt, asyncio.CancelledError):
+    except KeyboardInterrupt:
         logger.info("Wait cancelled by user.")
         print_info("Wait cancelled by user.")
         return False
+    except asyncio.CancelledError:
+        # Task cancellation (e.g. Ctrl+C propagated as a cancel, or an
+        # enclosing timeout) must actually stop the run. Swallowing it here
+        # returned False and let the caller continue as if the user had merely
+        # declined to wait, so the run never halted. Re-raise to propagate.
+        logger.info("Token-limit wait cancelled; propagating cancellation.")
+        raise
 
 
 TokenBudget = DailyTokenTracker

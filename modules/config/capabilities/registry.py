@@ -57,6 +57,10 @@ class Capabilities:
     supports_media_resolution: bool = False  # Google-style media_resolution
     default_media_resolution: str = "high"
 
+    # Audio
+    supports_audio_input: bool = False
+    audio_transcription_only: bool = False  # Dedicated STT endpoint, no chat
+
     # Structured outputs
     supports_structured_outputs: bool = True
     supports_json_mode: bool = True
@@ -173,6 +177,36 @@ _GOOGLE_BASE: dict[str, Any] = dict(
     max_context_tokens=1000000,
     max_output_tokens=8192,
 )
+
+# OpenAI speech-to-text models. These are served by /v1/audio/transcriptions
+# only: there is no chat or Responses surface, no vision, no structured
+# outputs, and no sampler controls beyond temperature (which the transcription
+# endpoint does accept).
+_OPENAI_AUDIO_BASE: dict[str, Any] = dict(
+    provider="openai",
+    supports_responses_api=False,
+    supports_chat_completions=False,
+    api_preference="langchain",
+    is_reasoning_model=False,
+    supports_reasoning_effort=False,
+    supports_developer_messages=False,
+    supports_image_input=False,
+    supports_image_detail=False,
+    supports_audio_input=True,
+    audio_transcription_only=True,
+    supports_structured_outputs=False,
+    supports_json_mode=False,
+    supports_function_calling=False,
+    supports_sampler_controls=True,
+    supports_top_p=False,
+    supports_frequency_penalty=False,
+    supports_presence_penalty=False,
+    max_context_tokens=16000,
+    max_output_tokens=2000,
+)
+
+# Gemini models accept audio parts alongside text and images; Gemma does not.
+_GEMINI_BASE: dict[str, Any] = {**_GOOGLE_BASE, "supports_audio_input": True}
 
 _OPENROUTER_BASE: dict[str, Any] = dict(
     provider="openrouter",
@@ -426,6 +460,13 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
         ),
     ),
     # o1 (not o1-mini, not o1-pro) — requires negative-prefix logic below
+    # --- OpenAI speech-to-text (/v1/audio/transcriptions) ---
+    # The two gpt-4o-*-transcribe ids MUST precede the bare "gpt-4o" prefix
+    # below, which would otherwise claim them for the vision profile.
+    (("gpt-transcribe",), "openai-audio", _OPENAI_AUDIO_BASE, {}),
+    (("gpt-4o-mini-transcribe",), "openai-audio", _OPENAI_AUDIO_BASE, {}),
+    (("gpt-4o-transcribe",), "openai-audio", _OPENAI_AUDIO_BASE, {}),
+    (("whisper-1",), "openai-audio", _OPENAI_AUDIO_BASE, {}),
     # --- OpenAI GPT-4o / GPT-4.1 (standard, non-reasoning) ---
     (("gpt-4o",), "gpt-4o", _OPENAI_STANDARD_BASE, {}),
     (
@@ -676,7 +717,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
     (
         ("gemini-3.5-flash", "gemini-3-5-flash"),
         "gemini-3.5-flash",
-        _GOOGLE_BASE,
+        _GEMINI_BASE,
         dict(
             is_reasoning_model=True,
             supports_reasoning_effort=True,
@@ -687,7 +728,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
     (
         ("gemini-3.1-pro-preview", "gemini-3-1-pro-preview"),
         "gemini-3.1-pro",
-        _GOOGLE_BASE,
+        _GEMINI_BASE,
         dict(
             is_reasoning_model=True,
             supports_reasoning_effort=True,
@@ -698,7 +739,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
     (
         ("gemini-3.1-flash-lite-preview", "gemini-3-1-flash-lite-preview"),
         "gemini-3.1-flash-lite",
-        _GOOGLE_BASE,
+        _GEMINI_BASE,
         dict(
             max_context_tokens=1000000,
             max_output_tokens=65536,
@@ -710,7 +751,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
     (
         ("gemini-3.1-flash-lite", "gemini-3-1-flash-lite"),
         "gemini-3.1-flash-lite",
-        _GOOGLE_BASE,
+        _GEMINI_BASE,
         dict(
             is_reasoning_model=True,
             supports_reasoning_effort=True,
@@ -721,7 +762,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
     (
         ("gemini-3.1-flash-image-preview", "gemini-3-1-flash-image-preview"),
         "gemini-3.1-flash-image",
-        _GOOGLE_BASE,
+        _GEMINI_BASE,
         dict(
             max_context_tokens=128000,
             max_output_tokens=32768,
@@ -730,7 +771,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
     (
         ("gemini-3-pro-image-preview",),
         "gemini-3-pro-image",
-        _GOOGLE_BASE,
+        _GEMINI_BASE,
         dict(
             max_context_tokens=65536,
             max_output_tokens=32768,
@@ -739,7 +780,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
     (
         ("gemini-3-flash", "gemini-3.0-flash"),
         "gemini-3-flash",
-        _GOOGLE_BASE,
+        _GEMINI_BASE,
         dict(
             is_reasoning_model=True,
             supports_reasoning_effort=True,
@@ -750,7 +791,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
     (
         ("gemini-3-pro", "gemini-3.0-pro"),
         "gemini-3-pro",
-        _GOOGLE_BASE,
+        _GEMINI_BASE,
         dict(
             is_reasoning_model=True,
             supports_reasoning_effort=True,
@@ -761,7 +802,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
     (
         ("gemini-3-preview", "gemini-3.0-preview"),
         "gemini-3-preview",
-        _GOOGLE_BASE,
+        _GEMINI_BASE,
         dict(
             is_reasoning_model=True,
             supports_reasoning_effort=True,
@@ -772,7 +813,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
     (
         ("gemini-3", "gemini-3.0"),
         "gemini-3",
-        _GOOGLE_BASE,
+        _GEMINI_BASE,
         dict(
             is_reasoning_model=True,
             supports_reasoning_effort=True,
@@ -785,7 +826,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
     (
         ("gemini-2.5-pro", "gemini-2-5-pro"),
         "gemini-2.5-pro",
-        _GOOGLE_BASE,
+        _GEMINI_BASE,
         dict(
             is_reasoning_model=True,
             supports_reasoning_effort=True,
@@ -796,7 +837,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
     (
         ("gemini-2.5-flash-lite", "gemini-2-5-flash-lite"),
         "gemini-2.5-flash-lite",
-        _GOOGLE_BASE,
+        _GEMINI_BASE,
         dict(
             max_context_tokens=1048576,
             max_output_tokens=32768,
@@ -809,7 +850,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
     (
         ("gemini-2.5-flash", "gemini-2-5-flash"),
         "gemini-2.5-flash",
-        _GOOGLE_BASE,
+        _GEMINI_BASE,
         dict(
             is_reasoning_model=False,
             supports_reasoning_effort=False,
@@ -820,17 +861,17 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
     (
         ("gemini-2.0-flash", "gemini-2-flash", "gemini-2.0"),
         "gemini-2.0-flash",
-        _GOOGLE_BASE,
+        _GEMINI_BASE,
         {},
     ),
     (
         ("gemini-1.5-pro", "gemini-1-5-pro"),
         "gemini-1.5-pro",
-        _GOOGLE_BASE,
+        _GEMINI_BASE,
         dict(max_context_tokens=2000000),
     ),
-    (("gemini-1.5-flash", "gemini-1-5-flash"), "gemini-1.5-flash", _GOOGLE_BASE, {}),
-    (("gemini",), "gemini", _GOOGLE_BASE, {}),
+    (("gemini-1.5-flash", "gemini-1-5-flash"), "gemini-1.5-flash", _GEMINI_BASE, {}),
+    (("gemini",), "gemini", _GEMINI_BASE, {}),
 ]
 
 

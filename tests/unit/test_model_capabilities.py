@@ -291,3 +291,83 @@ class TestGemini31Capabilities:
     def test_gemini_31_dash_alias(self) -> None:
         caps = detect_capabilities("gemini-3-1-pro-preview")
         assert caps.family == "gemini-3.1-pro"
+
+
+class TestAudioCapabilities:
+    """Tests for the audio-input capability flags and their gate functions."""
+
+    @pytest.mark.unit
+    def test_gpt_transcribe_is_an_audio_family(self) -> None:
+        caps = detect_capabilities("gpt-transcribe")
+        assert caps.family == "openai-audio"
+        assert caps.supports_audio_input is True
+        assert caps.audio_transcription_only is True
+
+    @pytest.mark.unit
+    def test_gpt_4o_transcribe_is_not_claimed_by_the_gpt_4o_prefix(self) -> None:
+        """The transcribe ids must win over the bare ``gpt-4o`` vision profile."""
+        caps = detect_capabilities("gpt-4o-transcribe")
+        assert caps.family == "openai-audio"
+        assert caps.supports_image_input is False
+
+    @pytest.mark.unit
+    def test_gpt_4o_mini_transcribe_is_an_audio_family(self) -> None:
+        assert detect_capabilities("gpt-4o-mini-transcribe").family == "openai-audio"
+
+    @pytest.mark.unit
+    def test_whisper_1_is_an_audio_family(self) -> None:
+        caps = detect_capabilities("whisper-1")
+        assert caps.family == "openai-audio"
+        assert caps.supports_audio_input is True
+
+    @pytest.mark.unit
+    def test_gpt_4o_does_not_accept_audio(self) -> None:
+        caps = detect_capabilities("gpt-4o")
+        assert caps.supports_audio_input is False
+        assert caps.audio_transcription_only is False
+
+    @pytest.mark.unit
+    def test_gpt_5_does_not_accept_audio(self) -> None:
+        assert detect_capabilities("gpt-5").supports_audio_input is False
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "model",
+        ["gemini-3-flash", "gemini-3-pro-preview", "gemini-3.1-pro-preview"],
+    )
+    def test_gemini_models_accept_audio(self, model: str) -> None:
+        assert detect_capabilities(model).supports_audio_input is True
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("model", ["gemma-4-31b-it", "gemma"])
+    def test_gemma_models_do_not_accept_audio(self, model: str) -> None:
+        assert detect_capabilities(model).supports_audio_input is False
+
+    @pytest.mark.unit
+    def test_ensure_audio_support_passes_for_an_audio_model(self) -> None:
+        from modules.config.capabilities import ensure_audio_support
+
+        assert ensure_audio_support("gpt-transcribe") is None
+
+    @pytest.mark.unit
+    def test_ensure_audio_support_raises_for_a_chat_only_model(self) -> None:
+        from modules.config.capabilities import ensure_audio_support
+
+        with pytest.raises(CapabilityError, match="does not support them"):
+            ensure_audio_support("gpt-5")
+
+    @pytest.mark.unit
+    def test_ensure_image_support_warns_but_does_not_raise_for_audio_only(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """An audio-only model must not break config load for an audio run."""
+        with caplog.at_level("WARNING"):
+            assert ensure_image_support("gpt-transcribe", True) is None
+        assert "accepts audio but not image inputs" in caplog.text
+
+    @pytest.mark.unit
+    def test_ensure_image_support_still_raises_for_a_text_only_model(self) -> None:
+        # o1-mini accepts neither images nor audio: the audio-only downgrade
+        # must not have widened into a blanket pass.
+        with pytest.raises(CapabilityError):
+            ensure_image_support("o1-mini", True)

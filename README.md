@@ -1,9 +1,9 @@
-# ChronoTranscriber v2.4.0
+# ChronoTranscriber v3.0.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
-documents, academic papers, and ebooks into searchable, structured text
-using state-of-the-art AI models or local OCR.
+documents, academic papers, ebooks, and audio recordings into searchable,
+structured text using state-of-the-art AI models or local OCR.
 
 Designed to integrate with
 [ChronoMiner](https://github.com/Paullllllllllllllllll/ChronoMiner) and
@@ -25,6 +25,7 @@ pipeline.
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [Output Formats](#output-formats)
+- [Audio Transcription](#audio-transcription)
 - [Batch Processing](#batch-processing)
 - [Utilities](#utilities)
 - [Architecture](#architecture)
@@ -56,6 +57,8 @@ preprocessing.
 - **Image folders** -- PNG, JPEG, WEBP, BMP, TIFF
 - **EPUBs** -- native extraction from EPUB 2.0/3.0
 - **MOBI/Kindle** -- unencrypted MOBI, AZW, AZW3, KFX
+- **Audio recordings** -- MP3, WAV, M4A, MP4, FLAC, OGG, and more, via a
+  speech-to-text API or a local Whisper model
 - **Auto mode** -- scan mixed directories and select the best method
   per file
 
@@ -65,6 +68,9 @@ preprocessing.
   Google, OpenRouter, custom OpenAI-compatible endpoints)
 - **Tesseract local OCR** -- fully offline processing with configurable
   preprocessing (grayscale, deskew, denoise, binarization)
+- **Audio transcription** -- speech recordings to plain text via the
+  OpenAI audio API, Google Gemini, or a local faster-whisper model;
+  long recordings are chunked automatically with per-chunk resume
 - **Centralized capability registry** -- single source of truth for all
   provider/model capabilities; unsupported parameters filtered
   automatically before API calls
@@ -134,9 +140,12 @@ Three operating modes are available, controlled by
 
 ## System Requirements
 
-- **Python** 3.10+ (3.13 recommended)
+- **Python** 3.13+ (matches `requires-python` in `pyproject.toml`)
 - **Tesseract OCR** (optional) -- required only for local OCR
-- **FFmpeg** (optional) -- required for JPEG2000 bilevel codestreams
+- **FFmpeg** (optional) -- required for JPEG2000 bilevel codestreams and
+  for chunking audio recordings that exceed the provider size limit
+- **faster-whisper** (optional) -- the `audio` extra, required only for
+  local Whisper transcription
 - At least one API key (see provider table above)
 
 All Python dependencies are declared in `pyproject.toml` and locked
@@ -159,6 +168,9 @@ uv sync --extra dev
 
 # Include evaluation notebook dependencies
 uv sync --extra eval
+
+# Include local Whisper audio transcription (faster-whisper)
+uv sync --extra audio
 ```
 
 **Install Tesseract** (optional, for local OCR):
@@ -168,10 +180,12 @@ uv sync --extra eval
 - Linux: `sudo apt-get install tesseract-ocr`
 - macOS: `brew install tesseract`
 
-**Install FFmpeg** (optional, for JPEG2000 bilevel codestreams):
+**Install FFmpeg** (optional, for JPEG2000 bilevel codestreams and for
+chunking long audio recordings):
 
-- Windows: [ffmpeg.org](https://ffmpeg.org/download.html), add `bin/`
-  to PATH
+- Windows: `winget install Gyan.FFmpeg`, or
+  [ffmpeg.org](https://ffmpeg.org/download.html) with `bin/` added to
+  PATH
 - Linux: `sudo apt-get install ffmpeg`
 - macOS: `brew install ffmpeg`
 
@@ -260,6 +274,18 @@ python main/unified_transcriber.py --type mobis --method native \
     --input ./kindle_books --output ./results
 ```
 
+**Audio recordings:**
+
+```bash
+# Remote speech-to-text (venue set in config/audio_config.yaml)
+python main/unified_transcriber.py --type audio --method audio-api \
+    --input ./recordings --output ./transcripts
+
+# Local faster-whisper (offline)
+python main/unified_transcriber.py --type audio --method whisper \
+    --input ./recordings --output ./transcripts
+```
+
 **Repair failed pages:**
 
 ```bash
@@ -271,8 +297,8 @@ python main/repair_transcriptions.py \
 
 ```
 --input / --output         Input and output paths
---type                     pdfs | images | epubs | mobis
---method                   native | tesseract | gpt
+--type                     pdfs | images | epubs | mobis | audio
+--method                   native | tesseract | gpt | audio-api | whisper
 --auto                     Auto mode (bypasses --type/--method)
 --batch                    Use async batch API
 --schema NAME              JSON schema selection
@@ -295,6 +321,10 @@ python main/repair_transcriptions.py \
 --dry-run                  Report planned actions; no API calls or writes
 --json                     Emit a machine-readable JSON summary line on stdout
 ```
+
+With `--type audio`, `--provider` and `--model` configure the audio venue
+declared in `audio_config.yaml` (`openai` or `google`) instead of the image
+transcription model, and `--batch` is refused: audio runs synchronously only.
 
 Run `python main/unified_transcriber.py --help` for the full list.
 
@@ -322,8 +352,8 @@ than silently reprocessing the whole job synchronously at full price; pass
 
 ## Configuration
 
-ChronoTranscriber uses four YAML files in `config/`, plus one optional
-fifth file (`api_keys_config.yaml`). The config directory can be
+ChronoTranscriber uses five YAML files in `config/`, plus one optional
+sixth file (`api_keys_config.yaml`). The config directory can be
 overridden via the `CHRONO_CONFIG_DIR` environment variable.
 
 **Example/real split.** Every config file has a tracked, scrubbed
@@ -428,7 +458,36 @@ validation/quality retries share separate budgets), content-quality
 validators with configurable thresholds, service tier, batch chunk
 size, and daily token budgets.
 
-### 5. API Keys Configuration (Optional) (`api_keys_config.yaml`)
+### 5. Audio Configuration (`audio_config.yaml`)
+
+```yaml
+audio_transcription:
+  provider: openai        # openai | google
+  concurrency_limit: 4
+  openai:
+    model: gpt-transcribe # gpt-4o-transcribe | gpt-4o-mini-transcribe | whisper-1
+  google:
+    model: gemini-3.6-flash
+chunking:
+  target_seconds: 600     # nominal chunk length
+  overlap_seconds: 0
+  chunk_format: mp3
+local_whisper:
+  model_size: large-v3
+  device: auto            # auto | cpu | cuda
+ffmpeg:
+  ffmpeg_cmd: ''          # empty = look up on PATH
+```
+
+Selects the remote venue for `--method audio-api`, the request parameters
+of each venue (model, prompt, language hints, temperature), how long
+recordings are cut into chunks, the local faster-whisper runtime for
+`--method whisper`, the ffmpeg/ffprobe executables, and a speech-tuned
+postprocessing profile. Every key is optional; each reader falls back to a
+built-in default. See [Audio Transcription](#audio-transcription) for the
+workflow.
+
+### 6. API Keys Configuration (Optional) (`api_keys_config.yaml`)
 
 ```yaml
 openai: OPENAI_API_KEY
@@ -498,6 +557,84 @@ Three formats via `--output-format` (default set in `paths_config.yaml`):
 
 Output files are named `<original_name>_transcription.{ext}`.
 
+## Audio Transcription
+
+Speech recordings are a first-class processing type: `--type audio` treats
+each file as a flat input, like a PDF, and writes a plain-text transcript
+through the same output writer, resume logic, and postprocessing as the
+document paths.
+
+**Supported containers:** `mp3`, `wav`, `m4a`, `mp4`, `mpga`, `mpeg`,
+`webm`, `flac`, `ogg`, `aac`, `aiff`. Each remote venue accepts a subset:
+OpenAI takes `mp3`, `mp4`, `mpeg`, `mpga`, `m4a`, `wav`, and `webm`;
+Gemini takes `wav`, `mp3`, `aiff`, `aac`, `ogg`, and `flac`. Chunking
+re-encodes to the configured `chunk_format` (`mp3` by default), so a
+container outside a venue's list still works once it is chunked.
+
+### Choosing a Venue
+
+| Venue | How to select | Notes |
+|-------|--------------|-------|
+| OpenAI audio API | `--method audio-api` with `provider: openai` | Default `gpt-transcribe`; also `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`. 25 MB per request |
+| Google Gemini | `--method audio-api` with `provider: google` | Any audio-capable Gemini model; 20 MB per inline request |
+| Local faster-whisper | `--method whisper` | Fully offline, no API key, no ffmpeg; handles long files natively |
+
+The remote venue is set by `audio_transcription.provider` in
+`config/audio_config.yaml` (or overridden per run with `--provider`);
+`--method whisper` bypasses it entirely and runs locally.
+
+### Installation
+
+```bash
+# Local Whisper only
+uv sync --extra audio
+
+# FFmpeg (Windows) -- needed only for chunking long recordings or page ranges
+winget install Gyan.FFmpeg
+```
+
+FFmpeg is looked up at call time and is required only when a recording
+exceeds the venue's per-request limit or when `--pages` selects a span of
+a recording. Short files are sent whole and never touch ffmpeg; local
+Whisper ships its own decoder (PyAV) and needs no ffmpeg at all.
+
+### Usage
+
+```bash
+# Remote speech-to-text
+python main/unified_transcriber.py --type audio --method audio-api \
+    --input ./recordings --output ./transcripts
+
+# Local faster-whisper (offline)
+python main/unified_transcriber.py --type audio --method whisper \
+    --input ./recordings --output ./transcripts
+```
+
+The interactive wizard offers audio alongside the document types: choose
+"Audio" as the processing type and then the remote or local method; the
+remaining prompts (output format, resume mode, file selection) are the
+usual ones.
+
+### Chunking and Resume
+
+Recordings longer than a venue's per-request limit are cut into
+deterministic segments of `chunking.target_seconds` (600 s by default,
+with optional `overlap_seconds`). Each chunk becomes one JSONL record, so
+resume, `--retry-errors`, and the evaluation tooling work exactly as they
+do for pages.
+
+### Caveats
+
+- Output is plain text only: no timestamps, no speaker diarization.
+- Synchronous only. No provider offers a batch API for audio, so
+  `--batch` is refused for `--type audio`.
+- Chunk boundaries can fall mid-sentence. Raise
+  `chunking.overlap_seconds` if boundary artifacts matter.
+- Changing `chunking.target_seconds` invalidates an in-progress resume:
+  chunk indices shift and already-transcribed chunks no longer align.
+- `repair_transcriptions.py` does not cover audio. Re-run the main tool
+  with `--retry-errors` to redo failed chunks.
+
 ## Batch Processing
 
 Async batch APIs for OpenAI, Anthropic, and Google. OpenAI offers
@@ -549,6 +686,9 @@ python main/repair_transcriptions.py \
 python main/repair_transcriptions.py \
     --transcription ./results/doc_transcription.txt --indices 5,12,18
 ```
+
+Audio transcripts are not covered; re-run `unified_transcriber.py` with
+`--retry-errors` to redo failed chunks.
 
 ### Post-process Transcriptions
 
@@ -626,12 +766,13 @@ a v1 ledger is adopted in place without losing the day's count.
 
 ## Architecture
 
-ChronoTranscriber follows a deep-module architecture: ten packages
+ChronoTranscriber follows a deep-module architecture: eleven packages
 under `modules/`, each with a narrow public surface, composed by CLI
 entry points in `main/`.
 
 ```
 modules/
++-- audio/         Chunk planning, ffmpeg cutting, speech-to-text backends
 +-- batch/         Provider-agnostic batch operations
 +-- config/        YAML config, capability registry, context resolution
 |   +-- capabilities/
@@ -727,8 +868,8 @@ Run the test suite:
 uv run python -m pytest -v
 ```
 
-The suite contains roughly 1,500 tests (unit and integration) covering
-all modules, providers, batch backends, and CLI parsers. Live API smoke
+The suite contains roughly 2,000 tests (unit and integration) covering
+all modules, providers, batch backends, audio, and CLI parsers. Live API smoke
 tests are marked `api` and deselected by default; run them explicitly
 with `pytest -m api`.
 
@@ -742,6 +883,24 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v3.0.0** (2 August 2026) -- Audio transcription. Speech recordings become a
+    first-class processing type: `--type audio` with `--method audio-api` sends
+    each recording to the OpenAI audio API (`gpt-transcribe` by default, also
+    `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, and `whisper-1`) or to Google
+    Gemini, while `--method whisper` transcribes offline through a local
+    faster-whisper model shipped as the new optional `audio` extra. A sixth
+    config file, `config/audio_config.yaml` (with a tracked
+    `audio_config.example.yaml`), selects the remote venue and holds the
+    per-venue request parameters, chunk planning, local Whisper runtime, ffmpeg
+    executable paths, and a speech-tuned postprocessing profile. Recordings
+    above a venue's per-request limit are cut into deterministic ffmpeg chunks
+    and each chunk is written as its own JSONL record, so resume,
+    `--retry-errors`, and the evaluation tooling behave as they do for pages;
+    short files are sent whole and never invoke ffmpeg. Output is plain text
+    without timestamps or diarization, audio runs synchronously (no provider
+    offers a batch API for it), and `repair_transcriptions.py` does not cover
+    audio. Major bump for the new modality, config file, and CLI surface; the
+    image and document paths are unchanged.
 - **v2.4.0** (19 July 2026) -- Dependency and documentation release from the
     third maintenance sweep. Raise all direct dependency floors to current
     stable releases (langchain stack, openai 2.46, anthropic 0.117,

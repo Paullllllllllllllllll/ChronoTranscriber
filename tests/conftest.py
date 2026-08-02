@@ -13,7 +13,9 @@ import json
 import os
 import shutil
 import tempfile
+import wave
 from collections.abc import Generator
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -152,6 +154,156 @@ def mock_config_service(
     mock_service.get_concurrency_config.return_value = mock_concurrency_config
     mock_service.get_image_processing_config.return_value = mock_image_processing_config
     return mock_service
+
+
+# =============================================================================
+# Audio Configuration Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def mock_audio_config() -> dict[str, Any]:
+    """Provide a mock audio configuration mirroring ``audio_config.example.yaml``.
+
+    Values are kept small and prompt-free so tests exercise the readers'
+    defaults without depending on the shipped template.
+    """
+    return {
+        "audio_transcription": {
+            "provider": "openai",
+            "concurrency_limit": 2,
+            "openai": {
+                "model": "gpt-transcribe",
+                "prompt": "",
+                "languages": [],
+                "language": "",
+                "keywords": [],
+                "temperature": None,
+            },
+            "google": {
+                "model": "gemini-3-flash",
+                "prompt": "",
+                "language_hint": "",
+                "max_output_tokens": 32768,
+                "temperature": 0.0,
+            },
+        },
+        "chunking": {
+            "target_seconds": 600,
+            "overlap_seconds": 0,
+            "max_request_bytes": 0,
+            "chunk_format": "mp3",
+            "mono": True,
+            "sample_rate": 16000,
+            "apply_to_local": False,
+        },
+        "local_whisper": {
+            "model_size": "large-v3",
+            "device": "auto",
+            "compute_type": "auto",
+            "beam_size": 5,
+            "vad_filter": True,
+            "language": "",
+            "model_path": "",
+            "download_root": "",
+        },
+        "ffmpeg": {
+            "ffmpeg_cmd": "",
+            "ffprobe_cmd": "",
+        },
+        "postprocessing": {
+            "enabled": False,
+            "merge_hyphenation": False,
+            "collapse_internal_spaces": True,
+            "max_blank_lines": 1,
+            "tab_size": 4,
+            "wrap_lines": False,
+            "auto_wrap": False,
+            "wrap_width": None,
+        },
+    }
+
+
+@pytest.fixture
+def mock_paths_config_with_audio(
+    mock_paths_config: dict[str, Any], tmp_path: Path
+) -> dict[str, Any]:
+    """``mock_paths_config`` extended with an ``Audio`` section.
+
+    The base fixture deliberately omits ``Audio`` (the legacy shape a
+    pre-audio ``paths_config.yaml`` still has), so both shapes stay covered.
+    """
+    config = deepcopy(mock_paths_config)
+    config["file_paths"]["Audio"] = {
+        "input": str(tmp_path / "audio_in"),
+        "output": str(tmp_path / "audio_out"),
+    }
+    return config
+
+
+@pytest.fixture
+def sample_audio_file(tmp_path: Path) -> Path:
+    """Create a small, real WAV file (0.5 s of silence, 16 kHz mono 16-bit)."""
+    audio_path = tmp_path / "sample_recording.wav"
+    frames = 8000  # 0.5 s at 16 kHz
+    with wave.open(str(audio_path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(16000)
+        handle.writeframes(b"\x00\x00" * frames)
+    return audio_path
+
+
+class StubAudioBackend:
+    """Minimal :class:`~modules.audio.backends.base.AudioBackend` stub.
+
+    Satisfies the backend protocol with canned responses: each call pops the
+    next entry from ``responses`` (an ``Exception`` instance is raised instead
+    of returned) and falls back to ``default_response`` once the queue is
+    empty. Every payload it saw is recorded on ``calls``.
+    """
+
+    def __init__(
+        self,
+        responses: list[Any] | None = None,
+        *,
+        provider_name: str = "stub",
+        model: str = "stub-audio-model",
+        default_response: dict[str, Any] | None = None,
+    ) -> None:
+        self.provider_name = provider_name
+        self.model = model
+        self.responses: list[Any] = list(responses or [])
+        self.default_response: dict[str, Any] = default_response or {
+            "output_text": "stub transcript",
+            "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+            "metadata": {"provider": provider_name, "model": model},
+        }
+        self.calls: list[Any] = []
+        self.closed = False
+        self.rekey_count = 0
+
+    async def transcribe_chunk(self, payload: Any) -> dict[str, Any]:
+        """Return (or raise) the next canned response for *payload*."""
+        self.calls.append(payload)
+        item = self.responses.pop(0) if self.responses else self.default_response
+        if isinstance(item, BaseException):
+            raise item
+        return item
+
+    async def close(self) -> None:
+        """Record that the backend was disposed."""
+        self.closed = True
+
+    def rekey(self) -> None:
+        """Record a re-key request."""
+        self.rekey_count += 1
+
+
+@pytest.fixture
+def mock_audio_backend() -> StubAudioBackend:
+    """Provide a configurable :class:`StubAudioBackend` instance."""
+    return StubAudioBackend()
 
 
 # =============================================================================

@@ -438,3 +438,57 @@ class TestParseIndices:
         """Test that empty parts are ignored."""
         result = parse_indices("1,,2,")
         assert result == [1, 2]
+
+
+class TestAudioCliArguments:
+    """Tests for the audio processing type and its speech-to-text methods."""
+
+    @pytest.mark.unit
+    def test_type_audio_parses(self) -> None:
+        """--type audio is an accepted processing type."""
+        parser = create_transcriber_parser()
+        args = parser.parse_args(
+            [
+                "--input",
+                "recordings",
+                "--type",
+                "audio",
+                "--method",
+                "audio-api",
+            ]
+        )
+        assert args.type == "audio"
+        assert args.method == "audio-api"
+
+    @pytest.mark.unit
+    def test_method_whisper_parses(self) -> None:
+        """--method whisper selects the local faster-whisper backend."""
+        parser = create_transcriber_parser()
+        args = parser.parse_args(["--type", "audio", "--method", "whisper"])
+        assert args.method == "whisper"
+
+    @pytest.mark.unit
+    def test_audio_is_offered_as_a_type_choice(self) -> None:
+        """The --type choice list advertises audio alongside the document types."""
+        parser = create_transcriber_parser()
+        action = next(a for a in parser._actions if a.dest == "type")
+        assert "audio" in action.choices
+        for legacy in ("images", "pdfs", "epubs", "mobis"):
+            assert legacy in action.choices
+
+    @pytest.mark.unit
+    def test_audio_methods_are_offered_as_method_choices(self) -> None:
+        """The --method choice list advertises both speech-to-text backends."""
+        parser = create_transcriber_parser()
+        action = next(a for a in parser._actions if a.dest == "method")
+        assert "audio-api" in action.choices
+        assert "whisper" in action.choices
+        for legacy in ("native", "tesseract", "gpt"):
+            assert legacy in action.choices
+
+    @pytest.mark.unit
+    def test_unknown_type_is_still_rejected(self) -> None:
+        """The widened choice list did not turn --type into a free-text field."""
+        parser = create_transcriber_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--type", "podcasts", "--method", "audio-api"])

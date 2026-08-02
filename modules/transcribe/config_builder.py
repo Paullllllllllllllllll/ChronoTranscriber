@@ -12,6 +12,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from modules.audio.constants import SUPPORTED_AUDIO_EXTENSIONS
 from modules.config.config_loader import PROJECT_ROOT
 from modules.core.cli_args import (
     resolve_path,
@@ -21,6 +22,10 @@ from modules.core.cli_args import (
 from modules.llm.schema_utils import list_schema_options
 from modules.transcribe.user_config import UserConfiguration
 from modules.ui import print_info, print_warning
+
+# Methods that only the audio workflow serves, and the venues that serve them.
+AUDIO_METHODS: tuple[str, ...] = ("audio-api", "whisper")
+AUDIO_CLI_PROVIDERS: tuple[str, ...] = ("openai", "google")
 
 
 def _resolve_schema(args_schema: str | None, config: UserConfiguration) -> None:
@@ -133,6 +138,71 @@ def _resolve_model_config_from_cli(
     return effective_model_config, applied_overrides
 
 
+def _resolve_audio_config_from_cli(
+    args: Any,
+    audio_config: dict[str, Any],
+) -> dict[str, Any]:
+    """Apply the audio-relevant CLI overrides onto an audio-config copy.
+
+    The audio workflow reads ``audio_config.yaml``, not ``model_config.yaml``,
+    so ``--provider`` and ``--model`` are routed here instead of through
+    :func:`_resolve_model_config_from_cli`; the model config is left untouched.
+    Applied overrides are reported on stdout (there is no second return value
+    to thread through the CLI entry point).
+
+    Args:
+        args: Parsed command-line arguments.
+        audio_config: Parsed ``audio_config.yaml`` (never mutated).
+
+    Returns:
+        A deep copy of *audio_config* with the overrides applied.
+
+    Raises:
+        ValueError: When ``--provider`` names a venue that serves no audio.
+    """
+    effective = deepcopy(audio_config)
+    section = effective.setdefault("audio_transcription", {})
+    if not isinstance(section, dict):
+        section = {}
+        effective["audio_transcription"] = section
+
+    applied: list[str] = []
+
+    provider = getattr(args, "provider", None)
+    if provider:
+        name = str(provider).strip().lower()
+        if name not in AUDIO_CLI_PROVIDERS:
+            raise ValueError(
+                f"--provider {provider} does not serve audio transcription; "
+                f"choose one of: {', '.join(AUDIO_CLI_PROVIDERS)}"
+            )
+        section["provider"] = name
+        applied.append(f"provider={name}")
+
+    active = str(section.get("provider") or "openai").strip().lower()
+
+    model = getattr(args, "model", None)
+    if model:
+        provider_section = section.setdefault(active, {})
+        if not isinstance(provider_section, dict):
+            provider_section = {}
+            section[active] = provider_section
+        provider_section["model"] = model
+        applied.append(f"{active}.model={model}")
+
+    for flag, value in (
+        ("--reasoning-effort", getattr(args, "reasoning_effort", None)),
+        ("--model-verbosity", getattr(args, "model_verbosity", None)),
+    ):
+        if value:
+            print_warning(f"{flag} does not apply to audio transcription; ignoring it.")
+
+    if applied:
+        print_info(f"CLI audio overrides: {', '.join(applied)}")
+
+    return effective
+
+
 def _collect_files_for_type(
     input_path: Path,
     processing_type: str,
@@ -151,11 +221,12 @@ def _collect_files_for_type(
         else:
             return [input_path]
 
-    # File-based types: pdfs, epubs, mobis
+    # File-based types: pdfs, epubs, mobis, audio
     ext_map: dict[str, list[str]] = {
         "pdfs": [".pdf"],
         "epubs": [".epub"],
         "mobis": [".mobi", ".azw", ".azw3", ".kfx"],
+        "audio": sorted(SUPPORTED_AUDIO_EXTENSIONS),
     }
     extensions = ext_map.get(processing_type, [])
 
@@ -299,19 +370,35 @@ def create_config_from_cli_args(
 
         return config
 
-    # Validate non-auto mode has required arguments
-    if not args.type or not args.method:
+    # Validate non-auto mode has required arguments. Audio is the one type with
+    # a sensible default method (the remote API); for the document types the
+    # native/tesseract/gpt choice is a real decision and stays required.
+    method = getattr(args, "method", None)
+    if args.type == "audio" and not method:
+        method = "audio-api"
+    if not args.type or not method:
         raise ValueError("--type and --method are required unless using --auto mode")
 
     config.processing_type = args.type
-    config.transcription_method = args.method
+    config.transcription_method = method
 
     if config.processing_type == "epubs" and config.transcription_method != "native":
         raise ValueError("EPUB processing only supports the 'native' method.")
     if config.processing_type == "mobis" and config.transcription_method != "native":
         raise ValueError("MOBI processing only supports the 'native' method.")
 
-    if args.method == "gpt":
+    if config.processing_type == "audio":
+        if method not in AUDIO_METHODS:
+            raise ValueError("--type audio requires --method audio-api or whisper")
+        # Speech-to-text has no batch API at either venue, so audio always runs
+        # synchronously regardless of --batch.
+        if getattr(args, "batch", False):
+            print_warning("Audio transcription has no batch API; ignoring --batch.")
+        config.use_batch_processing = False
+    elif method in AUDIO_METHODS:
+        raise ValueError(f"--method {method} requires --type audio")
+
+    if method == "gpt":
         config.use_batch_processing = args.batch
         config.sync_fallback = bool(getattr(args, "sync_fallback", False))
 
@@ -336,9 +423,12 @@ def create_config_from_cli_args(
 
 
 __all__ = [
+    "AUDIO_CLI_PROVIDERS",
+    "AUDIO_METHODS",
     "_resolve_schema",
     "_resolve_context",
     "_resolve_context_image",
+    "_resolve_audio_config_from_cli",
     "_resolve_model_config_from_cli",
     "_collect_files_for_type",
     "create_config_from_cli_args",

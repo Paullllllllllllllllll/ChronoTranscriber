@@ -11,12 +11,13 @@ import datetime
 import hashlib
 import json
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import aiofiles
 
+from modules.audio.whisper_runtime import transcribe_file as whisper_transcribe_file
 from modules.batch.jsonl import (
     ensure_resume_marker,
     extract_transcription_records,
@@ -47,6 +48,36 @@ logger = setup_logger(__name__)
 # ``page_{i + 1:04d}_tess_preprocessed<ext>`` with i drawn from the absolute
 # page_indices), so the page number can be recovered from the filename.
 _TESS_PAGE_RE = re.compile(r"^page_(\d+)_tess_preprocessed\.", re.IGNORECASE)
+
+
+class StreamPayload(Protocol):
+    """Structural contract every streaming payload satisfies.
+
+    Both :class:`modules.images.page_stream.PagePayload` and
+    :class:`modules.audio.audio_stream.AudioChunkPayload` match it, so the
+    streaming pipeline and the JSONL record builder accept either without
+    knowing which workflow produced the unit. Type-checking only: nothing
+    inspects this protocol at runtime.
+    """
+
+    index: int
+    image_name: str
+    source_file: str
+    page_index: int | None
+
+    def provenance(self) -> dict[str, Any]:
+        """Per-unit reproducibility record for JSONL persistence."""
+        ...
+
+
+# One transcription unit's result: (payload, image_name, text, raw_response,
+# order_index) — the shape every per-payload handler returns.
+PayloadResult = tuple[Any, str, str | None, dict[str, Any] | None, int]
+
+# Per-payload handler: ``(payload, transcriber) -> PayloadResult``. The
+# transcriber slot is whatever the caller threads through the pipeline (an LLM
+# transcriber, an ``AudioTranscriber``, or None for local backends).
+PayloadHandler = Callable[[Any, Any], Awaitable[PayloadResult]]
 
 
 def _absolute_order_index(
@@ -256,13 +287,15 @@ def _build_jsonl_record(
     method: str,
     is_folder: bool,
     transcriber: Any | None,
-    payload: PagePayload | None = None,
+    payload: StreamPayload | None = None,
 ) -> dict[str, Any] | None:
     """Build a JSONL record dict from a transcription result tuple.
 
     When ``payload`` is given (streaming pipeline), no preprocessed image
     file exists on disk: ``pre_processed_image`` is None and the record
-    carries the source reference and per-page provenance instead.
+    carries the source reference and per-page provenance instead. The payload
+    may be an image page or an audio chunk; both satisfy
+    :class:`StreamPayload`.
 
     Returns None if the result should be skipped (no text).
     """
@@ -289,8 +322,13 @@ def _build_jsonl_record(
         record["page_index"] = payload.page_index
         record["image_provenance"] = payload.provenance()
 
-    # Include raw_response and request_context only for GPT
-    if method == "gpt" and raw_response is not None and transcriber is not None:
+    # Include raw_response and request_context only for the API-backed methods
+    # (the local Tesseract/Whisper backends have neither).
+    if (
+        method in ("gpt", "audio-api")
+        and raw_response is not None
+        and transcriber is not None
+    ):
         try:
             ctx = {}
             extractor = getattr(transcriber, "extractor", None)
@@ -361,6 +399,67 @@ async def transcribe_payload(
         )
 
 
+async def transcribe_audio_payload(
+    payload: Any,
+    transcriber: Any,
+) -> PayloadResult:
+    """Transcribe one audio chunk through the remote speech-to-text venue.
+
+    The audio counterpart of :func:`transcribe_payload`: same 5-tuple shape,
+    same error taxonomy (an extraction failure becomes a
+    ``[transcription error: ...]`` placeholder rather than a dropped unit), and
+    the chunk's absolute index as ``order_index``.
+    """
+    image_name = payload.image_name
+    try:
+        result = await transcriber.transcribe_audio_chunk(payload)
+        logger.debug(f"Audio response for {image_name}: {result}")
+        try:
+            final_text: str | None = extract_transcribed_text(result, image_name)
+        except Exception as e:
+            logger.error(
+                "Error extracting transcription for %s: %s."
+                " Marking as transcription error.",
+                image_name,
+                e,
+            )
+            final_text = f"[transcription error: {image_name}]"
+        return (payload, image_name, final_text, result, payload.index)
+    except Exception as e:
+        logger.exception(f"Error transcribing {image_name}: {e}")
+        return (
+            payload,
+            image_name,
+            f"[transcription error: {image_name}]",
+            None,
+            payload.index,
+        )
+
+
+async def transcribe_audio_payload_whisper(
+    payload: Any,
+    whisper_cfg: dict[str, Any],
+) -> PayloadResult:
+    """Transcribe one audio chunk with the local faster-whisper runtime.
+
+    ``transcribe_file`` is blocking (model inference), so it runs off the event
+    loop exactly as ``perform_ocr`` does on the Tesseract path. It returns None
+    on failure, which becomes a ``[transcription error: ...]`` placeholder so
+    the chunk is recorded, surfaces as a failed unit, and is retried under
+    ``--retry-errors``. There is no raw response for a local backend.
+    """
+    image_name = payload.image_name
+    try:
+        text = await asyncio.to_thread(
+            whisper_transcribe_file, payload.path, whisper_cfg
+        )
+    except Exception as e:
+        logger.exception(f"Error transcribing {image_name} with local Whisper: {e}")
+        text = None
+    final_text = text if text is not None else f"[transcription error: {image_name}]"
+    return (payload, image_name, final_text, None, payload.index)
+
+
 def _compute_file_sha256(path: Path) -> str | None:
     """SHA-256 of a file via streamed read (sources can be ~1 GB)."""
     try:
@@ -414,7 +513,7 @@ def build_file_provenance(
 
 
 async def run_streaming_transcription_pipeline(
-    payload_source: AsyncIterator[PagePayload],
+    payload_source: AsyncIterator[StreamPayload],
     transcriber: Any,
     temp_jsonl_path: Path,
     output_txt_path: Path,
@@ -427,8 +526,11 @@ async def run_streaming_transcription_pipeline(
     tracker: Any = None,
     exhausted: asyncio.Event | None = None,
     total_pages: int | None = None,
+    *,
+    method: str = "gpt",
+    handler: PayloadHandler | None = None,
 ) -> None:
-    """Execute the in-memory streaming transcription pipeline (GPT method).
+    """Execute the in-memory streaming transcription pipeline.
 
     A bounded producer-consumer pool transcribes payloads as they are
     rendered; each result is streamed to the temp JSONL immediately. The
@@ -437,6 +539,13 @@ async def run_streaming_transcription_pipeline(
 
     Resume filtering happens BEFORE rendering (the caller passes a
     producer that already excludes completed pages).
+
+    Args:
+        method: Method label written to each JSONL record. Defaults to
+            ``"gpt"``, the image workflow's value.
+        handler: Per-payload coroutine ``(payload, transcriber)``. Defaults to
+            :func:`transcribe_payload`, so image callers are unaffected; the
+            audio workflow passes its own chunk handler.
     """
     transcription_conf = concurrency_config.get("concurrency", {}).get(
         "transcription", {}
@@ -462,8 +571,12 @@ async def run_streaming_transcription_pipeline(
             await jfile.write(json.dumps(file_provenance, ensure_ascii=False) + "\n")
             await jfile.flush()
 
-        async def handle(payload: PagePayload) -> Any:
-            return await transcribe_payload(payload, transcriber)
+        chosen_handler: PayloadHandler = (
+            handler if handler is not None else transcribe_payload
+        )
+
+        async def handle(payload: StreamPayload) -> Any:
+            return await chosen_handler(payload, transcriber)
 
         async def on_result_write(result_tuple: Any) -> None:
             if not result_tuple or len(result_tuple) < 5:
@@ -483,7 +596,7 @@ async def run_streaming_transcription_pipeline(
                     result_tuple[4],
                 ),
                 source_name,
-                "gpt",
+                method,
                 is_folder,
                 transcriber,
                 payload=payload,

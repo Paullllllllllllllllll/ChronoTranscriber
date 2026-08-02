@@ -56,6 +56,15 @@ class OutputTokensTruncatedError(Exception):
         )
 
 
+class AudioNotSupportedError(Exception):
+    """Raised when a provider has no audio-input support.
+
+    Providers whose chat model cannot accept audio parts inherit the
+    default :meth:`BaseProvider.transcribe_audio_from_base64`, which
+    raises this instead of silently returning an empty transcription.
+    """
+
+
 def _load_retry_config() -> dict[str, Any]:
     """Return the ``concurrency.transcription.retry`` config block.
 
@@ -146,6 +155,11 @@ def _classify_status(exc: BaseException) -> tuple[bool, bool]:
     return False, False
 
 
+def classify_http_status(exc: BaseException) -> tuple[bool, bool]:
+    """Public alias for :func:`_classify_status`; see it for the full contract."""
+    return _classify_status(exc)
+
+
 def _is_connection_error(exc: BaseException) -> bool:
     """Return True when the exception is a transient connection/timeout failure.
 
@@ -166,6 +180,11 @@ def _is_connection_error(exc: BaseException) -> bool:
         seen.add(id(current))
         current = current.__cause__ or current.__context__
     return False
+
+
+def is_connection_error(exc: BaseException) -> bool:
+    """Public alias for :func:`_is_connection_error`; see it for the full contract."""
+    return _is_connection_error(exc)
 
 
 def parse_retry_after(exc: BaseException | None) -> float | None:
@@ -613,6 +632,42 @@ class BaseProvider(ABC):
             TranscriptionResult with the transcription and metadata
         """
         pass
+
+    async def transcribe_audio_from_base64(
+        self,
+        audio_base64: str,
+        mime_type: str,
+        *,
+        system_prompt: str,
+        user_instruction: str = (
+            "Please transcribe the speech in this audio recording."
+        ),
+        max_output_tokens: int | None = None,
+    ) -> TranscriptionResult:
+        """Transcribe speech from a base64-encoded audio recording.
+
+        Not abstract: only providers whose chat model accepts audio input
+        override this. The default implementation raises
+        :class:`AudioNotSupportedError` so a misrouted audio job fails loudly
+        instead of returning an empty transcription.
+
+        Args:
+            audio_base64: Base64-encoded audio data
+            mime_type: MIME type of the audio (e.g., "audio/mp3")
+            system_prompt: System prompt for the model
+            user_instruction: User instruction text
+            max_output_tokens: Optional per-call output-token ceiling; ignored
+                by providers whose client offers no per-request override
+
+        Returns:
+            TranscriptionResult with the transcription and metadata
+
+        Raises:
+            AudioNotSupportedError: When the provider has no audio-input support
+        """
+        raise AudioNotSupportedError(
+            f"{self.provider_name} provider does not support audio input"
+        )
 
     @abstractmethod
     async def close(self) -> None:

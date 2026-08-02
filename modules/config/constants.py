@@ -33,4 +33,7 @@ SUPPORTED_MOBI_EXTENSIONS = {".mobi", ".azw", ".azw3", ".kfx"}
 TERMINAL_BATCH_STATUSES = {"completed", "expired", "cancelled", "failed"}
 
 # Document category labels used in paths_config.yaml
-DOCUMENT_CATEGORIES = ("PDFs", "Images", "EPUBs", "MOBIs", "Auto")
+DOCUMENT_CATEGORIES = ("PDFs", "Images", "EPUBs", "MOBIs", "Audio", "Auto")
+
+# Audio extensions live in modules/audio/constants.py, next to the audio
+# runtime that owns them.

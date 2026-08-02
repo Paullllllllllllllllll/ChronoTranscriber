@@ -214,6 +214,72 @@ class GoogleProvider(BaseProvider):
         # Invoke LLM - LangChain handles retries internally
         return await self._invoke_llm(llm_to_use, messages, invoke_kwargs)
 
+    async def transcribe_audio_from_base64(
+        self,
+        audio_base64: str,
+        mime_type: str,
+        *,
+        system_prompt: str,
+        user_instruction: str = (
+            "Please transcribe the speech in this audio recording."
+        ),
+        max_output_tokens: int | None = None,
+    ) -> TranscriptionResult:
+        """Transcribe speech from base64-encoded audio using LangChain.
+
+        Plain-text transcription: no structured output is requested, so the
+        model's answer is returned verbatim. ``max_output_tokens`` is applied
+        as a per-request override (clamped to the model's ceiling), which
+        ChatGoogleGenerativeAI honours through its generation config.
+        """
+        caps = self._capabilities
+
+        if not caps.supports_audio_input:
+            return TranscriptionResult(
+                content="",
+                error=f"Model {self.model} does not support audio inputs.",
+                transcription_not_possible=True,
+            )
+
+        # langchain-google-genai converts a base64 "file" content block into a
+        # Gemini inline-data Part (see its _convert_to_parts).
+        human_content: list[dict[str, Any]] = []
+        if user_instruction:
+            human_content.append({"type": "text", "text": user_instruction})
+        human_content.append(
+            {
+                "type": "file",
+                "source_type": "base64",
+                "mime_type": mime_type,
+                "data": audio_base64,
+            }
+        )
+
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=human_content),  # type: ignore[arg-type]
+        ]
+
+        invoke_kwargs: dict[str, Any] = {}
+        if max_output_tokens is not None and max_output_tokens > 0:
+            invoke_kwargs["max_output_tokens"] = int(
+                min(max_output_tokens, caps.max_output_tokens)
+            )
+
+        try:
+            response = await self._ainvoke_with_retry(
+                self._llm, messages, **invoke_kwargs
+            )
+            return await self._process_llm_response(response, GOOGLE_TOKEN_MAPPING)
+        except Exception as e:
+            # logger.exception captures the traceback so a programming error
+            # (e.g. KeyError from a refactor) is not masked as an API error.
+            logger.exception(f"Error invoking Google Gemini for audio: {e}")
+            return TranscriptionResult(
+                content="",
+                error=str(e),
+            )
+
     async def _invoke_llm(
         self,
         llm: Any,

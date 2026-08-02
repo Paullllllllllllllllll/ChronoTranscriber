@@ -32,6 +32,14 @@ from modules.ui.prompts import (
 
 logger = setup_logger(__name__)
 
+# Human-readable labels for the audio-only transcription methods. The document
+# methods read fine as bare upper-case tokens ("GPT", "TESSERACT"), so only the
+# audio pair is remapped in the processing summary.
+AUDIO_METHOD_LABELS: dict[str, str] = {
+    "audio-api": "API transcription",
+    "whisper": "Local Whisper",
+}
+
 
 class WorkflowUI:
     """Enhanced workflow UI with navigation support."""
@@ -61,6 +69,11 @@ class WorkflowUI:
             ("pdfs", "PDF Documents — Process PDF files or scanned documents"),
             ("epubs", "EPUB Documents — Extract text directly from EPUB ebooks"),
             ("mobis", "MOBI Documents — Extract text from MOBI/AZW ebooks"),
+            (
+                "audio",
+                "Audio Files — Transcribe speech recordings"
+                " (mp3, wav, m4a, ...) to plain text",
+            ),
         ]
 
     @staticmethod
@@ -91,6 +104,19 @@ class WorkflowUI:
                 (
                     "native",
                     "Native MOBI Extraction — Extract text from MOBI/AZW ebooks",
+                ),
+            ]
+        if processing_type == "audio":
+            return [
+                (
+                    "audio-api",
+                    "API Transcription — OpenAI or Gemini speech-to-text"
+                    " (provider set in audio_config.yaml)",
+                ),
+                (
+                    "whisper",
+                    "Local Whisper — Offline transcription via faster-whisper"
+                    " (no API key)",
                 ),
             ]
         return [
@@ -652,6 +678,8 @@ class WorkflowUI:
             return WorkflowUI._select_pdf_files(config, base_dir)
         if config.processing_type == "mobis":
             return WorkflowUI._select_mobi_files(config, base_dir)
+        if config.processing_type == "audio":
+            return WorkflowUI._select_audio_files(config, base_dir)
         return WorkflowUI._select_epub_files(config, base_dir)
 
     @staticmethod
@@ -765,6 +793,49 @@ class WorkflowUI:
         config.selected_items = selected_paths
         config.process_all = len(selected_paths) == len(mobi_files)
         print_success(f"Selected {len(selected_paths)} MOBI file(s) for processing.")
+        return True
+
+    @staticmethod
+    def _select_audio_files(config: UserConfiguration, audio_dir: Path) -> bool:
+        """Select audio recordings for processing."""
+        from modules.audio.constants import SUPPORTED_AUDIO_EXTENSIONS
+        from modules.infra.paths import natural_sort_key
+
+        if not audio_dir.is_dir():
+            print_error(f"No audio files found in {audio_dir}.")
+            return False
+
+        audio_files = sorted(
+            (
+                f
+                for f in audio_dir.iterdir()
+                if f.is_file() and f.suffix.lower() in SUPPORTED_AUDIO_EXTENSIONS
+            ),
+            key=lambda p: natural_sort_key(p.name),
+        )
+        if not audio_files:
+            print_error(f"No audio files found in {audio_dir}.")
+            return False
+
+        file_items = [(str(f), f.name) for f in audio_files]
+        selection_result = prompt_multiselect(
+            f"Select audio files to process ({len(audio_files)} available):",
+            file_items,
+            allow_all=True,
+            allow_back=True,
+        )
+
+        if selection_result.action == NavigationAction.BACK:
+            return False
+
+        selected_paths = [Path(p) for p in selection_result.value]
+        if not selected_paths:
+            print_warning("No audio files selected. Nothing to process.")
+            return False
+
+        config.selected_items = selected_paths
+        config.process_all = len(selected_paths) == len(audio_files)
+        print_success(f"Selected {len(selected_paths)} audio file(s) for processing.")
         return True
 
     @staticmethod
@@ -1054,6 +1125,10 @@ class WorkflowUI:
             doc_type = (config.processing_type or "unknown").capitalize()
             ui_print(f"    • Document type: {doc_type}", PromptStyle.INFO)
             trans_method = (config.transcription_method or "unknown").upper()
+            if config.processing_type == "audio":
+                trans_method = AUDIO_METHOD_LABELS.get(
+                    config.transcription_method or "", trans_method
+                )
             ui_print(
                 f"    • Transcription method: {trans_method}",
                 PromptStyle.INFO,
@@ -1150,6 +1225,58 @@ class WorkflowUI:
         print_separator(PromptStyle.LIGHT_LINE, 80)
 
     @staticmethod
+    def _build_audio_config_lines(config: UserConfiguration) -> None:
+        """Display the 'Audio Configuration' section.
+
+        Shows the transcription venue (remote provider and model, or the local
+        faster-whisper runtime), the nominal chunk length, and any configured
+        language hints. Replaces the model/concurrency sections for audio,
+        whose settings live in audio_config.yaml rather than model_config.yaml.
+        """
+        from modules.audio.constants import DEFAULT_TARGET_CHUNK_SECONDS
+        from modules.config.service import get_audio_config
+
+        audio_config = get_audio_config()
+        transcription = audio_config.get("audio_transcription", {}) or {}
+        chunking = audio_config.get("chunking", {}) or {}
+        local_whisper = audio_config.get("local_whisper", {}) or {}
+
+        ui_print("\n  Audio Configuration:", PromptStyle.HIGHLIGHT)
+        print_separator(PromptStyle.LIGHT_LINE, 80)
+
+        if config.transcription_method == "whisper":
+            model_size = local_whisper.get("model_size", "large-v3")
+            device = local_whisper.get("device", "auto")
+            ui_print(
+                f"    • Method: Local Whisper ({model_size}, device {device})",
+                PromptStyle.INFO,
+            )
+            language = local_whisper.get("language") or ""
+        else:
+            provider = str(transcription.get("provider", "openai")).lower()
+            provider_cfg = transcription.get(provider, {}) or {}
+            model_name = provider_cfg.get("model", "unknown")
+            ui_print(
+                f"    • Method: API transcription — {provider.upper()} ({model_name})",
+                PromptStyle.INFO,
+            )
+            language = (
+                provider_cfg.get("language") or provider_cfg.get("language_hint") or ""
+            )
+            languages = provider_cfg.get("languages") or []
+            if languages:
+                joined = ", ".join(str(code) for code in languages)
+                ui_print(f"      - Language hints: {joined}", PromptStyle.DIM)
+
+        if language:
+            ui_print(f"      - Language: {language}", PromptStyle.DIM)
+
+        target_seconds = chunking.get("target_seconds", DEFAULT_TARGET_CHUNK_SECONDS)
+        ui_print(f"      - Chunk length: {target_seconds} s", PromptStyle.DIM)
+
+        print_separator(PromptStyle.LIGHT_LINE, 80)
+
+    @staticmethod
     def _build_concurrency_config_lines(
         concurrency_config: dict[str, Any],
     ) -> None:
@@ -1215,6 +1342,8 @@ class WorkflowUI:
                 output_dir = file_paths.get("EPUBs", {}).get("output", "epubs_out")
             elif config.processing_type == "mobis":
                 output_dir = file_paths.get("MOBIs", {}).get("output", "mobis_out")
+            elif config.processing_type == "audio":
+                output_dir = file_paths.get("Audio", {}).get("output", "audio_out")
             else:
                 output_dir = "configured output directory"
             ui_print(f"    • Output directory: {output_dir}", PromptStyle.INFO)
@@ -1352,6 +1481,8 @@ class WorkflowUI:
                 item_type = "EPUB file(s)"
             elif config.processing_type == "mobis":
                 item_type = "MOBI file(s)"
+            elif config.processing_type == "audio":
+                item_type = "audio file(s)"
             else:
                 item_type = "file(s)"
             ui_print("  Ready to process ", PromptStyle.INFO, end="")
@@ -1367,6 +1498,9 @@ class WorkflowUI:
         if has_gpt:
             WorkflowUI._build_model_config_lines(model_config)
             WorkflowUI._build_concurrency_config_lines(concurrency_config)
+        elif config.processing_type == "audio":
+            # Audio settings live in audio_config.yaml, not model_config.yaml.
+            WorkflowUI._build_audio_config_lines(config)
 
         # === Output Location ===
         WorkflowUI._build_output_location_lines(config, paths_config, is_auto)
@@ -1523,6 +1657,8 @@ class WorkflowUI:
                 output_dir = file_paths.get("EPUBs", {}).get("output", "epubs_out")
             elif config.processing_type == "mobis":
                 output_dir = file_paths.get("MOBIs", {}).get("output", "mobis_out")
+            elif config.processing_type == "audio":
+                output_dir = file_paths.get("Audio", {}).get("output", "audio_out")
             else:
                 output_dir = "configured output directory"
             # Resolve to an absolute path so the location is unambiguous.

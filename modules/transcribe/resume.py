@@ -58,6 +58,7 @@ class ResumeChecker:
         image_output_dir: Configured image output directory.
         epub_output_dir: Configured EPUB output directory.
         mobi_output_dir: Configured MOBI output directory.
+        audio_output_dir: Configured audio output directory.
     """
 
     def __init__(
@@ -70,6 +71,7 @@ class ResumeChecker:
         image_output_dir: Path | None = None,
         epub_output_dir: Path | None = None,
         mobi_output_dir: Path | None = None,
+        audio_output_dir: Path | None = None,
         output_format: str = "txt",
         output_mode: str = "hash",
         input_root: Path | None = None,
@@ -99,6 +101,9 @@ class ResumeChecker:
         )
         self.mobi_output_dir = mobi_output_dir or Path(
             fp.get("MOBIs", {}).get("output", "mobis_out")
+        )
+        self.audio_output_dir = audio_output_dir or Path(
+            fp.get("Audio", {}).get("output", "audio_out")
         )
 
     def _output_complete_state(self, item: Path, output_path: Path) -> ProcessingState:
@@ -132,7 +137,8 @@ class ResumeChecker:
         Args:
             item: Input file or folder path.
             processing_type: One of ``"pdfs"``, ``"images"``, ``"epubs"``,
-                ``"mobis"``, or ``"auto"`` (auto-detect from item type).
+                ``"mobis"``, ``"audio"``, or ``"auto"`` (auto-detect from item
+                type).
 
         Returns:
             A :class:`ResumeResult` describing the item's state.
@@ -150,6 +156,8 @@ class ResumeChecker:
             return self._check_epub(item)
         elif processing_type == "mobis":
             return self._check_mobi(item)
+        elif processing_type == "audio":
+            return self._check_audio(item)
         elif processing_type == "auto":
             return self._check_auto(item)
         else:
@@ -403,6 +411,26 @@ class ResumeChecker:
             self.epub_output_dir,
             supports_partial_jsonl=False,
             hash_key=self._relative_key(epub_path),
+        )
+
+    def _check_audio(self, audio_path: Path) -> ResumeResult:
+        # Audio recordings are flat files, so the layout replicated here is the
+        # PDF one: mirror branch when configured, otherwise the hash-suffixed
+        # working directory (which also holds the resumable chunk JSONL).
+        # ``modules.audio.paths.prepare_audio_output`` derives exactly these
+        # names; any divergence would re-transcribe completed recordings.
+        if self.output_mode == "mirror" and self.input_root is not None:
+            return self._check_mirror_output(
+                audio_path,
+                audio_path.parent,
+                self.audio_output_dir,
+                audio_path.stem,
+            )
+        return self._check_output_exists(
+            audio_path,
+            audio_path.stem,
+            self.audio_output_dir,
+            hash_key=self._relative_key(audio_path),
         )
 
     def _check_mobi(self, mobi_path: Path) -> ResumeResult:

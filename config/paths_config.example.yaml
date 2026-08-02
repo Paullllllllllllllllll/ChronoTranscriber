@@ -127,6 +127,12 @@ file_paths:
     input: ''
     output: ''
 
+  # Audio recordings are flat files like PDFs; each one is transcribed to
+  # plain text (no timestamps, no diarization).
+  Audio:
+    input: ''
+    output: ''
+
   Auto:
     input: ''
     output: ''

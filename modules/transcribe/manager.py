@@ -12,7 +12,32 @@ from typing import Any
 
 import aiofiles
 
+from modules.audio.audio_stream import (
+    compute_audio_skip_indices,
+    stream_audio_chunks,
+)
+from modules.audio.chunker import (
+    ChunkSpec,
+    chunk_plan_signature,
+    estimate_output_bytes_per_second,
+    plan_chunks,
+)
+from modules.audio.constants import (
+    DEFAULT_MIN_CHUNK_SECONDS,
+    DEFAULT_TARGET_CHUNK_SECONDS,
+    GEMINI_INLINE_LIMIT_BYTES,
+    OPENAI_UPLOAD_LIMIT_BYTES,
+)
+from modules.audio.ffmpeg_runtime import (
+    configure_ffmpeg_executables,
+    ensure_ffmpeg_available,
+    is_ffmpeg_available,
+    probe_duration_seconds,
+)
+from modules.audio.paths import prepare_audio_output
+from modules.audio.whisper_runtime import ensure_faster_whisper_available
 from modules.batch.submission import submit_batch
+from modules.config.service import get_config_service
 from modules.documents.epub import EPUBProcessor
 from modules.documents.mobi import MOBIProcessor
 from modules.documents.pdf import PDFProcessor, native_extract_pdf_text
@@ -49,9 +74,13 @@ from modules.transcribe.pipeline import (
     BudgetExhaustedError,
     OutputWriteError,
     PageTranscriptionError,
+    PayloadHandler,
+    PayloadResult,
     build_file_provenance,
     run_streaming_transcription_pipeline,
     run_transcription_pipeline,
+    transcribe_audio_payload,
+    transcribe_audio_payload_whisper,
     write_output_from_jsonl,
 )
 from modules.transcribe.resume import ResumeChecker
@@ -59,6 +88,55 @@ from modules.transcribe.user_config import UserConfiguration
 from modules.ui import print_error, print_info, print_success, print_warning
 
 logger = setup_logger(__name__)
+
+# Methods served by a paid remote API: they share the token-budget gate and the
+# usage logging. The local backends (tesseract, whisper, native) are exempt from
+# both.
+_API_METHODS: tuple[str, ...] = ("gpt", "audio-api")
+
+# Methods served by the audio workflow.
+_AUDIO_METHODS: tuple[str, ...] = ("audio-api", "whisper")
+
+# Default emitted-chunk encoding settings when audio_config.chunking omits them.
+_DEFAULT_CHUNK_FORMAT = "mp3"
+_DEFAULT_SAMPLE_RATE = 16000
+
+
+def _read_chunk_plan_signature(jsonl_path: Path) -> str | None:
+    """Return the chunk-plan signature recorded in *jsonl_path*, if any.
+
+    The signature lives inside the ``file_provenance`` metadata record (not as
+    a new top-level JSONL key), so the record schema the image workflow writes
+    is untouched. The LAST provenance record wins: a re-run under a changed
+    plan appends a fresh one.
+    """
+    if not jsonl_path.exists():
+        return None
+    from modules.batch.jsonl import read_jsonl_records
+
+    signature: str | None = None
+    for record in read_jsonl_records(jsonl_path):
+        provenance = record.get("file_provenance")
+        if isinstance(provenance, dict):
+            candidate = provenance.get("chunk_plan_signature")
+            if isinstance(candidate, str) and candidate:
+                signature = candidate
+    return signature
+
+
+@dataclass(frozen=True)
+class _AudioChunkSettings:
+    """Resolved ``audio_config.chunking`` knobs for one recording."""
+
+    provider: str
+    max_request_bytes: int
+    target_seconds: int
+    overlap_seconds: float
+    min_chunk_seconds: int
+    chunk_format: str
+    mono: bool
+    sample_rate: int
+    apply_to_local: bool
 
 
 @dataclass
@@ -192,6 +270,8 @@ class WorkflowManager:
         model_config: dict[str, Any],
         concurrency_config: dict[str, Any],
         image_processing_config: dict[str, Any],
+        *,
+        audio_config: dict[str, Any] | None = None,
     ) -> None:
         self.user_config = user_config
         self.paths_config = paths_config
@@ -199,15 +279,29 @@ class WorkflowManager:
         self.concurrency_config = concurrency_config
         self.image_processing_config = image_processing_config
         self.processing_settings = paths_config.get("general", {})
+        # Audio settings are optional and read from their own file; callers that
+        # already resolved them (CLI overrides) pass them in.
+        self.audio_config: dict[str, Any] = (
+            audio_config
+            if audio_config is not None
+            else get_config_service().get_audio_config()
+        )
 
-        # Configure Tesseract executable if provided
+        # Configure Tesseract and FFmpeg executables if provided. Both only set
+        # module-level state, so they are cheap on every construction.
         configure_tesseract_executable(image_processing_config)
+        configure_ffmpeg_executables(self.audio_config)
         self.ocr_config = image_processing_config.get(
             "tesseract_image_processing", {}
         ).get("ocr", {})
 
         # Load post-processing configuration from image_processing_config
         self.postprocessing_config = image_processing_config.get("postprocessing", {})
+        # Speech transcripts get their own post-processing profile when the
+        # audio config defines one; None means "fall back to the image profile".
+        self.audio_postprocessing_config: dict[str, Any] | None = (
+            self.audio_config.get("postprocessing") or None
+        )
 
         # Resolve output directories via PathConfig
         pc = PathConfig.from_paths_config(paths_config)
@@ -216,6 +310,9 @@ class WorkflowManager:
         self.image_output_dir = pc.image_output_dir
         self.epub_output_dir = pc.epub_output_dir
         self.mobi_output_dir = pc.mobi_output_dir
+        # Created lazily by the audio workflow: ensure_output_dirs() must not
+        # materialize an audio_out/ directory for image or PDF runs.
+        self.audio_output_dir = pc.audio_output_dir
         pc.ensure_output_dirs()
 
         # Output mode
@@ -233,6 +330,7 @@ class WorkflowManager:
             image_output_dir=self.image_output_dir,
             epub_output_dir=self.epub_output_dir,
             mobi_output_dir=self.mobi_output_dir,
+            audio_output_dir=self.audio_output_dir,
             output_format=self.output_format,
             output_mode=self.output_mode,
             input_root=self.input_root,
@@ -312,7 +410,10 @@ class WorkflowManager:
         token_cfg = self.concurrency_config.get("daily_token_limit", {})
         if not token_cfg.get("enabled", False):
             return
-        if self.user_config.transcription_method != "gpt" and phase != "Initial":
+        if (
+            self.user_config.transcription_method not in _API_METHODS
+            and phase != "Initial"
+        ):
             return
         from modules.infra.token_budget import get_token_tracker
 
@@ -379,7 +480,7 @@ class WorkflowManager:
                 # Check token limit before starting each new item (GPT method
                 # only; batch mode is exempt from token limiting entirely).
                 if (
-                    self.user_config.transcription_method == "gpt"
+                    self.user_config.transcription_method in _API_METHODS
                     and not self.user_config.use_batch_processing
                     and not await check_and_wait_for_token_limit(
                         self.concurrency_config
@@ -409,6 +510,8 @@ class WorkflowManager:
                         await self.process_single_epub(item)
                     elif self.user_config.processing_type == "mobis":
                         await self.process_single_mobi(item)
+                    elif self.user_config.processing_type == "audio":
+                        await self.process_single_audio(item, transcriber)
                     elif self.user_config.processing_type == "auto":
                         await self._route_auto_item(item, transcriber)
                     else:
@@ -1298,6 +1401,451 @@ class WorkflowManager:
             output_txt_path=output_txt_path,
             transcriber=transcriber,
         )
+
+    # ------------------------------------------------------------------
+    # Audio workflow
+    # ------------------------------------------------------------------
+
+    def _audio_chunk_settings(self) -> _AudioChunkSettings:
+        """Read ``audio_config.chunking`` with its documented defaults."""
+        chunking = self.audio_config.get("chunking", {}) or {}
+        section = self.audio_config.get("audio_transcription", {}) or {}
+        provider = str(section.get("provider") or "openai").strip().lower()
+        provider_limit = (
+            GEMINI_INLINE_LIMIT_BYTES
+            if provider == "google"
+            else OPENAI_UPLOAD_LIMIT_BYTES
+        )
+        configured_cap = int(chunking.get("max_request_bytes") or 0)
+        return _AudioChunkSettings(
+            provider=provider,
+            max_request_bytes=configured_cap or provider_limit,
+            target_seconds=int(
+                chunking.get("target_seconds") or DEFAULT_TARGET_CHUNK_SECONDS
+            ),
+            overlap_seconds=float(chunking.get("overlap_seconds") or 0.0),
+            min_chunk_seconds=DEFAULT_MIN_CHUNK_SECONDS,
+            chunk_format=str(chunking.get("chunk_format") or _DEFAULT_CHUNK_FORMAT),
+            mono=bool(chunking.get("mono", True)),
+            sample_rate=int(chunking.get("sample_rate") or _DEFAULT_SAMPLE_RATE),
+            apply_to_local=bool(chunking.get("apply_to_local", False)),
+        )
+
+    def _plan_audio_specs(
+        self,
+        audio_path: Path,
+        method: str,
+        settings: _AudioChunkSettings,
+        *,
+        page_range_active: bool,
+    ) -> tuple[list[ChunkSpec] | None, bool]:
+        """Plan the chunks one recording is cut into.
+
+        Probing costs an ffprobe subprocess, so it is skipped entirely where it
+        cannot change the answer: a local Whisper run without
+        ``chunking.apply_to_local`` sends the file whole (faster-whisper handles
+        long inputs natively) and no page range is in play.
+
+        Returns:
+            ``(specs, planned)``. ``specs`` is None when the item must be
+            skipped — FFmpeg is required to split an oversized recording but is
+            unavailable, mirroring the Tesseract "runtime missing" skip.
+            ``planned`` is False when the plan is an unprobed whole-file
+            fallback, in which case chunk-index page ranges are meaningless.
+        """
+        whole_file = [ChunkSpec(index=0, start_seconds=0.0, duration_seconds=None)]
+        size_bytes = audio_path.stat().st_size
+
+        if not (page_range_active or method == "audio-api" or settings.apply_to_local):
+            return whole_file, False
+
+        # Only the remote venues enforce a payload ceiling; a local run may
+        # always fall back to the whole file.
+        oversized = method == "audio-api" and size_bytes > settings.max_request_bytes
+        available = ensure_ffmpeg_available() if oversized else is_ffmpeg_available()
+        if not available:
+            if oversized:
+                print_error(
+                    f"'{audio_path.name}' is {size_bytes / 1048576:.1f} MB and must "
+                    f"be split for the {settings.provider} API, but FFmpeg is "
+                    f"unavailable. Skipping."
+                )
+                return None, False
+            logger.info(
+                "FFmpeg unavailable; sending %s as a single request.", audio_path.name
+            )
+            return whole_file, False
+
+        duration = probe_duration_seconds(audio_path)
+        if duration is None or duration <= 0:
+            if oversized:
+                logger.error(
+                    "Could not probe the duration of %s; it cannot be split.",
+                    audio_path.name,
+                )
+                print_error(
+                    f"Could not determine the duration of '{audio_path.name}';"
+                    f" skipping (it exceeds the per-request size limit)."
+                )
+                return None, False
+            print_warning(
+                f"Could not determine the duration of '{audio_path.name}';"
+                f" transcribing it as a single request."
+            )
+            return whole_file, False
+
+        specs = plan_chunks(
+            duration_seconds=duration,
+            size_bytes=size_bytes,
+            target_seconds=settings.target_seconds,
+            max_request_bytes=settings.max_request_bytes,
+            output_bytes_per_second=estimate_output_bytes_per_second(
+                settings.chunk_format,
+                settings.sample_rate,
+                settings.mono,
+                source_bytes_per_second=size_bytes / duration,
+            ),
+            overlap_seconds=settings.overlap_seconds,
+            min_chunk_seconds=settings.min_chunk_seconds,
+        )
+        if len(specs) > 1:
+            print_info(
+                f"Planned {len(specs)} chunk(s) for {duration / 60:.1f} minute(s) "
+                f"of audio."
+            )
+        return specs, True
+
+    def _audio_handler(
+        self, method: str, transcriber: Any | None
+    ) -> tuple[PayloadHandler | None, Any, asyncio.Event | None]:
+        """Resolve the per-chunk handler, token tracker, and budget event.
+
+        Returns ``(None, None, None)`` when the local runtime is missing, so the
+        caller skips the item the way the Tesseract path does instead of
+        counting it as a failure. Only the remote method is budgeted; the local
+        one costs no tokens.
+        """
+        if method == "audio-api":
+            if transcriber is None:
+                raise ValueError(
+                    "No audio transcriber was opened for the 'audio-api' method."
+                )
+            return transcribe_audio_payload, get_token_tracker(), asyncio.Event()
+
+        if not ensure_faster_whisper_available():
+            return None, None, None
+        whisper_cfg = self.audio_config.get("local_whisper", {}) or {}
+
+        async def _whisper_handler(payload: Any, _transcriber: Any) -> PayloadResult:
+            return await transcribe_audio_payload_whisper(payload, whisper_cfg)
+
+        return _whisper_handler, None, None
+
+    def _audio_concurrency_config(self) -> dict[str, Any]:
+        """Concurrency config with the audio concurrency override applied.
+
+        ``audio_transcription.concurrency_limit`` overrides
+        ``concurrency.transcription.concurrency_limit`` for audio runs only, so
+        speech requests can be paced independently of image transcription. The
+        shared config object is copied, never mutated.
+        """
+        section = self.audio_config.get("audio_transcription", {}) or {}
+        limit = section.get("concurrency_limit")
+        if not limit:
+            return self.concurrency_config
+        concurrency = dict(self.concurrency_config.get("concurrency", {}) or {})
+        transcription = dict(concurrency.get("transcription", {}) or {})
+        transcription["concurrency_limit"] = int(limit)
+        concurrency["transcription"] = transcription
+        return {**self.concurrency_config, "concurrency": concurrency}
+
+    def _audio_file_provenance(
+        self,
+        audio_path: Path,
+        method: str,
+        settings: _AudioChunkSettings,
+        specs: list[ChunkSpec],
+        signature: str,
+    ) -> dict[str, Any]:
+        """File-level reproducibility record for one audio run.
+
+        Uses the same top-level ``file_provenance`` key the image workflow
+        writes, so every JSONL reader still classifies it as metadata. The
+        chunk-plan signature rides INSIDE that dict: resume compares it against
+        the current plan before honoring any skip set, because chunk indices
+        are positional and shift when the plan's parameters change.
+        """
+        section = self.audio_config.get("audio_transcription", {}) or {}
+        if method == "audio-api":
+            venue = settings.provider
+            model = str((section.get(settings.provider) or {}).get("model", "") or "")
+        else:
+            venue = "faster-whisper"
+            local = self.audio_config.get("local_whisper", {}) or {}
+            model = str(local.get("model_path") or local.get("model_size") or "")
+        return {
+            "file_provenance": {
+                "source_file": str(audio_path),
+                "source_bytes": audio_path.stat().st_size,
+                "method": method,
+                "provider": venue,
+                "model": model,
+                "chunk_plan_signature": signature,
+                "chunk_count": len(specs),
+                "chunking": {
+                    "target_seconds": settings.target_seconds,
+                    "overlap_seconds": settings.overlap_seconds,
+                    "max_request_bytes": settings.max_request_bytes,
+                    "chunk_format": settings.chunk_format,
+                    "mono": settings.mono,
+                    "sample_rate": settings.sample_rate,
+                },
+                "timestamp": datetime.datetime.now().isoformat(),
+            }
+        }
+
+    def _audio_resume_skip(
+        self, temp_jsonl_path: Path, source_name: str, signature: str
+    ) -> set[int]:
+        """Chunk indices already transcribed, honored only for the same plan.
+
+        Chunk indices are positional: a changed ``chunking`` setting (or a
+        different page range) moves every boundary, so records written under the
+        old plan describe different audio. On a signature mismatch the artifact
+        is therefore reset rather than merged — a plan with fewer chunks would
+        otherwise leave the old plan's trailing records in the JSONL, and the
+        transcript (deduplicated per chunk name, not per plan) would silently
+        splice a segment from the previous segmentation into the new one.
+        """
+        if self.resume_mode == "overwrite" or not temp_jsonl_path.exists():
+            return set()
+        skip = compute_audio_skip_indices(
+            temp_jsonl_path,
+            exclude_errors=getattr(self.user_config, "retry_errors", False),
+        )
+        if not skip:
+            return set()
+        stored = _read_chunk_plan_signature(temp_jsonl_path)
+        if stored is not None and stored != signature:
+            print_warning(
+                f"The chunk plan for '{source_name}' changed since the last run "
+                f"({stored} -> {signature}); discarding the stale chunk records "
+                f"and re-transcribing the recording."
+            )
+            temp_jsonl_path.write_text("", encoding="utf-8")
+            logger.info(
+                "Reset %s: chunk plan changed from %s to %s.",
+                temp_jsonl_path.name,
+                stored,
+                signature,
+            )
+            return set()
+        print_info(
+            f"Skipping {len(skip)} already-transcribed chunk(s) (found in JSONL)"
+        )
+        return skip
+
+    async def process_single_audio(
+        self, audio_path: Path, transcriber: Any | None
+    ) -> None:
+        """Transcribe a single audio recording.
+
+        Structurally the PDF flow's sibling — resolve the output paths, plan the
+        units of work, subtract what the temp JSONL already holds, stream the
+        rest through the shared transcription pipeline, and rebuild the
+        transcript from the JSONL — with time-sliced chunks in place of pages.
+        Always synchronous: neither venue offers a batch speech-to-text API, so
+        this path never reaches ``modules/batch``.
+        """
+        method = self.user_config.transcription_method or ""
+        if method not in _AUDIO_METHODS:
+            logger.error(
+                "Unsupported transcription method %r for audio item %s",
+                method,
+                audio_path.name,
+            )
+            raise ValueError(
+                f"Audio transcription requires method 'audio-api' or 'whisper'; "
+                f"got {method!r}."
+            )
+
+        print_info(f"Processing audio: {audio_path.name}")
+        print_info(f"Using method: {method}")
+
+        if self.user_config.use_batch_processing:
+            print_warning(
+                "Audio transcription has no batch API; processing synchronously."
+            )
+
+        # Created lazily, so a non-audio run never materializes audio_out/.
+        if not self.use_input_as_output:
+            self.audio_output_dir.mkdir(parents=True, exist_ok=True)
+
+        parent_folder, output_txt_path, temp_jsonl_path = prepare_audio_output(
+            audio_path,
+            output_dir=self.audio_output_dir,
+            input_paths_is_output_path=self.use_input_as_output,
+            output_mode=self.output_mode,
+            input_root=self.input_root,
+            output_format=self.output_format,
+        )
+        self._transient_tracker.register_jsonl(temp_jsonl_path, method)
+
+        settings = self._audio_chunk_settings()
+        page_range = self.user_config.page_range
+        if page_range is not None and page_range.is_empty_spec():
+            page_range = None
+
+        specs, planned = self._plan_audio_specs(
+            audio_path,
+            method,
+            settings,
+            page_range_active=page_range is not None,
+        )
+        if specs is None:
+            return
+
+        if page_range is not None and not planned:
+            print_warning(
+                "Page ranges select audio chunks and require FFmpeg;"
+                f" transcribing all of '{audio_path.name}' instead."
+            )
+            page_range = None
+        if page_range is not None:
+            keep = set(page_range.resolve(len(specs)))
+            if not keep:
+                print_warning(
+                    f"Page range '{page_range.describe()}' selected no chunks for "
+                    f"'{audio_path.name}' ({len(specs)} chunk(s)). Skipping."
+                )
+                return
+            if len(keep) < len(specs):
+                print_info(
+                    f"Page range: processing {len(keep)} of {len(specs)} chunks "
+                    f"({page_range.describe()})"
+                )
+                specs = [spec for spec in specs if spec.index in keep]
+
+        # Overwrite mode clears the stale JSONL before the skip set is read;
+        # otherwise refuse an artifact written by an incompatible format.
+        if self.resume_mode == "overwrite" and temp_jsonl_path.exists():
+            temp_jsonl_path.write_text("", encoding="utf-8")
+            logger.info(f"Cleared stale JSONL cache: {temp_jsonl_path.name}")
+        else:
+            from modules.batch.jsonl import verify_resume_compatible
+
+            verify_resume_compatible(temp_jsonl_path)
+
+        signature = chunk_plan_signature(specs)
+        skip = self._audio_resume_skip(temp_jsonl_path, audio_path.name, signature)
+
+        postprocessing_config = (
+            self.audio_postprocessing_config or self.postprocessing_config
+        )
+
+        needed = [spec for spec in specs if spec.index not in skip]
+        if not needed:
+            print_info(
+                "All chunks already transcribed. Regenerating output file from JSONL..."
+            )
+            if not write_output_from_jsonl(
+                temp_jsonl_path,
+                output_txt_path,
+                postprocessing_config,
+                output_format=self.output_format,
+            ):
+                raise OutputWriteError(audio_path.name)
+            self._cleanup_temp_jsonl(temp_jsonl_path, method)
+            self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
+            return
+
+        handler, tracker, exhausted = self._audio_handler(method, transcriber)
+        if handler is None:
+            return
+
+        # A whole-file plan never writes a chunk file, so the working directory
+        # is only created (and registered for cleanup) when cutting is real.
+        work_dir = parent_folder / "audio_chunks"
+        multi_chunk = len(specs) > 1
+        if multi_chunk:
+            work_dir.mkdir(parents=True, exist_ok=True)
+            self._transient_tracker.register_preprocessed_folder(
+                work_dir, audio_path.name
+            )
+
+        print_info(f"Starting {method} transcription for {len(needed)} chunk(s)...")
+        page_failure: PageTranscriptionError | None = None
+        try:
+            await run_streaming_transcription_pipeline(
+                stream_audio_chunks(
+                    audio_path,
+                    specs=specs,
+                    work_dir=work_dir,
+                    chunk_format=settings.chunk_format,
+                    mono=settings.mono,
+                    sample_rate=settings.sample_rate,
+                    skip_indices=skip,
+                ),
+                transcriber,
+                temp_jsonl_path,
+                output_txt_path,
+                audio_path.name,
+                self._audio_concurrency_config(),
+                postprocessing_config,
+                is_folder=False,
+                output_format=self.output_format,
+                file_provenance=self._audio_file_provenance(
+                    audio_path, method, settings, specs, signature
+                ),
+                tracker=tracker,
+                exhausted=exhausted,
+                total_pages=len(needed),
+                method=method,
+                handler=handler,
+            )
+        except PageTranscriptionError as pte:
+            # No budget deferral: the output is complete (with error
+            # placeholders), so propagate unchanged and keep every artifact.
+            if exhausted is None or not exhausted.is_set():
+                raise
+            page_failure = pte
+
+        if exhausted is not None and exhausted.is_set():
+            # The daily budget ran out mid-recording. The pipeline skips the
+            # final write on an exhausting pass, but an earlier pass may have
+            # left one behind: withhold it so a truncated transcript is never
+            # mistaken for a complete one, and protect the JSONL from cleanup so
+            # chunk-level resume rebuilds the transcript after the daily reset.
+            transcribed = compute_audio_skip_indices(temp_jsonl_path)
+            deferred = [spec for spec in specs if spec.index not in transcribed]
+            completed = len(specs) - len(deferred)
+            self._withhold_partial_output(output_txt_path, self.output_format)
+            self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
+            failure_note = (
+                f" and {page_failure.failed_pages} chunk(s) failed"
+                if page_failure is not None
+                else ""
+            )
+            print_info(
+                f"Partial transcription for '{audio_path.name}': {len(deferred)} "
+                f"chunk(s) deferred by the daily token budget{failure_note}. "
+                f"Withheld the partial output; {completed} completed chunk(s) "
+                f"retained in {temp_jsonl_path.name} for resume on the next run."
+            )
+            raise BudgetExhaustedError(
+                audio_path.name,
+                deferred_pages=len(deferred),
+                completed_pages=completed,
+            )
+
+        if multi_chunk:
+            self._cleanup_preprocessed(work_dir, audio_path.name)
+            self._transient_tracker.mark_preprocessed_complete(work_dir)
+        print_success(
+            f"Saved transcription for '{audio_path.name}' -> {output_txt_path.name}"
+        )
+        self._cleanup_temp_jsonl(temp_jsonl_path, method)
+        self._transient_tracker.mark_jsonl_complete(temp_jsonl_path)
 
     async def process_single_image_folder(
         self, folder: Path, transcriber: Any | None

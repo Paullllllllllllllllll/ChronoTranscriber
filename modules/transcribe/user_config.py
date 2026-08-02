@@ -26,8 +26,10 @@ class UserConfiguration:
     """Stores user's processing preferences to avoid re-prompting during workflow.
 
     Attributes:
-        processing_type: Type of documents ("images", "pdfs", "epubs", or "auto")
-        transcription_method: Method to use ("native", "tesseract", or "gpt")
+        processing_type: Type of documents ("images", "pdfs", "epubs", "mobis",
+            "audio", or "auto")
+        transcription_method: Method to use ("native", "tesseract", "gpt",
+            "audio-api", or "whisper")
         use_batch_processing: Whether to use batch processing for GPT
         selected_items: List of files or folders to process
         process_all: Flag indicating whether to process all items
@@ -86,6 +88,8 @@ class UserConfiguration:
             "native": "Native PDF extraction",
             "tesseract": "Tesseract OCR",
             "gpt": "GPT-based transcription",
+            "audio-api": "Audio API transcription",
+            "whisper": "Local Whisper transcription",
         }.get(self.transcription_method or "", self.transcription_method)
         batch_text = " with batch processing" if self.use_batch_processing else ""
         schema_text = (

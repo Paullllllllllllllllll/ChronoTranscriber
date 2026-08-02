@@ -20,6 +20,7 @@ _project_root = Path(__file__).resolve().parents[1]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
+from modules.audio.transcriber import open_audio_transcriber  # noqa: E402
 from modules.config.service import get_config_service  # noqa: E402
 from modules.core.cli_args import (  # noqa: E402
     create_transcriber_parser,
@@ -32,6 +33,7 @@ from modules.infra.paths import PathConfig  # noqa: E402
 from modules.llm import open_transcriber  # noqa: E402
 from modules.llm.schema_utils import list_schema_options  # noqa: E402, F401
 from modules.transcribe.config_builder import (  # noqa: E402
+    _resolve_audio_config_from_cli,
     _resolve_model_config_from_cli,
     create_config_from_cli_args,
 )
@@ -91,6 +93,8 @@ async def configure_user_workflow_interactive(
     mobi_input_dir: Path,
     auto_input_dir: Path,
     paths_config: dict[str, Any],
+    *,
+    audio_input_dir: Path | None = None,
 ) -> UserConfiguration:
     """
     Guide user through configuration with navigation support (interactive mode).
@@ -101,6 +105,9 @@ async def configure_user_workflow_interactive(
         epub_input_dir: EPUB input directory
         mobi_input_dir: MOBI input directory
         auto_input_dir: Auto mode input directory
+        paths_config: Paths configuration
+        audio_input_dir: Audio input directory; resolved from *paths_config*
+            when omitted.
 
     Returns:
         UserConfiguration object with all settings
@@ -173,6 +180,15 @@ async def configure_user_workflow_interactive(
                 base_dir = pdf_input_dir
             elif config.processing_type == "mobis":
                 base_dir = mobi_input_dir
+            elif config.processing_type == "audio":
+                base_dir = (
+                    audio_input_dir
+                    if audio_input_dir is not None
+                    else PathConfig.from_paths_config(paths_config).audio_input_dir
+                )
+                # Created here, not in ensure_input_dirs(), so a run that never
+                # touches audio does not materialize an audio input directory.
+                base_dir.mkdir(parents=True, exist_ok=True)
             else:
                 base_dir = epub_input_dir
 
@@ -362,6 +378,8 @@ async def process_documents(
     model_config: dict[str, Any],
     concurrency_config: dict[str, Any],
     image_processing_config: dict[str, Any],
+    *,
+    audio_config: dict[str, Any] | None = None,
 ) -> ProcessingSummary:
     """
     Process documents based on user configuration.
@@ -372,11 +390,17 @@ async def process_documents(
         model_config: Model configuration
         concurrency_config: Concurrency configuration
         image_processing_config: Image processing configuration
+        audio_config: Audio configuration (CLI overrides already applied);
+            loaded from the config service when omitted and audio is processed.
 
     Returns:
         A `ProcessingSummary` with the real success/failure counts.
     """
     print_info("Starting document processing...")
+
+    is_audio = user_config.processing_type == "audio"
+    if is_audio and audio_config is None:
+        audio_config = get_config_service().get_audio_config()
 
     # Create workflow manager
     workflow_manager = WorkflowManager(
@@ -385,7 +409,19 @@ async def process_documents(
         model_config,
         concurrency_config,
         image_processing_config,
+        audio_config=audio_config,
     )
+
+    # Audio: the remote venue needs its own transcriber; local Whisper needs
+    # none. Speech-to-text has no batch API, so this path is always synchronous.
+    if is_audio:
+        if user_config.transcription_method == "audio-api":
+            async with open_audio_transcriber(
+                audio_config=audio_config,
+                concurrency_config=concurrency_config,
+            ) as audio_transcriber:
+                return await workflow_manager.process_selected_items(audio_transcriber)
+        return await workflow_manager.process_selected_items()
 
     # Initialize transcriber if needed for synchronous GPT processing
     if (
@@ -421,6 +457,7 @@ async def transcribe_interactive() -> None:
         pc.mobi_input_dir,
         pc.auto_input_dir,
         paths_config,
+        audio_input_dir=pc.audio_input_dir,
     )
 
     # Track processing time
@@ -479,14 +516,88 @@ def _emit_json_summary(summary: ProcessingSummary, *, dry_run: bool = False) -> 
     print(json.dumps(payload, ensure_ascii=False))
 
 
+def _planned_audio_chunks(
+    item: Path,
+    user_config: UserConfiguration,
+    audio_config: dict[str, Any],
+) -> str:
+    """Describe how many chunks *item* would be split into, for the dry run.
+
+    Report-only and deliberately cheap: a recording that fits the provider's
+    per-request limit is reported as a single request without probing, and an
+    oversized one falls back to ``"unknown"`` when FFmpeg cannot measure it.
+    """
+    from modules.audio.chunker import (
+        estimate_output_bytes_per_second,
+        plan_chunks,
+    )
+    from modules.audio.constants import (
+        DEFAULT_MIN_CHUNK_SECONDS,
+        DEFAULT_TARGET_CHUNK_SECONDS,
+        GEMINI_INLINE_LIMIT_BYTES,
+        OPENAI_UPLOAD_LIMIT_BYTES,
+    )
+    from modules.audio.ffmpeg_runtime import (
+        is_ffmpeg_available,
+        probe_duration_seconds,
+    )
+
+    chunking = audio_config.get("chunking", {}) or {}
+    section = audio_config.get("audio_transcription", {}) or {}
+    provider = str(section.get("provider") or "openai").strip().lower()
+    limit = int(chunking.get("max_request_bytes") or 0) or (
+        GEMINI_INLINE_LIMIT_BYTES if provider == "google" else OPENAI_UPLOAD_LIMIT_BYTES
+    )
+
+    if user_config.transcription_method == "whisper" and not chunking.get(
+        "apply_to_local", False
+    ):
+        return "1 chunk"
+
+    try:
+        size_bytes = item.stat().st_size
+    except OSError:
+        return "unknown (file unreadable)"
+    if size_bytes <= limit:
+        return "1 chunk"
+    if not is_ffmpeg_available():
+        return "unknown (ffmpeg not available)"
+    duration = probe_duration_seconds(item)
+    if duration is None or duration <= 0:
+        return "unknown (duration not probeable)"
+
+    chunk_format = str(chunking.get("chunk_format") or "mp3")
+    sample_rate = int(chunking.get("sample_rate") or 16000)
+    mono = bool(chunking.get("mono", True))
+    specs = plan_chunks(
+        duration_seconds=duration,
+        size_bytes=size_bytes,
+        target_seconds=int(
+            chunking.get("target_seconds") or DEFAULT_TARGET_CHUNK_SECONDS
+        ),
+        max_request_bytes=limit,
+        output_bytes_per_second=estimate_output_bytes_per_second(
+            chunk_format,
+            sample_rate,
+            mono,
+            source_bytes_per_second=size_bytes / duration,
+        ),
+        overlap_seconds=float(chunking.get("overlap_seconds") or 0.0),
+        min_chunk_seconds=DEFAULT_MIN_CHUNK_SECONDS,
+    )
+    return f"{len(specs)} chunk(s)"
+
+
 def _dry_run_report(
     user_config: UserConfiguration,
     paths_config: dict[str, Any],
+    audio_config: dict[str, Any] | None = None,
 ) -> ProcessingSummary:
     """Report discovery + resume classification without any API calls.
 
     Returns a ProcessingSummary whose ``total`` is the number of items that
-    would be processed after resume filtering.
+    would be processed after resume filtering. Audio items additionally report
+    the chunk count each recording would be split into.
     """
     if user_config.processing_type == "auto":
         decisions = user_config.auto_decisions or []
@@ -506,6 +617,7 @@ def _dry_run_report(
         image_output_dir=pc.image_output_dir,
         epub_output_dir=pc.epub_output_dir,
         mobi_output_dir=pc.mobi_output_dir,
+        audio_output_dir=pc.audio_output_dir,
         output_format=user_config.output_format,
         output_mode=user_config.output_mode,
         input_root=user_config.input_root,
@@ -517,8 +629,16 @@ def _dry_run_report(
         f"[DRY RUN] {len(items)} discovered; {len(to_process)} would be processed, "
         f"{len(skipped)} skipped (already complete)."
     )
+    is_audio = user_config.processing_type == "audio"
+    effective_audio_config = audio_config if audio_config is not None else {}
     for item in to_process:
-        print_info(f"[DRY RUN]   would process: {item.name}")
+        if is_audio:
+            chunk_note = _planned_audio_chunks(
+                item, user_config, effective_audio_config
+            )
+            print_info(f"[DRY RUN]   would process: {item.name} ({chunk_note})")
+        else:
+            print_info(f"[DRY RUN]   would process: {item.name}")
     return ProcessingSummary(processed=0, failed=0, total=len(to_process))
 
 
@@ -545,13 +665,22 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> int:
         args, base_input_dir, base_output_dir, paths_config
     )
 
-    # Resolve model config from base config + optional CLI overrides
-    effective_model_config, applied_model_overrides = _resolve_model_config_from_cli(
-        config_service.get_model_config(),
-        args,
-    )
-    if applied_model_overrides:
-        print_info(f"CLI model overrides: {', '.join(applied_model_overrides)}")
+    # Resolve model config from base config + optional CLI overrides. Audio
+    # reads audio_config.yaml instead, so --provider/--model are routed there
+    # and the image model config is left exactly as configured.
+    is_audio = not args.auto and getattr(args, "type", None) == "audio"
+    effective_audio_config: dict[str, Any] | None = None
+    if is_audio:
+        effective_audio_config = _resolve_audio_config_from_cli(
+            args, config_service.get_audio_config()
+        )
+        effective_model_config = config_service.get_model_config()
+    else:
+        effective_model_config, applied_model_overrides = (
+            _resolve_model_config_from_cli(config_service.get_model_config(), args)
+        )
+        if applied_model_overrides:
+            print_info(f"CLI model overrides: {', '.join(applied_model_overrides)}")
 
     effective_paths_config = paths_config
     if not args.auto:
@@ -565,6 +694,7 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> int:
             "pdfs": "PDFs",
             "epubs": "EPUBs",
             "mobis": "MOBIs",
+            "audio": "Audio",
         }
         section = _TYPE_TO_SECTION.get(args.type, "PDFs")
         file_paths_cfg.setdefault(section, {})["output"] = str(output_path)
@@ -593,7 +723,9 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> int:
 
     # Dry run: discovery + resume classification only, no API calls / side effects.
     if getattr(args, "dry_run", False):
-        summary = _dry_run_report(user_config, effective_paths_config)
+        summary = _dry_run_report(
+            user_config, effective_paths_config, effective_audio_config
+        )
         if json_summary:
             _emit_json_summary(summary, dry_run=True)
         return 0
@@ -614,6 +746,7 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> int:
             effective_model_config,
             config_service.get_concurrency_config(),
             config_service.get_image_processing_config(),
+            audio_config=effective_audio_config,
         )
 
     if summary.failed:

@@ -64,6 +64,14 @@ Examples:
   # Batch processing with custom schema
   python main/unified_transcriber.py --input images/docs --output output
       --type images --method gpt --batch --schema my_schema
+
+  # Transcribe audio recordings with the configured speech-to-text API
+  python main/unified_transcriber.py --non-interactive --type audio
+      --method audio-api --input C:/recordings --output C:/transcripts
+
+  # Transcribe audio recordings offline with local Whisper
+  python main/unified_transcriber.py --non-interactive --type audio
+      --method whisper --input C:/recordings
         """,
     )
 
@@ -90,19 +98,24 @@ Examples:
     parser.add_argument(
         "--type",
         "-t",
-        choices=["images", "pdfs", "epubs", "mobis"],
+        choices=["images", "pdfs", "epubs", "mobis", "audio"],
         required=False,
-        help="Type of documents to process: 'images', 'pdfs', 'epubs', or 'mobis'.",
+        help=(
+            "Type of documents to process: 'images', 'pdfs', 'epubs', 'mobis',"
+            " or 'audio' (speech recordings)."
+        ),
     )
 
     parser.add_argument(
         "--method",
         "-m",
-        choices=["native", "tesseract", "gpt"],
+        choices=["native", "tesseract", "gpt", "audio-api", "whisper"],
         required=False,
         help=(
-            "Transcription method. Use 'native' for PDFs/EPUBs, 'tesseract' for"
-            " OCR, or 'gpt' for AI transcription."
+            "Transcription method. For documents/images: 'native' for"
+            " PDFs/EPUBs/MOBIs, 'tesseract' for OCR, or 'gpt' for AI"
+            " transcription. For --type audio: 'audio-api' for remote"
+            " speech-to-text or 'whisper' for local faster-whisper."
         ),
     )
 

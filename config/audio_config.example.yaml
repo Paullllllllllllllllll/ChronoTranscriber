@@ -1,0 +1,154 @@
+# =============================================================================
+# Audio Transcription Configuration (EXAMPLE TEMPLATE)
+# =============================================================================
+# This file ships as a scrubbed public template. A fresh clone uses it
+# automatically if audio_config.yaml is absent (the loader logs a notice).
+# To customize: copy this file to audio_config.yaml and edit it.
+#
+# Every key below is OPTIONAL: each reader falls back to a built-in default
+# when a key or a whole section is missing, and the loader returns an empty
+# dict when neither audio_config.yaml nor this example file exists.
+#
+# Used by:
+#   - modules/audio/backends/*.py (provider-specific transcription backends)
+#   - modules/audio/chunker.py (chunk planning and slicing)
+#   - modules/audio/whisper_runtime.py (local faster-whisper runtime)
+#   - modules/audio/ffmpeg_runtime.py (ffmpeg/ffprobe invocation)
+#   - modules/transcribe/manager.py (audio workflow orchestration)
+# =============================================================================
+
+# =============================================================================
+# 1. Remote Audio Transcription
+# =============================================================================
+# Venue and per-provider request settings for the "audio-api" method.
+audio_transcription:
+  # Which remote provider serves the "audio-api" method: 'openai' or 'google'.
+  provider: openai
+
+  # Concurrent chunk requests. When absent, the value falls back to
+  # concurrency.transcription.concurrency_limit in concurrency_config.yaml.
+  concurrency_limit: 4
+
+  openai:
+    # gpt-transcribe | gpt-4o-transcribe | gpt-4o-mini-transcribe | whisper-1.
+    # Hard limit of 25 MB per request; accepted containers are mp3, mp4,
+    # mpeg, mpga, m4a, wav, and webm.
+    model: gpt-transcribe
+
+    # Free-form context hint (vocabulary, style, expected content).
+    # whisper-1 truncates this at 224 tokens.
+    prompt: ''
+
+    # ISO-639-1 hints, e.g. ['de', 'fr']. gpt-transcribe only; sent via
+    # extra_body and ignored by the other models.
+    languages: []
+
+    # Single ISO-639-1 code. gpt-4o-* and whisper-1 only.
+    language: ''
+
+    # Literal terms expected in the audio (names, technical vocabulary).
+    # gpt-transcribe only.
+    keywords: []
+
+    # Sampling temperature; null omits the parameter.
+    temperature: null
+
+  google:
+    # Any audio-capable Gemini model. Inline requests are capped at ~20 MB;
+    # accepted containers are wav, mp3, aiff, aac, ogg, and flac. Audio is
+    # billed at 32 tokens per second.
+    model: gemini-3.6-flash
+
+    # Instruction sent alongside the audio part.
+    prompt: |
+      Transcribe the speech in this audio recording verbatim into plain text.
+      Do not add timestamps, speaker labels, headings, or commentary.
+      Output only the transcript.
+
+    # Appended to the prompt when set, e.g. 'The recording is in German.'
+    language_hint: ''
+
+    max_output_tokens: 32768
+    temperature: 0.0
+
+# =============================================================================
+# 2. Chunking
+# =============================================================================
+# Long recordings are split before submission so each request stays within the
+# provider's per-request size limit.
+chunking:
+  # Nominal chunk length in seconds. Changing this invalidates an in-progress
+  # resume: chunk indices shift and already-transcribed chunks no longer align.
+  target_seconds: 600
+
+  # Seconds of audio repeated at each chunk boundary. 0 disables overlap.
+  overlap_seconds: 0
+
+  # Hard per-request byte cap. 0 uses the provider default (OpenAI 25 MB,
+  # Gemini 20 MB inline).
+  max_request_bytes: 0
+
+  # Encoding of the emitted chunks: 'mp3', 'wav16', or 'copy' (stream copy).
+  chunk_format: mp3
+
+  # Downmix to a single channel and resample before sending.
+  mono: true
+  sample_rate: 16000
+
+  # Chunk local faster-whisper runs as well. Off by default: faster-whisper
+  # handles long files natively and chunking only adds boundary artifacts.
+  apply_to_local: false
+
+# =============================================================================
+# 3. Local Whisper (faster-whisper)
+# =============================================================================
+# Settings for the offline transcription method. Requires the optional
+# faster-whisper dependency.
+local_whisper:
+  model_size: large-v3
+
+  # auto | cpu | cuda
+  device: auto
+
+  # auto | int8 | int8_float16 | float16 | float32
+  compute_type: auto
+
+  beam_size: 5
+
+  # Drop non-speech segments with the built-in voice-activity detector.
+  vad_filter: true
+
+  # ISO-639-1 code; '' auto-detects.
+  language: ''
+
+  # Absolute path to a local model directory; overrides model_size when set.
+  model_path: ''
+
+  # Cache directory for downloaded models; '' uses the library default.
+  download_root: ''
+
+# =============================================================================
+# 4. FFmpeg Binaries
+# =============================================================================
+# Absolute paths to the ffmpeg/ffprobe executables used for probing, chunking,
+# and format conversion.
+ffmpeg:
+  # '' uses PATH. Windows hint: winget install Gyan.FFmpeg
+  ffmpeg_cmd: ''
+  ffprobe_cmd: ''
+
+# =============================================================================
+# 5. Post-Processing Settings
+# =============================================================================
+# Speech profile, applied to the assembled transcript before writing. It
+# deliberately omits hyphenation merging (speech has no line-break hyphens)
+# and line wrapping (transcripts stay one paragraph per utterance run).
+postprocessing:
+  enabled: true
+  merge_hyphenation: false
+  collapse_internal_spaces: true
+  max_blank_lines: 1
+  tab_size: 4
+  wrap_lines: false
+  auto_wrap: false
+  wrap_width: null

@@ -173,6 +173,7 @@ _DEFAULTS: dict[str, dict[str, str]] = {
     "Images": {"input": "images_in", "output": "images_out"},
     "EPUBs": {"input": "epubs_in", "output": "epubs_out"},
     "MOBIs": {"input": "mobis_in", "output": "mobis_out"},
+    "Audio": {"input": "audio_in", "output": "audio_out"},
     "Auto": {"input": "auto_in", "output": "auto_out"},
 }
 
@@ -195,6 +196,8 @@ class PathConfig:
     epub_output_dir: Path = field(default_factory=lambda: Path("epubs_out"))
     mobi_input_dir: Path = field(default_factory=lambda: Path("mobis_in"))
     mobi_output_dir: Path = field(default_factory=lambda: Path("mobis_out"))
+    audio_input_dir: Path = field(default_factory=lambda: Path("audio_in"))
+    audio_output_dir: Path = field(default_factory=lambda: Path("audio_out"))
     auto_input_dir: Path = field(default_factory=lambda: Path("auto_in"))
     auto_output_dir: Path = field(default_factory=lambda: Path("auto_out"))
 
@@ -214,6 +217,8 @@ class PathConfig:
             epub_output_dir=_get_path(fp, "EPUBs", "output"),
             mobi_input_dir=_get_path(fp, "MOBIs", "input"),
             mobi_output_dir=_get_path(fp, "MOBIs", "output"),
+            audio_input_dir=_get_path(fp, "Audio", "input"),
+            audio_output_dir=_get_path(fp, "Audio", "output"),
             auto_input_dir=_get_path(fp, "Auto", "input"),
             auto_output_dir=_get_path(fp, "Auto", "output"),
             use_input_as_output=general.get("input_paths_is_output_path", False),
@@ -226,6 +231,7 @@ class PathConfig:
             "images": (self.image_input_dir, self.image_output_dir),
             "epubs": (self.epub_input_dir, self.epub_output_dir),
             "mobis": (self.mobi_input_dir, self.mobi_output_dir),
+            "audio": (self.audio_input_dir, self.audio_output_dir),
             "auto": (self.auto_input_dir, self.auto_output_dir),
         }
         if processing_type not in mapping:

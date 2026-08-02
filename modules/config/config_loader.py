@@ -91,6 +91,7 @@ DEFAULT_PATHS_CONFIG_PATH = CONFIG_DIR / "paths_config.yaml"
 DEFAULT_CONCURRENCY_CONFIG_PATH = CONFIG_DIR / "concurrency_config.yaml"
 DEFAULT_IMAGE_PROCESSING_CONFIG_PATH = CONFIG_DIR / "image_processing_config.yaml"
 DEFAULT_API_KEYS_CONFIG_PATH = CONFIG_DIR / "api_keys_config.yaml"
+DEFAULT_AUDIO_CONFIG_PATH = CONFIG_DIR / "audio_config.yaml"
 
 
 @dataclass(slots=True)
@@ -122,6 +123,7 @@ class ConfigLoader:
         self._concurrency: dict[str, Any] | None = None
         self._image_processing: dict[str, Any] | None = None
         self._api_keys: dict[str, Any] | None = None
+        self._audio: dict[str, Any] | None = None
 
     @staticmethod
     def _load_yaml_file(path: Path) -> dict[str, Any]:
@@ -234,6 +236,23 @@ class ConfigLoader:
             except FileNotFoundError:
                 self._api_keys = {}
         return self._api_keys.copy()
+
+    def get_audio_config(self) -> dict[str, Any]:
+        """Load and return the optional audio transcription settings (cached).
+
+        Covers the remote audio providers, chunk planning, the local
+        faster-whisper runtime, ffmpeg binaries, and the speech postprocessing
+        profile. The file is entirely optional: every key has a built-in
+        default, so an empty dict is returned when the file is absent.
+        Falls back to the bundled .example.yaml if the real file is absent;
+        returns {} if neither file exists.
+        """
+        if self._audio is None:
+            try:
+                self._audio = self._load_yaml_file(DEFAULT_AUDIO_CONFIG_PATH)
+            except FileNotFoundError:
+                self._audio = {}
+        return self._audio.copy()
 
     # -------- Internal helpers for path normalization --------
 

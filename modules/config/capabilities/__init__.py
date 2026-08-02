@@ -4,7 +4,8 @@ Three submodules (single source of truth for capabilities across providers):
 - registry: Capabilities dataclass + provider base dicts + _MODEL_REGISTRY data.
 - detection: detect_provider, detect_capabilities (with OpenRouter passthrough),
   plus model-type/image-config helpers.
-- params: CapabilityError + ensure_image_support fail-fast safety gate.
+- params: CapabilityError + ensure_image_support / ensure_audio_support
+  fail-fast safety gates.
 
 Public API is re-exported here; callers should prefer
 `from modules.config.capabilities import detect_capabilities, ...`.
@@ -18,6 +19,7 @@ from modules.config.capabilities.detection import (
 )
 from modules.config.capabilities.params import (
     CapabilityError,
+    ensure_audio_support,
     ensure_image_support,
 )
 from modules.config.capabilities.registry import (
@@ -41,4 +43,5 @@ __all__ = [
     # params
     "CapabilityError",
     "ensure_image_support",
+    "ensure_audio_support",
 ]

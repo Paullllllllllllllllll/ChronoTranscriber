@@ -1,4 +1,4 @@
-# ChronoTranscriber v3.0.0
+# ChronoTranscriber v3.0.1
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -882,6 +882,12 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v3.0.1** (4 August 2026) -- Security patch from the weekly sweep:
+  JupyterLab moves to 4.6.2, closing two high-severity advisories, and the
+  ignore rules now cover `backup/` and every `.env*` spelling so neither a
+  local archive nor a credentials file can be staged by accident. No
+  runtime change.
 
 - **v3.0.0** (2 August 2026) -- Audio transcription. Speech recordings become a
     first-class processing type: `--type audio` with `--method audio-api` sends

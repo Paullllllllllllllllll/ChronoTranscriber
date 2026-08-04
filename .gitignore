@@ -44,3 +44,9 @@ logs/
 /eval/transcription_eval.ipynb
 # Local scratch area (ad-hoc tests, backups)
 scratch/
+
+# Local backup archives (kept locally, not versioned)
+backup/
+
+# Local environment files (never versioned)
+.env*

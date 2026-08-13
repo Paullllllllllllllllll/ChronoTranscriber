@@ -35,6 +35,8 @@ eval/reports/eval_chart_*.png
 # Real config files are gitignored; scrubbed *.example.yaml templates are tracked.
 /config/*
 !/config/*.example.yaml
+# Machine-local alternate config directories (never versioned)
+/config_*/
 
 # IDE and cache
 .idea/

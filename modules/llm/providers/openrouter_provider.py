@@ -35,6 +35,7 @@ from modules.llm.providers.base import (
     TranscriptionResult,
     aclose_chat_model,
 )
+from modules.llm.providers.http_timeouts import build_httpx_timeout
 
 logger = setup_logger(__name__)
 
@@ -218,7 +219,8 @@ class OpenRouterProvider(BaseProvider):
             model=model,
             base_url=OPENROUTER_BASE_URL,
             max_tokens=max_tokens,
-            timeout=timeout,
+            # Per-phase timeout: a scalar would set connect to `timeout` too.
+            timeout=build_httpx_timeout(timeout),
             max_retries=0,
             disabled_params=disabled_params,
             default_headers=default_headers,

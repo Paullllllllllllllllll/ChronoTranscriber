@@ -1,4 +1,4 @@
-# ChronoTranscriber v3.0.1
+# ChronoTranscriber v3.1.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -429,8 +429,14 @@ collapsing, blank-line capping, and line wrapping.
 concurrency:
   transcription:
     concurrency_limit: 20
+    request_timeout: 900       # Read timeout per attempt (seconds)
+    page_timeout: auto         # Wall-clock ceiling per page across all retries
+    connect_timeout: 10        # Per-phase HTTP timeouts (OpenAI-family only)
+    write_timeout: 30
+    pool_timeout: 30
     retry:
-      attempts: 5              # Network retries with exponential backoff
+      attempts: 8              # Network retries with exponential backoff
+      timeout_attempts: 3      # Smaller budget for request-timeout failures
       validation_attempts: 3   # Retries for malformed output + quality
       min_input_tokens: 500    # Cross-contamination detection threshold
       content_quality:
@@ -457,6 +463,15 @@ Controls concurrency limits, retry strategy (network and
 validation/quality retries share separate budgets), content-quality
 validators with configurable thresholds, service tier, batch chunk
 size, and daily token budgets.
+
+HTTP timeouts are per phase for the OpenAI-family clients (openai,
+openrouter, custom, and the OpenAI audio backend): `request_timeout` is
+the read budget, while `connect_timeout`, `write_timeout`, and
+`pool_timeout` (defaults 10/30/30 s) bound the other phases. On Windows
+the kernel dead-peer detection Linux gets from `TCP_USER_TIMEOUT` is
+unavailable, so the read timeout and the `page_timeout` watchdog are the
+only stall detectors -- keep `request_timeout` tight (120-300 s) outside
+the `flex` service tier.
 
 ### 5. Audio Configuration (`audio_config.yaml`)
 
@@ -882,6 +897,20 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v3.1.0** (13 August 2026) -- Request-stall hardening. A configurable
+  per-page wall-clock watchdog (`page_timeout`, default `auto`) now bounds
+  one page across all retry attempts, so a single stalled request can no
+  longer park a whole run for hours; request timeouts get their own smaller
+  retry budget (`retry.timeout_attempts`, default 3) because each timed-out
+  attempt is billed server-side without a usage payload; the OpenAI-family
+  clients (chat and audio) receive per-phase HTTP timeouts
+  (`connect_timeout`/`write_timeout`/`pool_timeout`, defaults 10/30/30 s)
+  instead of a scalar that silently set the connect timeout to the full
+  read budget; retry log lines now name the page being retried instead of
+  `<unknown>`; and the progress display reports every increment within the
+  final interval window plus a 45 s report-rate floor, so end-of-run stalls
+  are visible. All new config keys default safely when absent.
 
 - **v3.0.1** (4 August 2026) -- Security patch from the weekly sweep:
   JupyterLab moves to 4.6.2, closing two high-severity advisories, and the

@@ -22,7 +22,7 @@ from modules.llm.prompt_utils import (
     render_prompt_with_schema,
 )
 from modules.llm.providers import BaseProvider, get_provider
-from modules.llm.providers.base import TranscriptionResult
+from modules.llm.providers.base import TranscriptionResult, call_label
 
 logger = setup_logger(__name__)
 
@@ -367,10 +367,11 @@ class LangChainTranscriber:
             Dictionary containing transcription response data
             (compatible with existing workflow expectations)
         """
-        result = await self._provider.transcribe_image(
-            image_path,
-            **self._transcribe_kwargs(),
-        )
+        with call_label(image_path.name):
+            result = await self._provider.transcribe_image(
+                image_path,
+                **self._transcribe_kwargs(),
+            )
 
         # Convert TranscriptionResult to dict format expected by existing code
         return self._result_to_dict(result)
@@ -379,21 +380,27 @@ class LangChainTranscriber:
         self,
         image_base64: str,
         mime_type: str,
+        *,
+        label: str | None = None,
     ) -> dict[str, Any]:
         """Transcribe from base64-encoded image data.
 
         Args:
             image_base64: Base64-encoded image data
             mime_type: MIME type of the image
+            label: Optional human-readable name for the image (e.g. the page
+                file name), bound for the duration of the provider call so
+                retry logging can identify it
 
         Returns:
             Dictionary containing transcription response data
         """
-        result = await self._provider.transcribe_image_from_base64(
-            image_base64=image_base64,
-            mime_type=mime_type,
-            **self._transcribe_kwargs(),
-        )
+        with call_label(label):
+            result = await self._provider.transcribe_image_from_base64(
+                image_base64=image_base64,
+                mime_type=mime_type,
+                **self._transcribe_kwargs(),
+            )
 
         return self._result_to_dict(result)
 

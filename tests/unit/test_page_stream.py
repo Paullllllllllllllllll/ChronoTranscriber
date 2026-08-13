@@ -477,7 +477,7 @@ class _FakeTranscriber:
         self.calls: list[str] = []
 
     async def transcribe_image_from_base64(
-        self, image_base64: str, mime_type: str
+        self, image_base64: str, mime_type: str, **kwargs: Any
     ) -> dict[str, Any]:
         marker = base64.b64decode(image_base64).decode("utf-8")
         self.calls.append(marker)

@@ -374,7 +374,7 @@ async def transcribe_payload(
     image_name = payload.image_name
     try:
         result = await transcriber.transcribe_image_from_base64(
-            payload.base64, payload.mime_type
+            payload.base64, payload.mime_type, label=image_name
         )
         logger.debug(f"LLM response for {image_name}: {result}")
         try:

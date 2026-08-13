@@ -1822,3 +1822,82 @@ class TestContentQualityDiscardedTokens:
             provider._validate_result_content_quality({"raw": MagicMock()})
 
         assert getattr(ei.value, "discarded_total", None) == 777
+
+
+class TestRetryLogLabel:
+    """Retry log lines must name the page, not tenacity's ``<unknown>``."""
+
+    def _make_provider(self):
+        """Create a minimal concrete provider."""
+
+        class _ConcreteProvider(BaseProvider):
+            @property
+            def provider_name(self):
+                return "test"
+
+            def get_capabilities(self):
+                return Capabilities(model="m", family="test")
+
+            async def transcribe_image_from_base64(self, *a, **kw):
+                pass
+
+            async def close(self):
+                pass
+
+        return _ConcreteProvider.__new__(_ConcreteProvider)
+
+    def _run_one_retry(self):
+        """Fail once with a retryable error, then succeed."""
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        import httpx
+        import tenacity
+
+        provider = self._make_provider()
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(
+            side_effect=[httpx.ConnectError("refused"), "success_response"]
+        )
+
+        async def _run():
+            with (
+                patch("modules.llm.providers.base.load_max_retries", return_value=5),
+                patch(
+                    "modules.llm.providers.base.load_page_timeout", return_value=None
+                ),
+                patch(
+                    "tenacity.wait_exponential_jitter",
+                    return_value=tenacity.wait_none(),
+                ),
+            ):
+                return await provider._ainvoke_with_retry(mock_llm, ["msg"])
+
+        return asyncio.run(_run())
+
+    @pytest.mark.unit
+    def test_retry_log_names_the_bound_label(self, caplog) -> None:
+        """The bound call label appears in the retry log line."""
+        import logging
+
+        from modules.llm.providers.base import call_label
+
+        with caplog.at_level(logging.WARNING), call_label("page_0042.png"):
+            result = self._run_one_retry()
+
+        assert result == "success_response"
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("page_0042.png" in message for message in messages)
+        assert not any("<unknown>" in message for message in messages)
+
+    @pytest.mark.unit
+    def test_retry_log_without_label_uses_placeholder(self, caplog) -> None:
+        """Without a bound label the retry log says ``<unknown page>``."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            result = self._run_one_retry()
+
+        assert result == "success_response"
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("<unknown page>" in message for message in messages)

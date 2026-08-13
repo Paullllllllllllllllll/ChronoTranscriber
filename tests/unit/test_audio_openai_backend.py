@@ -12,6 +12,7 @@ import hashlib
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -222,7 +223,7 @@ class TestConstruction:
     def test_default_request_timeout(self) -> None:
         _backend()
         assert (
-            _FakeAsyncOpenAI.instances[-1].init_kwargs["timeout"]
+            _FakeAsyncOpenAI.instances[-1].init_kwargs["timeout"].read
             == DEFAULT_AUDIO_REQUEST_TIMEOUT_S
         )
 
@@ -231,7 +232,7 @@ class TestConstruction:
             _audio_config(),
             {"concurrency": {"transcription": {"request_timeout": 42}}},
         )
-        assert _FakeAsyncOpenAI.instances[-1].init_kwargs["timeout"] == 42.0
+        assert _FakeAsyncOpenAI.instances[-1].init_kwargs["timeout"].read == 42.0
 
     def test_malformed_timeout_falls_back_to_the_default(self) -> None:
         OpenAIAudioBackend(
@@ -239,9 +240,28 @@ class TestConstruction:
             {"concurrency": {"transcription": {"request_timeout": "nonsense"}}},
         )
         assert (
-            _FakeAsyncOpenAI.instances[-1].init_kwargs["timeout"]
+            _FakeAsyncOpenAI.instances[-1].init_kwargs["timeout"].read
             == DEFAULT_AUDIO_REQUEST_TIMEOUT_S
         )
+
+    def test_timeout_is_per_phase(self) -> None:
+        """The upload budget is the READ phase only; connect stays tight."""
+        import httpx
+
+        mock_cs = MagicMock()
+        mock_cs.return_value.get_concurrency_config.return_value = {}
+        with patch("modules.llm.providers.base.get_config_service", mock_cs):
+            OpenAIAudioBackend(
+                _audio_config(),
+                {"concurrency": {"transcription": {"request_timeout": 600}}},
+            )
+
+        timeout = _FakeAsyncOpenAI.instances[-1].init_kwargs["timeout"]
+        assert isinstance(timeout, httpx.Timeout)
+        assert timeout.read == 600.0
+        assert timeout.connect == 10.0
+        assert timeout.write == 30.0
+        assert timeout.pool == 30.0
 
     def test_non_audio_model_is_refused(self) -> None:
         with pytest.raises(CapabilityError):

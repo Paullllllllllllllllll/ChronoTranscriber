@@ -42,6 +42,7 @@ from modules.llm.providers.base import (
     TranscriptionResult,
     aclose_chat_model,
 )
+from modules.llm.providers.http_timeouts import build_httpx_timeout
 
 logger = setup_logger(__name__)
 
@@ -115,7 +116,8 @@ class CustomProvider(BaseProvider):
             model=model,
             base_url=base_url,
             max_tokens=max_tokens,  # type: ignore[call-arg]  # langchain-openai stubs omit max_tokens
-            timeout=timeout,
+            # Per-phase timeout: a scalar would set connect to `timeout` too.
+            timeout=build_httpx_timeout(timeout),
             max_retries=0,
             temperature=temperature,
         )

@@ -397,7 +397,7 @@ class TestStreamingPipelineImageDefaults:
                 self.calls = 0
 
             async def transcribe_image_from_base64(
-                self, _b64: str, _mime: str
+                self, _b64: str, _mime: str, **kwargs: Any
             ) -> dict[str, Any]:
                 self.calls += 1
                 return {"output_text": f"page text {self.calls}"}

@@ -35,6 +35,7 @@ from modules.llm.providers.factory import (
     get_api_key_for_provider,
     resolve_api_key_env_var,
 )
+from modules.llm.providers.http_timeouts import build_httpx_timeout
 
 logger = setup_logger(__name__)
 
@@ -113,8 +114,16 @@ class OpenAIAudioBackend:
         return DEFAULT_AUDIO_REQUEST_TIMEOUT_S
 
     def _build_client(self, api_key: str) -> AsyncOpenAI:
-        """Build an SDK client with retries disabled (see module docstring)."""
-        return AsyncOpenAI(api_key=api_key, max_retries=0, timeout=self._timeout)
+        """Build an SDK client with retries disabled (see module docstring).
+
+        The timeout is per-phase: a scalar float would apply the long upload
+        budget to the connect phase as well, hiding a dead peer for minutes.
+        """
+        return AsyncOpenAI(
+            api_key=api_key,
+            max_retries=0,
+            timeout=build_httpx_timeout(self._timeout),
+        )
 
     # -- request construction ----------------------------------------------
 

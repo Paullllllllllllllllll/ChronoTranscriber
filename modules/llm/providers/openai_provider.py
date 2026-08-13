@@ -31,6 +31,7 @@ from modules.llm.providers.base import (
     TranscriptionResult,
     aclose_chat_model,
 )
+from modules.llm.providers.http_timeouts import build_httpx_timeout
 
 logger = setup_logger(__name__)
 
@@ -113,10 +114,11 @@ class OpenAIProvider(BaseProvider):
         # - Responses API routing (use_responses_api=True)
         # max_retries=0 disables SDK-internal retries so the tenacity loop in
         # BaseProvider._ainvoke_with_retry is the single retry authority.
-        llm_kwargs = {
+        llm_kwargs: dict[str, Any] = {
             "api_key": api_key,
             "model": model,
-            "timeout": timeout,
+            # Per-phase timeout: a scalar would set connect to `timeout` too.
+            "timeout": build_httpx_timeout(timeout),
             "max_retries": 0,
             "disabled_params": disabled_params,
             "use_responses_api": True,
@@ -189,7 +191,7 @@ class OpenAIProvider(BaseProvider):
                 assert isinstance(model_kwargs, dict)
                 model_kwargs["prompt_cache_retention"] = retention
 
-        self._llm = ChatOpenAI(**llm_kwargs)  # type: ignore[arg-type]
+        self._llm = ChatOpenAI(**llm_kwargs)
 
     @property
     def provider_name(self) -> str:

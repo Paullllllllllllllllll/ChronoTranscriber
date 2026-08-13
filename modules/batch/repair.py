@@ -791,7 +791,9 @@ async def _repair_sync_mode(
         try:
             if target.image_base64:
                 raw = await transcriber.transcribe_image_from_base64(
-                    target.image_base64, target.mime_type or "image/jpeg"
+                    target.image_base64,
+                    target.mime_type or "image/jpeg",
+                    label=target.image_name,
                 )
             elif target.image_path is not None:
                 raw = await transcribe_image_with_llm(target.image_path, transcriber)

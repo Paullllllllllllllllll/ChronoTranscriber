@@ -632,3 +632,48 @@ class TestOpenAIProviderContextImage:
 
         ctx_block = captured_messages[1].content[1]
         assert ctx_block["image_url"].get("detail") == "original"
+
+
+class TestOpenAIProviderHttpTimeout:
+    """The ChatOpenAI timeout is per-phase, not a scalar (see http_timeouts)."""
+
+    @pytest.mark.unit
+    def test_timeout_is_an_httpx_timeout_with_read_and_connect_split(self) -> None:
+        """A configured timeout lands on the read phase, connect stays tight."""
+        import httpx
+
+        from modules.llm.providers.openai_provider import OpenAIProvider
+
+        captured: dict[str, Any] = {}
+
+        with patch(
+            "modules.llm.providers.openai_provider.ChatOpenAI",
+            side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+        ):
+            provider = OpenAIProvider(
+                api_key="sk-test",
+                model="gpt-4o",
+                timeout=900.0,
+            )
+
+        timeout = captured.get("timeout")
+        assert isinstance(timeout, httpx.Timeout)
+        assert timeout.read == 900.0
+        assert timeout.connect == 10.0
+        # The public attribute keeps the raw float.
+        assert provider.timeout == 900.0
+
+    @pytest.mark.unit
+    def test_timeout_none_is_forwarded_as_none(self) -> None:
+        """Without a configured timeout the SDK defaults are left alone."""
+        from modules.llm.providers.openai_provider import OpenAIProvider
+
+        captured: dict[str, Any] = {}
+
+        with patch(
+            "modules.llm.providers.openai_provider.ChatOpenAI",
+            side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+        ):
+            OpenAIProvider(api_key="sk-test", model="gpt-4o", timeout=None)
+
+        assert captured.get("timeout", "missing") is None

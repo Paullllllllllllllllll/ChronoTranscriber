@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
@@ -171,3 +172,129 @@ class TestProgressTracker:
 
         tracker = ProgressTracker(total=10, on_update=bad_callback)
         await tracker.finalize()  # Should not raise
+
+
+class TestProgressTailWindow:
+    @pytest.mark.asyncio
+    async def test_every_increment_in_tail_window_reports(self) -> None:
+        seen: list[int] = []
+        tracker = ProgressTracker(
+            total=47,
+            on_update=lambda state: seen.append(state.completed),
+            update_interval=10,
+        )
+        for _ in range(47):
+            await tracker.increment_completed()
+
+        assert seen == [10, 20, 30, *range(38, 48)]
+
+    @pytest.mark.asyncio
+    async def test_mid_run_increment_outside_window_silent(self) -> None:
+        seen: list[int] = []
+        tracker = ProgressTracker(
+            total=47,
+            on_update=lambda state: seen.append(state.completed),
+            update_interval=10,
+        )
+        for _ in range(35):
+            await tracker.increment_completed()
+
+        assert 35 not in seen
+        assert seen == [10, 20, 30]
+
+    @pytest.mark.asyncio
+    async def test_tail_window_reports_failures_too(self) -> None:
+        seen: list[tuple[int, int]] = []
+        tracker = ProgressTracker(
+            total=47,
+            on_update=lambda state: seen.append((state.completed, state.failed)),
+            update_interval=10,
+        )
+        for _ in range(46):
+            await tracker.increment_completed()
+        await tracker.increment_failed()
+
+        assert seen[-1] == (46, 1)
+        assert (46, 0) in seen
+
+    @pytest.mark.asyncio
+    async def test_zero_interval_clamped_to_one(self) -> None:
+        callback = MagicMock()
+        tracker = ProgressTracker(total=100, on_update=callback, update_interval=0)
+        for _ in range(5):
+            await tracker.increment_completed()
+
+        assert tracker.update_interval == 1
+        assert callback.call_count == 5
+
+    @pytest.mark.asyncio
+    async def test_negative_interval_clamped_to_one(self) -> None:
+        callback = MagicMock()
+        tracker = ProgressTracker(total=100, on_update=callback, update_interval=-5)
+        for _ in range(5):
+            await tracker.increment_completed()
+
+        assert tracker.update_interval == 1
+        assert callback.call_count == 5
+
+    @pytest.mark.asyncio
+    async def test_short_run_fully_covered_by_tail_window(self) -> None:
+        seen: list[int] = []
+        tracker = ProgressTracker(
+            total=3,
+            on_update=lambda state: seen.append(state.completed),
+            update_interval=10,
+        )
+        for _ in range(3):
+            await tracker.increment_completed()
+
+        assert seen == [1, 2, 3]
+
+    @pytest.mark.asyncio
+    async def test_zero_heartbeat_reports_every_increment(self) -> None:
+        callback = MagicMock()
+        tracker = ProgressTracker(
+            total=5000,
+            on_update=callback,
+            update_interval=1000,
+            heartbeat_seconds=0.0,
+        )
+        for _ in range(7):
+            await tracker.increment_completed()
+
+        assert callback.call_count == 7
+
+    @pytest.mark.asyncio
+    async def test_long_heartbeat_stays_silent_mid_run(self) -> None:
+        callback = MagicMock()
+        tracker = ProgressTracker(
+            total=5000,
+            on_update=callback,
+            update_interval=1000,
+            heartbeat_seconds=3600.0,
+        )
+        for _ in range(7):
+            await tracker.increment_completed()
+
+        assert callback.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_no_spurious_heartbeat_on_first_increment(self) -> None:
+        callback = MagicMock()
+        tracker = ProgressTracker(total=10, on_update=callback, update_interval=5)
+        await tracker.increment_completed()
+        assert callback.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_raising_callback_in_tail_window_advances_timestamp(self) -> None:
+        def bad_callback(state):
+            raise ValueError("callback error")
+
+        tracker = ProgressTracker(total=3, on_update=bad_callback, update_interval=10)
+        stale = time.monotonic() - 1000.0
+        tracker._last_report_at = stale
+        for _ in range(3):
+            await tracker.increment_completed()
+
+        assert tracker.state.completed == 3
+        assert tracker._last_report_at > stale

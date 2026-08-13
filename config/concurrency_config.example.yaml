@@ -42,6 +42,33 @@ concurrency:
     # LangChain will raise APITimeoutError and trigger retry on expiry.
     request_timeout: 900
 
+    # Wall-clock ceiling (seconds) for ONE page across ALL retry attempts.
+    # request_timeout above bounds a single attempt only, so without this the
+    # worst case per page was attempts x request_timeout (8 x 900 s = 2 hours),
+    # which parks the whole deck behind one stuck page.
+    # Values:
+    #   auto  -- (the default when absent) request_timeout x
+    #            retry.timeout_attempts + 300 s of backoff headroom
+    #   "off" -- disabled (quote it; a bare `off` is YAML boolean false, which
+    #            is also accepted), or 0
+    #   <n>   -- an explicit number of seconds
+    page_timeout: auto
+
+    # Per-phase HTTP timeouts (OpenAI-family clients only: openai, openrouter,
+    # custom, and the OpenAI audio backend). request_timeout above is the READ
+    # phase; a scalar float would replace all four phases and make `connect`
+    # 900s too. Anthropic and Google keep a plain float -- their LangChain
+    # wrappers require it.
+    #
+    # Windows note: the kernel dead-peer detection Linux gets from
+    # TCP_USER_TIMEOUT is unavailable on win32 (only SO_KEEPALIVE applies), so
+    # the read timeout and the page_timeout watchdog above are the only stall
+    # detectors -- keep request_timeout tight (120-300s) outside the `flex`
+    # service tier.
+    connect_timeout: 10
+    write_timeout: 30
+    pool_timeout: 30
+
     # Retry configuration for transient API errors (429, 5xx, timeouts).
     # The tenacity loop in modules/llm/providers/base.py is the SINGLE retry
     # authority: every provider builds its SDK client with max_retries=0, so
@@ -52,6 +79,13 @@ concurrency:
       # Maximum transient (429 / 5xx / connection / timeout) retry attempts
       # before failing.
       attempts: 8
+
+      # Retry budget for TIMEOUT failures specifically (capped at `attempts`).
+      # A timed-out request is billed server-side but returns no usage payload,
+      # so every timeout retry is untracked overshoot. Cheap connection
+      # failures (ConnectError, DNS) keep the full `attempts` budget; connect
+      # timeouts fall under this budget instead.
+      timeout_attempts: 3
 
       # Maximum retry attempts for validation/parsing errors (model returns
       # unparseable structured output) AND for transient provider response-shape

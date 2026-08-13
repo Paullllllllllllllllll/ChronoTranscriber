@@ -516,3 +516,27 @@ class TestOpenRouterProviderClose:
     async def test_close_does_not_raise(self, mock_chat: MagicMock) -> None:
         provider = OpenRouterProvider(api_key="k", model="m")
         await provider.close()
+
+
+class TestOpenRouterProviderHttpTimeout:
+    """The ChatOpenAI timeout is per-phase, not a scalar (see http_timeouts)."""
+
+    @pytest.mark.unit
+    @patch("modules.llm.providers.openrouter_provider.ChatOpenAI")
+    def test_timeout_is_an_httpx_timeout(self, mock_chat: MagicMock) -> None:
+        import httpx
+
+        provider = OpenRouterProvider(api_key="k", model="openai/gpt-4o", timeout=300.0)
+
+        timeout = mock_chat.call_args.kwargs["timeout"]
+        assert isinstance(timeout, httpx.Timeout)
+        assert timeout.read == 300.0
+        assert timeout.connect == 10.0
+        assert provider.timeout == 300.0
+
+    @pytest.mark.unit
+    @patch("modules.llm.providers.openrouter_provider.ChatOpenAI")
+    def test_timeout_none_is_forwarded_as_none(self, mock_chat: MagicMock) -> None:
+        OpenRouterProvider(api_key="k", model="openai/gpt-4o", timeout=None)
+
+        assert mock_chat.call_args.kwargs["timeout"] is None

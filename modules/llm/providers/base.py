@@ -5,10 +5,13 @@ Defines the common interface that all LLM providers must implement.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
-import logging
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -65,6 +68,37 @@ class AudioNotSupportedError(Exception):
     """
 
 
+class PageTimeoutError(Exception):
+    """Raised when one page exceeds its wall-clock ceiling across all retries.
+
+    Subclasses :class:`Exception` (never :class:`BaseException`) so the
+    pipeline's ``except Exception`` handler converts it into a
+    ``[transcription error]`` placeholder for that page instead of tearing
+    down the whole run.
+    """
+
+    def __init__(self, label: str, seconds: float) -> None:
+        self.label = label
+        self.seconds = seconds
+        super().__init__(
+            f"Page {label!r} exceeded its {seconds:.0f}s wall-clock ceiling "
+            f"across all retry attempts"
+        )
+
+
+def _load_transcription_config() -> dict[str, Any]:
+    """Return the ``concurrency.transcription`` config block.
+
+    Shared lookup for the loaders below; returns an empty dict when any level
+    of the config is missing so callers can apply their own defaults via
+    ``.get``.
+    """
+    conc_cfg = get_config_service().get_concurrency_config() or {}
+    conc = conc_cfg.get("concurrency", {})
+    trans = conc.get("transcription", {}) if isinstance(conc, dict) else {}
+    return trans if isinstance(trans, dict) else {}
+
+
 def _load_retry_config() -> dict[str, Any]:
     """Return the ``concurrency.transcription.retry`` config block.
 
@@ -72,9 +106,7 @@ def _load_retry_config() -> dict[str, Any]:
     when any level of the config is missing so callers can apply their own
     defaults via ``.get``.
     """
-    conc_cfg = get_config_service().get_concurrency_config() or {}
-    trans_cfg = (conc_cfg.get("concurrency", {}) or {}).get("transcription", {}) or {}
-    return trans_cfg.get("retry", {}) or {}
+    return _load_transcription_config().get("retry", {}) or {}
 
 
 def load_max_retries() -> int:
@@ -128,6 +160,76 @@ def load_min_input_tokens() -> int:
         return 500
 
 
+def load_timeout_attempts() -> int:
+    """Load the retry budget reserved for TIMEOUT failures specifically.
+
+    A timed-out request has already been billed server-side but returns no
+    usage payload, so every timeout retry is untracked overshoot. The budget
+    is therefore smaller than the general ``retry.attempts`` budget and is
+    clamped to it (a value above ``attempts`` is meaningless). Defaults to 3.
+    """
+    try:
+        attempts = int(_load_retry_config().get("timeout_attempts", 3))
+        return max(1, min(attempts, load_max_retries()))
+    except (KeyError, AttributeError, TypeError, ValueError) as e:
+        logger.debug(
+            "Could not load timeout_attempts from config, using default: %s", e
+        )
+        return 3
+
+
+def load_page_timeout() -> float | None:
+    """Load the per-page wall-clock ceiling in seconds, or ``None`` if disabled.
+
+    ``request_timeout`` bounds a single attempt; this bounds the SUM of every
+    attempt made for one page. Accepted values of
+    ``concurrency.transcription.page_timeout``:
+
+    - absent or ``"auto"`` — ``request_timeout * timeout_attempts + 300`` s of
+      backoff headroom. This is deliberately a backstop ABOVE the timeout
+      budget's own bound: it also catches mixed-classification pathologies
+      (alternating timeouts, connection errors and 429 backoffs) that would
+      otherwise still run the full ``attempts * request_timeout``.
+    - ``None``, ``False`` (YAML 1.1 parses a bare ``off`` as boolean false),
+      ``0``, or ``"off"``/``"none"``/``"disabled"`` — watchdog disabled.
+    - any positive number (or numeric string) — that many seconds.
+    """
+    try:
+        trans = _load_transcription_config()
+    except (KeyError, AttributeError, TypeError, ValueError) as e:
+        logger.debug("Could not load page_timeout from config, disabling: %s", e)
+        return None
+
+    def _auto() -> float:
+        try:
+            request_timeout = float(trans.get("request_timeout", 900) or 900)
+        except (TypeError, ValueError):
+            request_timeout = 900.0
+        return request_timeout * load_timeout_attempts() + 300.0
+
+    raw = trans.get("page_timeout", "auto")
+    if raw is None:
+        return None
+    # bool must be checked before the numeric branch: isinstance(False, int).
+    if isinstance(raw, bool):
+        return None if not raw else _auto()
+    if isinstance(raw, (int, float)):
+        return float(raw) if raw > 0 else None
+    if isinstance(raw, str):
+        text = raw.strip().lower()
+        if text in ("off", "none", "disabled"):
+            return None
+        if text == "auto":
+            return _auto()
+        try:
+            value = float(text)
+        except ValueError:
+            logger.debug("Unrecognised page_timeout %r; using auto", raw)
+            return _auto()
+        return value if value > 0 else None
+    return None
+
+
 def _classify_status(exc: BaseException) -> tuple[bool, bool]:
     """Classify an exception by its HTTP status code (authoritative when present).
 
@@ -168,7 +270,9 @@ def _is_connection_error(exc: BaseException) -> bool:
     ``APIConnectionError from httpx.ConnectError``), so checking only the
     top-level exception type misses them. Walk the ``__cause__``/``__context__``
     chain (bounded, cycle-safe) looking for ``httpx.ConnectError`` or
-    ``httpx.TimeoutException``.
+    ``httpx.TimeoutException``. In the transcription retry loop, timeout
+    failures are short-circuited earlier by :func:`_is_timeout_error` and
+    never reach this predicate; see that function for the distinction.
     """
     import httpx
 
@@ -185,6 +289,80 @@ def _is_connection_error(exc: BaseException) -> bool:
 def is_connection_error(exc: BaseException) -> bool:
     """Public alias for :func:`_is_connection_error`; see it for the full contract."""
     return _is_connection_error(exc)
+
+
+_TIMEOUT_CLASS_NAMES: frozenset[str] = frozenset(
+    {
+        "APITimeoutError",
+        "APIConnectionTimeoutError",
+        "ConnectTimeout",
+        "ReadTimeout",
+        "WriteTimeout",
+        "PoolTimeout",
+        "TimeoutException",
+        "DeadlineExceeded",
+        "ServerTimeoutError",
+    }
+)
+
+
+def _is_timeout_error(exc: BaseException) -> bool:
+    """Return True when the exception is (or wraps) a request timeout.
+
+    Deliberately narrower than :func:`_is_connection_error`: a ``ConnectError``
+    is cheap and unbilled, whereas a read timeout has already burned a billed
+    server-side generation that carries no usage payload back to us. Timeouts
+    therefore get their own, smaller retry budget.
+
+    Walks the ``__cause__``/``__context__`` chain (bounded, cycle-safe) looking
+    for an ``httpx.TimeoutException`` or a builtin ``TimeoutError``; the
+    class-NAME fallback additionally covers SDK timeout types raised without an
+    httpx cause (e.g. a bare openai ``APITimeoutError``).
+    """
+    import httpx
+
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, (httpx.TimeoutException, TimeoutError)):
+            return True
+        if type(current).__name__ in _TIMEOUT_CLASS_NAMES:
+            return True
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def is_timeout_error(exc: BaseException) -> bool:
+    """Public alias for :func:`_is_timeout_error`; see it for the full contract."""
+    return _is_timeout_error(exc)
+
+
+_CALL_LABEL: ContextVar[str | None] = ContextVar("ct_call_label", default=None)
+
+
+@contextmanager
+def call_label(label: str | None) -> Iterator[None]:
+    """Bind a human-readable label (e.g. a page filename) to the current call.
+
+    A ContextVar rather than a keyword argument: it avoids threading a label
+    through every provider method signature, and asyncio copies the context
+    per task, so concurrently transcribed pages never observe each other's
+    label. A falsy label is a no-op.
+    """
+    if not label:
+        yield
+        return
+    token = _CALL_LABEL.set(label)
+    try:
+        yield
+    finally:
+        _CALL_LABEL.reset(token)
+
+
+def current_call_label() -> str | None:
+    """Return the label bound by the innermost active :func:`call_label`."""
+    return _CALL_LABEL.get()
 
 
 def parse_retry_after(exc: BaseException | None) -> float | None:
@@ -1136,6 +1314,60 @@ class BaseProvider(ABC):
         expect_image_tokens: bool = False,
         **invoke_kwargs: Any,
     ) -> Any:
+        """Run :meth:`_ainvoke_with_retry_inner` under a per-page watchdog.
+
+        An httpx read timeout bounds ONE attempt; nothing bounded the sum of
+        the attempts, so a page that kept timing out could occupy a worker for
+        ``attempts * request_timeout`` (8 x 900 s = two hours) and park the
+        whole deck behind it. This wraps the whole retry loop in a wall-clock
+        ceiling from :func:`load_page_timeout`, converting an overrun into a
+        :class:`PageTimeoutError` that the pipeline records as a single failed
+        page. Returns the inner call unwrapped when the ceiling is disabled.
+        """
+        page_timeout = load_page_timeout()
+        if page_timeout is None:
+            return await self._ainvoke_with_retry_inner(
+                llm,
+                messages,
+                expect_image_tokens=expect_image_tokens,
+                **invoke_kwargs,
+            )
+        # The ceiling is per CALL, not per page: a provider that makes two
+        # sequential _ainvoke_with_retry calls for one page may take up to
+        # 2x the ceiling. Accepted. Also accepted: the cancelled attempt's
+        # server-side usage is unrecoverable, since a cancelled request
+        # carries no usage payload back to us.
+        watchdog = asyncio.timeout(page_timeout)
+        try:
+            async with watchdog:
+                return await self._ainvoke_with_retry_inner(
+                    llm,
+                    messages,
+                    expect_image_tokens=expect_image_tokens,
+                    **invoke_kwargs,
+                )
+        except TimeoutError as exc:
+            # A TimeoutError raised by the call itself (rather than by the
+            # expiring watchdog) must keep its own identity.
+            if not watchdog.expired():
+                raise
+            label = current_call_label() or "<unknown page>"
+            logger.error(
+                "Page watchdog fired for %s after %.0fs (all retry attempts "
+                "combined); abandoning this page.",
+                label,
+                page_timeout,
+            )
+            raise PageTimeoutError(label, page_timeout) from exc
+
+    async def _ainvoke_with_retry_inner(
+        self,
+        llm: Any,
+        messages: list[Any],
+        *,
+        expect_image_tokens: bool = False,
+        **invoke_kwargs: Any,
+    ) -> Any:
         """Invoke the LangChain LLM with retry on transient and validation errors.
 
         This is the SINGLE retry authority: every provider constructs its
@@ -1174,11 +1406,47 @@ class BaseProvider(ABC):
 
         max_attempts = load_max_retries()
         max_validation_attempts = load_max_validation_retries()
+        max_timeout_attempts = load_timeout_attempts()
         min_input_tokens = load_min_input_tokens() if expect_image_tokens else 0
         validation_attempt_count = 0
+        timeout_attempt_count = 0
 
         def _should_retry(exc: BaseException) -> bool:
-            nonlocal validation_attempt_count
+            nonlocal validation_attempt_count, timeout_attempt_count
+            # tenacity's AttemptManager.__exit__ swallows BaseException — including
+            # asyncio.CancelledError — into this predicate. A CancelledError raised
+            # while an httpx.ReadTimeout is still propagating carries that timeout
+            # in its __context__, so the cause-chain classifiers below would match
+            # it and retry past the cancellation. Refuse to retry cancellation.
+            if isinstance(exc, asyncio.CancelledError):
+                return False
+            # Timeouts are checked BEFORE the connection-error branch, which also
+            # matches httpx.TimeoutException. A read timeout has already been
+            # billed server-side and returns no usage payload, so every retry is
+            # untracked overshoot; it gets a smaller budget than the cheap,
+            # unbilled ConnectError/DNS failures. httpx.ConnectTimeout lands here
+            # too (it subclasses TimeoutException) — intended, since connect is
+            # now bounded tightly.
+            if _is_timeout_error(exc):
+                timeout_attempt_count += 1
+                if timeout_attempt_count >= max_timeout_attempts:
+                    logger.error(
+                        "Request timeout budget exhausted (%d/%d) for %s; "
+                        "not retrying: %s",
+                        timeout_attempt_count,
+                        max_timeout_attempts,
+                        current_call_label() or "<unknown page>",
+                        str(exc)[:200],
+                    )
+                    return False
+                logger.warning(
+                    "Request timeout on attempt %d/%d for %s, retrying: %s",
+                    timeout_attempt_count,
+                    max_timeout_attempts,
+                    current_call_label() or "<unknown page>",
+                    str(exc)[:200],
+                )
+                return True
             # Cause-chain-aware: provider SDKs wrap httpx transport errors
             # (e.g. openai.APIConnectionError from httpx.ConnectError), so
             # the underlying connection failure is found via __cause__.
@@ -1273,11 +1541,24 @@ class BaseProvider(ABC):
             return computed
 
         def _before_sleep(retry_state: tenacity.RetryCallState) -> None:
-            """Recover usage from the failed attempt, then log the retry."""
+            """Recover usage from the failed attempt, then log the retry.
+
+            Replaces ``tenacity.before_sleep_log``, which renders the wrapped
+            callable as ``<unknown>`` for the ``with attempt:`` form used here
+            and so produced log lines naming no page at all.
+            """
             exc = retry_state.outcome.exception() if retry_state.outcome else None
             if exc is not None:
                 _commit_tokens_from_exception(exc, self.token_stamp)
-            tenacity.before_sleep_log(logger, logging.WARNING)(retry_state)
+            logger.warning(
+                "Retrying %s in %.1fs (attempt %d/%d) after %s: %s",
+                current_call_label() or "<unknown page>",
+                getattr(retry_state.next_action, "sleep", 0.0) or 0.0,
+                retry_state.attempt_number,
+                max_attempts,
+                type(exc).__name__ if exc is not None else "no exception",
+                str(exc)[:200] if exc is not None else "",
+            )
 
         last_result: Any = None
         try:
@@ -1337,9 +1618,17 @@ class BaseProvider(ABC):
         from modules.infra.rate_limit import await_capacity, get_shared_rate_limiter
 
         limiter = get_shared_rate_limiter(self.provider_name)
+        # Known limitation: cancellation does not reach the asyncio.to_thread
+        # worker inside await_capacity — the thread finishes its sleep and then
+        # exits, so a burst of page timeouts during heavy 429 backoff can
+        # transiently occupy executor threads.
         await await_capacity(limiter)
         try:
             result = await llm.ainvoke(messages, **invoke_kwargs)
+        except asyncio.CancelledError:
+            # Cancellation is not an API outcome; keep it out of the limiter's
+            # adaptive error signal.
+            raise
         except BaseException as exc:
             is_rate_limit, is_server_error = _classify_status(exc)
             limiter.report_error(is_rate_limit=is_rate_limit or is_server_error)

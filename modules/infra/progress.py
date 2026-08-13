@@ -6,6 +6,7 @@ Provides progress tracking and reporting for long-running async tasks.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -90,24 +91,36 @@ class ProgressState:
 
 
 class ProgressTracker:
-    """Async-safe progress tracker with callback support."""
+    """Async-safe progress tracker with callback support.
+
+    Reports are emitted from increments only; there is deliberately no
+    background heartbeat task, so a run that produces no increments at
+    all stays silent here and must be surfaced by the caller.
+    """
 
     def __init__(
         self,
         total: int,
         on_update: Callable[[ProgressState], None] | None = None,
         update_interval: int = 10,
+        heartbeat_seconds: float = 45.0,
     ) -> None:
         """Initialize progress tracker.
 
         Args:
             total: Total number of items to process.
             on_update: Optional callback called on progress updates.
-            update_interval: Number of items between progress reports.
+            update_interval: Number of items between progress reports;
+                clamped to at least 1.
+            heartbeat_seconds: Maximum time between reports; once this
+                much time has passed since the last report, the next
+                increment reports regardless of the interval.
         """
         self.state = ProgressState(total=total)
         self.on_update = on_update
-        self.update_interval = update_interval
+        self.update_interval = max(1, int(update_interval))
+        self.heartbeat_seconds = float(heartbeat_seconds)
+        self._last_report_at: float = time.monotonic()
         self._lock = asyncio.Lock()
 
     async def increment_completed(self) -> None:
@@ -123,19 +136,39 @@ class ProgressTracker:
             await self._maybe_report()
 
     async def _maybe_report(self) -> None:
-        """Report progress if interval reached."""
+        """Report progress if any reporting rule applies.
+
+        A report is emitted when the processed count lands on the update
+        interval, when everything is processed, when fewer items remain
+        than the update interval (the tail window, so a run stalled on
+        its last few items keeps showing its true position), or when
+        ``heartbeat_seconds`` has elapsed since the last report.
+        """
+        if not self.on_update:
+            return
+
         processed = self.state.completed + self.state.failed
-        if (
-            processed % self.update_interval == 0 or processed == self.state.total
-        ) and self.on_update:
-            try:
-                self.on_update(self.state)
-            except Exception as e:
-                logger.error(f"Progress callback failed: {e}")
+        remaining = self.state.total - processed
+        now = time.monotonic()
+        should_report = (
+            processed % self.update_interval == 0
+            or processed >= self.state.total
+            or remaining < self.update_interval
+            or (now - self._last_report_at) >= self.heartbeat_seconds
+        )
+        if not should_report:
+            return
+
+        self._last_report_at = now
+        try:
+            self.on_update(self.state)
+        except Exception as e:
+            logger.error(f"Progress callback failed: {e}")
 
     async def finalize(self) -> None:
         """Force final progress report."""
         if self.on_update:
+            self._last_report_at = time.monotonic()
             try:
                 self.on_update(self.state)
             except Exception as e:

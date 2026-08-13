@@ -412,3 +412,51 @@ class TestProviderTypeIntegration:
         for pt in ProviderType:
             assert isinstance(pt.value, str)
             assert len(pt.value) > 0
+
+
+class TestCustomProviderHttpTimeout:
+    """The ChatOpenAI timeout is per-phase, not a scalar (see http_timeouts)."""
+
+    @pytest.mark.unit
+    def test_timeout_is_an_httpx_timeout(self) -> None:
+        import httpx
+
+        from modules.llm.providers.custom_provider import CustomProvider
+
+        captured: dict[str, Any] = {}
+
+        with patch(
+            "modules.llm.providers.custom_provider.ChatOpenAI",
+            side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+        ):
+            provider = CustomProvider(
+                api_key="k",
+                model="my-model",
+                base_url="https://example.invalid/v1",
+                timeout=450.0,
+            )
+
+        timeout = captured.get("timeout")
+        assert isinstance(timeout, httpx.Timeout)
+        assert timeout.read == 450.0
+        assert timeout.connect == 10.0
+        assert provider.timeout == 450.0
+
+    @pytest.mark.unit
+    def test_timeout_none_is_forwarded_as_none(self) -> None:
+        from modules.llm.providers.custom_provider import CustomProvider
+
+        captured: dict[str, Any] = {}
+
+        with patch(
+            "modules.llm.providers.custom_provider.ChatOpenAI",
+            side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+        ):
+            CustomProvider(
+                api_key="k",
+                model="my-model",
+                base_url="https://example.invalid/v1",
+                timeout=None,
+            )
+
+        assert captured.get("timeout", "missing") is None

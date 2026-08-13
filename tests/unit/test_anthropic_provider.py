@@ -648,3 +648,34 @@ class TestAnthropicProviderContextImage:
             if isinstance(b, dict) and b.get("type") == "text"
         ]
         assert "Reference page:" in texts
+
+
+class TestAnthropicProviderTimeoutStaysScalar:
+    """ChatAnthropic compares its timeout with ``> 0`` and needs a plain float.
+
+    Negative guard against a future sweep extending the per-phase
+    httpx.Timeout of the OpenAI-family providers to this wrapper.
+    """
+
+    @pytest.mark.unit
+    def test_timeout_is_a_plain_float(self) -> None:
+        import httpx
+
+        from modules.llm.providers.anthropic_provider import AnthropicProvider
+
+        captured: dict[str, Any] = {}
+
+        with patch(
+            "modules.llm.providers.anthropic_provider.ChatAnthropic",
+            side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+        ):
+            AnthropicProvider(
+                api_key="sk-ant-test",
+                model="claude-3-5-sonnet-20241022",
+                timeout=900.0,
+            )
+
+        timeout = captured.get("timeout")
+        assert not isinstance(timeout, httpx.Timeout)
+        assert isinstance(timeout, float)
+        assert timeout == 900.0

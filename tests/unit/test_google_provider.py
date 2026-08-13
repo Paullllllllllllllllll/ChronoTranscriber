@@ -405,3 +405,34 @@ class TestGoogleProviderContextImage:
             if isinstance(b, dict) and b.get("type") == "text"
         ]
         assert "Reference page:" in texts
+
+
+class TestGoogleProviderTimeoutStaysScalar:
+    """ChatGoogleGenerativeAI computes ``int(timeout * 1000)``: plain float only.
+
+    Negative guard against a future sweep extending the per-phase
+    httpx.Timeout of the OpenAI-family providers to this wrapper.
+    """
+
+    @pytest.mark.unit
+    def test_timeout_is_a_plain_float(self) -> None:
+        import httpx
+
+        from modules.llm.providers.google_provider import GoogleProvider
+
+        captured: dict[str, Any] = {}
+
+        with patch(
+            "modules.llm.providers.google_provider.ChatGoogleGenerativeAI",
+            side_effect=lambda **kw: captured.update(kw) or MagicMock(),
+        ):
+            GoogleProvider(
+                api_key="AIza-test",
+                model="gemini-1.5-pro",
+                timeout=900.0,
+            )
+
+        timeout = captured.get("timeout")
+        assert not isinstance(timeout, httpx.Timeout)
+        assert isinstance(timeout, float)
+        assert timeout == 900.0

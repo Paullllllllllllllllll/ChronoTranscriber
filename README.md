@@ -1,4 +1,4 @@
-# ChronoTranscriber v3.1.0
+# ChronoTranscriber v3.1.1
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -898,6 +898,12 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v3.1.1** (15 August 2026) -- Security patch for a transitive
+  dependency. The locked `cryptography` build moves from 49.0.0 to
+  50.0.0, which closes CVE-2026-69247; the package reaches the project
+  indirectly through `google-auth`, so no direct requirement changed and
+  the public API is untouched. The full test suite passes unchanged on
+  the new resolution.
 - **v3.1.0** (13 August 2026) -- Request-stall hardening. A configurable
   per-page wall-clock watchdog (`page_timeout`, default `auto`) now bounds
   one page across all retry attempts, so a single stalled request can no

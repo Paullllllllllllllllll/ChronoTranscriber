@@ -138,6 +138,7 @@ class AnthropicProvider(BaseProvider):
             family = self._capabilities.family
 
             _ADAPTIVE_FAMILIES = (
+                "claude-opus-5",
                 "claude-fable-5",
                 "claude-sonnet-5",
                 "claude-opus-4.8",

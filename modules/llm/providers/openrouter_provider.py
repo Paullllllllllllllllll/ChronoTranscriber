@@ -46,6 +46,7 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 def _effort_to_ratio(effort: str) -> float:
     e = (effort or "").strip().lower()
     return {
+        "max": 1.0,
         "xhigh": 0.95,
         "high": 0.80,
         "medium": 0.50,

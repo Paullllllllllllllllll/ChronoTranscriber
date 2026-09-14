@@ -1,4 +1,4 @@
-# ChronoTranscriber v3.1.1
+# ChronoTranscriber v3.2.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -898,6 +898,13 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v3.2.0** (14 September 2026) -- Register `claude-opus-5`,
+  `gemini-3.7-flash`, and `gemini-3.6-flash` in the capability registry
+  so they no longer fall through to the bare provider defaults; add
+  `claude-opus-5` to the Anthropic adaptive-thinking families; accept
+  `max` as a reasoning-effort level in the CLI and map it in the
+  OpenRouter and Google providers. Security patch: the locked `tornado`
+  moves from 6.5.7 to 6.5.8 (CVE-2026-82397, GHSA-mpf4-983q-p7j4).
 - **v3.1.1** (15 August 2026) -- Security patch for a transitive
   dependency. The locked `cryptography` build moves from 49.0.0 to
   50.0.0, which closes CVE-2026-69247; the package reaches the project

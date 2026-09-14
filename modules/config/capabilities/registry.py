@@ -488,6 +488,18 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
     # the family names are registered in the provider's adaptive-thinking set,
     # which sends {"type": "adaptive"} instead of a budget_tokens block.
     (
+        ("claude-opus-5",),
+        "claude-opus-5",
+        _ANTHROPIC_BASE,
+        dict(
+            is_reasoning_model=True,
+            supports_reasoning_effort=True,
+            supports_top_p=False,
+            max_context_tokens=1000000,
+            max_output_tokens=128000,
+        ),
+    ),
+    (
         ("claude-fable-5",),
         "claude-fable-5",
         _ANTHROPIC_BASE,
@@ -714,6 +726,32 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
     # Gemini 3.5 Flash (GA 2026-07-09): vision + PDF input, media_resolution
     # low/medium/high/ultra_high, thinking_level minimal/low/medium(default)/
     # high. MUST precede the bare "gemini-3" prefix.
+    (
+        ("gemini-3.7-flash", "gemini-3-7-flash"),
+        "gemini-3.7-flash",
+        _GEMINI_BASE,
+        dict(
+            is_reasoning_model=True,
+            supports_reasoning_effort=True,
+            supports_sampler_controls=False,
+            supports_top_p=False,
+            max_context_tokens=1000000,
+            max_output_tokens=65536,
+        ),
+    ),
+    (
+        ("gemini-3.6-flash", "gemini-3-6-flash"),
+        "gemini-3.6-flash",
+        _GEMINI_BASE,
+        dict(
+            is_reasoning_model=True,
+            supports_reasoning_effort=True,
+            supports_sampler_controls=False,
+            supports_top_p=False,
+            max_context_tokens=1000000,
+            max_output_tokens=65536,
+        ),
+    ),
     (
         ("gemini-3.5-flash", "gemini-3-5-flash"),
         "gemini-3.5-flash",

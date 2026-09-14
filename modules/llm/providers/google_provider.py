@@ -101,6 +101,7 @@ class GoogleProvider(BaseProvider):
                 "low": "low",
                 "medium": "medium",
                 "high": "high",
+                "max": "high",
             }
             if effort in effort_to_level and not family.startswith("gemini-2"):
                 llm_kwargs["thinking_level"] = effort_to_level[effort]

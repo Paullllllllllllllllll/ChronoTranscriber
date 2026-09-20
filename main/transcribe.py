@@ -1,4 +1,4 @@
-# unified_transcriber.py
+# transcribe.py
 """
 Main CLI script for the ChronoTranscriber application.
 
@@ -82,7 +82,7 @@ async def _open_transcriber_from_config(
 
 # Config-synthesis helpers live in modules.transcribe.config_builder and
 # are re-imported at the top of this module so existing callers that do
-# ``from main.unified_transcriber import create_config_from_cli_args``
+# ``from main.transcribe import create_config_from_cli_args``
 # continue to work.
 
 
@@ -764,11 +764,11 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> int:
     return 1 if summary.failed else 0
 
 
-class UnifiedTranscriberScript(AsyncDualModeScript):
+class TranscribeScript(AsyncDualModeScript):
     """Main script for the ChronoTranscriber application."""
 
     def __init__(self) -> None:
-        super().__init__("unified_transcriber")
+        super().__init__("transcribe")
 
     def create_argument_parser(self) -> Any:
         """Create argument parser for CLI mode."""
@@ -796,7 +796,7 @@ class UnifiedTranscriberScript(AsyncDualModeScript):
 
 def main() -> None:
     """Main entry point."""
-    UnifiedTranscriberScript().execute()
+    TranscribeScript().execute()
 
 
 # --------------------------------------------------

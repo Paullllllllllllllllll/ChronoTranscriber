@@ -748,7 +748,7 @@ class WorkflowManager:
             print_warning(
                 f"'{source_name}' was already finalized from a batch run; "
                 f"skipping batch resubmission (it would resubmit every page). "
-                f"Use repair_transcriptions for failed pages, or resume mode "
+                f"Use repair for failed pages, or resume mode "
                 f"'overwrite' to redo the whole item."
             )
             return True

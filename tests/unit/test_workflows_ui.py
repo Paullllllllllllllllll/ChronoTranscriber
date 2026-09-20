@@ -501,7 +501,7 @@ class TestAutoWizardStepOrder:
 
     @pytest.mark.asyncio
     async def test_auto_flow_step_order(self, tmp_path: Path) -> None:
-        from main import unified_transcriber as ut
+        from main import transcribe as ut
 
         calls: list[str] = []
 

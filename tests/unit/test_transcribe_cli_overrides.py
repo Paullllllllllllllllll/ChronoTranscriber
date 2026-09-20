@@ -1,4 +1,4 @@
-"""Unit tests for CLI model override behavior in main/unified_transcriber.py."""
+"""Unit tests for CLI model override behavior in main/transcribe.py."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ class TestResolveModelConfigFromCLI:
     @pytest.mark.unit
     def test_applies_all_cli_model_overrides(self) -> None:
         """Model/provider/reasoning/verbosity/token overrides are applied to a copy."""
-        from main.unified_transcriber import _resolve_model_config_from_cli
+        from main.transcribe import _resolve_model_config_from_cli
 
         base = {
             "transcription_model": {
@@ -57,7 +57,7 @@ class TestResolveModelConfigFromCLI:
     @pytest.mark.unit
     def test_auto_detects_provider_from_model_when_provider_not_given(self) -> None:
         """Provider is inferred from --model when --provider is omitted."""
-        from main.unified_transcriber import _resolve_model_config_from_cli
+        from main.transcribe import _resolve_model_config_from_cli
 
         base = {"transcription_model": {"provider": "openai", "name": "gpt-5-mini"}}
         args = Namespace(
@@ -78,7 +78,7 @@ class TestResolveModelConfigFromCLI:
     @pytest.mark.unit
     def test_rejects_non_positive_max_output_tokens(self) -> None:
         """--max-output-tokens must be positive."""
-        from main.unified_transcriber import _resolve_model_config_from_cli
+        from main.transcribe import _resolve_model_config_from_cli
 
         base = {"transcription_model": {"provider": "openai", "name": "gpt-5-mini"}}
         args = Namespace(
@@ -100,7 +100,7 @@ class TestOpenTranscriberFromConfigForwarding:
     @pytest.mark.asyncio
     async def test_forwards_runtime_model_settings_to_open_transcriber(self) -> None:
         """Transcriber init receives model/runtime overrides from model_config."""
-        from main.unified_transcriber import _open_transcriber_from_config
+        from main.transcribe import _open_transcriber_from_config
 
         user_config = UserConfiguration()
         user_config.selected_schema_path = Path(
@@ -118,9 +118,7 @@ class TestOpenTranscriberFromConfigForwarding:
             }
         }
 
-        with patch(
-            "main.unified_transcriber.open_transcriber", return_value="ctx"
-        ) as mock_open:
+        with patch("main.transcribe.open_transcriber", return_value="ctx") as mock_open:
             result = await _open_transcriber_from_config(user_config, model_config)
 
         assert result == "ctx"

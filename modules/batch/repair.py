@@ -1,7 +1,7 @@
 """Repair operations for failed or placeholder transcriptions.
 
 This module encapsulates the interactive repair workflow previously embedded
-in ``main/repair_transcriptions.py``. It keeps a clean separation of
+in ``main/repair.py``. It keeps a clean separation of
 orchestration logic from the CLI entry point so it can be imported and
 tested.
 

@@ -1,7 +1,7 @@
 """CLI → UserConfiguration translation.
 
 Extracts the configuration-synthesis helpers that previously lived in
-``main/unified_transcriber.py``. Keeps the CLI entry point thin and
+``main/transcribe.py``. Keeps the CLI entry point thin and
 centralises every place where CLI arguments become a validated
 :class:`UserConfiguration`.
 """

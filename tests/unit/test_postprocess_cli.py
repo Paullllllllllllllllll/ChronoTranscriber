@@ -1,4 +1,4 @@
-"""Unit tests for main/postprocess_transcriptions.py CLI behavior.
+"""Unit tests for main/postprocess.py CLI behavior.
 
 Covers directory file collection (legacy + modern naming) and honest exit
 codes on partial failure.
@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from main.postprocess_transcriptions import (
+from main.postprocess import (
     collect_transcription_files,
     postprocess_cli,
     postprocess_interactive,
@@ -120,15 +120,15 @@ class TestPostprocessInteractive:
         """An empty directory returns 1 with the reworded warning."""
         with (
             patch(
-                "main.postprocess_transcriptions.get_config_service",
+                "main.postprocess.get_config_service",
                 return_value=self._config_service(),
             ),
             patch(
-                "main.postprocess_transcriptions.prompt_text",
+                "main.postprocess.prompt_text",
                 return_value=_cont(str(temp_dir)),
             ),
             patch(
-                "main.postprocess_transcriptions.prompt_yes_no",
+                "main.postprocess.prompt_yes_no",
                 return_value=_cont(False),
             ),
         ):
@@ -155,25 +155,25 @@ class TestPostprocessInteractive:
 
         with (
             patch(
-                "main.postprocess_transcriptions.get_config_service",
+                "main.postprocess.get_config_service",
                 return_value=self._config_service(),
             ),
             patch(
-                "main.postprocess_transcriptions.prompt_text",
+                "main.postprocess.prompt_text",
                 return_value=_cont(str(target)),
             ),
             patch(
-                "main.postprocess_transcriptions.prompt_yes_no",
+                "main.postprocess.prompt_yes_no",
                 # use-config-base=False, merge-hyphenation=True, proceed=True
                 side_effect=[_cont(False), _cont(True), _cont(True)],
             ),
             patch(
-                "main.postprocess_transcriptions.prompt_select",
+                "main.postprocess.prompt_select",
                 # wrap mode = "no", output mode = "in_place"
                 side_effect=[_cont("no"), _cont("in_place")],
             ),
             patch(
-                "main.postprocess_transcriptions.postprocess_file",
+                "main.postprocess.postprocess_file",
                 side_effect=_fake_postprocess_file,
             ),
         ):
@@ -205,25 +205,25 @@ class TestPostprocessInteractive:
 
         with (
             patch(
-                "main.postprocess_transcriptions.get_config_service",
+                "main.postprocess.get_config_service",
                 return_value=self._config_service(),
             ),
             patch(
-                "main.postprocess_transcriptions.prompt_text",
+                "main.postprocess.prompt_text",
                 side_effect=[_cont(str(input_dir)), _cont(str(output_dir))],
             ),
             patch(
-                "main.postprocess_transcriptions.prompt_yes_no",
+                "main.postprocess.prompt_yes_no",
                 # recursive=True, use-config=False, merge=False, proceed=True
                 side_effect=[_cont(True), _cont(False), _cont(False), _cont(True)],
             ),
             patch(
-                "main.postprocess_transcriptions.prompt_select",
+                "main.postprocess.prompt_select",
                 # wrap mode = "no", output mode = "new_dir"
                 side_effect=[_cont("no"), _cont("new_dir")],
             ),
             patch(
-                "main.postprocess_transcriptions.postprocess_file",
+                "main.postprocess.postprocess_file",
                 side_effect=_capture,
             ),
         ):
@@ -254,11 +254,11 @@ class TestPostprocessCliExitCodes:
 
         with (
             patch(
-                "main.postprocess_transcriptions.get_config_service",
+                "main.postprocess.get_config_service",
                 return_value=self._patched_config_service(),
             ),
             patch(
-                "main.postprocess_transcriptions.postprocess_file",
+                "main.postprocess.postprocess_file",
                 side_effect=RuntimeError("boom"),
             ),
         ):
@@ -272,11 +272,11 @@ class TestPostprocessCliExitCodes:
 
         with (
             patch(
-                "main.postprocess_transcriptions.get_config_service",
+                "main.postprocess.get_config_service",
                 return_value=self._patched_config_service(),
             ),
             patch(
-                "main.postprocess_transcriptions.postprocess_file",
+                "main.postprocess.postprocess_file",
                 return_value=None,
             ),
         ):
@@ -292,11 +292,11 @@ class TestPostprocessCliExitCodes:
 
         with (
             patch(
-                "main.postprocess_transcriptions.get_config_service",
+                "main.postprocess.get_config_service",
                 return_value=self._patched_config_service(),
             ),
             patch(
-                "main.postprocess_transcriptions.postprocess_file",
+                "main.postprocess.postprocess_file",
                 side_effect=RuntimeError("boom"),
             ),
         ):
@@ -312,11 +312,11 @@ class TestPostprocessCliExitCodes:
 
         with (
             patch(
-                "main.postprocess_transcriptions.get_config_service",
+                "main.postprocess.get_config_service",
                 return_value=self._patched_config_service(),
             ),
             patch(
-                "main.postprocess_transcriptions.postprocess_file",
+                "main.postprocess.postprocess_file",
                 side_effect=RuntimeError("boom"),
             ),
         ):

@@ -1,4 +1,4 @@
-# repair_transcriptions.py
+# repair.py
 """
 CLI script for repairing transcription batches.
 
@@ -19,11 +19,11 @@ from modules.core.cli_args import create_repair_parser
 from modules.transcribe.dual_mode import AsyncDualModeScript
 
 
-class RepairTranscriptionsScript(AsyncDualModeScript):
+class RepairScript(AsyncDualModeScript):
     """Script for repairing transcription batches."""
 
     def __init__(self) -> None:
-        super().__init__("repair_transcriptions")
+        super().__init__("repair")
 
     def create_argument_parser(self) -> ArgumentParser:
         """Create argument parser for CLI mode."""
@@ -48,7 +48,7 @@ class RepairTranscriptionsScript(AsyncDualModeScript):
         if getattr(args, "json_summary", False):
             payload = {
                 "tool": "chronotranscriber",
-                "command": "repair_transcriptions",
+                "command": "repair",
                 "repaired": int(summary.get("repaired", 0)),
                 "failed": failed,
                 "exit_code": exit_code,
@@ -60,7 +60,7 @@ class RepairTranscriptionsScript(AsyncDualModeScript):
 
 def main() -> None:
     """Main entry point."""
-    RepairTranscriptionsScript().execute()
+    RepairScript().execute()
 
 
 if __name__ == "__main__":

@@ -43,7 +43,7 @@ def append_finalized_marker(temp_file: Path) -> None:
     status and ``process_all_batches`` skips the file; without it a retained
     temp JSONL (the shipped ``retain_temporary_jsonl: true`` default) is
     re-downloaded and re-finalized on every run, silently reverting any manual
-    ``repair_transcriptions`` edits to the final ``.txt`` and — once the
+    ``repair`` edits to the final ``.txt`` and — once the
     provider's output files expire — reporting long-finalized jobs as "pending"
     forever. The marker carries only a ``status`` (no provider), and
     ``batch_session`` is a recognized metadata key, so it is inert to every

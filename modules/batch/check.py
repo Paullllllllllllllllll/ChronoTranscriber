@@ -240,7 +240,7 @@ def process_all_batches(
             if has_batch_session and not batch_ids:
                 print_warning(
                     f"{temp_file.name} has a batch_session marker but no batch IDs;"
-                    f" skipping. Use 'main/repair_transcriptions.py' if needed."
+                    f" skipping. Use 'main/repair.py' if needed."
                 )
             elif batch_ids:
                 n = len(batch_ids)
@@ -264,7 +264,7 @@ def process_all_batches(
             print_warning(
                 f"No batch IDs found in {temp_file.name}. This file appears to be"
                 f" batched but missing tracking entries. Use"
-                f" 'main/repair_transcriptions.py' if you need to reconstruct outputs."
+                f" 'main/repair.py' if you need to reconstruct outputs."
             )
             continue
 

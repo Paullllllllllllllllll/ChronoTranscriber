@@ -40,7 +40,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 # Import project modules at module level (order matters for circular deps).
 import modules.config.config_loader as _cl_mod  # noqa: E402
-from main.unified_transcriber import process_documents  # noqa: E402
+from main.transcribe import process_documents  # noqa: E402
 from modules.config.service import ConfigService, get_config_service  # noqa: E402
 from modules.documents.page_range import parse_page_range  # noqa: E402
 from modules.transcribe.user_config import UserConfiguration  # noqa: E402
@@ -240,7 +240,7 @@ def _run_cli(
     env["CHRONO_CONFIG_DIR"] = str(config_dir)
     env["PYTHONPATH"] = str(PROJECT_ROOT)
     return subprocess.run(
-        [sys.executable, str(PROJECT_ROOT / "main" / "unified_transcriber.py")] + args,
+        [sys.executable, str(PROJECT_ROOT / "main" / "transcribe.py")] + args,
         cwd=str(PROJECT_ROOT),
         env=env,
         capture_output=True,
@@ -616,7 +616,7 @@ class TestCLIMode:
         pp_result = subprocess.run(
             [
                 sys.executable,
-                str(PROJECT_ROOT / "main" / "postprocess_transcriptions.py"),
+                str(PROJECT_ROOT / "main" / "postprocess.py"),
                 "--input",
                 str(out_file),
                 "--in-place",
@@ -1115,11 +1115,11 @@ class TestInteractiveMode:
         try:
             from unittest.mock import patch as _patch
 
-            from main.unified_transcriber import (
-                UnifiedTranscriberScript,
+            from main.transcribe import (
+                TranscribeScript,
             )
 
-            script = UnifiedTranscriberScript()
+            script = TranscribeScript()
             # Interactive input is simulated via _InputFeeder, so satisfy the
             # non-TTY guard (which otherwise exits 2 outside a real terminal).
             with _patch("modules.transcribe.dual_mode.sys.stdin") as _m_stdin:

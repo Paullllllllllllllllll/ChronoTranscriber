@@ -1,4 +1,4 @@
-"""Unit tests for create_config_from_cli_args() in main/unified_transcriber.py.
+"""Unit tests for create_config_from_cli_args() in main/transcribe.py.
 
 Tests CLI-to-config override paths for resume_mode, output_format, and
 page_range to verify that CLI flags always take precedence over config
@@ -66,9 +66,9 @@ def _make_paths_config(
 
 def _call_create_config(args, paths_config, input_dir, output_dir):
     """Call create_config_from_cli_args with AutoSelector mocked."""
-    from main.unified_transcriber import create_config_from_cli_args
+    from main.transcribe import create_config_from_cli_args
 
-    with patch("main.unified_transcriber.AutoSelector"):
+    with patch("main.transcribe.AutoSelector"):
         return create_config_from_cli_args(args, input_dir, output_dir, paths_config)
 
 

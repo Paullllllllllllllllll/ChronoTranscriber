@@ -73,7 +73,7 @@ def setup_logger(name: str) -> logging.Logger:
     """Return a logger under the ``chrono`` hierarchy.
 
     Every caller's *name* (e.g. ``"modules.llm.transcriber"`` or
-    ``"main.unified_transcriber"``) is mapped to
+    ``"main.transcribe"``) is mapped to
     ``"chrono.<name>"``, making it a child of the single
     ``"chrono"`` logger that owns the shared
     ``RotatingFileHandler``.  This guarantees exactly one open

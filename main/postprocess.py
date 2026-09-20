@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-postprocess_transcriptions.py
+postprocess.py
 
 Post-process transcription output files to clean up OCR artifacts,
 normalize whitespace, optionally merge hyphenated words, and wrap long lines.
@@ -132,7 +132,7 @@ def _emit_postprocess_json_summary(
         return
     payload = {
         "tool": "chronotranscriber",
-        "command": "postprocess_transcriptions",
+        "command": "postprocess",
         "files_processed": files_processed,
         "files_failed": files_failed,
         "exit_code": exit_code,
@@ -481,7 +481,7 @@ class PostprocessScript(DualModeScript):
     """Script for post-processing transcription output files."""
 
     def __init__(self) -> None:
-        super().__init__("postprocess_transcriptions")
+        super().__init__("postprocess")
 
     def create_argument_parser(self) -> ArgumentParser:
         """Create argument parser for CLI mode."""

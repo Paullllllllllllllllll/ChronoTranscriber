@@ -43,7 +43,7 @@ def add_agent_contract_args(
 
 
 def create_transcriber_parser() -> argparse.ArgumentParser:
-    """Create argument parser for unified_transcriber.py in CLI mode.
+    """Create argument parser for transcribe.py in CLI mode.
 
     Returns:
         Configured ArgumentParser for transcription operations
@@ -54,23 +54,23 @@ def create_transcriber_parser() -> argparse.ArgumentParser:
         epilog="""
 Examples:
   # Transcribe images with GPT
-  python main/unified_transcriber.py --input images/my_folder --output results
+  python main/transcribe.py --input images/my_folder --output results
       --type images --method gpt
 
   # Transcribe PDFs with Tesseract OCR
-  python main/unified_transcriber.py --input pdfs --output output
+  python main/transcribe.py --input pdfs --output output
       --type pdfs --method tesseract
 
   # Batch processing with custom schema
-  python main/unified_transcriber.py --input images/docs --output output
+  python main/transcribe.py --input images/docs --output output
       --type images --method gpt --batch --schema my_schema
 
   # Transcribe audio recordings with the configured speech-to-text API
-  python main/unified_transcriber.py --non-interactive --type audio
+  python main/transcribe.py --non-interactive --type audio
       --method audio-api --input C:/recordings --output C:/transcripts
 
   # Transcribe audio recordings offline with local Whisper
-  python main/unified_transcriber.py --non-interactive --type audio
+  python main/transcribe.py --non-interactive --type audio
       --method whisper --input C:/recordings
         """,
     )
@@ -310,7 +310,7 @@ Examples:
 
 
 def create_repair_parser() -> argparse.ArgumentParser:
-    """Create argument parser for repair_transcriptions.py in CLI mode.
+    """Create argument parser for repair.py in CLI mode.
 
     Returns:
         Configured ArgumentParser for repair operations
@@ -323,15 +323,15 @@ def create_repair_parser() -> argparse.ArgumentParser:
         epilog="""
 Examples:
   # Repair all failures in a transcription
-  python main/repair_transcriptions.py
+  python main/repair.py
       --transcription results/my_doc_transcription.txt
 
   # Repair only API errors with batch processing
-  python main/repair_transcriptions.py
+  python main/repair.py
       --transcription results/doc.txt --errors-only --batch
 
   # Repair specific line indices
-  python main/repair_transcriptions.py
+  python main/repair.py
       --transcription results/doc.txt --indices 0,5,12
         """,
     )
@@ -488,7 +488,7 @@ Examples:
 
 
 def create_postprocess_parser() -> argparse.ArgumentParser:
-    """Create argument parser for postprocess_transcriptions.py in CLI mode.
+    """Create argument parser for postprocess.py in CLI mode.
 
     Returns:
         Configured ArgumentParser for post-processing operations
@@ -502,27 +502,27 @@ def create_postprocess_parser() -> argparse.ArgumentParser:
         epilog="""
 Examples:
   # Post-process a single file in-place
-  python main/postprocess_transcriptions.py
+  python main/postprocess.py
       --input results/doc_transcription.txt --in-place
 
   # Post-process with explicit output
-  python main/postprocess_transcriptions.py
+  python main/postprocess.py
       --input results/doc.txt --output results/doc_cleaned.txt
 
   # Process all transcription files in a directory
-  python main/postprocess_transcriptions.py
+  python main/postprocess.py
       --input results/ --in-place --recursive
 
   # Enable hyphenation merging
-  python main/postprocess_transcriptions.py
+  python main/postprocess.py
       --input doc.txt --in-place --merge-hyphenation
 
   # Enable line wrapping with auto-detected width
-  python main/postprocess_transcriptions.py
+  python main/postprocess.py
       --input doc.txt --in-place --auto-wrap
 
   # Enable line wrapping with explicit width
-  python main/postprocess_transcriptions.py
+  python main/postprocess.py
       --input doc.txt --in-place --wrap-width 100
         """,
     )

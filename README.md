@@ -1,4 +1,4 @@
-# ChronoTranscriber v3.2.0
+# ChronoTranscriber v4.0.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -224,7 +224,7 @@ The real `*.yaml` files are gitignored and never pushed; only the
 **Interactive mode** (recommended for new users):
 
 ```bash
-python main/unified_transcriber.py
+python main/transcribe.py
 ```
 
 The wizard guides you through document type, method, processing options,
@@ -234,15 +234,15 @@ and file selection. Press `b` to go back, `q` to quit at any time.
 
 ```bash
 # Transcribe a PDF with AI
-python main/unified_transcriber.py --type pdfs --method gpt \
+python main/transcribe.py --type pdfs --method gpt \
     --input ./documents/my_doc.pdf --output ./results
 
 # Process images with Tesseract (offline)
-python main/unified_transcriber.py --type images --method tesseract \
+python main/transcribe.py --type images --method tesseract \
     --input ./scans --output ./results
 
 # Batch process PDFs (50% cheaper)
-python main/unified_transcriber.py --type pdfs --method gpt --batch \
+python main/transcribe.py --type pdfs --method gpt --batch \
     --input ./archive --output ./results
 ```
 
@@ -252,7 +252,7 @@ python main/unified_transcriber.py --type pdfs --method gpt --batch \
 
 ```bash
 # Submit
-python main/unified_transcriber.py --type pdfs --method gpt --batch \
+python main/transcribe.py --type pdfs --method gpt --batch \
     --input ./archive --output ./results
 # Monitor (run periodically; auto-downloads on completion)
 python main/check_batches.py
@@ -261,16 +261,16 @@ python main/check_batches.py
 **Mixed document types (auto mode):**
 
 ```bash
-python main/unified_transcriber.py --auto \
+python main/transcribe.py --auto \
     --input ./mixed_documents --output ./results
 ```
 
 **EPUB and MOBI extraction:**
 
 ```bash
-python main/unified_transcriber.py --type epubs --method native \
+python main/transcribe.py --type epubs --method native \
     --input ./ebooks --output ./results
-python main/unified_transcriber.py --type mobis --method native \
+python main/transcribe.py --type mobis --method native \
     --input ./kindle_books --output ./results
 ```
 
@@ -278,18 +278,18 @@ python main/unified_transcriber.py --type mobis --method native \
 
 ```bash
 # Remote speech-to-text (venue set in config/audio_config.yaml)
-python main/unified_transcriber.py --type audio --method audio-api \
+python main/transcribe.py --type audio --method audio-api \
     --input ./recordings --output ./transcripts
 
 # Local faster-whisper (offline)
-python main/unified_transcriber.py --type audio --method whisper \
+python main/transcribe.py --type audio --method whisper \
     --input ./recordings --output ./transcripts
 ```
 
 **Repair failed pages:**
 
 ```bash
-python main/repair_transcriptions.py \
+python main/repair.py \
     --transcription ./results/document_transcription.txt --errors-only
 ```
 
@@ -326,7 +326,7 @@ With `--type audio`, `--provider` and `--model` configure the audio venue
 declared in `audio_config.yaml` (`openai` or `google`) instead of the image
 transcription model, and `--batch` is refused: audio runs synchronously only.
 
-Run `python main/unified_transcriber.py --help` for the full list.
+Run `python main/transcribe.py --help` for the full list.
 
 ### Exit Codes and Automation
 
@@ -617,11 +617,11 @@ Whisper ships its own decoder (PyAV) and needs no ffmpeg at all.
 
 ```bash
 # Remote speech-to-text
-python main/unified_transcriber.py --type audio --method audio-api \
+python main/transcribe.py --type audio --method audio-api \
     --input ./recordings --output ./transcripts
 
 # Local faster-whisper (offline)
-python main/unified_transcriber.py --type audio --method whisper \
+python main/transcribe.py --type audio --method whisper \
     --input ./recordings --output ./transcripts
 ```
 
@@ -647,7 +647,7 @@ do for pages.
   `chunking.overlap_seconds` if boundary artifacts matter.
 - Changing `chunking.target_seconds` invalidates an in-progress resume:
   chunk indices shift and already-transcribed chunks no longer align.
-- `repair_transcriptions.py` does not cover audio. Re-run the main tool
+- `repair.py` does not cover audio. Re-run the main tool
   with `--retry-errors` to redo failed chunks.
 
 ## Batch Processing
@@ -694,15 +694,15 @@ Re-transcribe failed or selected pages within an existing output:
 
 ```bash
 # Repair API errors only
-python main/repair_transcriptions.py \
+python main/repair.py \
     --transcription ./results/doc_transcription.txt --errors-only
 
 # Repair specific page indices
-python main/repair_transcriptions.py \
+python main/repair.py \
     --transcription ./results/doc_transcription.txt --indices 5,12,18
 ```
 
-Audio transcripts are not covered; re-run `unified_transcriber.py` with
+Audio transcripts are not covered; re-run `transcribe.py` with
 `--retry-errors` to redo failed chunks.
 
 ### Post-process Transcriptions
@@ -711,7 +711,7 @@ Run the text cleanup pipeline (Unicode normalization, hyphenation
 merging, whitespace normalization, line wrapping) on existing output:
 
 ```bash
-python main/postprocess_transcriptions.py \
+python main/postprocess.py \
     --input-dir ./results
 ```
 
@@ -801,11 +801,11 @@ modules/
 +-- ui/            Interactive prompts, batch display, workflow wizard
 
 main/
-+-- unified_transcriber.py      Primary entry point
++-- transcribe.py               Primary entry point
 +-- check_batches.py            Monitor and finalize batch jobs
 +-- cancel_batches.py           Cancel non-terminal batch jobs
-+-- repair_transcriptions.py    Re-transcribe failed pages
-+-- postprocess_transcriptions.py  Standalone post-processing
++-- repair.py                   Re-transcribe failed pages
++-- postprocess.py              Standalone post-processing
 ```
 
 Provider integration flows through `modules/llm/providers/` (factory
@@ -841,7 +841,7 @@ variable. Provider can also be auto-detected from the model name.
 
 **What happens when pages fail?**
 Failed pages are marked with error placeholders in the output.
-Use `repair_transcriptions.py --errors-only` to re-transcribe only
+Use `repair.py --errors-only` to re-transcribe only
 the failures.
 
 **Can I process password-protected PDFs?**
@@ -898,6 +898,16 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v4.0.0** (20 September 2026) -- Breaking rename of the three entry
+  points that carried transitional names: `main/unified_transcriber.py`
+  is now `main/transcribe.py`, `main/repair_transcriptions.py` is now
+  `main/repair.py`, and `main/postprocess_transcriptions.py` is now
+  `main/postprocess.py`; the old file names are removed outright, with
+  no compatibility shims, so callers, scripts, and documentation must
+  switch to the new paths. The `command` field of the `--json` summaries
+  follows the new names (`repair`, `postprocess`). Also re-synced the vendored shared token
+  ledger module to upstream version 2.1.3 and updated its pinned content
+  hash accordingly.
 - **v3.2.0** (14 September 2026) -- Register `claude-opus-5`,
   `gemini-3.7-flash`, and `gemini-3.6-flash` in the capability registry
   so they no longer fall through to the bare provider defaults; add

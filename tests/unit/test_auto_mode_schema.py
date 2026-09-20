@@ -128,7 +128,7 @@ class TestAutoModeCliSchemaSelection:
         self, temp_dir: Path, mock_paths_config: dict[str, Any]
     ) -> None:
         """Test that --schema argument works with --auto mode."""
-        from main.unified_transcriber import create_config_from_cli_args
+        from main.transcribe import create_config_from_cli_args
 
         # Create test files in temp directory
         test_file = temp_dir / "test_image_folder"
@@ -164,9 +164,7 @@ class TestAutoModeCliSchemaSelection:
             ),
         ]
 
-        with patch(
-            "main.unified_transcriber.list_schema_options", return_value=mock_options
-        ):
+        with patch("main.transcribe.list_schema_options", return_value=mock_options):
             config = create_config_from_cli_args(
                 args, temp_dir, temp_dir / "output", mock_paths_config
             )
@@ -180,7 +178,7 @@ class TestAutoModeCliSchemaSelection:
         self, temp_dir: Path, mock_paths_config: dict[str, Any]
     ) -> None:
         """Test that invalid schema name raises ValueError."""
-        from main.unified_transcriber import create_config_from_cli_args
+        from main.transcribe import create_config_from_cli_args
 
         # Create test files
         test_folder = temp_dir / "test_folder"
@@ -206,7 +204,7 @@ class TestAutoModeCliSchemaSelection:
         )
 
         with (
-            patch("main.unified_transcriber.list_schema_options", return_value=[]),
+            patch("main.transcribe.list_schema_options", return_value=[]),
             pytest.raises(ValueError, match="Schema 'nonexistent_schema' not found"),
         ):
             create_config_from_cli_args(
@@ -218,7 +216,7 @@ class TestAutoModeCliSchemaSelection:
         self, temp_dir: Path, mock_paths_config: dict[str, Any]
     ) -> None:
         """Test that default schema is used when --schema is not specified."""
-        from main.unified_transcriber import create_config_from_cli_args
+        from main.transcribe import create_config_from_cli_args
 
         # Create test files
         test_folder = temp_dir / "test_folder"
@@ -259,7 +257,7 @@ class TestAutoModeContextSelection:
         self, temp_dir: Path, mock_paths_config: dict[str, Any]
     ) -> None:
         """Test that --context argument works with --auto mode."""
-        from main.unified_transcriber import create_config_from_cli_args
+        from main.transcribe import create_config_from_cli_args
 
         # Create test files
         test_folder = temp_dir / "test_folder"

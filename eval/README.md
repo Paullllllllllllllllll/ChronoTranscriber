@@ -81,12 +81,12 @@ Run transcriptions for each model and category. The
 
 ```bash
 # Tesseract baseline
-uv run python main/unified_transcriber.py --input eval/test_data/input/address_books \
+uv run python main/transcribe.py --input eval/test_data/input/address_books \
     --output eval/test_data/output/address_books/tesseract \
     --type images --method tesseract
 
 # GPT-5.2 (medium reasoning)
-uv run python main/unified_transcriber.py --input eval/test_data/input/address_books \
+uv run python main/transcribe.py --input eval/test_data/input/address_books \
     --output eval/test_data/output/address_books/gpt_5.2_medium \
     --type images --method gpt --model gpt-5.2
 ```
@@ -94,7 +94,7 @@ uv run python main/unified_transcriber.py --input eval/test_data/input/address_b
 **bibliography** (single PDF):
 
 ```bash
-uv run python main/unified_transcriber.py \
+uv run python main/transcribe.py \
     --input eval/test_data/input/bibliography/Whitaker_1913_English_Cookery_Books_to_the_Year_1850.pdf \
     --output eval/test_data/output/bibliography/gpt_5.2_medium \
     --type pdfs --method gpt --model gpt-5.2
@@ -103,7 +103,7 @@ uv run python main/unified_transcriber.py \
 **military_records** (each PDF separately, or the whole folder):
 
 ```bash
-uv run python main/unified_transcriber.py --input eval/test_data/input/military_records \
+uv run python main/transcribe.py --input eval/test_data/input/military_records \
     --output eval/test_data/output/military_records/gpt_5.2_medium \
     --type pdfs --method gpt --model gpt-5.2
 ```

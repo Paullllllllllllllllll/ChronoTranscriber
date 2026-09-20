@@ -208,7 +208,7 @@ class TestPageFailurePropagation:
             )
 
     def test_json_summary_reports_failure_and_exit_1(self, capsys: Any) -> None:
-        from main.unified_transcriber import _emit_json_summary
+        from main.transcribe import _emit_json_summary
         from modules.transcribe.manager import ProcessingSummary
 
         _emit_json_summary(ProcessingSummary(processed=0, failed=1, total=1))
@@ -860,7 +860,7 @@ class TestAutoModeConfigPropagation:
     async def test_full_copy_and_resume_checker_repointed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import main.unified_transcriber as ut
+        import main.transcribe as ut
         from modules.transcribe.manager import ProcessingSummary
         from modules.transcribe.user_config import UserConfiguration
 
@@ -1146,19 +1146,19 @@ class TestRepairJsonSummary:
     async def test_emits_summary_all_repaired_exit_0(
         self, monkeypatch: pytest.MonkeyPatch, capsys: Any
     ) -> None:
-        import main.repair_transcriptions as rt
+        import main.repair as rt
 
         async def fake_main_cli(args: Any, paths_config: Any) -> dict[str, int]:
             return {"repaired": 3, "failed": 0}
 
         monkeypatch.setattr(rt, "main_cli", fake_main_cli)
-        script = rt.RepairTranscriptionsScript()
+        script = rt.RepairScript()
 
         await script.run_cli(Namespace(json_summary=True))
         payload = _extract_json_line(capsys.readouterr().out)
         assert payload == {
             "tool": "chronotranscriber",
-            "command": "repair_transcriptions",
+            "command": "repair",
             "repaired": 3,
             "failed": 0,
             "exit_code": 0,
@@ -1170,13 +1170,13 @@ class TestRepairJsonSummary:
     ) -> None:
         """A surviving placeholder must surface as a non-zero exit, not a
         silent success (the single-line unresolved-target incident)."""
-        import main.repair_transcriptions as rt
+        import main.repair as rt
 
         async def fake_main_cli(args: Any, paths_config: Any) -> dict[str, int]:
             return {"repaired": 3, "failed": 1}
 
         monkeypatch.setattr(rt, "main_cli", fake_main_cli)
-        script = rt.RepairTranscriptionsScript()
+        script = rt.RepairScript()
 
         with pytest.raises(SystemExit) as exc_info:
             await script.run_cli(Namespace(json_summary=True))
@@ -1184,7 +1184,7 @@ class TestRepairJsonSummary:
         payload = _extract_json_line(capsys.readouterr().out)
         assert payload == {
             "tool": "chronotranscriber",
-            "command": "repair_transcriptions",
+            "command": "repair",
             "repaired": 3,
             "failed": 1,
             "exit_code": 1,
@@ -1212,7 +1212,7 @@ class TestPostprocessJsonSummary:
         return Namespace(**base)
 
     def test_in_place_emits_summary(self, tmp_path: Path, capsys: Any) -> None:
-        import main.postprocess_transcriptions as pp
+        import main.postprocess as pp
 
         f = tmp_path / "doc_transcription.txt"
         f.write_text("hello   world\n\n\n\n\nend\n", encoding="utf-8")
@@ -1222,7 +1222,7 @@ class TestPostprocessJsonSummary:
         payload = _extract_json_line(capsys.readouterr().out)
         assert payload == {
             "tool": "chronotranscriber",
-            "command": "postprocess_transcriptions",
+            "command": "postprocess",
             "files_processed": 1,
             "files_failed": 0,
             "exit_code": 0,
@@ -1231,7 +1231,7 @@ class TestPostprocessJsonSummary:
     def test_missing_input_emits_summary_with_exit_1(
         self, tmp_path: Path, capsys: Any
     ) -> None:
-        import main.postprocess_transcriptions as pp
+        import main.postprocess as pp
 
         code = pp.postprocess_cli(self._make_args(tmp_path / "missing.txt"))
         assert code == 1

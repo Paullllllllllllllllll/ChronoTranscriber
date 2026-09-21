@@ -1,4 +1,4 @@
-# ChronoTranscriber v4.0.0
+# ChronoTranscriber v4.0.1
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -898,6 +898,12 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v4.0.1** (21 September 2026) -- Security patch for the notebook
+  dependency stack: jupyter-server moves from 2.20.0 to 2.21.1, which
+  fixes CVE-2026-86049, where a request that failed with a 500 error
+  logged its `Referer` header unredacted and could expose an
+  authentication token carried in a URL. Only locally run evaluation
+  notebook servers were affected.
 - **v4.0.0** (20 September 2026) -- Breaking rename of the three entry
   points that carried transitional names: `main/unified_transcriber.py`
   is now `main/transcribe.py`, `main/repair_transcriptions.py` is now

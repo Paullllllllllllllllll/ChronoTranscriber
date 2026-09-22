@@ -58,12 +58,19 @@ logger = setup_logger(__name__)
 async def _open_transcriber_from_config(
     user_config: UserConfiguration,
     model_config: dict[str, Any],
+    *,
+    service_tier: str | None = None,
 ) -> Any:
     """Create an LLM transcriber context manager from config (shared helper).
 
     Returns an async context manager that yields the transcriber instance.
     Centralises the identical ``open_transcriber`` call used in both
     :func:`process_auto_mode` and :func:`process_documents`.
+
+    Args:
+        service_tier: Optional runtime override for the OpenAI service tier
+            (e.g. from the CLI's ``--service-tier``), taking precedence over
+            concurrency_config.yaml.
     """
     tm = model_config.get("transcription_model", {})
 
@@ -77,6 +84,7 @@ async def _open_transcriber_from_config(
         max_output_tokens=tm.get("max_output_tokens"),
         reasoning_config=tm.get("reasoning"),
         text_config=tm.get("text"),
+        service_tier=service_tier,
     )
 
 
@@ -257,6 +265,7 @@ async def process_auto_mode(
     image_processing_config: dict[str, Any],
     *,
     print_decision_summary: bool = True,
+    service_tier: str | None = None,
 ) -> ProcessingSummary:
     """Process documents in auto mode with per-file method decisions.
 
@@ -269,6 +278,8 @@ async def process_auto_mode(
         print_decision_summary: When True, print the AUTO MODE DECISIONS table.
             The interactive wizard already prints it during selection, so it
             passes False here to avoid a duplicate; CLI mode keeps it True.
+        service_tier: Optional runtime override for the OpenAI service tier
+            (from the CLI's ``--service-tier``).
     """
 
     print_header("AUTO MODE", "Processing files with automatic method selection...")
@@ -354,7 +365,7 @@ async def process_auto_mode(
                 ).resolve()
 
             async with await _open_transcriber_from_config(
-                user_config, model_config
+                user_config, model_config, service_tier=service_tier
             ) as t:
                 transcriber = t
                 group_summary = await workflow_manager.process_selected_items(
@@ -380,6 +391,7 @@ async def process_documents(
     image_processing_config: dict[str, Any],
     *,
     audio_config: dict[str, Any] | None = None,
+    service_tier: str | None = None,
 ) -> ProcessingSummary:
     """
     Process documents based on user configuration.
@@ -392,6 +404,8 @@ async def process_documents(
         image_processing_config: Image processing configuration
         audio_config: Audio configuration (CLI overrides already applied);
             loaded from the config service when omitted and audio is processed.
+        service_tier: Optional runtime override for the OpenAI service tier
+            (from the CLI's ``--service-tier``).
 
     Returns:
         A `ProcessingSummary` with the real success/failure counts.
@@ -428,7 +442,9 @@ async def process_documents(
         user_config.transcription_method == "gpt"
         and not user_config.use_batch_processing
     ):
-        async with await _open_transcriber_from_config(user_config, model_config) as t:
+        async with await _open_transcriber_from_config(
+            user_config, model_config, service_tier=service_tier
+        ) as t:
             return await workflow_manager.process_selected_items(t)
     # For non-GPT methods or batch processing, no transcriber needed
     return await workflow_manager.process_selected_items()
@@ -682,6 +698,10 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> int:
         if applied_model_overrides:
             print_info(f"CLI model overrides: {', '.join(applied_model_overrides)}")
 
+    service_tier_override = getattr(args, "service_tier", None)
+    if service_tier_override:
+        print_info(f"CLI service tier override: {service_tier_override}")
+
     effective_paths_config = paths_config
     if not args.auto:
         output_path = resolve_path(args.output, base_output_dir)
@@ -738,6 +758,7 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> int:
             effective_model_config,
             config_service.get_concurrency_config(),
             config_service.get_image_processing_config(),
+            service_tier=service_tier_override,
         )
     else:
         summary = await process_documents(
@@ -747,6 +768,7 @@ async def transcribe_cli(args: Any, paths_config: dict[str, Any]) -> int:
             config_service.get_concurrency_config(),
             config_service.get_image_processing_config(),
             audio_config=effective_audio_config,
+            service_tier=service_tier_override,
         )
 
     if summary.failed:

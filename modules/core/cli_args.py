@@ -213,6 +213,16 @@ Examples:
         help="Override maximum output tokens per response.",
     )
 
+    parser.add_argument(
+        "--service-tier",
+        choices=["auto", "default", "flex", "priority"],
+        help=(
+            "Override the OpenAI service tier for this run, taking precedence"
+            " over concurrency_config.yaml. Dropped for providers/models that"
+            " do not support it."
+        ),
+    )
+
     # Resume / overwrite behavior
     resume_group = parser.add_mutually_exclusive_group()
     resume_group.add_argument(

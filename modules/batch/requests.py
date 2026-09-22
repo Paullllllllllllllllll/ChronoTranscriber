@@ -163,8 +163,11 @@ def _build_responses_body_for_image(
         )
     except (KeyError, AttributeError, TypeError):
         st = None
-    # Fallback: use model_config if service_tier not in concurrency_config
-    effective_service_tier = st if st is not None else tm.get("service_tier")
+    # transcription_model.service_tier wins when set: it is how the CLI's
+    # --service-tier override reaches batch requests (see
+    # modules/transcribe/config_builder.py). Otherwise fall back to
+    # concurrency_config.yaml's configured value.
+    effective_service_tier = tm.get("service_tier") if tm.get("service_tier") else st
 
     # IMPORTANT: Flex processing is only available for synchronous API calls, NOT
     # batch API. If flex is configured, use "auto" instead for batch requests.

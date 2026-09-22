@@ -46,6 +46,7 @@ class LangChainTranscriber:
         max_output_tokens: int | None = None,
         reasoning_config: dict[str, Any] | None = None,
         text_config: dict[str, Any] | None = None,
+        service_tier: str | None = None,
     ) -> None:
         """Initialize the transcriber.
 
@@ -62,6 +63,9 @@ class LangChainTranscriber:
             max_output_tokens: Optional runtime override for max output tokens
             reasoning_config: Optional runtime override for reasoning settings
             text_config: Optional runtime override for text settings (verbosity)
+            service_tier: Optional runtime override for the OpenAI service tier
+                (auto/default/flex/priority), taking precedence over
+                concurrency_config.yaml's concurrency.transcription.service_tier
         """
         self.use_hierarchical_context = use_hierarchical_context
         config_service = get_config_service()
@@ -247,20 +251,25 @@ class LangChainTranscriber:
         text_cfg = text_config if text_config is not None else tm.get("text")
 
         # Load service_tier and request_timeout from concurrency config
-        # (synchronous mode)
+        # (synchronous mode). An explicit constructor override (e.g. the CLI's
+        # --service-tier) takes precedence over the configured value.
         try:
             cc = config_service.get_concurrency_config()
             trans_cfg = (cc.get("concurrency", {}) or {}).get("transcription", {}) or {}
-            service_tier = trans_cfg.get("service_tier")
+            configured_service_tier = trans_cfg.get("service_tier")
             request_timeout = trans_cfg.get("request_timeout")
         except Exception:
-            service_tier = None
+            configured_service_tier = None
             request_timeout = None
+
+        effective_service_tier = (
+            service_tier if service_tier is not None else configured_service_tier
+        )
 
         # Build kwargs for optional parameters
         provider_kwargs: dict[str, Any] = {}
-        if service_tier:
-            provider_kwargs["service_tier"] = service_tier
+        if effective_service_tier:
+            provider_kwargs["service_tier"] = effective_service_tier
         if top_p is not None:
             provider_kwargs["top_p"] = float(top_p)
         if frequency_penalty is not None:
@@ -476,6 +485,7 @@ async def open_transcriber(
     max_output_tokens: int | None = None,
     reasoning_config: dict[str, Any] | None = None,
     text_config: dict[str, Any] | None = None,
+    service_tier: str | None = None,
 ) -> AsyncGenerator[LangChainTranscriber]:
     """Context manager for LangChainTranscriber with automatic cleanup.
 
@@ -492,6 +502,7 @@ async def open_transcriber(
         max_output_tokens: Optional runtime override for max output tokens
         reasoning_config: Optional runtime override for reasoning settings
         text_config: Optional runtime override for text settings (verbosity)
+        service_tier: Optional runtime override for the OpenAI service tier
 
     Yields:
         LangChainTranscriber instance with managed lifecycle
@@ -507,6 +518,7 @@ async def open_transcriber(
         max_output_tokens=max_output_tokens,
         reasoning_config=reasoning_config,
         text_config=text_config,
+        service_tier=service_tier,
     )
     try:
         yield transcriber

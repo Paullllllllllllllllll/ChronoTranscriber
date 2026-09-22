@@ -102,6 +102,8 @@ class TestCreateTranscriberParser:
                 "verbose",
                 "--max-output-tokens",
                 "65536",
+                "--service-tier",
+                "priority",
             ]
         )
         assert args.model == "gpt-5.2"
@@ -109,6 +111,27 @@ class TestCreateTranscriberParser:
         assert args.reasoning_effort == "high"
         assert args.model_verbosity == "verbose"
         assert args.max_output_tokens == 65536
+        assert args.service_tier == "priority"
+
+    @pytest.mark.unit
+    def test_invalid_service_tier_choice(self) -> None:
+        """Test that invalid --service-tier choice raises parser error."""
+        parser = create_transcriber_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(
+                [
+                    "--input",
+                    "input",
+                    "--output",
+                    "output",
+                    "--type",
+                    "pdfs",
+                    "--method",
+                    "gpt",
+                    "--service-tier",
+                    "premium",
+                ]
+            )
 
     @pytest.mark.unit
     def test_invalid_model_verbosity_choice(self) -> None:

@@ -118,7 +118,11 @@ def _build_responses_body(
         )
     except (KeyError, AttributeError, TypeError):
         st = None
-    effective_service_tier = st if st is not None else tm.get("service_tier")
+    # transcription_model.service_tier wins when set: it is how the CLI's
+    # --service-tier override reaches batch requests (see
+    # modules/transcribe/config_builder.py). Otherwise fall back to
+    # concurrency_config.yaml's configured value.
+    effective_service_tier = tm.get("service_tier") if tm.get("service_tier") else st
 
     # Flex is not supported for batch - convert to auto
     if effective_service_tier:

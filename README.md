@@ -1,4 +1,4 @@
-# ChronoTranscriber v4.0.1
+# ChronoTranscriber v4.1.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -309,6 +309,8 @@ python main/repair.py \
 --reasoning-effort LEVEL   none | low | medium | high | xhigh
 --model-verbosity LEVEL    concise | medium | verbose (OpenAI GPT-5 family)
 --max-output-tokens N      Override the max output token limit
+--service-tier TIER        auto | default | flex | priority (OpenAI; overrides
+                            concurrency_config.yaml for this run)
 --output-format FORMAT     txt | md | json
 --output-mode MODE         hash | mirror (mirror replicates input hierarchy)
 --pages RANGE              e.g., '3-7', 'first:5', '1,3,5-8'
@@ -898,6 +900,11 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v4.1.0** (22 September 2026) -- A new `--service-tier
+  {auto,default,flex,priority}` flag on `transcribe.py` overrides the
+  configured OpenAI service tier for one run, without editing
+  `concurrency_config.yaml`; it reaches both synchronous calls and batch
+  submissions, where `flex` still maps to `auto`.
 - **v4.0.1** (21 September 2026) -- Security patch for the notebook
   dependency stack: jupyter-server moves from 2.20.0 to 2.21.1, which
   fixes CVE-2026-86049, where a request that failed with a 500 error

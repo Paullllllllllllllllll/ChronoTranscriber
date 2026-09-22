@@ -117,6 +117,17 @@ def _resolve_model_config_from_cli(
         tm["reasoning"] = reasoning_cfg
         applied_overrides.append(f"reasoning.effort={reasoning_effort}")
 
+    # Batch submissions build their request body from this model_config, and
+    # already fall back to transcription_model.service_tier when
+    # concurrency_config.yaml has none set (modules/batch/requests.py,
+    # modules/batch/backends/openai_backend.py). Writing the override here, and
+    # giving it priority there, makes --service-tier apply to batch requests
+    # too; synchronous requests get the override via a separate constructor
+    # parameter on LangChainTranscriber (modules/llm/transcriber.py).
+    service_tier = getattr(args, "service_tier", None)
+    if service_tier:
+        tm["service_tier"] = service_tier
+
     model_verbosity = getattr(args, "model_verbosity", None)
     if model_verbosity:
         text_cfg = tm.get("text")

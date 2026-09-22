@@ -76,6 +76,52 @@ class TestResolveModelConfigFromCLI:
         assert "provider=google (auto)" in applied
 
     @pytest.mark.unit
+    def test_service_tier_override_wins(self) -> None:
+        """--service-tier is written into transcription_model.service_tier."""
+        from main.transcribe import _resolve_model_config_from_cli
+
+        base = {
+            "transcription_model": {
+                "provider": "openai",
+                "name": "gpt-5-mini",
+                "service_tier": "default",
+            }
+        }
+        args = Namespace(
+            model=None,
+            provider=None,
+            max_output_tokens=None,
+            reasoning_effort=None,
+            model_verbosity=None,
+            service_tier="priority",
+        )
+
+        resolved, _applied = _resolve_model_config_from_cli(base, args)
+
+        assert resolved["transcription_model"]["service_tier"] == "priority"
+        # ensure base config remains unchanged
+        assert base["transcription_model"]["service_tier"] == "default"
+
+    @pytest.mark.unit
+    def test_service_tier_absent_leaves_model_config_unchanged(self) -> None:
+        """Without --service-tier, transcription_model is untouched."""
+        from main.transcribe import _resolve_model_config_from_cli
+
+        base = {"transcription_model": {"provider": "openai", "name": "gpt-5-mini"}}
+        args = Namespace(
+            model=None,
+            provider=None,
+            max_output_tokens=None,
+            reasoning_effort=None,
+            model_verbosity=None,
+            service_tier=None,
+        )
+
+        resolved, _applied = _resolve_model_config_from_cli(base, args)
+
+        assert "service_tier" not in resolved["transcription_model"]
+
+    @pytest.mark.unit
     def test_rejects_non_positive_max_output_tokens(self) -> None:
         """--max-output-tokens must be positive."""
         from main.transcribe import _resolve_model_config_from_cli
@@ -128,3 +174,28 @@ class TestOpenTranscriberFromConfigForwarding:
         assert kwargs["max_output_tokens"] == 32000
         assert kwargs["reasoning_config"] == {"effort": "high"}
         assert kwargs["text_config"] == {"verbosity": "concise"}
+        assert kwargs["service_tier"] is None
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_forwards_service_tier_override_to_open_transcriber(self) -> None:
+        """--service-tier reaches open_transcriber for synchronous requests."""
+        from main.transcribe import _open_transcriber_from_config
+
+        user_config = UserConfiguration()
+        user_config.selected_schema_path = Path(
+            "schemas/markdown_transcription_schema.json"
+        )
+        user_config.additional_context_path = None
+
+        model_config = {
+            "transcription_model": {"provider": "openai", "name": "gpt-5.2"}
+        }
+
+        with patch("main.transcribe.open_transcriber", return_value="ctx") as mock_open:
+            result = await _open_transcriber_from_config(
+                user_config, model_config, service_tier="flex"
+            )
+
+        assert result == "ctx"
+        assert mock_open.call_args.kwargs["service_tier"] == "flex"

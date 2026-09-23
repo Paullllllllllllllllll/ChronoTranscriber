@@ -237,10 +237,22 @@ _OPENROUTER_BASE: dict[str, Any] = dict(
 # ---------------------------------------------------------------------------
 
 _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]]] = [
-    # --- OpenAI GPT-6 family (sol/luna GA 2026-09-22) ---
+    # --- OpenAI GPT-6 family (astra; sol/luna GA 2026-09-22) ---
     # Same capability profile as GPT-5.6: 1.05M context, 128k output, vision
     # with image_detail original (Responses route only; verified 23.09.2026
-    # against the live API), reasoning efforts none..max.
+    # against the live API for sol/luna). Reasoning efforts: astra low..max,
+    # sol/luna none..max.
+    (
+        ("gpt-6-astra",),
+        "gpt-6-astra",
+        _OPENAI_REASONING_BASE,
+        dict(
+            supports_chat_completions=False,
+            max_context_tokens=1050000,
+            max_output_tokens=128000,
+            supports_image_detail_original=True,
+        ),
+    ),
     (
         ("gpt-6-sol",),
         "gpt-6-sol",

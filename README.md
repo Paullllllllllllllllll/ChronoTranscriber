@@ -1,4 +1,4 @@
-# ChronoTranscriber v4.2.0
+# ChronoTranscriber v4.3.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -900,6 +900,9 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v4.3.0** (23 September 2026) -- Register `gpt-6-astra` with the same
+  profile as the other GPT-6 models: pinned to the Responses route for
+  image detail `original`, 1.05M context and 128k output.
 - **v4.2.0** (23 September 2026) -- Register `gpt-6-sol`, `gpt-6-luna`
   and `claude-opus-5-5`. Both GPT-6 models are pinned to the Responses
   route, the only route that accepts image detail `original`. Opus 5.5

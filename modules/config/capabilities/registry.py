@@ -237,6 +237,32 @@ _OPENROUTER_BASE: dict[str, Any] = dict(
 # ---------------------------------------------------------------------------
 
 _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]]] = [
+    # --- OpenAI GPT-6 family (sol/luna GA 2026-09-22) ---
+    # Same capability profile as GPT-5.6: 1.05M context, 128k output, vision
+    # with image_detail original (Responses route only; verified 23.09.2026
+    # against the live API), reasoning efforts none..max.
+    (
+        ("gpt-6-sol",),
+        "gpt-6-sol",
+        _OPENAI_REASONING_BASE,
+        dict(
+            supports_chat_completions=False,
+            max_context_tokens=1050000,
+            max_output_tokens=128000,
+            supports_image_detail_original=True,
+        ),
+    ),
+    (
+        ("gpt-6-luna",),
+        "gpt-6-luna",
+        _OPENAI_REASONING_BASE,
+        dict(
+            supports_chat_completions=False,
+            max_context_tokens=1050000,
+            max_output_tokens=128000,
+            supports_image_detail_original=True,
+        ),
+    ),
     # --- OpenAI GPT-5.x family (reasoning, Responses-native) ---
     # GPT-5.6 (GA 2026-07-09): sol (flagship), terra (mid), luna (small).
     # All three share the same capability profile: 1.05M context, 128k
@@ -487,6 +513,19 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
     # these models, so supports_top_p is disabled here (mirroring Opus 4.7) and
     # the family names are registered in the provider's adaptive-thinking set,
     # which sends {"type": "adaptive"} instead of a budget_tokens block.
+    # Opus 5.5 MUST precede the bare "claude-opus-5" prefix.
+    (
+        ("claude-opus-5-5", "claude-opus-5.5"),
+        "claude-opus-5.5",
+        _ANTHROPIC_BASE,
+        dict(
+            is_reasoning_model=True,
+            supports_reasoning_effort=True,
+            supports_top_p=False,
+            max_context_tokens=1000000,
+            max_output_tokens=128000,
+        ),
+    ),
     (
         ("claude-opus-5",),
         "claude-opus-5",

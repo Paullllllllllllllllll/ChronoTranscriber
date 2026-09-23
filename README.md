@@ -1,4 +1,4 @@
-# ChronoTranscriber v4.1.0
+# ChronoTranscriber v4.2.0
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -900,6 +900,13 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v4.2.0** (23 September 2026) -- Register `gpt-6-sol`, `gpt-6-luna`
+  and `claude-opus-5-5`. Both GPT-6 models are pinned to the Responses
+  route, the only route that accepts image detail `original`. Opus 5.5
+  joins the Anthropic adaptive-thinking families; without that entry it
+  would receive a `budget_tokens` thinking block and fail with HTTP 400.
+  The shared ledger (module version 2.1.4) adds `gpt-6-sol` to the large
+  default pool and `gpt-6-luna` to the small one.
 - **v4.1.0** (22 September 2026) -- A new `--service-tier
   {auto,default,flex,priority}` flag on `transcribe.py` overrides the
   configured OpenAI service tier for one run, without editing

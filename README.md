@@ -1,4 +1,4 @@
-# ChronoTranscriber v4.3.0
+# ChronoTranscriber v4.3.1
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -900,6 +900,9 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v4.3.1** (30 September 2026) -- The shared ledger (module version 2.1.5)
+  adds `gpt-6-astra` to the large default pool; before, its usage was
+  recorded without a pool and escaped the per-key pool caps.
 - **v4.3.0** (23 September 2026) -- Register `gpt-6-astra` with the same
   profile as the other GPT-6 models: pinned to the Responses route for
   image detail `original`, 1.05M context and 128k output.

@@ -372,6 +372,16 @@ async def transcribe_payload(
     provenance) and the absolute page index as ``order_index``.
     """
     image_name = payload.image_name
+    if getattr(payload, "render_error", None) is not None:
+        # The page never produced an image (render failure or over
+        # max_image_bytes): record the failure without an API call.
+        return (
+            payload,
+            image_name,
+            f"[transcription error: {image_name}]",
+            None,
+            payload.index,
+        )
     try:
         result = await transcriber.transcribe_image_from_base64(
             payload.base64, payload.mime_type, label=image_name

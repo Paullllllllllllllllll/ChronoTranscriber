@@ -62,6 +62,10 @@ class PagePayload:
     source_file: str = ""
     page_index: int | None = None
     image_provenance: dict[str, Any] = field(default_factory=dict)
+    # Set when the page could not be rendered or encoded (for example over
+    # max_image_bytes); the page is then recorded as a transcription error
+    # instead of vanishing from the output.
+    render_error: str | None = None
 
     def provenance(self) -> dict[str, Any]:
         """Per-page reproducibility record for JSONL persistence."""
@@ -460,12 +464,32 @@ def _load_image_payload(
         )
 
 
+def _render_error_payload(
+    index: int,
+    image_name: str,
+    source_file: str,
+    page_index: int | None,
+    error: Exception,
+) -> PagePayload:
+    """Placeholder payload for a page that could not be rendered or encoded."""
+    return PagePayload(
+        index=index,
+        image_name=image_name,
+        base64="",
+        source_file=source_file,
+        page_index=page_index,
+        image_provenance={"render_error": str(error)},
+        render_error=str(error),
+    )
+
+
 def _raise_if_failure_rate_excessive(source_name: str, total: int, failed: int) -> None:
     """Raise when too many pages failed, mirroring the legacy disk pipeline.
 
-    Below the excessive-failure threshold, failed pages are skipped rather than
-    raised; surface a WARNING so a partial output is never mistaken for a
-    complete one (B8).
+    Below the excessive-failure threshold, each failed page is yielded as a
+    render-error payload that becomes a ``[transcription error]`` record, so
+    the item counts as failed and repair can re-render the page; surface a
+    WARNING as well (B8).
     """
     if total > 1 and failed >= 2 and (failed / total) >= IMAGE_FAILURE_RATE_THRESHOLD:
         raise RuntimeError(
@@ -477,14 +501,16 @@ def _raise_if_failure_rate_excessive(source_name: str, total: int, failed: int) 
         from modules.ui import print_warning
 
         logger.warning(
-            "Skipped %d of %d page(s) in '%s' that failed to render/preprocess.",
+            "%d of %d page(s) in '%s' failed to render/preprocess and are "
+            "recorded as transcription errors.",
             failed,
             total,
             source_name,
         )
         print_warning(
-            f"Skipped {failed} of {total} page(s) in '{source_name}' that failed "
-            f"to render/preprocess; the output will be missing those pages."
+            f"{failed} of {total} page(s) in '{source_name}' failed to "
+            f"render/preprocess; they are marked as transcription errors "
+            f"(repair re-renders them)."
         )
 
 
@@ -534,7 +560,13 @@ async def stream_pdf_payloads(
                     pdf_path.name,
                     e,
                 )
-                continue
+                payload = _render_error_payload(
+                    page_index,
+                    pdf_page_image_name(page_index),
+                    str(pdf_path),
+                    page_index,
+                    e,
+                )
             yield payload
     _raise_if_failure_rate_excessive(pdf_path.name, len(needed), failed)
 
@@ -578,7 +610,9 @@ async def stream_folder_payloads(
         except Exception as e:
             failed += 1
             logger.error("Error preprocessing image %s: %s", src.name, e)
-            continue
+            payload = _render_error_payload(
+                index, folder_image_name(src), str(src), None, e
+            )
         yield payload
     _raise_if_failure_rate_excessive(folder.name, len(needed), failed)
 

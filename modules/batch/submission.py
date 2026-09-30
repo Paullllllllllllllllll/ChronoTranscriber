@@ -146,6 +146,18 @@ async def submit_batch(
             "Could not write early batch_session marker: %s: %s", type(e).__name__, e
         )
 
+    # A page that could not be rendered or encoded gets metadata but no request:
+    # finalization turns every expected custom_id without a result into a
+    # [transcription error] placeholder, which repair can re-render.
+    def _custom_id(pos: int, payload: PagePayload) -> str:
+        prefix = "unrendered" if payload.render_error is not None else "req"
+        return f"{prefix}-{pos + 1}"
+
+    if all(payload.render_error is not None for payload in payloads):
+        raise BatchSubmissionError(
+            f"No page of '{source_name}' could be rendered for batch submission"
+        )
+
     # Record image metadata (no preprocessed files exist; carry the source
     # reference and per-page provenance so repair can re-render).
     try:
@@ -156,7 +168,7 @@ async def submit_batch(
                         "pre_processed_image": None,
                         "image_name": payload.image_name,
                         "order_index": payload.index,
-                        "custom_id": f"req-{pos + 1}",
+                        "custom_id": _custom_id(pos, payload),
                         "source_file": payload.source_file,
                         "page_index": payload.page_index,
                         "image_provenance": payload.provenance(),
@@ -180,6 +192,7 @@ async def submit_batch(
             },
         )
         for pos, payload in enumerate(payloads)
+        if payload.render_error is None
     ]
 
     # Load system prompt

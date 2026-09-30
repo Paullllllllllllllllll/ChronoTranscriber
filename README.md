@@ -1,4 +1,4 @@
-# ChronoTranscriber v4.4.0
+# ChronoTranscriber v4.4.1
 
 A Python-based document transcription tool for researchers, archivists,
 and digital humanities projects. ChronoTranscriber transforms historical
@@ -940,6 +940,12 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v4.4.1** (30 September 2026) -- A page that cannot be rendered or
+  encoded, including one over `max_image_bytes`, is now recorded as a
+  `[transcription error]` placeholder instead of vanishing from the output,
+  so the item counts as failed and repair can re-render the page. In batch
+  mode such a page gets metadata but no request, and finalization writes
+  its placeholder; a document with no renderable page fails submission.
 - **v4.4.0** (30 September 2026) -- Native scan resolution: `target_dpi:
   native` renders each PDF page at the density of its scan image, and payloads
   are sized to each model's documented limits (OpenAI `original` patch caps,

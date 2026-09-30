@@ -1,141 +1,89 @@
-# =============================================================================
-# Image Processing Configuration (EXAMPLE TEMPLATE)
-# =============================================================================
-# This file ships as a scrubbed public template. A fresh clone uses it
-# automatically if image_processing_config.yaml is absent (the loader logs
-# a notice). To customize: copy this file to image_processing_config.yaml
-# and edit it.
-#
-# Used by:
-#   - modules/images/pipeline.py (image preprocessing pipelines)
-#   - modules/documents/pdf.py (PDF page image extraction)
-#   - modules/images/tesseract_runtime.py (Tesseract OCR settings)
-#   - modules/batch/requests.py and modules/batch/backends/*.py
-#     (llm_detail for batch requests)
-#   - modules/transcribe/pipeline.py and modules/transcribe/manager.py
-#     (target_dpi, postprocessing)
-#   - modules/batch/check.py (postprocessing on batch results)
-# =============================================================================
-
-
-# Maximum pixel count per rendered page before automatic DPI reduction.
-# When a page would exceed this budget at target_dpi, DPI is scaled down just
-# enough to stay within the limit. Set to 0 to disable.
-# Default 24_000_000 (24 MP) bounds the worst-case raw page in memory to
-# ~72 MB RGB while staying 2.3x above the 10.24 MP original_max_pixels send
-# cap, so the image actually sent to the API is unaffected.
+# Image processing defaults. Copy this example to customize a local config.
+# Numeric runs: direct renders to the profile; supersample resizes afterward.
+# Native runs always render directly to the resolved model cap or profile.
+render_strategy: direct
+# Numeric rendering only; 0 disables the memory guard.
 max_pixels_per_page: 24000000
 
-# Render strategy for the LLM/vision PDF path (does not affect Tesseract).
-# - direct (default): compute the final pixel dimensions the active resize
-#   profile would produce and rasterize the page directly at that zoom, never
-#   above target_dpi/72. Skips rendering pixels the provider/resize would only
-#   discard; the resize_for_detail pipeline still runs as a safety net. When the
-#   target_dpi render already fits the profile's caps, the payload is
-#   byte-identical to supersample.
-# - supersample: legacy behavior -- render at target_dpi, then downscale.
-render_strategy: direct
+# Registry caps apply in numeric and native modes. Optional original_max_side_px,
+# original_max_pixels (OpenAI), and high_max_side_px (Anthropic) only tighten caps.
+# OpenAI original: 30,000 patches of 32 px for GPT-5.6/GPT-6, otherwise
+# 10,000 patches and a 6,000 px edge. Anthropic: 2,576 px / 4,784 patches
+# of 28 px for high-resolution models; 1,568 px / 1,568 patches otherwise.
 
-# =============================================================================
-# 1. OpenAI API Image Processing
-# =============================================================================
-# Settings for preprocessing images before sending to OpenAI's vision models.
-# Applies to synchronous transcription and Batch API.
 api_image_processing:
-  target_dpi: 300  # DPI for rendering/extracting images before API processing.
-  grayscale_conversion: true  # Convert color images to grayscale to reduce noise.
-  handle_transparency: true  # Flatten images with alpha onto white background.
-  # Controls the fidelity of images sent to the OpenAI Responses API.
-  # Values:
-  # - original: full-fidelity (up to 6000px / 10.24M pixels), GPT-5.4+ only
-  # - high: uses tiling approach (170 tokens per 512x512 tile), better for fine details
-  # - low: 512x512 resize, 85 tokens per image, faster/cheaper
-  # - auto: omit the parameter and let the model decide
-  # Token cost: low=85 tokens; high=85 + (170 x number of 512px tiles)
+  # Positive render DPI or native (density of the largest page-spanning scan).
+  target_dpi: native
+  # Used by native mode for pages without a usable scan image.
+  native_fallback_dpi: 300
+  # jpeg or lossless png; oversized PNG falls back to JPEG with a warning.
+  payload_format: jpeg
+  # Base64 bytes per image; 0 disables the guard. Oversized JPEG is a page error.
+  max_image_bytes: 50000000
+  grayscale_conversion: true
+  handle_transparency: true
+  jpeg_quality: 95
   llm_detail: original
-
-  # JPEG compression quality (1-100) when saving processed images for API use.
-  jpeg_quality: 100
-
-  # Resizing behavior prior to sending to the API.
-  # Values:
-  # - auto: choose a resizing strategy based on llm_detail
-  # - none: do not resize (only transparency/grayscale steps applied)
-  # Note: any other value currently behaves like 'auto' (resizing enabled).
+  # auto selects the detail profile; none disables only optional profile sizing.
   resize_profile: high
-
-  # Parameters for resizing profiles
-  # For low detail, cap the longest side to this many pixels (preserve aspect ratio)
-  low_max_side_px: 512
-  # For high detail, fit into this box (width, height) with padding as needed
-  high_target_box: [768, 1536]
-  # For original detail (GPT-5.4+), cap to API maximum dimensions
-  original_max_side_px: 6000
-  original_max_pixels: 10240000  # 10.24M pixels
-
-# =============================================================================
-# 2. Google Gemini API Image Processing
-# =============================================================================
-# Settings for preprocessing images before sending to Google's Gemini models.
-# Google uses media_resolution instead of OpenAI's detail parameter.
-google_image_processing:
-  target_dpi: 300  # DPI for rendering/extracting images before API processing.
-  grayscale_conversion: true  # Convert color images to grayscale to reduce noise.
-  handle_transparency: true  # Flatten images with alpha onto white background.
-
-  # Controls the resolution of images sent to Google Gemini API.
-  # Values (Gemini 3 token counts per image):
-  # - ultra_high: 2240 tokens - Highest quality
-  # - high: 1120 tokens - Recommended for OCR/dense documents
-  # - medium: 560 tokens - Balanced quality/cost
-  # - low: 280 tokens - Minimal tokens, fast/cheap
-  # - auto: MEDIA_RESOLUTION_UNSPECIFIED - Default
-  media_resolution: high
-
-  # JPEG compression quality (1-100) when saving processed images for API use.
-  jpeg_quality: 100
-
-  # Resizing behavior prior to sending to the API.
-  resize_profile: high
-
-  # Parameters for resizing profiles
   low_max_side_px: 512
   high_target_box: [768, 1536]
 
-# =============================================================================
-# 3. Anthropic Claude API Image Processing
-# =============================================================================
-# Settings for preprocessing images before sending to Anthropic's Claude models.
-#
-# Anthropic guidelines:
-#   - Recommended: long edge <= 1568px, <= 1.15 megapixels for optimal latency
-#   - Minimum: 200px on any edge
-#   - Maximum: 8000x8000px (or 2000x2000 if >20 images in one request)
-#   - Token calculation: tokens = (width x height) / 750
 anthropic_image_processing:
-  target_dpi: 300  # DPI for rendering/extracting images before API processing.
-  grayscale_conversion: true  # Convert color images to grayscale to reduce noise.
-  handle_transparency: true  # Flatten images with alpha onto white background.
-
-  # JPEG compression quality (1-100) when saving processed images for API use.
-  jpeg_quality: 100
-
-  # Resizing behavior prior to sending to the API.
-  # Best practice: pre-resize to <=1568px to avoid server-side resizing latency.
+  # Positive render DPI or native (density of the largest page-spanning scan).
+  target_dpi: native
+  # Used by native mode for pages without a usable scan image.
+  native_fallback_dpi: 300
+  # jpeg or lossless png; oversized PNG falls back to JPEG with a warning.
+  payload_format: jpeg
+  # Base64 bytes per image; 0 disables the guard. Oversized JPEG is a page error.
+  max_image_bytes: 10000000
+  grayscale_conversion: true
+  handle_transparency: true
+  jpeg_quality: 95
+  # auto selects the detail profile; none disables only optional profile sizing.
   resize_profile: auto
-
-  # Parameters for resizing profiles
   low_max_side_px: 512
-  # 2576 targets high-res-tier models only (Claude Opus 4.7+ / Sonnet 5), which
-  # read a longer edge; costs ~3x the image tokens vs 1568. Older Claude models
-  # are server-side downscaled to 1568 anyway.
-  high_max_side_px: 2576
+  high_target_box: [768, 1536]
 
-# =============================================================================
-# 4. Tesseract OCR Image Processing
-# =============================================================================
-# Settings for preprocessing images before local Tesseract OCR.
-# Includes engine configuration, binary path, and preprocessing pipeline.
+google_image_processing:
+  # Positive render DPI or native (density of the largest page-spanning scan).
+  target_dpi: 300
+  # Used by native mode for pages without a usable scan image.
+  native_fallback_dpi: 300
+  # jpeg or lossless png; oversized PNG falls back to JPEG with a warning.
+  payload_format: jpeg
+  # Base64 bytes per image; 0 disables the guard. Oversized JPEG is a page error.
+  max_image_bytes: 20000000
+  grayscale_conversion: true
+  handle_transparency: true
+  jpeg_quality: 95
+  # Server-side image resolution budget; no documented pixel maximum.
+  media_resolution: high
+  # auto selects the detail profile; none disables only optional profile sizing.
+  resize_profile: high
+  low_max_side_px: 512
+  high_target_box: [768, 1536]
+
+custom_image_processing:
+  # Positive render DPI or native (density of the largest page-spanning scan).
+  target_dpi: 300
+  # Used by native mode for pages without a usable scan image.
+  native_fallback_dpi: 300
+  # jpeg or lossless png; oversized PNG falls back to JPEG with a warning.
+  payload_format: jpeg
+  # Base64 bytes per image; 0 disables the guard. Oversized JPEG is a page error.
+  max_image_bytes: 0
+  grayscale_conversion: false
+  handle_transparency: true
+  jpeg_quality: 90
+  llm_detail: high
+  # auto selects the detail profile; none disables only optional profile sizing.
+  resize_profile: high
+  low_max_side_px: 2500
+  high_target_box: [2500, 2500]
+
+# Local OCR (native is not supported).
 tesseract_image_processing:
   # Resolution for page rendering and image saving; DPI metadata is embedded if enabled.
   target_dpi: 300
@@ -199,17 +147,3 @@ postprocessing:
 
   # Explicit wrap width (characters). Only used when wrap_lines=true and auto_wrap=false.
   wrap_width: 120
-
-# =============================================================================
-# Custom Endpoint Image Processing
-# =============================================================================
-# Aggressive preprocessing for self-hosted models with small context windows
-# (e.g., 8,192 tokens). Produces compact images to stay within token budget.
-# Adjust these values based on your endpoint's context window size.
-custom_image_processing:
-  grayscale_conversion: false
-  handle_transparency: true
-  jpeg_quality: 90
-  llm_detail: high
-  low_max_side_px: 2500
-  high_target_box: [2500, 2500]

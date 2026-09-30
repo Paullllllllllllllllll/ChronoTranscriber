@@ -157,6 +157,8 @@ class ImageEntry:
     page_number: int | None = None
     source_file: str | None = None
     page_index: int | None = None
+    image_settings: dict[str, Any] | None = None
+    model_type: str | None = None
 
 
 @dataclass
@@ -211,6 +213,7 @@ def collect_image_entries_from_jsonl(temp_jsonl_path: Path | None) -> list[Image
     """
     entries: dict[int, ImageEntry] = {}
     run_source_file: str | None = None
+    run_provenance: dict[str, Any] = {}
     if temp_jsonl_path is None or not temp_jsonl_path.exists():
         return []
 
@@ -230,7 +233,8 @@ def collect_image_entries_from_jsonl(temp_jsonl_path: Path | None) -> list[Image
                 if "file_provenance" in obj and isinstance(
                     obj["file_provenance"], dict
                 ):
-                    src = obj["file_provenance"].get("source_file")
+                    run_provenance = obj["file_provenance"]
+                    src = run_provenance.get("source_file")
                     if src:
                         run_source_file = str(src)
                     continue
@@ -311,6 +315,12 @@ def collect_image_entries_from_jsonl(temp_jsonl_path: Path | None) -> list[Image
             if entry.source_file is None:
                 entry.source_file = run_source_file
 
+    for entry in entries.values():
+        if run_provenance.get("image_settings_fingerprint"):
+            entry.image_settings = dict(run_provenance.get("image_config", {}))
+            entry.model_type = run_provenance.get("model_type")
+            if run_provenance.get("detail") is not None:
+                entry.image_settings["resolved_detail"] = run_provenance["detail"]
     return [entries[k] for k in sorted(entries.keys())]
 
 
@@ -499,6 +509,8 @@ class RepairTarget:
     page_number: int | None = None
     image_base64: str | None = None
     mime_type: str | None = None
+    request_detail: str | None = None
+    media_resolution: str | None = None
 
 
 def _load_configs() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
@@ -532,10 +544,20 @@ def _rerender_payload_for_entry(
         logger.warning("Recorded source file missing: %s", source)
         return None
 
-    tm = model_config.get("transcription_model", {})
-    img_cfg, model_type, target_dpi, max_pixels, render_strategy = (
-        resolve_image_settings(tm.get("provider", "openai"), tm.get("name", ""))
-    )
+    if entry.image_settings is not None:
+        img_cfg = entry.image_settings
+        model_type = entry.model_type or "openai"
+        target_dpi = img_cfg.get("target_dpi", 300)
+        max_pixels = int(img_cfg.get("max_pixels_per_page", 0))
+        render_strategy = img_cfg.get("render_strategy", "direct")
+    else:
+        logger.warning(
+            "Legacy repair settings for %s; using current config.", entry.image_name
+        )
+        tm = model_config.get("transcription_model", {})
+        img_cfg, model_type, target_dpi, max_pixels, render_strategy = (
+            resolve_image_settings(tm.get("provider", "openai"), tm.get("name", ""))
+        )
 
     try:
         if source.suffix.lower() == ".pdf":
@@ -598,8 +620,29 @@ def _resolve_repair_targets(
         if entry:
             resolved_path = resolve_image_path(job.parent_folder, entry, job.identifier)
             resolved_order_index = entry.order_index
-            if resolved_path is None and model_config is not None:
-                rerendered = _rerender_payload_for_entry(entry, model_config)
+            if model_config is not None:
+                recorded_path = (
+                    Path(entry.pre_processed_image)
+                    if entry.pre_processed_image
+                    else None
+                )
+                is_preprocessed = resolved_path is not None and (
+                    resolved_path.parent.name
+                    in ("preprocessed_images", "preprocessed_images_tesseract")
+                    or (
+                        recorded_path is not None
+                        and resolved_path
+                        in (recorded_path, job.parent_folder / recorded_path.name)
+                    )
+                )
+                if resolved_path is not None and not is_preprocessed:
+                    from dataclasses import replace
+
+                    raw_entry = replace(entry, source_file=str(resolved_path))
+                    rerendered = _rerender_payload_for_entry(raw_entry, model_config)
+                    resolved_path = None
+                elif resolved_path is None:
+                    rerendered = _rerender_payload_for_entry(entry, model_config)
         else:
             if image_name:
                 for sub in ("preprocessed_images", "preprocessed_images_tesseract"):
@@ -633,6 +676,36 @@ def _resolve_repair_targets(
                                     resolved_path = cand
                                     break
 
+        if (
+            entry is None
+            and resolved_path is not None
+            and model_config is not None
+            and resolved_path.parent.name
+            not in ("preprocessed_images", "preprocessed_images_tesseract")
+        ):
+            from modules.transcribe.resume import read_image_provenance
+
+            recorded = (
+                read_image_provenance(job.temp_jsonl_path)
+                if job.temp_jsonl_path
+                else None
+            ) or {}
+            raw_entry = ImageEntry(
+                resolved_order_index,
+                image_name or resolved_path.name,
+                None,
+                None,
+                source_file=str(resolved_path),
+                image_settings=(
+                    recorded.get("image_config")
+                    if recorded.get("image_settings_fingerprint")
+                    else None
+                ),
+                model_type=recorded.get("model_type"),
+            )
+            rerendered = _rerender_payload_for_entry(raw_entry, model_config)
+            resolved_path = None
+
         if rerendered is None and (resolved_path is None or not resolved_path.exists()):
             logger.warning(
                 "Could not resolve image for failure line %s (%s); skipping.",
@@ -641,12 +714,23 @@ def _resolve_repair_targets(
             )
             continue
 
+        settings = entry.image_settings if entry else None
+        if entry is None and rerendered is not None:
+            settings = raw_entry.image_settings
         pn: int | None = None
         if entry and isinstance(entry.page_number, int):
             pn = entry.page_number
         elif resolved_order_index is not None and resolved_order_index >= 0:
             pn = resolved_order_index + 1
 
+        if resolved_path is not None and settings:
+            from types import SimpleNamespace
+
+            from modules.images.encoding import encode_image_to_base64
+
+            data, mime = encode_image_to_base64(resolved_path)
+            rerendered = SimpleNamespace(base64=data, mime_type=mime)
+            resolved_path = None
         targets.append(
             RepairTarget(
                 order_index=resolved_order_index,
@@ -658,6 +742,8 @@ def _resolve_repair_targets(
                 page_number=pn,
                 image_base64=rerendered.base64 if rerendered else None,
                 mime_type=rerendered.mime_type if rerendered else None,
+                request_detail=settings.get("resolved_detail") if settings else None,
+                media_resolution=settings.get("media_resolution") if settings else None,
             )
         )
 
@@ -794,6 +880,16 @@ async def _repair_sync_mode(
                     target.image_base64,
                     target.mime_type or "image/jpeg",
                     label=target.image_name,
+                    **(
+                        {"image_detail": target.request_detail}
+                        if target.request_detail
+                        else {}
+                    ),
+                    **(
+                        {"media_resolution": target.media_resolution}
+                        if target.media_resolution
+                        else {}
+                    ),
                 )
             elif target.image_path is not None:
                 raw = await transcribe_image_with_llm(target.image_path, transcriber)

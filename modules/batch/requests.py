@@ -415,7 +415,7 @@ def _build_batch_request_line(
         system_prompt=system_prompt,
         image_url=image_url,
         transcription_schema=prep.transcription_schema,
-        llm_detail=prep.llm_detail,
+        llm_detail=image_info.get("request_detail", prep.llm_detail),
     )
 
     logger.debug(
@@ -643,6 +643,9 @@ def process_batch_transcription(
                     "order_index": global_idx,
                     "page_number": global_idx + 1,
                 }
+                request_detail = getattr(image_file, "request_detail", None)
+                if request_detail is not None:
+                    image_info["request_detail"] = request_detail
                 if request_prep is not None:
                     request_line, metadata_record = _build_batch_request_line(
                         request_prep,

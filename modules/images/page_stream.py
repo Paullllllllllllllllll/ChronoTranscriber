@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import math
 import re
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,12 @@ from PIL import Image, ImageOps
 
 from modules.config.constants import SUPPORTED_IMAGE_EXTENSIONS
 from modules.images.encoding import encode_bytes_to_base64
+from modules.images.native import (
+    TargetDpi,
+    format_downscale_log,
+    native_page_dpi,
+    resolve_target_size,
+)
 from modules.images.pipeline import IMAGE_FAILURE_RATE_THRESHOLD, ImageProcessor
 from modules.infra.logger import setup_logger
 from modules.infra.paths import natural_sort_key
@@ -54,6 +61,7 @@ class PagePayload:
     effective_dpi: int | None = None
     source_file: str = ""
     page_index: int | None = None
+    image_provenance: dict[str, Any] = field(default_factory=dict)
 
     def provenance(self) -> dict[str, Any]:
         """Per-page reproducibility record for JSONL persistence."""
@@ -63,6 +71,7 @@ class PagePayload:
             "height": self.height,
             "byte_size": self.byte_size,
             "effective_dpi": self.effective_dpi,
+            **self.image_provenance,
         }
 
 
@@ -112,7 +121,7 @@ def list_folder_images(folder: Path) -> list[Path]:
 
 def resolve_image_settings(
     provider: str, model_name: str
-) -> tuple[dict[str, Any], str, int, int, str]:
+) -> tuple[dict[str, Any], str, TargetDpi, int, str]:
     """Resolve provider-specific image settings from configuration.
 
     Returns:
@@ -128,17 +137,41 @@ def resolve_image_settings(
     model_type = detect_model_type(provider, (model_name or "").lower())
     full_cfg = get_config_service().get_image_processing_config()
     img_cfg = full_cfg.get(get_image_config_section_name(model_type), {})
-    target_dpi = int(img_cfg.get("target_dpi", 300))
+    if provider.lower() == "openrouter":
+        img_cfg = {
+            **img_cfg,
+            "llm_detail": full_cfg.get("api_image_processing", {}).get(
+                "llm_detail", "high"
+            ),
+        }
     max_pixels = int(full_cfg.get("max_pixels_per_page", 0))
     render_strategy = str(full_cfg.get("render_strategy", "direct") or "direct").lower()
-    return img_cfg, model_type, target_dpi, max_pixels, render_strategy
+    from modules.images.settings import resolved_settings
+
+    img_cfg = resolved_settings(
+        img_cfg,
+        provider,
+        model_name,
+        model_type,
+        get_image_config_section_name(model_type),
+        max_pixels,
+        render_strategy,
+    )
+    return img_cfg, model_type, img_cfg["target_dpi"], max_pixels, render_strategy
 
 
 def compute_pdf_skip_indices(
-    jsonl_path: Path, *, exclude_errors: bool = False
+    jsonl_path: Path,
+    *,
+    exclude_errors: bool = False,
+    image_settings: dict[str, Any] | None = None,
 ) -> set[int]:
     """0-based page indices already transcribed according to the temp JSONL."""
     from modules.batch.jsonl import get_processed_image_names
+    from modules.transcribe.resume import verify_image_settings
+
+    if image_settings is not None:
+        verify_image_settings(jsonl_path, image_settings)
 
     skip: set[int] = set()
     for name in get_processed_image_names(jsonl_path, exclude_errors=exclude_errors):
@@ -149,10 +182,17 @@ def compute_pdf_skip_indices(
 
 
 def compute_folder_skip_names(
-    jsonl_path: Path, *, exclude_errors: bool = False
+    jsonl_path: Path,
+    *,
+    exclude_errors: bool = False,
+    image_settings: dict[str, Any] | None = None,
 ) -> set[str]:
     """Image names already transcribed according to the temp JSONL."""
     from modules.batch.jsonl import get_processed_image_names
+    from modules.transcribe.resume import verify_image_settings
+
+    if image_settings is not None:
+        verify_image_settings(jsonl_path, image_settings)
 
     return get_processed_image_names(jsonl_path, exclude_errors=exclude_errors)
 
@@ -167,10 +207,62 @@ def _payload_from_pil(
     source_file: str,
     page_index: int | None,
     effective_dpi: int | None,
+    provenance: dict[str, Any] | None = None,
 ) -> PagePayload:
     """Run the in-memory transform chain and wrap the result in a payload."""
     jpeg_bytes, width, height = ImageProcessor.process_pil(img, img_cfg, model_type)
+    mime = "image/png" if jpeg_bytes.startswith(b"\x89PNG") else "image/jpeg"
+    detail = ImageProcessor.resolve_detail(img_cfg, model_type)
+    source = provenance or {
+        "source_dpi_x": None,
+        "source_dpi_y": None,
+        "dpi_source": "file",
+        "source_width": img.width,
+        "source_height": img.height,
+        "render_dpi": None,
+        "file_dpi_metadata": img.info.get("dpi"),
+    }
+    if "downscale_reason" not in source:
+        _, reason = resolve_target_size(
+            source["source_width"],
+            source["source_height"],
+            model_type,
+            img_cfg.get("model_name", ""),
+            detail,
+            img_cfg,
+        )
+        source["downscale_reason"] = reason
+    padded = (
+        model_type != "anthropic"
+        and detail not in ("low", "original")
+        and img_cfg.get("resize_profile") != "none"
+    )
+    source.update(
+        cap_policy=img_cfg.get("cap_policy", "profile-v1"),
+        sent_dpi=(
+            None
+            if padded or source["source_dpi_x"] is None
+            else max(source["source_dpi_x"], source["source_dpi_y"])
+            * width
+            / source["source_width"]
+        ),
+        payload_format=mime.split("/")[1],
+        mime_type=mime,
+        format_fallback=(
+            img_cfg.get("payload_format", "jpeg") == "png" and mime == "image/jpeg"
+        ),
+    )
+    if source["downscale_reason"] != "none":
+        logger.info(
+            format_downscale_log(
+                index + 1,
+                {**source, "width": width, "height": height},
+                img_cfg.get("model_name", model_type),
+            )
+        )
     return PagePayload(
+        mime_type=mime,
+        image_provenance=source,
         index=index,
         image_name=image_name,
         base64=encode_bytes_to_base64(jpeg_bytes),
@@ -188,7 +280,7 @@ def _render_pdf_page_payload(
     doc: fitz.Document,
     pdf_path: Path,
     page_index: int,
-    target_dpi: int,
+    target_dpi: TargetDpi,
     max_pixels: int,
     img_cfg: dict[str, Any],
     model_type: str,
@@ -208,15 +300,50 @@ def _render_pdf_page_payload(
     from modules.documents.pdf import _get_effective_dpi
 
     page = doc[page_index]
-    if render_strategy == "supersample":
+    density = (
+        native_page_dpi(page, int(img_cfg.get("native_fallback_dpi", 300)))
+        if target_dpi == "native"
+        else None
+    )
+    source_dpi = density.dpi if density else float(target_dpi)
+    source_width = math.ceil(page.rect.width * (source_dpi / 72) - 1e-7)
+    source_height = math.ceil(page.rect.height * (source_dpi / 72) - 1e-7)
+    size, reason = resolve_target_size(
+        source_width,
+        source_height,
+        model_type,
+        img_cfg.get("model_name", ""),
+        ImageProcessor.resolve_detail(img_cfg, model_type),
+        img_cfg,
+    )
+    img_cfg = {**img_cfg, "_target_size": size}
+    if target_dpi == "native":
+        zoom = source_dpi / 72 * min(size[0] / source_width, size[1] / source_height)
+        effective_dpi = int(round(zoom * 72))
+    elif render_strategy == "supersample":
         effective_dpi = _get_effective_dpi(page, target_dpi, max_pixels)
         zoom = effective_dpi / 72
     else:
-        rect = page.rect
         zoom = ImageProcessor.derive_render_zoom(
-            rect.width, rect.height, target_dpi, max_pixels, img_cfg, model_type
+            page.rect.width,
+            page.rect.height,
+            target_dpi,
+            max_pixels,
+            img_cfg,
+            model_type,
         )
         effective_dpi = int(round(zoom * 72))
+    if target_dpi != "native" and max_pixels and (max_pixels < size[0] * size[1]):
+        reason = "memory_guard"
+    provenance = {
+        "source_dpi_x": density.dpi_x if density else source_dpi,
+        "source_dpi_y": density.dpi_y if density else source_dpi,
+        "dpi_source": density.source if density else "numeric",
+        "source_width": source_width,
+        "source_height": source_height,
+        "render_dpi": zoom * 72,
+        "downscale_reason": reason,
+    }
     mat = fitz.Matrix(zoom, zoom)
     pix = page.get_pixmap(matrix=mat, alpha=False)
     # frombuffer + samples_mv avoids the extra buffer->bytes copy that
@@ -237,6 +364,7 @@ def _render_pdf_page_payload(
             source_file=str(pdf_path),
             page_index=page_index,
             effective_dpi=effective_dpi,
+            provenance=provenance,
         )
     finally:
         img.close()
@@ -256,14 +384,12 @@ def _apply_jpeg_draft(
             max_side = int(img_cfg.get("low_max_side_px", 512))
             if max(w, h) > max_side:
                 img.draft(desired_mode, (max_side, max_side))
-        elif detail == "original":
-            max_side = int(img_cfg.get("original_max_side_px", 6000))
-            if max(w, h) > max_side:
-                img.draft(desired_mode, (max_side, max_side))
-        elif model_type == "anthropic":
-            max_side = int(img_cfg.get("high_max_side_px", 1568))
-            if max(w, h) > max_side:
-                img.draft(desired_mode, (max_side, max_side))
+        elif detail == "original" or model_type == "anthropic":
+            size, _ = resolve_target_size(
+                w, h, model_type, img_cfg.get("model_name", ""), detail, img_cfg
+            )
+            if size != (w, h):
+                img.draft(desired_mode, size)
         else:
             box = img_cfg.get("high_target_box", [768, 1536])
             try:
@@ -285,6 +411,15 @@ def _load_image_payload(
     """Load and preprocess one source image in memory (thread worker)."""
     try:
         with Image.open(image_path) as img:
+            provenance = {
+                "source_dpi_x": None,
+                "source_dpi_y": None,
+                "dpi_source": "file",
+                "source_width": img.width,
+                "source_height": img.height,
+                "render_dpi": None,
+                "file_dpi_metadata": img.info.get("dpi"),
+            }
             _apply_jpeg_draft(img, img_cfg, model_type)
             # Honor EXIF orientation so camera JPEGs are not processed sideways
             # (B14). exif_transpose always makes a full-image copy; skip it when
@@ -303,6 +438,7 @@ def _load_image_payload(
                 source_file=str(image_path),
                 page_index=None,
                 effective_dpi=None,
+                provenance=provenance,
             )
     except OSError:
         if image_path.suffix.lower() not in {".jp2", ".j2k"}:
@@ -355,7 +491,7 @@ def _raise_if_failure_rate_excessive(source_name: str, total: int, failed: int) 
 async def stream_pdf_payloads(
     pdf_path: Path,
     *,
-    target_dpi: int,
+    target_dpi: TargetDpi,
     img_cfg: dict[str, Any],
     model_type: str,
     max_pixels: int = 0,
@@ -451,7 +587,7 @@ def render_single_pdf_page_payload(
     pdf_path: Path,
     page_index: int,
     *,
-    target_dpi: int,
+    target_dpi: TargetDpi,
     img_cfg: dict[str, Any],
     model_type: str,
     max_pixels: int = 0,

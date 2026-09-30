@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import io
+import math
 from pathlib import Path
 
 import numpy as np
@@ -247,7 +248,8 @@ class TestDeriveRenderZoom:
         # 800 x 1200 pt at 300 DPI -> ~3333 x 5000 px = ~16.7 MP > 10.24 MP.
         zoom = ImageProcessor.derive_render_zoom(800.0, 1200.0, 300, 0, cfg, "openai")
         rendered_px = (800.0 * zoom) * (1200.0 * zoom)
-        assert rendered_px == pytest.approx(10240000, rel=1e-6)
+        assert rendered_px <= 10240000
+        assert math.ceil(800 * zoom / 32) * math.ceil(1200 * zoom / 32) <= 10000
         assert zoom < 300 / 72.0
 
     @pytest.mark.unit
@@ -256,11 +258,12 @@ class TestDeriveRenderZoom:
         zoom = ImageProcessor.derive_render_zoom(
             _A4_W_PT, _A4_H_PT, 300, 0, cfg, "anthropic"
         )
-        long_px_at_target = _A4_H_PT * 300 / 72.0
-        expected_dpi = 300 * 2576 / long_px_at_target
-        assert zoom * 72.0 == pytest.approx(expected_dpi, rel=1e-6)
-        # Long edge lands at the cap.
-        assert _A4_H_PT * zoom == pytest.approx(2576, abs=1.0)
+        # An unflagged model uses the standard tier; config cannot loosen it.
+        assert _A4_H_PT * zoom <= 1568
+        assert (
+            math.ceil(_A4_W_PT * zoom / 28) * math.ceil(_A4_H_PT * zoom / 28)
+            <= 1568
+        )
 
     @pytest.mark.unit
     def test_anthropic_small_page_not_upscaled(self) -> None:

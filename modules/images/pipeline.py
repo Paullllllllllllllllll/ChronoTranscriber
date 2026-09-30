@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 import math
 import subprocess
 import tempfile
@@ -18,6 +17,12 @@ from skimage.filters import threshold_sauvola
 
 from modules.config.constants import SUPPORTED_IMAGE_EXTENSIONS
 from modules.config.service import get_config_service
+from modules.images.native import (
+    guarded_payload,
+    model_image_cap,
+    resolve_target_size,
+    validate_image_settings,
+)
 from modules.infra.logger import setup_logger
 from modules.infra.multiprocessing_utils import run_multiprocessing_tasks
 from modules.infra.paths import (
@@ -76,6 +81,25 @@ class ImageProcessor:
             model_type: 'openai', 'google', or 'anthropic' for
                 provider-specific resizing
         """
+        cap = model_image_cap(
+            model_type, img_cfg.get("model_name", ""), detail, img_cfg
+        )
+        if cap:
+            target = img_cfg.get("_target_size")
+            if target is None:
+                target, _ = resolve_target_size(
+                    *image.size,
+                    model_type,
+                    img_cfg.get("model_name", ""),
+                    detail,
+                    img_cfg,
+                )
+            size = min(image.width, target[0]), min(image.height, target[1])
+            return (
+                image
+                if size == image.size
+                else image.resize(size, Image.Resampling.LANCZOS)
+            )
         # Normalize flags and defaults
         resize_profile = (img_cfg.get("resize_profile", "auto") or "auto").lower()
         if resize_profile == "none":
@@ -154,7 +178,7 @@ class ImageProcessor:
     def derive_render_zoom(
         page_width_pt: float,
         page_height_pt: float,
-        target_dpi: int,
+        target_dpi: float,
         max_pixels: int,
         img_cfg: dict[str, Any],
         model_type: str,
@@ -175,6 +199,22 @@ class ImageProcessor:
         legacy ("supersample") render.
         """
         target_zoom = target_dpi / 72.0
+        detail = ImageProcessor.resolve_detail(img_cfg, model_type).lower()
+        cap = model_image_cap(
+            model_type, img_cfg.get("model_name", ""), detail, img_cfg
+        )
+        if cap:
+            w = math.ceil(page_width_pt * target_zoom - 1e-7)
+            h = math.ceil(page_height_pt * target_zoom - 1e-7)
+            size = img_cfg.get("_target_size")
+            if size is None:
+                size, _ = resolve_target_size(
+                    w, h, model_type, img_cfg.get("model_name", ""), detail, img_cfg
+                )
+            zoom = target_zoom * min(size[0] / w, size[1] / h)
+            return ImageProcessor._apply_max_pixels_zoom(
+                page_width_pt, page_height_pt, zoom, max_pixels
+            )
         resize_profile = (img_cfg.get("resize_profile", "auto") or "auto").lower()
         if resize_profile == "none":
             return ImageProcessor._apply_max_pixels_zoom(
@@ -250,6 +290,8 @@ class ImageProcessor:
         Google uses ``media_resolution``, Anthropic keys off ``resize_profile``,
         and OpenAI-compatible providers use ``llm_detail``.
         """
+        if "resolved_detail" in img_cfg:
+            return str(img_cfg["resolved_detail"])
         if model_type == "google":
             return str(img_cfg.get("media_resolution", "high") or "high")
         if model_type == "anthropic":
@@ -262,7 +304,7 @@ class ImageProcessor:
         img_cfg: dict[str, Any],
         model_type: str = "openai",
     ) -> tuple[bytes, int, int]:
-        """Preprocess a PIL image fully in memory and return JPEG bytes.
+        """Preprocess a PIL image fully in memory and return encoded payload bytes.
 
         Applies the same transform chain as the path-based pipeline:
         transparency flattening, optional grayscale conversion,
@@ -300,10 +342,15 @@ class ImageProcessor:
             img = img.convert("RGB")
 
         jpeg_quality = int(img_cfg.get("jpeg_quality", 95))
-        buffer = io.BytesIO()
-        img.save(buffer, format="JPEG", quality=jpeg_quality)
+        data, _, _ = guarded_payload(
+            img,
+            img_cfg.get("payload_format", "jpeg"),
+            jpeg_quality,
+            int(img_cfg.get("max_image_bytes", 0)),
+            log=logger,
+        )
         width, height = img.size
-        return buffer.getvalue(), width, height
+        return data, width, height
 
     # --- Static Methods for Folder-Level Processing ---
 
@@ -630,6 +677,7 @@ class ImageProcessor:
         )
         preproc_cfg = tip_cfg.get("preprocessing", {})
         output_format = str(preproc_cfg.get("output_format", "png")).lower()
+        validate_image_settings(tip_cfg, "tesseract_image_processing")
         target_dpi = int(tip_cfg.get("target_dpi", 300))
         embed_dpi = bool(preproc_cfg.get("embed_dpi_metadata", True))
         # Concurrency settings

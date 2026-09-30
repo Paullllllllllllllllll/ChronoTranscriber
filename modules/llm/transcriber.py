@@ -391,6 +391,8 @@ class LangChainTranscriber:
         mime_type: str,
         *,
         label: str | None = None,
+        image_detail: str | None = None,
+        media_resolution: str | None = None,
     ) -> dict[str, Any]:
         """Transcribe from base64-encoded image data.
 
@@ -404,11 +406,16 @@ class LangChainTranscriber:
         Returns:
             Dictionary containing transcription response data
         """
+        kwargs = dict(self._transcribe_kwargs())
+        if image_detail is not None:
+            kwargs["image_detail"] = image_detail
+        if media_resolution is not None:
+            kwargs["media_resolution"] = media_resolution
         with call_label(label):
             result = await self._provider.transcribe_image_from_base64(
                 image_base64=image_base64,
                 mime_type=mime_type,
-                **self._transcribe_kwargs(),
+                **kwargs,
             )
 
         return self._result_to_dict(result)

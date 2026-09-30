@@ -57,6 +57,9 @@ class Capabilities:
     supports_media_resolution: bool = False  # Google-style media_resolution
     default_media_resolution: str = "high"
 
+    image_original_patch_cap_30k: bool = False
+    image_high_res_tier: bool = False
+
     # Audio
     supports_audio_input: bool = False
     audio_transcription_only: bool = False  # Dedicated STT endpoint, no chat
@@ -251,6 +254,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
             max_context_tokens=1050000,
             max_output_tokens=128000,
             supports_image_detail_original=True,
+            image_original_patch_cap_30k=True,
         ),
     ),
     (
@@ -262,6 +266,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
             max_context_tokens=1050000,
             max_output_tokens=128000,
             supports_image_detail_original=True,
+            image_original_patch_cap_30k=True,
         ),
     ),
     (
@@ -273,12 +278,13 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
             max_context_tokens=1050000,
             max_output_tokens=128000,
             supports_image_detail_original=True,
+            image_original_patch_cap_30k=True,
         ),
     ),
     # --- OpenAI GPT-5.x family (reasoning, Responses-native) ---
     # GPT-5.6 (GA 2026-07-09): sol (flagship), terra (mid), luna (small).
     # All three share the same capability profile: 1.05M context, 128k
-    # output, vision with image_detail original/auto (no patch cap), and
+    # output, vision with image_detail original/auto (30,000-patch cap), and
     # reasoning-effort support. The bare "gpt-5.6" API alias routes to sol.
     # These MUST precede the bare "gpt-5" prefix so unknown-model text-only
     # fallback never triggers.
@@ -291,6 +297,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
             max_context_tokens=1050000,
             max_output_tokens=128000,
             supports_image_detail_original=True,
+            image_original_patch_cap_30k=True,
         ),
     ),
     (
@@ -302,6 +309,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
             max_context_tokens=1050000,
             max_output_tokens=128000,
             supports_image_detail_original=True,
+            image_original_patch_cap_30k=True,
         ),
     ),
     (
@@ -313,6 +321,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
             max_context_tokens=1050000,
             max_output_tokens=128000,
             supports_image_detail_original=True,
+            image_original_patch_cap_30k=True,
         ),
     ),
     # Bare "gpt-5.6" alias (routes to sol). Must follow the -sol/-terra/-luna
@@ -326,6 +335,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
             max_context_tokens=1050000,
             max_output_tokens=128000,
             supports_image_detail_original=True,
+            image_original_patch_cap_30k=True,
         ),
     ),
     # GPT-5.5 Pro (GA 2026): Responses-native reasoning flagship. Vision with
@@ -531,6 +541,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
         "claude-opus-5.5",
         _ANTHROPIC_BASE,
         dict(
+            image_high_res_tier=True,
             is_reasoning_model=True,
             supports_reasoning_effort=True,
             supports_top_p=False,
@@ -543,6 +554,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
         "claude-opus-5",
         _ANTHROPIC_BASE,
         dict(
+            image_high_res_tier=True,
             is_reasoning_model=True,
             supports_reasoning_effort=True,
             supports_top_p=False,
@@ -555,6 +567,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
         "claude-fable-5",
         _ANTHROPIC_BASE,
         dict(
+            image_high_res_tier=True,
             is_reasoning_model=True,
             supports_reasoning_effort=True,
             supports_top_p=False,
@@ -567,6 +580,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
         "claude-opus-4.8",
         _ANTHROPIC_BASE,
         dict(
+            image_high_res_tier=True,
             is_reasoning_model=True,
             supports_reasoning_effort=True,
             supports_top_p=False,
@@ -579,6 +593,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
         "claude-sonnet-5",
         _ANTHROPIC_BASE,
         dict(
+            image_high_res_tier=True,
             is_reasoning_model=True,
             supports_reasoning_effort=True,
             supports_top_p=False,
@@ -592,6 +607,7 @@ _MODEL_REGISTRY: list[tuple[tuple[str, ...], str, dict[str, Any], dict[str, Any]
         "claude-opus-4.7",
         _ANTHROPIC_BASE,
         dict(
+            image_high_res_tier=True,
             is_reasoning_model=True,
             supports_reasoning_effort=True,
             supports_top_p=False,

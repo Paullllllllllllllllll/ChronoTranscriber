@@ -10,6 +10,7 @@ used by each processor's ``prepare_output_folder`` method.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -441,3 +442,51 @@ class ResumeChecker:
             supports_partial_jsonl=False,
             hash_key=self._relative_key(mobi_path),
         )
+
+
+def read_image_provenance(path: Path) -> dict[str, Any] | None:
+    """Read the original image settings header without loading page payloads."""
+    if not path.exists():
+        return None
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                record = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if isinstance(record, dict) and isinstance(
+                record.get("file_provenance"), dict
+            ):
+                return dict(record["file_provenance"])
+    return None
+
+
+def verify_image_settings(path: Path, current: dict[str, Any]) -> None:
+    """Reject mixed preprocessing before resume reads a page skip set."""
+    from modules.images.native import image_settings_fingerprint
+
+    if not path.exists() or not path.stat().st_size:
+        return
+    recorded = read_image_provenance(path)
+    if not recorded or not recorded.get("image_settings_fingerprint"):
+        logger.warning(
+            "Legacy image settings in %s; resumed pages may mix settings.", path.name
+        )
+        return
+    if recorded["image_settings_fingerprint"] == image_settings_fingerprint(current):
+        return
+    previous = {
+        **recorded.get("image_config", {}),
+        "model_type": recorded.get("model_type"),
+    }
+    changed = sorted(
+        key
+        for key in previous.keys() | current.keys()
+        if previous.get(key) != current.get(key)
+    )
+    message = (
+        f"Image settings changed for {path.name}: {', '.join(changed)}. "
+        "Skipping file; use --overwrite to replace the existing run."
+    )
+    logger.error(message)
+    raise ValueError(message)

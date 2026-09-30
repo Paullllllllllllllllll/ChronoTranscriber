@@ -802,7 +802,11 @@ class WorkflowManager:
             if method == "tesseract"
             else "api_image_processing"
         )
-        return int(self.image_processing_config.get(section, {}).get("target_dpi", 300))
+        from modules.images.native import validate_image_settings
+
+        cfg = self.image_processing_config.get(section, {})
+        validate_image_settings(cfg, section)
+        return int(cfg.get("target_dpi", 300))
 
     def _cleanup_temp_jsonl(self, temp_jsonl_path: Path, method: str) -> None:
         """Remove temporary JSONL unless retained or needed for batch tracking."""
@@ -895,6 +899,25 @@ class WorkflowManager:
             resolve_image_settings(provider, model_name)
         )
 
+        if (
+            target_dpi == "native"
+            and img_cfg.get("cap_policy") == "profile-v1"
+            and not getattr(self, "_native_profile_warned", False)
+        ):
+            logger.warning(
+                "Native resolution is bounded by a resize profile for %s; "
+                "the profile discards native resolution.",
+                model_name,
+            )
+            self._native_profile_warned = True
+
+        img_cfg = {
+            **img_cfg,
+            "target_dpi": target_dpi,
+            "max_pixels_per_page": max_pixels,
+            "render_strategy": render_strategy,
+        }
+
         all_indices = (
             page_indices if page_indices is not None else list(range(total_units))
         )
@@ -913,7 +936,9 @@ class WorkflowManager:
                 files = list_folder_images(source_path)
                 skip_names = (
                     compute_folder_skip_names(
-                        temp_jsonl_path, exclude_errors=retry_errors
+                        temp_jsonl_path,
+                        exclude_errors=retry_errors,
+                        image_settings={**img_cfg, "model_type": model_type},
                     )
                     if use_skip
                     else set()
@@ -927,7 +952,11 @@ class WorkflowManager:
                     and files[i].name not in skip_names
                 ]
             skip_indices = (
-                compute_pdf_skip_indices(temp_jsonl_path, exclude_errors=retry_errors)
+                compute_pdf_skip_indices(
+                    temp_jsonl_path,
+                    exclude_errors=retry_errors,
+                    image_settings={**img_cfg, "model_type": model_type},
+                )
                 if use_skip
                 else set()
             )

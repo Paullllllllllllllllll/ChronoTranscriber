@@ -484,6 +484,8 @@ def build_file_provenance(
 
     import PIL
 
+    from modules.images.native import image_settings_fingerprint
+
     try:
         pymupdf_version = version("pymupdf")
     except PackageNotFoundError:
@@ -498,15 +500,13 @@ def build_file_provenance(
             "pymupdf_version": pymupdf_version,
             "pillow_version": PIL.__version__,
             "model_type": model_type,
-            "image_config": {
-                "target_dpi": img_cfg.get("target_dpi"),
-                "max_pixels_per_page": max_pixels,
-                "resize_profile": img_cfg.get("resize_profile"),
-                "llm_detail": img_cfg.get("llm_detail"),
-                "media_resolution": img_cfg.get("media_resolution"),
-                "jpeg_quality": img_cfg.get("jpeg_quality"),
-                "grayscale_conversion": img_cfg.get("grayscale_conversion"),
-            },
+            "image_config": {**img_cfg, "max_pixels_per_page": max_pixels},
+            "model_name": img_cfg.get("model_name", ""),
+            "detail": img_cfg.get("resolved_detail"),
+            "cap_policy": img_cfg.get("cap_policy", "profile-v1"),
+            "image_settings_fingerprint": image_settings_fingerprint(
+                {**img_cfg, "max_pixels_per_page": max_pixels, "model_type": model_type}
+            ),
             "timestamp": datetime.datetime.now().isoformat(),
         }
     }

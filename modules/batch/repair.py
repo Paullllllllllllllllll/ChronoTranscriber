@@ -608,10 +608,37 @@ def _resolve_repair_targets(
     """
     name_to_entry: dict[str, ImageEntry] = {e.image_name: e for e in image_entries}
     targets: list[RepairTarget] = []
+    current_model = (
+        str((model_config or {}).get("transcription_model", {}).get("name") or "")
+        or None
+    )
+
+    def _for_current_model(
+        settings: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        # Recorded settings carry the recorded model's caps and detail; a repair
+        # under another model re-derives both from the current configuration.
+        if settings is None or current_model is None:
+            return settings
+        if settings.get("model_name", current_model) != current_model:
+            logger.warning(
+                "Repair model %s differs from the recorded model %s; using the "
+                "current image settings.",
+                current_model,
+                settings.get("model_name"),
+            )
+            return None
+        return settings
 
     for idx in failure_indices:
         image_name = extract_image_name_from_failure_line(final_lines[idx])
         entry = name_to_entry.get(image_name) if image_name else None
+        if entry is not None and entry.image_settings is not None:
+            from dataclasses import replace
+
+            entry = replace(
+                entry, image_settings=_for_current_model(entry.image_settings)
+            )
 
         resolved_path: Path | None = None
         resolved_order_index: int = -1
@@ -696,7 +723,7 @@ def _resolve_repair_targets(
                 None,
                 None,
                 source_file=str(resolved_path),
-                image_settings=(
+                image_settings=_for_current_model(
                     recorded.get("image_config")
                     if recorded.get("image_settings_fingerprint")
                     else None

@@ -345,8 +345,11 @@ def test_openrouter_uses_wire_detail() -> None:
         24000000,
         "direct",
     )
-    assert cfg["resolved_detail"] == "auto"
+    # OpenRouter sends no detail for this route: the section profile decides,
+    # and original falls back to the conservative 10,000-patch cap.
+    assert cfg["resolved_detail"] == "original"
     assert not cfg["image_original_patch_cap_30k"]
+    assert cfg["cap_policy"] == "openai-original-10k-v1"
     size, reason = resolve_target_size(
         4000,
         7000,
@@ -355,8 +358,8 @@ def test_openrouter_uses_wire_detail() -> None:
         cfg["resolved_detail"],
         cfg,
     )
-    assert size[0] <= 768 and size[1] <= 1536
-    assert reason == "profile"
+    assert math.ceil(size[0] / 32) * math.ceil(size[1] / 32) <= 10000
+    assert reason == "model_cap"
 
 
 def test_fingerprint_and_resume(
@@ -435,6 +438,38 @@ def test_repair_recorded_settings(tmp_path: Path, raw_on_disk: bool) -> None:
     assert target.request_detail == "original"
     image = Image.open(io.BytesIO(base64.b64decode(target.image_base64)))
     assert image.size == (300, 450)
+    # Another repair model re-derives caps and detail from the current config.
+    current = settings("gpt-5.4")
+    with patch(
+        "modules.images.page_stream.resolve_image_settings",
+        return_value=(current, "openai", "native", 24000000, "direct"),
+    ) as current_settings:
+        targets = _resolve_repair_targets(
+            job,
+            collect_image_entries_from_jsonl(path),
+            [0],
+            [f"[transcription error: {name}]"],
+            {"transcription_model": {"provider": "openai", "name": "gpt-5.4"}},
+        )
+    assert current_settings.called
+    assert targets[0].request_detail is None
+
+
+def test_openrouter_without_detail_sizes_by_section_profile() -> None:
+    cfg = resolved_settings(
+        {"target_dpi": "native", "llm_detail": "low", "resize_profile": "auto"},
+        "openrouter",
+        "anthropic/claude-opus-5",
+        "anthropic",
+        "anthropic_image_processing",
+        24000000,
+        "direct",
+    )
+    assert cfg["resolved_detail"] == "auto"
+    size, _ = resolve_target_size(
+        4000, 7000, "anthropic", cfg["model_name"], cfg["resolved_detail"], cfg
+    )
+    assert max(size) > 512
 
 
 @pytest.mark.parametrize(
@@ -581,7 +616,7 @@ def test_repair_raw_without_page_record(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("detail", ["high", "low"])
-def test_openrouter_reads_the_request_section(detail: str) -> None:
+def test_openrouter_without_detail_keeps_section_profile(detail: str) -> None:
     from modules.images.page_stream import resolve_image_settings
 
     config = {
@@ -591,4 +626,6 @@ def test_openrouter_reads_the_request_section(detail: str) -> None:
     with patch("modules.config.service.get_config_service") as service:
         service.return_value.get_image_processing_config.return_value = config
         cfg, _, _, _, _ = resolve_image_settings("openrouter", "google/gemini-3-flash")
-    assert cfg["resolved_detail"] == detail
+    # No detail reaches Gemini through OpenRouter, so the API section's
+    # llm_detail never overrides the Google section's own resolution.
+    assert cfg["resolved_detail"] == "low"

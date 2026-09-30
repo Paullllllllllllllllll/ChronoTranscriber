@@ -41,7 +41,11 @@ def resolved_settings(
         .lower()
         .strip()
     )
-    if provider in ("openai", "openrouter"):
+    if provider == "openrouter" and not caps.supports_image_detail:
+        # No detail parameter reaches the model, so size by the section's own
+        # profile (Anthropic tier, Google resolution) rather than llm_detail.
+        detail = ImageProcessor.resolve_detail(result, model_type).lower()
+    elif provider in ("openai", "openrouter"):
         allowed = {"low", "high"}
         if provider == "openai" and caps.supports_image_detail_original:
             allowed.add("original")

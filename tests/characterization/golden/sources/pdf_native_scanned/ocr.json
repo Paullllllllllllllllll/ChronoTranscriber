@@ -1,0 +1,29 @@
+{
+  "calls": [
+    {
+      "config": "--oem 3 --psm 6",
+      "height": 1270,
+      "image": "page_0001_tess_preprocessed.png",
+      "mode": "L",
+      "page": 1,
+      "width": 854
+    },
+    {
+      "config": "--oem 3 --psm 6",
+      "height": 1270,
+      "image": "page_0002_tess_preprocessed.png",
+      "mode": "L",
+      "page": 2,
+      "width": 854
+    },
+    {
+      "config": "--oem 3 --psm 6",
+      "height": 1270,
+      "image": "page_0003_tess_preprocessed.png",
+      "mode": "L",
+      "page": 3,
+      "width": 854
+    }
+  ],
+  "version_checks": 1
+}

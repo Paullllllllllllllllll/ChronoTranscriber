@@ -1,0 +1,88 @@
+{
+  "calls": [
+    {
+      "attempt": 1,
+      "chunk": {
+        "seconds": 30.0,
+        "start_second": 0
+      },
+      "file": {
+        "bytes": 12044,
+        "mime": "audio/mp3",
+        "name": "talk_chunk_0001.mp3"
+      },
+      "kwargs": {
+        "model": "gpt-transcribe"
+      },
+      "provider": "openai"
+    },
+    {
+      "attempt": 1,
+      "chunk": {
+        "seconds": 30.0,
+        "start_second": 30
+      },
+      "file": {
+        "bytes": 12044,
+        "mime": "audio/mp3",
+        "name": "talk_chunk_0002.mp3"
+      },
+      "kwargs": {
+        "model": "gpt-transcribe"
+      },
+      "provider": "openai"
+    },
+    {
+      "attempt": 2,
+      "chunk": {
+        "seconds": 30.0,
+        "start_second": 30
+      },
+      "file": {
+        "bytes": 12044,
+        "mime": "audio/mp3",
+        "name": "talk_chunk_0002.mp3"
+      },
+      "kwargs": {
+        "model": "gpt-transcribe"
+      },
+      "provider": "openai"
+    },
+    {
+      "attempt": 1,
+      "chunk": {
+        "seconds": 15.0,
+        "start_second": 60
+      },
+      "file": {
+        "bytes": 6044,
+        "mime": "audio/mp3",
+        "name": "talk_chunk_0003.mp3"
+      },
+      "kwargs": {
+        "model": "gpt-transcribe"
+      },
+      "provider": "openai"
+    }
+  ],
+  "models": [
+    {
+      "constructor": "AsyncOpenAI",
+      "kwargs": {
+        "api_key": "<env:OPENAI_API_KEY>",
+        "http_client": "<_DefaultAsyncHttpxClient>",
+        "max_retries": 0,
+        "timeout": {
+          "httpx.Timeout": {
+            "connect": 10.0,
+            "pool": 30.0,
+            "read": 900.0,
+            "write": 30.0
+          }
+        }
+      },
+      "provider": "openai"
+    }
+  ],
+  "prompts": {}
+}

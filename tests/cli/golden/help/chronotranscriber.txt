@@ -1,0 +1,18 @@
+usage: chronotranscriber [-h] COMMAND ...
+
+Transcribe PDFs, image folders, EPUB and MOBI files and audio recordings with vision models,
+Tesseract, native text layers or speech-to-text.
+
+options:
+  -h, --help    show this help message and exit
+
+commands:
+  COMMAND
+    transcribe  transcribe documents, image folders and recordings
+    repair      transcribe the failed pages of transcriptions again
+    batch       check, finalize or cancel batch submissions
+    render      render the txt and md views from the store again
+    drop        remove documents from the store, to transcribe them from scratch
+    ui          guided run in an interactive terminal
+
+Run 'chronotranscriber <command> --help' for the options of a command.

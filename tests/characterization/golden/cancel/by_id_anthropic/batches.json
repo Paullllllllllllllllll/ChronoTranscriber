@@ -1,0 +1,26 @@
+[
+  {
+    "batch_id": "<openai-batch-1>",
+    "polls": 0,
+    "provider": "openai",
+    "state": "pending"
+  },
+  {
+    "batch_id": "<anthropic-batch-1>",
+    "polls": 0,
+    "provider": "anthropic",
+    "state": "cancelled"
+  },
+  {
+    "batch_id": "<google-batch-1>",
+    "polls": 0,
+    "provider": "google",
+    "state": "pending"
+  },
+  {
+    "batch_id": "<openai-batch-2>",
+    "polls": 0,
+    "provider": "openai",
+    "state": "completed"
+  }
+]

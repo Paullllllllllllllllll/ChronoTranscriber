@@ -1,0 +1,72 @@
+{
+  "calls": [
+    {
+      "attempt": 1,
+      "bound": {},
+      "chunk": {
+        "seconds": 20.0,
+        "start_second": 0
+      },
+      "kwargs": {
+        "max_output_tokens": 32768
+      },
+      "messages": [
+        {
+          "blocks": [
+            {
+              "chars": 163,
+              "prompt": "prompt-1",
+              "type": "text"
+            }
+          ],
+          "role": "system"
+        },
+        {
+          "blocks": [
+            {
+              "text": "Please transcribe the speech in this audio recording.",
+              "type": "text"
+            },
+            {
+              "bytes": 8044,
+              "keys": [
+                "base64",
+                "mime_type",
+                "type"
+              ],
+              "mime": "audio/wav",
+              "type": "file"
+            }
+          ],
+          "role": "human"
+        }
+      ],
+      "provider": "google"
+    }
+  ],
+  "models": [
+    {
+      "constructor": "ChatGoogleGenerativeAI",
+      "kwargs": {
+        "client_args": {
+          "event_hooks": {
+            "response": [
+              "<function>"
+            ]
+          },
+          "transport": "<EitherTransport>"
+        },
+        "google_api_key": "<env:GOOGLE_API_KEY>",
+        "max_retries": 0,
+        "max_tokens": 32768,
+        "model": "gemini-3.5-flash",
+        "timeout": null,
+        "top_k": null
+      },
+      "provider": "google"
+    }
+  ],
+  "prompts": {
+    "prompt-1": "Transcribe the speech in this audio recording verbatim into plain text.\nDo not add timestamps, speaker labels, headings, or commentary.\nOutput only the transcript."
+  }
+}

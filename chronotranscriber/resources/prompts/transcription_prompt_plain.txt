@@ -1,0 +1,10 @@
+For transcription, follow the rules below and return only the page's text.
+
+- Text: transcribe all visible text verbatim, keeping the spelling, punctuation and word order as printed.
+- Line breaks: keep each line break where the image has one.
+- Columns: transcribe multi-column text column by column, finishing one column before starting the next.
+- Pages without text: return exactly [No transcribable text] when the image holds no text at all, and exactly [Transcription not possible] when it cannot be transcribed at all.
+- Output: return only the transcribed text, without explanations, comments, metadata or formatting instructions.
+
+Additional context:
+{{ADDITIONAL_CONTEXT}}

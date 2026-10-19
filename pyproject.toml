@@ -1,0 +1,156 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "chronotranscriber"
+version = "1.0.0"
+description = "LLM-assisted document transcription tool for researchers and archivists"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.13"
+authors = [
+    { name = "Paul Goetz", email = "goetz@soziologie.uzh.ch" },
+]
+keywords = ["transcription", "ocr", "llm", "digital-humanities"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Text Processing :: General",
+]
+
+dependencies = [
+    # LLM integration (LangChain abstraction layer)
+    "langchain-core>=1.4.9",
+    "langchain-openai>=1.3.5",
+    "langchain-anthropic>=1.4.8",
+    "langchain-google-genai>=4.2.7",
+    # Direct SDK usage (batch API backends)
+    "openai>=2.46",
+    "anthropic>=0.117",
+    "google-genai>=2.12",
+    # Document processing
+    "PyMuPDF>=1.28",
+    "EbookLib>=0.20",
+    "mobi>=0.4.1",
+    "lxml>=6.1.1",
+    "pytesseract>=0.3.13",
+    # Image processing
+    "pillow>=12.3",
+    # OpenCV 5.0 (released 07.2026) is a fresh major of a native vision library;
+    # the preprocessing pipeline's numerics are not exhaustively covered by tests,
+    # so hold the 4.x series until 5.x has stabilized.
+    "opencv-python>=4.13,<5",
+    "deskew>=1.6.1",
+    "scikit-image>=0.26",
+    "numpy>=2.5",
+    # Configuration
+    "PyYAML>=6.0",
+    # HTTP (direct use in provider retry logic)
+    "httpx>=0.28",
+    # Utilities
+    "colorama>=0.4.6",
+    # Interactive prompts (common/prompts.py)
+    "questionary>=2.1",
+    "prompt-toolkit>=3.0",
+    "rich>=15.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4",
+    "pytest-cov>=7.0",
+    "mypy>=2.1",
+    "ruff>=0.15.18",
+    "types-PyYAML",
+    "coverage>=7.14.1",
+]
+audio = [
+    "faster-whisper>=1.2",
+]
+
+[project.scripts]
+chronotranscriber = "chronotranscriber.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/Paullllllllllllllllll/ChronoTranscriber"
+Repository = "https://github.com/Paullllllllllllllllll/ChronoTranscriber"
+Issues = "https://github.com/Paullllllllllllllllll/ChronoTranscriber/issues"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "unit: Unit tests (fast, no external dependencies)",
+    "integration: Integration tests (may require external services)",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+ignore_missing_imports = true
+# Type-check the shipped source only; tests/ carry intentionally loose typing.
+exclude = [
+    '^\.venv/',
+    '^tests/',
+    '^staging/',
+    '^htmlcov/',
+    '^scratch/',
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["chronotranscriber"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+extend-exclude = ["scratch", ".claude", "backup"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "I", "B", "UP", "SIM",
+    "C901", "PLR0912", "PLR0913", "PLR0915", "BLE001", "T201", "ERA001",
+]
+ignore = ["UP047"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.pylint]
+max-args = 8
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR0913"]
+"chronotranscriber/cli/**" = ["T201"]
+"chronotranscriber/ui/**" = ["T201"]
+
+[tool.ruff.format]
+quote-style = "double"
+docstring-code-format = false
+
+[tool.deptry]
+# Treat the dev extra as development dependencies (pytest, mypy, ruff and type
+# stubs are not imported in the shipped source tree).
+pep621_dev_dependency_groups = ["dev"]
+# tests/ carry test-only imports that are intentionally undeclared.
+extend_exclude = ["tests"]
+
+[tool.deptry.package_module_name_map]
+# Distributions whose import name differs from the package name; declaring these
+# keeps scans accurate even when deptry runs outside the project venv.
+google-genai = ["google"]
+PyYAML = ["yaml"]
+PyMuPDF = ["fitz"]
+pillow = ["PIL"]
+opencv-python = ["cv2"]
+scikit-image = ["skimage"]

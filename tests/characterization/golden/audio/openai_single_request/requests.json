@@ -1,0 +1,50 @@
+{
+  "calls": [
+    {
+      "attempt": 1,
+      "chunk": {
+        "seconds": 20.0,
+        "start_second": 0
+      },
+      "file": {
+        "bytes": 8044,
+        "mime": "audio/wav",
+        "name": "talk_chunk_0001.wav"
+      },
+      "kwargs": {
+        "extra_body": {
+          "keywords": [
+            "Roggen"
+          ],
+          "languages": [
+            "de",
+            "fr"
+          ]
+        },
+        "model": "gpt-transcribe",
+        "prompt": "Minutes of the grain market."
+      },
+      "provider": "openai"
+    }
+  ],
+  "models": [
+    {
+      "constructor": "AsyncOpenAI",
+      "kwargs": {
+        "api_key": "<env:OPENAI_API_KEY>",
+        "http_client": "<_DefaultAsyncHttpxClient>",
+        "max_retries": 0,
+        "timeout": {
+          "httpx.Timeout": {
+            "connect": 10.0,
+            "pool": 30.0,
+            "read": 900.0,
+            "write": 30.0
+          }
+        }
+      },
+      "provider": "openai"
+    }
+  ],
+  "prompts": {}
+}

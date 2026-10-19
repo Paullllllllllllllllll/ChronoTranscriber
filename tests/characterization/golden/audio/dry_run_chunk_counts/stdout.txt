@@ -1,0 +1,3 @@
+[INFO] [DRY RUN] 2 discovered; 2 would be processed, 0 skipped (already complete).
+[INFO] [DRY RUN]   would process: brief.wav (1 chunk)
+[INFO] [DRY RUN]   would process: session.wav (3 chunk(s))

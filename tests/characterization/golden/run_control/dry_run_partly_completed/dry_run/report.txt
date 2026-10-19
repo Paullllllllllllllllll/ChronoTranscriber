@@ -1,0 +1,4 @@
+[INFO] Resume mode: skip (use --force to reprocess all)
+[INFO] [DRY RUN] 3 discovered; 2 would be processed, 1 skipped (already complete).
+[INFO] [DRY RUN]   would process: b.pdf
+[INFO] [DRY RUN]   would process: c.pdf

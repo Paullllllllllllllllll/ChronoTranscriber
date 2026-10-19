@@ -1,0 +1,98 @@
+usage: chronotranscriber repair [--input PATH] [options]
+
+Find the failed pages of a transcription file, of a database or of every database at or below a
+folder, transcribe them again, store the new results in the database and render the documents'
+text files from it again.
+
+options:
+  -h, --help            show this help message and exit
+
+input:
+  --input PATH          a transcription file or the input it was transcribed from, a
+                        chronotranscriber.sqlite, or a folder whose databases at or below it are
+                        repaired; default: the current directory
+
+failures to repair:
+  --errors-only         repair transcription errors; the default when no other cause is given
+  --not-possible        repair pages marked transcription not possible
+  --no-text             repair pages marked no transcribable text
+  --all-failures        repair every failure cause
+  --indices LIST        0-based page indices (order in the item) among the selected failures of
+                        one document: 0,5,12 or 3-7; default: every selected failure
+
+schema, prompt and context:
+  --schema NAME|PATH    transcription schema: a name found in schemas/ or a path; default:
+                        markdown_transcription_schema
+  --prompt PATH|default
+                        system prompt file, or default (the prompt of the response format);
+                        default: default
+  --context TEXT|PATH|auto|none
+                        transcription context: topics as text or a path to a text file (overrides
+                        sidecars), auto (the item's sidecar) or none (no context); default: auto
+  --fallback-context TEXT|PATH|none
+                        transcription context for items without a sidecar under --context auto:
+                        topics as text, a path to a text file, or none; default: none
+  --context-image PATH|auto|none
+                        image sent with every page: an image file, auto (the item's sidecar image)
+                        or none; default: auto
+
+model:
+  --provider {openai,anthropic,google,openrouter,custom}
+                        model provider; default: inferred from the model name
+  --model NAME          model name; a provider: prefix (anthropic:NAME) selects the provider;
+                        default: gpt-6-luna
+  --endpoint NAME       named custom endpoint from the settings (implies provider custom);
+                        default: none
+  --reasoning-effort {none,minimal,low,medium,high,xhigh,max}
+                        reasoning effort; default: xhigh
+  --verbosity {low,medium,high}
+                        output verbosity; default: medium
+  --max-output-tokens N
+                        maximum output tokens; default: the model's output limit
+  --temperature T       sampling temperature, 0.0 to 2.0; default: 1.0
+  --top-p P             nucleus sampling, 0.0 to 1.0; sent only when supported; default: 1.0
+  --service-tier {auto,default,flex,priority}
+                        OpenAI service tier; default: default; only for provider openai
+  --response-format {schema,json,text}
+                        schema (API-enforced), json (prompted, validated) or text (plain);
+                        default: schema when the model supports it, else json
+
+images:
+  --dpi native|N        render resolution: native or a DPI value; default: the provider's
+                        recommended value
+  --image-detail {low,high,auto,original}
+                        image detail sent to the model; default: the provider's recommended value
+  --image-format {jpeg,png}
+                        page image format; default: the provider's recommended value
+  --jpeg-quality N      JPEG quality, 1 to 100; default: the provider's recommended value
+  --grayscale, --no-grayscale
+                        convert page images to grayscale; default: the provider's recommended
+                        value
+
+run control:
+  --batch, --no-batch   submit the repairs to the provider's batch API; default: off
+  --dry-run             plan without API calls or writes
+  --json                print one JSON summary line on stdout
+  --settings FILE       alternate settings file; default: config/settings.yaml
+
+Precedence: a flag wins over the settings defaults: block, which wins over the code default.
+--settings FILE reads another settings file instead of config/settings.yaml.
+
+Exit codes:
+  0    every selected page was repaired, or no page was left to repair; a
+       dry run that planned, also without API keys
+  1    a selected page stayed unrepaired, or the repair work failed
+  2    usage or configuration error: a path no store records, a database
+       the store refuses, --indices with several documents, or an unset
+       API key variable
+  130  interrupted (Ctrl+C or Ctrl+Break)
+
+With --json, stdout carries exactly one JSON summary line on every exit; progress, warnings and
+errors go to stderr.
+
+Examples:
+  Repair the transcription errors of one file:
+    chronotranscriber repair --input out/book-1a2b3c4d/book.txt
+  Repair every failure cause of the documents below a folder through the
+  batch API:
+    chronotranscriber repair --input out --all-failures --batch

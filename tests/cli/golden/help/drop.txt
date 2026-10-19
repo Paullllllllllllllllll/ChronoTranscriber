@@ -1,0 +1,43 @@
+usage: chronotranscriber drop --input PATH
+                              (--select EXPR | --files LIST | --all) [options]
+
+Delete the selected documents of a store with all their stored rows and the rendered files that
+were not changed outside the tool, without model calls.
+
+options:
+  -h, --help     show this help message and exit
+
+input:
+  --input PATH   output folder holding chronotranscriber.sqlite, or the database itself
+
+documents to drop:
+  --select EXPR  select stored documents by number (1,3), range (1-5) or name search
+  --files LIST   comma-separated names of stored documents or of their input files
+  --all          drop every document of the store
+
+run control:
+  --dry-run      plan without API calls or writes
+  --json         print one JSON summary line on stdout
+
+Exit codes:
+  0    every selected document was dropped, or in a dry run would be
+  1    a document was refused: another run leases it, or a batch
+       submission that is open or unresolved holds its pages
+  2    usage error: no store at the input, a database the store refuses,
+       not exactly one of --select, --files and --all, or a selection
+       that matches no stored document
+  130  interrupted (Ctrl+C or Ctrl+Break)
+
+With --json, stdout carries exactly one JSON summary line on every exit; progress, warnings and
+errors go to stderr.
+
+drop deletes each selected document with its pages, responses and render records, so the next
+transcribe run processes it from scratch. A rendered file is deleted only while it matches the
+hash recorded when it was written; a file changed outside the tool stays and is named, and while
+it stays the next run skips the item as unstored.
+
+Examples:
+  List what dropping the documents whose name holds "ledger" would delete:
+    chronotranscriber drop --input out --select ledger --dry-run
+  Drop documents 2 and 3 of the store:
+    chronotranscriber drop --input out --select 2,3

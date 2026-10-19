@@ -1,0 +1,1500 @@
+## artifacts
+{
+  "created_at": "<datetime>",
+  "kind": "prompt",
+  "run_id": "<run-1>",
+  "sha256": "<sha256>",
+  "text": "<text: 397 chars>"
+}
+{
+  "created_at": "<datetime>",
+  "kind": "schema",
+  "run_id": "<run-1>",
+  "sha256": "<sha256>",
+  "text": "<text: 3539 chars>"
+}
+## documents
+{
+  "doc_id": 1,
+  "first_run_id": "<run-1>",
+  "image_settings": {
+    "cap_policy": "anthropic-standard-v1",
+    "grayscale_conversion": false,
+    "handle_transparency": true,
+    "high_target_box": [
+      768,
+      1536
+    ],
+    "image_high_res_tier": false,
+    "image_original_patch_cap_30k": false,
+    "jpeg_quality": 95,
+    "low_max_side_px": 512,
+    "max_image_bytes": 10000000,
+    "max_pixels_per_page": 24000000,
+    "model_name": "claude-sonnet-4-6",
+    "model_type": "anthropic",
+    "native_fallback_dpi": 300,
+    "payload_format": "jpeg",
+    "provider": "anthropic",
+    "render_strategy": "direct",
+    "resize_profile": "auto",
+    "resolved_detail": "auto",
+    "target_dpi": "native"
+  },
+  "input_path": "<tmp>/docs/doc.pdf",
+  "input_sha256": "<sha256>",
+  "kind": "pdf",
+  "last_run_id": "<run-2>",
+  "lease_generation": "<generation>",
+  "lease_run_id": null,
+  "lease_until": null,
+  "name": "doc-139d544b/doc",
+  "status": "complete",
+  "tool": "chronotranscriber",
+  "units_done": 4,
+  "units_failed": 0,
+  "units_pending": 0,
+  "units_total": 4,
+  "updated_at": "<datetime>"
+}
+## meta
+{
+  "component": "chronotranscriber",
+  "version": 1
+}
+{
+  "component": "core",
+  "version": 2
+}
+## notes
+## outputs
+{
+  "doc_id": 1,
+  "format": "txt",
+  "path": "doc-139d544b/doc.txt",
+  "rendered_at": "<datetime>",
+  "run_id": "<run-2>",
+  "sha256": "<sha256>",
+  "stale": 0
+}
+## responses
+{
+  "attempt": 1,
+  "created_at": "<datetime>",
+  "custom_id": null,
+  "doc_id": 1,
+  "error": null,
+  "error_type": null,
+  "http_status": null,
+  "idx": 0,
+  "kind": "page",
+  "latency": "<duration>",
+  "model": "claude-sonnet-4-6",
+  "provider": "anthropic",
+  "raw": {
+    "additional_kwargs": {},
+    "content": "{\"transcription\": \"## Market Records, Part 01\\n\\nGrain deliveries to the city market fell in 1601, and the magis-\\ntrates fixed the bread assize twice.\\nWheat      12 sous      Rye      9 sous\\n\\n\\n\\n\\n<page_number>1</page_number>\", \"no_transcribable_text\": false, \"transcription_not_possible\": false}",
+    "id": "lc_run--<uuid>-0",
+    "invalid_tool_calls": [],
+    "name": null,
+    "response_metadata": {
+      "model_name": "claude-sonnet-4-6",
+      "status": "completed"
+    },
+    "tool_calls": [],
+    "type": "ai",
+    "usage_metadata": {
+      "input_tokens": 1500,
+      "output_tokens": 400,
+      "total_tokens": 1900
+    }
+  },
+  "raw_kind": "sdk",
+  "request": null,
+  "response_id": 1,
+  "role": "transcription",
+  "run_id": "<run-1>",
+  "submission_id": null,
+  "tool": "chronotranscriber",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 1500,
+    "output_tokens": 400,
+    "reasoning_tokens": 0,
+    "total_tokens": 1900
+  }
+}
+{
+  "attempt": 1,
+  "created_at": "<datetime>",
+  "custom_id": null,
+  "doc_id": 1,
+  "error": "Error code: 400 - invalid request",
+  "error_type": "FakeAPIError",
+  "http_status": 400,
+  "idx": 1,
+  "kind": "page",
+  "latency": "<duration>",
+  "model": "claude-sonnet-4-6",
+  "provider": "anthropic",
+  "raw": null,
+  "raw_kind": null,
+  "request": null,
+  "response_id": 2,
+  "role": "transcription",
+  "run_id": "<run-1>",
+  "submission_id": null,
+  "tool": "chronotranscriber",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "reasoning_tokens": 0,
+    "total_tokens": 0
+  }
+}
+{
+  "attempt": 1,
+  "created_at": "<datetime>",
+  "custom_id": "<submission-1>-00000",
+  "doc_id": 1,
+  "error": null,
+  "error_type": null,
+  "http_status": null,
+  "idx": 1,
+  "kind": "page",
+  "latency": null,
+  "model": "claude-sonnet-4-6",
+  "provider": "anthropic",
+  "raw": {
+    "custom_id": "<submission-1>-00000",
+    "result": {
+      "message": {
+        "container": null,
+        "content": [
+          {
+            "citations": null,
+            "text": "{\"transcription\": \"## Market Records, Part 02\\n\\nGrain deliveries to the city market fell in 1602, and the magis-\\ntrates fixed the bread assize twice.\\nWheat      12 sous      Rye      9 sous\\n\\n\\n\\n\\n<page_number>2</page_number>\", \"no_transcribable_text\": false, \"transcription_not_possible\": false}",
+            "type": "text"
+          }
+        ],
+        "id": "msg_fake0001",
+        "model": "claude-sonnet-4-6",
+        "role": "assistant",
+        "stop_details": null,
+        "stop_reason": "end_turn",
+        "stop_sequence": null,
+        "type": "message",
+        "usage": {
+          "cache_creation": null,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "inference_geo": null,
+          "input_tokens": 1500,
+          "output_tokens": 400,
+          "output_tokens_details": null,
+          "server_tool_use": null,
+          "service_tier": null
+        }
+      },
+      "type": "succeeded"
+    }
+  },
+  "raw_kind": "sdk",
+  "request": {
+    "max_tokens": 128000,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "The image:",
+            "type": "text"
+          },
+          {
+            "source": {
+              "data": "<omitted base64, 8860 chars>",
+              "media_type": "image/jpeg",
+              "type": "base64"
+            },
+            "type": "image"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-sonnet-4-6",
+    "output_config": {
+      "effort": "high",
+      "format": {
+        "schema": {
+          "additionalProperties": false,
+          "description": "Schema for document transcription output",
+          "properties": {
+            "no_transcribable_text": {
+              "description": "<text: 146 chars>",
+              "type": "boolean"
+            },
+            "transcription": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "<text: 2630 chars>"
+            },
+            "transcription_not_possible": {
+              "description": "<text: 178 chars>",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "transcription",
+            "no_transcribable_text",
+            "transcription_not_possible"
+          ],
+          "title": "TranscriptionSchema",
+          "type": "object"
+        },
+        "type": "json_schema"
+      }
+    },
+    "system": [
+      {
+        "cache_control": {
+          "type": "ephemeral"
+        },
+        "text": "<text: 3896 chars>",
+        "type": "text"
+      }
+    ],
+    "thinking": {
+      "type": "adaptive"
+    }
+  },
+  "response_id": 3,
+  "role": "repair",
+  "run_id": "<run-2>",
+  "submission_id": "<submission-1>",
+  "tool": "chronotranscriber",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 1500,
+    "output_tokens": 400,
+    "reasoning_tokens": 0,
+    "total_tokens": 1900
+  }
+}
+{
+  "attempt": 1,
+  "created_at": "<datetime>",
+  "custom_id": null,
+  "doc_id": 1,
+  "error": null,
+  "error_type": null,
+  "http_status": null,
+  "idx": 2,
+  "kind": "page",
+  "latency": "<duration>",
+  "model": "claude-sonnet-4-6",
+  "provider": "anthropic",
+  "raw": {
+    "additional_kwargs": {},
+    "content": "{\"transcription\": null, \"no_transcribable_text\": true, \"transcription_not_possible\": false}",
+    "id": "lc_run--<uuid>-0",
+    "invalid_tool_calls": [],
+    "name": null,
+    "response_metadata": {
+      "model_name": "claude-sonnet-4-6",
+      "status": "completed"
+    },
+    "tool_calls": [],
+    "type": "ai",
+    "usage_metadata": {
+      "input_tokens": 1500,
+      "output_tokens": 400,
+      "total_tokens": 1900
+    }
+  },
+  "raw_kind": "sdk",
+  "request": null,
+  "response_id": 4,
+  "role": "transcription",
+  "run_id": "<run-1>",
+  "submission_id": null,
+  "tool": "chronotranscriber",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 1500,
+    "output_tokens": 400,
+    "reasoning_tokens": 0,
+    "total_tokens": 1900
+  }
+}
+{
+  "attempt": 1,
+  "created_at": "<datetime>",
+  "custom_id": "<submission-1>-00001",
+  "doc_id": 1,
+  "error": null,
+  "error_type": null,
+  "http_status": null,
+  "idx": 2,
+  "kind": "page",
+  "latency": null,
+  "model": "claude-sonnet-4-6",
+  "provider": "anthropic",
+  "raw": {
+    "custom_id": "<submission-1>-00001",
+    "result": {
+      "message": {
+        "container": null,
+        "content": [
+          {
+            "citations": null,
+            "text": "{\"transcription\": \"## Market Records, Part 03\\n\\nGrain deliveries to the city market fell in 1603, and the magis-\\ntrates fixed the bread assize twice.\\nWheat      12 sous      Rye      9 sous\\n\\n\\n\\n\\n<page_number>3</page_number>\", \"no_transcribable_text\": false, \"transcription_not_possible\": false}",
+            "type": "text"
+          }
+        ],
+        "id": "msg_fake0002",
+        "model": "claude-sonnet-4-6",
+        "role": "assistant",
+        "stop_details": null,
+        "stop_reason": "end_turn",
+        "stop_sequence": null,
+        "type": "message",
+        "usage": {
+          "cache_creation": null,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "inference_geo": null,
+          "input_tokens": 1500,
+          "output_tokens": 400,
+          "output_tokens_details": null,
+          "server_tool_use": null,
+          "service_tier": null
+        }
+      },
+      "type": "succeeded"
+    }
+  },
+  "raw_kind": "sdk",
+  "request": {
+    "max_tokens": 128000,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "The image:",
+            "type": "text"
+          },
+          {
+            "source": {
+              "data": "<omitted base64, 8860 chars>",
+              "media_type": "image/jpeg",
+              "type": "base64"
+            },
+            "type": "image"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-sonnet-4-6",
+    "output_config": {
+      "effort": "high",
+      "format": {
+        "schema": {
+          "additionalProperties": false,
+          "description": "Schema for document transcription output",
+          "properties": {
+            "no_transcribable_text": {
+              "description": "<text: 146 chars>",
+              "type": "boolean"
+            },
+            "transcription": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "<text: 2630 chars>"
+            },
+            "transcription_not_possible": {
+              "description": "<text: 178 chars>",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "transcription",
+            "no_transcribable_text",
+            "transcription_not_possible"
+          ],
+          "title": "TranscriptionSchema",
+          "type": "object"
+        },
+        "type": "json_schema"
+      }
+    },
+    "system": [
+      {
+        "cache_control": {
+          "type": "ephemeral"
+        },
+        "text": "<text: 3896 chars>",
+        "type": "text"
+      }
+    ],
+    "thinking": {
+      "type": "adaptive"
+    }
+  },
+  "response_id": 5,
+  "role": "repair",
+  "run_id": "<run-2>",
+  "submission_id": "<submission-1>",
+  "tool": "chronotranscriber",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 1500,
+    "output_tokens": 400,
+    "reasoning_tokens": 0,
+    "total_tokens": 1900
+  }
+}
+{
+  "attempt": 1,
+  "created_at": "<datetime>",
+  "custom_id": null,
+  "doc_id": 1,
+  "error": null,
+  "error_type": null,
+  "http_status": null,
+  "idx": 3,
+  "kind": "page",
+  "latency": "<duration>",
+  "model": "claude-sonnet-4-6",
+  "provider": "anthropic",
+  "raw": {
+    "additional_kwargs": {},
+    "content": "{\"transcription\": null, \"no_transcribable_text\": false, \"transcription_not_possible\": true}",
+    "id": "lc_run--<uuid>-0",
+    "invalid_tool_calls": [],
+    "name": null,
+    "response_metadata": {
+      "model_name": "claude-sonnet-4-6",
+      "status": "completed"
+    },
+    "tool_calls": [],
+    "type": "ai",
+    "usage_metadata": {
+      "input_tokens": 1500,
+      "output_tokens": 400,
+      "total_tokens": 1900
+    }
+  },
+  "raw_kind": "sdk",
+  "request": null,
+  "response_id": 6,
+  "role": "transcription",
+  "run_id": "<run-1>",
+  "submission_id": null,
+  "tool": "chronotranscriber",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 1500,
+    "output_tokens": 400,
+    "reasoning_tokens": 0,
+    "total_tokens": 1900
+  }
+}
+{
+  "attempt": 1,
+  "created_at": "<datetime>",
+  "custom_id": "<submission-1>-00002",
+  "doc_id": 1,
+  "error": null,
+  "error_type": null,
+  "http_status": null,
+  "idx": 3,
+  "kind": "page",
+  "latency": null,
+  "model": "claude-sonnet-4-6",
+  "provider": "anthropic",
+  "raw": {
+    "custom_id": "<submission-1>-00002",
+    "result": {
+      "message": {
+        "container": null,
+        "content": [
+          {
+            "citations": null,
+            "text": "{\"transcription\": \"## Market Records, Part 04\\n\\nGrain deliveries to the city market fell in 1604, and the magis-\\ntrates fixed the bread assize twice.\\nWheat      12 sous      Rye      9 sous\\n\\n\\n\\n\\n<page_number>4</page_number>\", \"no_transcribable_text\": false, \"transcription_not_possible\": false}",
+            "type": "text"
+          }
+        ],
+        "id": "msg_fake0003",
+        "model": "claude-sonnet-4-6",
+        "role": "assistant",
+        "stop_details": null,
+        "stop_reason": "end_turn",
+        "stop_sequence": null,
+        "type": "message",
+        "usage": {
+          "cache_creation": null,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "inference_geo": null,
+          "input_tokens": 1500,
+          "output_tokens": 400,
+          "output_tokens_details": null,
+          "server_tool_use": null,
+          "service_tier": null
+        }
+      },
+      "type": "succeeded"
+    }
+  },
+  "raw_kind": "sdk",
+  "request": {
+    "max_tokens": 128000,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "The image:",
+            "type": "text"
+          },
+          {
+            "source": {
+              "data": "<omitted base64, 8860 chars>",
+              "media_type": "image/jpeg",
+              "type": "base64"
+            },
+            "type": "image"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-sonnet-4-6",
+    "output_config": {
+      "effort": "high",
+      "format": {
+        "schema": {
+          "additionalProperties": false,
+          "description": "Schema for document transcription output",
+          "properties": {
+            "no_transcribable_text": {
+              "description": "<text: 146 chars>",
+              "type": "boolean"
+            },
+            "transcription": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "<text: 2630 chars>"
+            },
+            "transcription_not_possible": {
+              "description": "<text: 178 chars>",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "transcription",
+            "no_transcribable_text",
+            "transcription_not_possible"
+          ],
+          "title": "TranscriptionSchema",
+          "type": "object"
+        },
+        "type": "json_schema"
+      }
+    },
+    "system": [
+      {
+        "cache_control": {
+          "type": "ephemeral"
+        },
+        "text": "<text: 3896 chars>",
+        "type": "text"
+      }
+    ],
+    "thinking": {
+      "type": "adaptive"
+    }
+  },
+  "response_id": 7,
+  "role": "repair",
+  "run_id": "<run-2>",
+  "submission_id": "<submission-1>",
+  "tool": "chronotranscriber",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 1500,
+    "output_tokens": 400,
+    "reasoning_tokens": 0,
+    "total_tokens": 1900
+  }
+}
+## runs
+{
+  "command": "transcribe",
+  "ended_at": "<datetime>",
+  "exit_code": 1,
+  "run_id": "<run-1>",
+  "settings_fingerprint": null,
+  "spec": {
+    "audio.chunk_seconds": {
+      "source": "default",
+      "value": 600
+    },
+    "audio.language": {
+      "source": "default",
+      "value": null
+    },
+    "audio.whisper_model": {
+      "source": "default",
+      "value": "large-v3"
+    },
+    "images.detail": {
+      "source": "default",
+      "value": null
+    },
+    "images.dpi": {
+      "source": "default",
+      "value": null
+    },
+    "images.format": {
+      "source": "default",
+      "value": null
+    },
+    "images.grayscale": {
+      "source": "default",
+      "value": null
+    },
+    "images.jpeg_quality": {
+      "source": "default",
+      "value": null
+    },
+    "input.all": {
+      "source": "flag",
+      "value": true
+    },
+    "input.files": {
+      "source": "flag",
+      "value": []
+    },
+    "input.pages": {
+      "source": "default",
+      "value": null
+    },
+    "input.path": {
+      "source": "flag",
+      "value": "<tmp>/docs/doc.pdf"
+    },
+    "input.recursive": {
+      "source": "default",
+      "value": false
+    },
+    "input.select": {
+      "source": "flag",
+      "value": null
+    },
+    "input.type": {
+      "source": "flag",
+      "value": "pdf"
+    },
+    "method.name": {
+      "source": "flag",
+      "value": "llm"
+    },
+    "method.searchable_pdfs": {
+      "source": "default",
+      "value": "ocr"
+    },
+    "model.endpoint": {
+      "source": "default",
+      "value": null
+    },
+    "model.max_output_tokens": {
+      "source": "default",
+      "value": null
+    },
+    "model.model": {
+      "source": "flag",
+      "value": "claude-sonnet-4-6"
+    },
+    "model.provider": {
+      "source": "flag",
+      "value": "anthropic"
+    },
+    "model.reasoning_effort": {
+      "source": "default",
+      "value": "xhigh"
+    },
+    "model.response_format": {
+      "source": "default",
+      "value": null
+    },
+    "model.service_tier": {
+      "source": "default",
+      "value": "default"
+    },
+    "model.temperature": {
+      "source": "default",
+      "value": 1.0
+    },
+    "model.top_p": {
+      "source": "default",
+      "value": 1.0
+    },
+    "model.verbosity": {
+      "source": "default",
+      "value": "medium"
+    },
+    "ocr.config": {
+      "source": "default",
+      "value": "--oem 3 --psm 6"
+    },
+    "ocr.preprocess": {
+      "source": "default",
+      "value": "default"
+    },
+    "output.directory": {
+      "source": "flag",
+      "value": "<tmp>/out"
+    },
+    "output.formats": {
+      "source": "default",
+      "value": [
+        "txt"
+      ]
+    },
+    "output.layout": {
+      "source": "default",
+      "value": "hash"
+    },
+    "prompt.context": {
+      "source": "default",
+      "value": null
+    },
+    "prompt.context_image": {
+      "source": "default",
+      "value": null
+    },
+    "prompt.fallback_context": {
+      "source": "default",
+      "value": null
+    },
+    "prompt.prompt": {
+      "source": "default",
+      "value": null
+    },
+    "prompt.schema": {
+      "source": "default",
+      "value": "markdown_transcription_schema"
+    },
+    "run.batch": {
+      "source": "default",
+      "value": false
+    },
+    "run.concurrency": {
+      "source": "default",
+      "value": 16
+    },
+    "run.dry_run": {
+      "source": "default",
+      "value": false
+    },
+    "run.force": {
+      "source": "default",
+      "value": false
+    },
+    "run.json": {
+      "source": "flag",
+      "value": true
+    },
+    "run.keep_working_files": {
+      "source": "default",
+      "value": false
+    },
+    "run.retry_errors": {
+      "source": "flag",
+      "value": false
+    },
+    "run.sync_fallback": {
+      "source": "default",
+      "value": false
+    }
+  },
+  "started_at": "<datetime>",
+  "tool": "chronotranscriber",
+  "tool_version": "<version>"
+}
+{
+  "command": "repair",
+  "ended_at": "<datetime>",
+  "exit_code": 0,
+  "run_id": "<run-2>",
+  "settings_fingerprint": null,
+  "spec": {
+    "images.detail": {
+      "source": "flag",
+      "value": null
+    },
+    "images.dpi": {
+      "source": "flag",
+      "value": null
+    },
+    "images.format": {
+      "source": "flag",
+      "value": null
+    },
+    "images.grayscale": {
+      "source": "flag",
+      "value": null
+    },
+    "images.jpeg_quality": {
+      "source": "flag",
+      "value": null
+    },
+    "input": {
+      "source": "flag",
+      "value": "<tmp>/out/doc-139d544b/doc.txt"
+    },
+    "model.endpoint": {
+      "source": "flag",
+      "value": null
+    },
+    "model.max_output_tokens": {
+      "source": "flag",
+      "value": null
+    },
+    "model.model": {
+      "source": "flag",
+      "value": "claude-sonnet-4-6"
+    },
+    "model.provider": {
+      "source": "flag",
+      "value": "anthropic"
+    },
+    "model.reasoning_effort": {
+      "source": "flag",
+      "value": "xhigh"
+    },
+    "model.response_format": {
+      "source": "flag",
+      "value": null
+    },
+    "model.service_tier": {
+      "source": "flag",
+      "value": "default"
+    },
+    "model.temperature": {
+      "source": "flag",
+      "value": 1.0
+    },
+    "model.top_p": {
+      "source": "flag",
+      "value": 1.0
+    },
+    "model.verbosity": {
+      "source": "flag",
+      "value": "medium"
+    },
+    "prompt.context": {
+      "source": "flag",
+      "value": null
+    },
+    "prompt.context_image": {
+      "source": "flag",
+      "value": null
+    },
+    "prompt.fallback_context": {
+      "source": "flag",
+      "value": null
+    },
+    "prompt.prompt": {
+      "source": "flag",
+      "value": null
+    },
+    "prompt.schema": {
+      "source": "flag",
+      "value": "markdown_transcription_schema"
+    },
+    "run.batch": {
+      "source": "flag",
+      "value": true
+    },
+    "run.dry_run": {
+      "source": "flag",
+      "value": false
+    },
+    "run.json": {
+      "source": "flag",
+      "value": true
+    },
+    "selection.causes": {
+      "source": "flag",
+      "value": [
+        "api_error",
+        "not_possible",
+        "no_text"
+      ]
+    },
+    "selection.indices": {
+      "source": "flag",
+      "value": null
+    }
+  },
+  "started_at": "<datetime>",
+  "tool": "chronotranscriber",
+  "tool_version": "<version>"
+}
+## submission_requests
+{
+  "custom_id": "<submission-1>-00000",
+  "doc_id": 1,
+  "idx": 1,
+  "kind": "page",
+  "request": {
+    "max_tokens": 128000,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "The image:",
+            "type": "text"
+          },
+          {
+            "source": {
+              "data": "<omitted base64, 8860 chars>",
+              "media_type": "image/jpeg",
+              "type": "base64"
+            },
+            "type": "image"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-sonnet-4-6",
+    "output_config": {
+      "effort": "high",
+      "format": {
+        "schema": {
+          "additionalProperties": false,
+          "description": "Schema for document transcription output",
+          "properties": {
+            "no_transcribable_text": {
+              "description": "True only when the image holds no text at all, such as a blank or purely pictorial page; false whenever any text can be transcribed, even in part.",
+              "type": "boolean"
+            },
+            "transcription": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The page's text as Markdown, transcribed in reading order. Text: always transcribe verbatim, keeping the wording, spelling, punctuation, capitalization, numbers and names exactly as printed, errors and archaic forms included, since readers check the text against the scan and search it for exact terms. Write only text visible in the image and never add, complete or correct anything. Illegible text: write [illegible] for a word or passage you cannot read, and [?] in place of the uncertain part of a partly legible word. Scope: include all visible text, headers, footers, margin text, captions and tables among it, unless the additional context makes exceptions. Line breaks: keep each line break where the image has one. Columns: transcribe multi-column text column by column, finishing one column before starting the next. Markdown: mark headings with # by level, italic type as *text*, bold type as **text**, and write tables as Markdown tables. Page numbers: wrap the printed page number of a header or footer in tags, as <page_number>N</page_number>, where it appears; numbers in the body text and in tables stay untagged. Footnotes: write a note marker in the text as [^N] and the note itself, in the body or the footer, as [^N]: followed by its text, N being the printed marker. Formulas: wrap math inside a sentence in single dollar signs, $...$, and an equation set on its own line in double dollar signs, $$...$$, which are for display equations only. Use only these two delimiters, not \\(...\\) or \\[...\\]. Apart from note markers, which follow the footnote rule, write every subscript and superscript, affiliation marks included, as _ or ^ inside $...$, not as HTML tags such as <sub> and <sup> and not as a bare ^ outside math. Keep every relation and symbol exactly as printed: > stays >, < stays <, a definition with \\equiv keeps \\equiv, and the layout of an equation stays as set. Use standard LaTeX commands such as \\frac{}{}, \\sqrt{}, \\sum, \\int and Greek letters, and \\mathrm{} for upright text in math; balance every \\left with a \\right, using \\left. or \\right. for a one-sided delimiter. Images: describe each image, chart or diagram where it appears as ![Image: description], naming what it shows, its labels and any trend it conveys. Two-page spreads: when the image shows two facing pages, transcribe the left page in full, then the right page, and tag each page's printed number. Cross-page continuity: the page is usually one of many, so transcribe a sentence that begins on the previous page or ends on the next exactly as far as this page shows it. Use null when the image holds no transcribable text."
+            },
+            "transcription_not_possible": {
+              "description": "True only when the image cannot be transcribed at all, such as a corrupted or entirely unreadable scan; false whenever any part can be transcribed, even with [illegible] markers.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "transcription",
+            "no_transcribable_text",
+            "transcription_not_possible"
+          ],
+          "title": "TranscriptionSchema",
+          "type": "object"
+        },
+        "type": "json_schema"
+      }
+    },
+    "system": [
+      {
+        "cache_control": {
+          "type": "ephemeral"
+        },
+        "text": "For transcription, follow the rules in the field descriptions of the JSON schema below; return only JSON that matches it.\n\nThe transcription is research text: later steps extract records from it and readers check it against the scan, so exact wording, spelling, numbers and names matter more than readability.\n\nThe JSON schema:\n{\n  \"name\": \"markdown_transcription_schema\",\n  \"strict\": true,\n  \"schema\": {\n    \"type\": \"object\",\n    \"properties\": {\n      \"transcription\": {\n        \"type\": [\n          \"string\",\n          \"null\"\n        ],\n        \"description\": \"The page's text as Markdown, transcribed in reading order. Text: always transcribe verbatim, keeping the wording, spelling, punctuation, capitalization, numbers and names exactly as printed, errors and archaic forms included, since readers check the text against the scan and search it for exact terms. Write only text visible in the image and never add, complete or correct anything. Illegible text: write [illegible] for a word or passage you cannot read, and [?] in place of the uncertain part of a partly legible word. Scope: include all visible text, headers, footers, margin text, captions and tables among it, unless the additional context makes exceptions. Line breaks: keep each line break where the image has one. Columns: transcribe multi-column text column by column, finishing one column before starting the next. Markdown: mark headings with # by level, italic type as *text*, bold type as **text**, and write tables as Markdown tables. Page numbers: wrap the printed page number of a header or footer in tags, as <page_number>N</page_number>, where it appears; numbers in the body text and in tables stay untagged. Footnotes: write a note marker in the text as [^N] and the note itself, in the body or the footer, as [^N]: followed by its text, N being the printed marker. Formulas: wrap math inside a sentence in single dollar signs, $...$, and an equation set on its own line in double dollar signs, $$...$$, which are for display equations only. Use only these two delimiters, not \\\\(...\\\\) or \\\\[...\\\\]. Apart from note markers, which follow the footnote rule, write every subscript and superscript, affiliation marks included, as _ or ^ inside $...$, not as HTML tags such as <sub> and <sup> and not as a bare ^ outside math. Keep every relation and symbol exactly as printed: > stays >, < stays <, a definition with \\\\equiv keeps \\\\equiv, and the layout of an equation stays as set. Use standard LaTeX commands such as \\\\frac{}{}, \\\\sqrt{}, \\\\sum, \\\\int and Greek letters, and \\\\mathrm{} for upright text in math; balance every \\\\left with a \\\\right, using \\\\left. or \\\\right. for a one-sided delimiter. Images: describe each image, chart or diagram where it appears as ![Image: description], naming what it shows, its labels and any trend it conveys. Two-page spreads: when the image shows two facing pages, transcribe the left page in full, then the right page, and tag each page's printed number. Cross-page continuity: the page is usually one of many, so transcribe a sentence that begins on the previous page or ends on the next exactly as far as this page shows it. Use null when the image holds no transcribable text.\"\n      },\n      \"no_transcribable_text\": {\n        \"type\": \"boolean\",\n        \"description\": \"True only when the image holds no text at all, such as a blank or purely pictorial page; false whenever any text can be transcribed, even in part.\"\n      },\n      \"transcription_not_possible\": {\n        \"type\": \"boolean\",\n        \"description\": \"True only when the image cannot be transcribed at all, such as a corrupted or entirely unreadable scan; false whenever any part can be transcribed, even with [illegible] markers.\"\n      }\n    },\n    \"required\": [\n      \"transcription\",\n      \"no_transcribable_text\",\n      \"transcription_not_possible\"\n    ],\n    \"additionalProperties\": false\n  }\n}",
+        "type": "text"
+      }
+    ],
+    "thinking": {
+      "type": "adaptive"
+    }
+  },
+  "submission_id": "<submission-1>"
+}
+{
+  "custom_id": "<submission-1>-00001",
+  "doc_id": 1,
+  "idx": 2,
+  "kind": "page",
+  "request": {
+    "max_tokens": 128000,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "The image:",
+            "type": "text"
+          },
+          {
+            "source": {
+              "data": "<omitted base64, 8860 chars>",
+              "media_type": "image/jpeg",
+              "type": "base64"
+            },
+            "type": "image"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-sonnet-4-6",
+    "output_config": {
+      "effort": "high",
+      "format": {
+        "schema": {
+          "additionalProperties": false,
+          "description": "Schema for document transcription output",
+          "properties": {
+            "no_transcribable_text": {
+              "description": "True only when the image holds no text at all, such as a blank or purely pictorial page; false whenever any text can be transcribed, even in part.",
+              "type": "boolean"
+            },
+            "transcription": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The page's text as Markdown, transcribed in reading order. Text: always transcribe verbatim, keeping the wording, spelling, punctuation, capitalization, numbers and names exactly as printed, errors and archaic forms included, since readers check the text against the scan and search it for exact terms. Write only text visible in the image and never add, complete or correct anything. Illegible text: write [illegible] for a word or passage you cannot read, and [?] in place of the uncertain part of a partly legible word. Scope: include all visible text, headers, footers, margin text, captions and tables among it, unless the additional context makes exceptions. Line breaks: keep each line break where the image has one. Columns: transcribe multi-column text column by column, finishing one column before starting the next. Markdown: mark headings with # by level, italic type as *text*, bold type as **text**, and write tables as Markdown tables. Page numbers: wrap the printed page number of a header or footer in tags, as <page_number>N</page_number>, where it appears; numbers in the body text and in tables stay untagged. Footnotes: write a note marker in the text as [^N] and the note itself, in the body or the footer, as [^N]: followed by its text, N being the printed marker. Formulas: wrap math inside a sentence in single dollar signs, $...$, and an equation set on its own line in double dollar signs, $$...$$, which are for display equations only. Use only these two delimiters, not \\(...\\) or \\[...\\]. Apart from note markers, which follow the footnote rule, write every subscript and superscript, affiliation marks included, as _ or ^ inside $...$, not as HTML tags such as <sub> and <sup> and not as a bare ^ outside math. Keep every relation and symbol exactly as printed: > stays >, < stays <, a definition with \\equiv keeps \\equiv, and the layout of an equation stays as set. Use standard LaTeX commands such as \\frac{}{}, \\sqrt{}, \\sum, \\int and Greek letters, and \\mathrm{} for upright text in math; balance every \\left with a \\right, using \\left. or \\right. for a one-sided delimiter. Images: describe each image, chart or diagram where it appears as ![Image: description], naming what it shows, its labels and any trend it conveys. Two-page spreads: when the image shows two facing pages, transcribe the left page in full, then the right page, and tag each page's printed number. Cross-page continuity: the page is usually one of many, so transcribe a sentence that begins on the previous page or ends on the next exactly as far as this page shows it. Use null when the image holds no transcribable text."
+            },
+            "transcription_not_possible": {
+              "description": "True only when the image cannot be transcribed at all, such as a corrupted or entirely unreadable scan; false whenever any part can be transcribed, even with [illegible] markers.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "transcription",
+            "no_transcribable_text",
+            "transcription_not_possible"
+          ],
+          "title": "TranscriptionSchema",
+          "type": "object"
+        },
+        "type": "json_schema"
+      }
+    },
+    "system": [
+      {
+        "cache_control": {
+          "type": "ephemeral"
+        },
+        "text": "For transcription, follow the rules in the field descriptions of the JSON schema below; return only JSON that matches it.\n\nThe transcription is research text: later steps extract records from it and readers check it against the scan, so exact wording, spelling, numbers and names matter more than readability.\n\nThe JSON schema:\n{\n  \"name\": \"markdown_transcription_schema\",\n  \"strict\": true,\n  \"schema\": {\n    \"type\": \"object\",\n    \"properties\": {\n      \"transcription\": {\n        \"type\": [\n          \"string\",\n          \"null\"\n        ],\n        \"description\": \"The page's text as Markdown, transcribed in reading order. Text: always transcribe verbatim, keeping the wording, spelling, punctuation, capitalization, numbers and names exactly as printed, errors and archaic forms included, since readers check the text against the scan and search it for exact terms. Write only text visible in the image and never add, complete or correct anything. Illegible text: write [illegible] for a word or passage you cannot read, and [?] in place of the uncertain part of a partly legible word. Scope: include all visible text, headers, footers, margin text, captions and tables among it, unless the additional context makes exceptions. Line breaks: keep each line break where the image has one. Columns: transcribe multi-column text column by column, finishing one column before starting the next. Markdown: mark headings with # by level, italic type as *text*, bold type as **text**, and write tables as Markdown tables. Page numbers: wrap the printed page number of a header or footer in tags, as <page_number>N</page_number>, where it appears; numbers in the body text and in tables stay untagged. Footnotes: write a note marker in the text as [^N] and the note itself, in the body or the footer, as [^N]: followed by its text, N being the printed marker. Formulas: wrap math inside a sentence in single dollar signs, $...$, and an equation set on its own line in double dollar signs, $$...$$, which are for display equations only. Use only these two delimiters, not \\\\(...\\\\) or \\\\[...\\\\]. Apart from note markers, which follow the footnote rule, write every subscript and superscript, affiliation marks included, as _ or ^ inside $...$, not as HTML tags such as <sub> and <sup> and not as a bare ^ outside math. Keep every relation and symbol exactly as printed: > stays >, < stays <, a definition with \\\\equiv keeps \\\\equiv, and the layout of an equation stays as set. Use standard LaTeX commands such as \\\\frac{}{}, \\\\sqrt{}, \\\\sum, \\\\int and Greek letters, and \\\\mathrm{} for upright text in math; balance every \\\\left with a \\\\right, using \\\\left. or \\\\right. for a one-sided delimiter. Images: describe each image, chart or diagram where it appears as ![Image: description], naming what it shows, its labels and any trend it conveys. Two-page spreads: when the image shows two facing pages, transcribe the left page in full, then the right page, and tag each page's printed number. Cross-page continuity: the page is usually one of many, so transcribe a sentence that begins on the previous page or ends on the next exactly as far as this page shows it. Use null when the image holds no transcribable text.\"\n      },\n      \"no_transcribable_text\": {\n        \"type\": \"boolean\",\n        \"description\": \"True only when the image holds no text at all, such as a blank or purely pictorial page; false whenever any text can be transcribed, even in part.\"\n      },\n      \"transcription_not_possible\": {\n        \"type\": \"boolean\",\n        \"description\": \"True only when the image cannot be transcribed at all, such as a corrupted or entirely unreadable scan; false whenever any part can be transcribed, even with [illegible] markers.\"\n      }\n    },\n    \"required\": [\n      \"transcription\",\n      \"no_transcribable_text\",\n      \"transcription_not_possible\"\n    ],\n    \"additionalProperties\": false\n  }\n}",
+        "type": "text"
+      }
+    ],
+    "thinking": {
+      "type": "adaptive"
+    }
+  },
+  "submission_id": "<submission-1>"
+}
+{
+  "custom_id": "<submission-1>-00002",
+  "doc_id": 1,
+  "idx": 3,
+  "kind": "page",
+  "request": {
+    "max_tokens": 128000,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "The image:",
+            "type": "text"
+          },
+          {
+            "source": {
+              "data": "<omitted base64, 8860 chars>",
+              "media_type": "image/jpeg",
+              "type": "base64"
+            },
+            "type": "image"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-sonnet-4-6",
+    "output_config": {
+      "effort": "high",
+      "format": {
+        "schema": {
+          "additionalProperties": false,
+          "description": "Schema for document transcription output",
+          "properties": {
+            "no_transcribable_text": {
+              "description": "True only when the image holds no text at all, such as a blank or purely pictorial page; false whenever any text can be transcribed, even in part.",
+              "type": "boolean"
+            },
+            "transcription": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The page's text as Markdown, transcribed in reading order. Text: always transcribe verbatim, keeping the wording, spelling, punctuation, capitalization, numbers and names exactly as printed, errors and archaic forms included, since readers check the text against the scan and search it for exact terms. Write only text visible in the image and never add, complete or correct anything. Illegible text: write [illegible] for a word or passage you cannot read, and [?] in place of the uncertain part of a partly legible word. Scope: include all visible text, headers, footers, margin text, captions and tables among it, unless the additional context makes exceptions. Line breaks: keep each line break where the image has one. Columns: transcribe multi-column text column by column, finishing one column before starting the next. Markdown: mark headings with # by level, italic type as *text*, bold type as **text**, and write tables as Markdown tables. Page numbers: wrap the printed page number of a header or footer in tags, as <page_number>N</page_number>, where it appears; numbers in the body text and in tables stay untagged. Footnotes: write a note marker in the text as [^N] and the note itself, in the body or the footer, as [^N]: followed by its text, N being the printed marker. Formulas: wrap math inside a sentence in single dollar signs, $...$, and an equation set on its own line in double dollar signs, $$...$$, which are for display equations only. Use only these two delimiters, not \\(...\\) or \\[...\\]. Apart from note markers, which follow the footnote rule, write every subscript and superscript, affiliation marks included, as _ or ^ inside $...$, not as HTML tags such as <sub> and <sup> and not as a bare ^ outside math. Keep every relation and symbol exactly as printed: > stays >, < stays <, a definition with \\equiv keeps \\equiv, and the layout of an equation stays as set. Use standard LaTeX commands such as \\frac{}{}, \\sqrt{}, \\sum, \\int and Greek letters, and \\mathrm{} for upright text in math; balance every \\left with a \\right, using \\left. or \\right. for a one-sided delimiter. Images: describe each image, chart or diagram where it appears as ![Image: description], naming what it shows, its labels and any trend it conveys. Two-page spreads: when the image shows two facing pages, transcribe the left page in full, then the right page, and tag each page's printed number. Cross-page continuity: the page is usually one of many, so transcribe a sentence that begins on the previous page or ends on the next exactly as far as this page shows it. Use null when the image holds no transcribable text."
+            },
+            "transcription_not_possible": {
+              "description": "True only when the image cannot be transcribed at all, such as a corrupted or entirely unreadable scan; false whenever any part can be transcribed, even with [illegible] markers.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "transcription",
+            "no_transcribable_text",
+            "transcription_not_possible"
+          ],
+          "title": "TranscriptionSchema",
+          "type": "object"
+        },
+        "type": "json_schema"
+      }
+    },
+    "system": [
+      {
+        "cache_control": {
+          "type": "ephemeral"
+        },
+        "text": "For transcription, follow the rules in the field descriptions of the JSON schema below; return only JSON that matches it.\n\nThe transcription is research text: later steps extract records from it and readers check it against the scan, so exact wording, spelling, numbers and names matter more than readability.\n\nThe JSON schema:\n{\n  \"name\": \"markdown_transcription_schema\",\n  \"strict\": true,\n  \"schema\": {\n    \"type\": \"object\",\n    \"properties\": {\n      \"transcription\": {\n        \"type\": [\n          \"string\",\n          \"null\"\n        ],\n        \"description\": \"The page's text as Markdown, transcribed in reading order. Text: always transcribe verbatim, keeping the wording, spelling, punctuation, capitalization, numbers and names exactly as printed, errors and archaic forms included, since readers check the text against the scan and search it for exact terms. Write only text visible in the image and never add, complete or correct anything. Illegible text: write [illegible] for a word or passage you cannot read, and [?] in place of the uncertain part of a partly legible word. Scope: include all visible text, headers, footers, margin text, captions and tables among it, unless the additional context makes exceptions. Line breaks: keep each line break where the image has one. Columns: transcribe multi-column text column by column, finishing one column before starting the next. Markdown: mark headings with # by level, italic type as *text*, bold type as **text**, and write tables as Markdown tables. Page numbers: wrap the printed page number of a header or footer in tags, as <page_number>N</page_number>, where it appears; numbers in the body text and in tables stay untagged. Footnotes: write a note marker in the text as [^N] and the note itself, in the body or the footer, as [^N]: followed by its text, N being the printed marker. Formulas: wrap math inside a sentence in single dollar signs, $...$, and an equation set on its own line in double dollar signs, $$...$$, which are for display equations only. Use only these two delimiters, not \\\\(...\\\\) or \\\\[...\\\\]. Apart from note markers, which follow the footnote rule, write every subscript and superscript, affiliation marks included, as _ or ^ inside $...$, not as HTML tags such as <sub> and <sup> and not as a bare ^ outside math. Keep every relation and symbol exactly as printed: > stays >, < stays <, a definition with \\\\equiv keeps \\\\equiv, and the layout of an equation stays as set. Use standard LaTeX commands such as \\\\frac{}{}, \\\\sqrt{}, \\\\sum, \\\\int and Greek letters, and \\\\mathrm{} for upright text in math; balance every \\\\left with a \\\\right, using \\\\left. or \\\\right. for a one-sided delimiter. Images: describe each image, chart or diagram where it appears as ![Image: description], naming what it shows, its labels and any trend it conveys. Two-page spreads: when the image shows two facing pages, transcribe the left page in full, then the right page, and tag each page's printed number. Cross-page continuity: the page is usually one of many, so transcribe a sentence that begins on the previous page or ends on the next exactly as far as this page shows it. Use null when the image holds no transcribable text.\"\n      },\n      \"no_transcribable_text\": {\n        \"type\": \"boolean\",\n        \"description\": \"True only when the image holds no text at all, such as a blank or purely pictorial page; false whenever any text can be transcribed, even in part.\"\n      },\n      \"transcription_not_possible\": {\n        \"type\": \"boolean\",\n        \"description\": \"True only when the image cannot be transcribed at all, such as a corrupted or entirely unreadable scan; false whenever any part can be transcribed, even with [illegible] markers.\"\n      }\n    },\n    \"required\": [\n      \"transcription\",\n      \"no_transcribable_text\",\n      \"transcription_not_possible\"\n    ],\n    \"additionalProperties\": false\n  }\n}",
+        "type": "text"
+      }
+    ],
+    "thinking": {
+      "type": "adaptive"
+    }
+  },
+  "submission_id": "<submission-1>"
+}
+## submissions
+{
+  "batch_id": "<anthropic-batch-1>",
+  "counts": {
+    "completed": 3,
+    "failed": 0,
+    "pending": 0,
+    "total": 3
+  },
+  "error": null,
+  "finalized_at": "<datetime>",
+  "intent_at": "<datetime>",
+  "last_checked_at": "<datetime>",
+  "model": "claude-sonnet-4-6",
+  "part": 1,
+  "provider": "anthropic",
+  "provider_status": "ended",
+  "request_count": 3,
+  "run_id": "<run-2>",
+  "status": "finalized",
+  "submission_id": "<submission-1>",
+  "tool": "chronotranscriber",
+  "updated_at": "<datetime>",
+  "upload_ref": null
+}
+## units
+{
+  "attempts": 1,
+  "content": "## Market Records, Part 01\n\nGrain deliveries to the city market fell in 1601, and the magis-\ntrates fixed the bread assize twice.\nWheat      12 sous      Rye      9 sous\n\n\n\n\n<page_number>1</page_number>",
+  "doc_id": 1,
+  "error": null,
+  "error_type": null,
+  "idx": 0,
+  "kind": "page",
+  "label": "page_0001_pre_processed.jpg",
+  "model": "claude-sonnet-4-6",
+  "outcome": "ok",
+  "provenance": {
+    "byte_size": "<byte_size>",
+    "cap_policy": "anthropic-standard-v1",
+    "downscale_reason": "none",
+    "dpi_source": "image",
+    "effective_dpi": 180.0,
+    "format_fallback": false,
+    "height": 750,
+    "mime_type": "image/jpeg",
+    "payload_format": "jpeg",
+    "render_dpi": 180.0,
+    "sent_dpi": 180.0,
+    "sha256": "<sha256>",
+    "source_dpi_x": 180.0,
+    "source_dpi_y": 180.0,
+    "source_height": 750,
+    "source_width": 500,
+    "width": 500
+  },
+  "provider": "anthropic",
+  "response_id": 1,
+  "run_id": "<run-1>",
+  "source_index": 0,
+  "stale": 0,
+  "status": "done",
+  "tool": "chronotranscriber",
+  "updated_at": "<datetime>",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 1500,
+    "output_tokens": 400,
+    "reasoning_tokens": 0,
+    "total_tokens": 1900
+  }
+}
+{
+  "attempts": 1,
+  "content": "## Market Records, Part 02\n\nGrain deliveries to the city market fell in 1602, and the magis-\ntrates fixed the bread assize twice.\nWheat      12 sous      Rye      9 sous\n\n\n\n\n<page_number>2</page_number>",
+  "doc_id": 1,
+  "error": null,
+  "error_type": null,
+  "idx": 1,
+  "kind": "page",
+  "label": "page_0002_pre_processed.jpg",
+  "model": "claude-sonnet-4-6",
+  "outcome": "ok",
+  "provenance": {
+    "byte_size": "<byte_size>",
+    "cap_policy": "anthropic-standard-v1",
+    "downscale_reason": "none",
+    "dpi_source": "image",
+    "effective_dpi": 180.0,
+    "format_fallback": false,
+    "height": 750,
+    "mime_type": "image/jpeg",
+    "payload_format": "jpeg",
+    "render_dpi": 180.0,
+    "sent_dpi": 180.0,
+    "sha256": "<sha256>",
+    "source_dpi_x": 180.0,
+    "source_dpi_y": 180.0,
+    "source_height": 750,
+    "source_width": 500,
+    "width": 500
+  },
+  "provider": "anthropic",
+  "response_id": 3,
+  "run_id": "<run-2>",
+  "source_index": 1,
+  "stale": 0,
+  "status": "done",
+  "tool": "chronotranscriber",
+  "updated_at": "<datetime>",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 1500,
+    "output_tokens": 400,
+    "reasoning_tokens": 0,
+    "total_tokens": 1900
+  }
+}
+{
+  "attempts": 1,
+  "content": "## Market Records, Part 03\n\nGrain deliveries to the city market fell in 1603, and the magis-\ntrates fixed the bread assize twice.\nWheat      12 sous      Rye      9 sous\n\n\n\n\n<page_number>3</page_number>",
+  "doc_id": 1,
+  "error": null,
+  "error_type": null,
+  "idx": 2,
+  "kind": "page",
+  "label": "page_0003_pre_processed.jpg",
+  "model": "claude-sonnet-4-6",
+  "outcome": "ok",
+  "provenance": {
+    "byte_size": "<byte_size>",
+    "cap_policy": "anthropic-standard-v1",
+    "downscale_reason": "none",
+    "dpi_source": "image",
+    "effective_dpi": 180.0,
+    "format_fallback": false,
+    "height": 750,
+    "mime_type": "image/jpeg",
+    "payload_format": "jpeg",
+    "render_dpi": 180.0,
+    "sent_dpi": 180.0,
+    "sha256": "<sha256>",
+    "source_dpi_x": 180.0,
+    "source_dpi_y": 180.0,
+    "source_height": 750,
+    "source_width": 500,
+    "width": 500
+  },
+  "provider": "anthropic",
+  "response_id": 5,
+  "run_id": "<run-2>",
+  "source_index": 2,
+  "stale": 0,
+  "status": "done",
+  "tool": "chronotranscriber",
+  "updated_at": "<datetime>",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 1500,
+    "output_tokens": 400,
+    "reasoning_tokens": 0,
+    "total_tokens": 1900
+  }
+}
+{
+  "attempts": 1,
+  "content": "## Market Records, Part 04\n\nGrain deliveries to the city market fell in 1604, and the magis-\ntrates fixed the bread assize twice.\nWheat      12 sous      Rye      9 sous\n\n\n\n\n<page_number>4</page_number>",
+  "doc_id": 1,
+  "error": null,
+  "error_type": null,
+  "idx": 3,
+  "kind": "page",
+  "label": "page_0004_pre_processed.jpg",
+  "model": "claude-sonnet-4-6",
+  "outcome": "ok",
+  "provenance": {
+    "byte_size": "<byte_size>",
+    "cap_policy": "anthropic-standard-v1",
+    "downscale_reason": "none",
+    "dpi_source": "image",
+    "effective_dpi": 180.0,
+    "format_fallback": false,
+    "height": 750,
+    "mime_type": "image/jpeg",
+    "payload_format": "jpeg",
+    "render_dpi": 180.0,
+    "sent_dpi": 180.0,
+    "sha256": "<sha256>",
+    "source_dpi_x": 180.0,
+    "source_dpi_y": 180.0,
+    "source_height": 750,
+    "source_width": 500,
+    "width": 500
+  },
+  "provider": "anthropic",
+  "response_id": 7,
+  "run_id": "<run-2>",
+  "source_index": 3,
+  "stale": 0,
+  "status": "done",
+  "tool": "chronotranscriber",
+  "updated_at": "<datetime>",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 1500,
+    "output_tokens": 400,
+    "reasoning_tokens": 0,
+    "total_tokens": 1900
+  }
+}
+## view page_text
+{
+  "document": "doc-139d544b/doc",
+  "error": null,
+  "image_name": "page_0001_pre_processed.jpg",
+  "kind": "page",
+  "model": "claude-sonnet-4-6",
+  "order_index": 0,
+  "outcome": "ok",
+  "page_index": 0,
+  "provider": "anthropic",
+  "run_id": "<run-1>",
+  "status": "done",
+  "text": "## Market Records, Part 01\n\nGrain deliveries to the city market fell in 1601, and the magis-\ntrates fixed the bread assize twice.\nWheat      12 sous      Rye      9 sous\n\n\n\n\n<page_number>1</page_number>",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 1500,
+    "output_tokens": 400,
+    "reasoning_tokens": 0,
+    "total_tokens": 1900
+  }
+}
+{
+  "document": "doc-139d544b/doc",
+  "error": null,
+  "image_name": "page_0002_pre_processed.jpg",
+  "kind": "page",
+  "model": "claude-sonnet-4-6",
+  "order_index": 1,
+  "outcome": "ok",
+  "page_index": 1,
+  "provider": "anthropic",
+  "run_id": "<run-2>",
+  "status": "done",
+  "text": "## Market Records, Part 02\n\nGrain deliveries to the city market fell in 1602, and the magis-\ntrates fixed the bread assize twice.\nWheat      12 sous      Rye      9 sous\n\n\n\n\n<page_number>2</page_number>",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 1500,
+    "output_tokens": 400,
+    "reasoning_tokens": 0,
+    "total_tokens": 1900
+  }
+}
+{
+  "document": "doc-139d544b/doc",
+  "error": null,
+  "image_name": "page_0003_pre_processed.jpg",
+  "kind": "page",
+  "model": "claude-sonnet-4-6",
+  "order_index": 2,
+  "outcome": "ok",
+  "page_index": 2,
+  "provider": "anthropic",
+  "run_id": "<run-2>",
+  "status": "done",
+  "text": "## Market Records, Part 03\n\nGrain deliveries to the city market fell in 1603, and the magis-\ntrates fixed the bread assize twice.\nWheat      12 sous      Rye      9 sous\n\n\n\n\n<page_number>3</page_number>",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 1500,
+    "output_tokens": 400,
+    "reasoning_tokens": 0,
+    "total_tokens": 1900
+  }
+}
+{
+  "document": "doc-139d544b/doc",
+  "error": null,
+  "image_name": "page_0004_pre_processed.jpg",
+  "kind": "page",
+  "model": "claude-sonnet-4-6",
+  "order_index": 3,
+  "outcome": "ok",
+  "page_index": 3,
+  "provider": "anthropic",
+  "run_id": "<run-2>",
+  "status": "done",
+  "text": "## Market Records, Part 04\n\nGrain deliveries to the city market fell in 1604, and the magis-\ntrates fixed the bread assize twice.\nWheat      12 sous      Rye      9 sous\n\n\n\n\n<page_number>4</page_number>",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 1500,
+    "output_tokens": 400,
+    "reasoning_tokens": 0,
+    "total_tokens": 1900
+  }
+}

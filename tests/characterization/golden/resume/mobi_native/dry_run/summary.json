@@ -1,0 +1,218 @@
+{
+  "exit_code": 0,
+  "json_line": {
+    "blocked": [],
+    "dry_run": true,
+    "items_blocked": 0,
+    "items_complete": 0,
+    "items_failed": 0,
+    "items_skipped": 0,
+    "items_submitted": 0,
+    "items_total": 1,
+    "outputs": [],
+    "refused": [],
+    "skipped": [],
+    "spec": {
+      "audio.chunk_seconds": {
+        "source": "default",
+        "value": 600
+      },
+      "audio.language": {
+        "source": "default",
+        "value": null
+      },
+      "audio.whisper_model": {
+        "source": "default",
+        "value": "large-v3"
+      },
+      "images.detail": {
+        "source": "default",
+        "value": null
+      },
+      "images.dpi": {
+        "source": "default",
+        "value": null
+      },
+      "images.format": {
+        "source": "default",
+        "value": null
+      },
+      "images.grayscale": {
+        "source": "default",
+        "value": null
+      },
+      "images.jpeg_quality": {
+        "source": "default",
+        "value": null
+      },
+      "input.all": {
+        "source": "flag",
+        "value": true
+      },
+      "input.files": {
+        "source": "flag",
+        "value": []
+      },
+      "input.pages": {
+        "source": "default",
+        "value": null
+      },
+      "input.path": {
+        "source": "flag",
+        "value": "<tmp>/books/notes.mobi"
+      },
+      "input.recursive": {
+        "source": "default",
+        "value": false
+      },
+      "input.select": {
+        "source": "flag",
+        "value": null
+      },
+      "input.type": {
+        "source": "flag",
+        "value": "mobi"
+      },
+      "method.name": {
+        "source": "flag",
+        "value": "native"
+      },
+      "method.searchable_pdfs": {
+        "source": "default",
+        "value": "ocr"
+      },
+      "model.endpoint": {
+        "source": "default",
+        "value": null
+      },
+      "model.max_output_tokens": {
+        "source": "default",
+        "value": null
+      },
+      "model.model": {
+        "source": "default",
+        "value": "gpt-6-luna"
+      },
+      "model.provider": {
+        "source": "default",
+        "value": "openai"
+      },
+      "model.reasoning_effort": {
+        "source": "default",
+        "value": "xhigh"
+      },
+      "model.response_format": {
+        "source": "default",
+        "value": null
+      },
+      "model.service_tier": {
+        "source": "default",
+        "value": "default"
+      },
+      "model.temperature": {
+        "source": "default",
+        "value": 1.0
+      },
+      "model.top_p": {
+        "source": "default",
+        "value": 1.0
+      },
+      "model.verbosity": {
+        "source": "default",
+        "value": "medium"
+      },
+      "ocr.config": {
+        "source": "default",
+        "value": "--oem 3 --psm 6"
+      },
+      "ocr.preprocess": {
+        "source": "default",
+        "value": "default"
+      },
+      "output.directory": {
+        "source": "flag",
+        "value": "<tmp>/out"
+      },
+      "output.formats": {
+        "source": "default",
+        "value": [
+          "txt"
+        ]
+      },
+      "output.layout": {
+        "source": "default",
+        "value": "hash"
+      },
+      "prompt.context": {
+        "source": "default",
+        "value": null
+      },
+      "prompt.context_image": {
+        "source": "default",
+        "value": null
+      },
+      "prompt.fallback_context": {
+        "source": "default",
+        "value": null
+      },
+      "prompt.prompt": {
+        "source": "default",
+        "value": null
+      },
+      "prompt.schema": {
+        "source": "default",
+        "value": "markdown_transcription_schema"
+      },
+      "run.batch": {
+        "source": "default",
+        "value": false
+      },
+      "run.concurrency": {
+        "source": "default",
+        "value": 16
+      },
+      "run.dry_run": {
+        "source": "flag",
+        "value": true
+      },
+      "run.force": {
+        "source": "default",
+        "value": false
+      },
+      "run.json": {
+        "source": "flag",
+        "value": true
+      },
+      "run.keep_working_files": {
+        "source": "default",
+        "value": false
+      },
+      "run.retry_errors": {
+        "source": "flag",
+        "value": false
+      },
+      "run.sync_fallback": {
+        "source": "default",
+        "value": false
+      }
+    },
+    "to_process": [
+      {
+        "method": "native",
+        "name": "notes.mobi",
+        "state": "partial",
+        "type": "mobi"
+      }
+    ],
+    "unstored": [],
+    "usage": {
+      "total": {
+        "cached_tokens": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0,
+        "total_tokens": 0
+      }
+    }
+  }
+}

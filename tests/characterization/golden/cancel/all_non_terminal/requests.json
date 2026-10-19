@@ -1,0 +1,76 @@
+{
+  "batch": {
+    "calls": [
+      {
+        "after_id": null,
+        "call": "anthropic.messages.batches.list",
+        "limit": 100
+      },
+      {
+        "call": "google.batches.list",
+        "config": {
+          "page_size": 100
+        }
+      },
+      {
+        "after": null,
+        "call": "openai.batches.list",
+        "limit": 100
+      },
+      {
+        "batch_id": "<anthropic-batch-1>",
+        "call": "anthropic.messages.batches.cancel"
+      },
+      {
+        "call": "google.batches.cancel",
+        "name": "<google-batch-1>"
+      },
+      {
+        "batch_id": "<openai-batch-1>",
+        "call": "openai.batches.cancel"
+      }
+    ],
+    "clients": [
+      {
+        "kwargs": {
+          "api_key": "<env:ANTHROPIC_API_KEY>",
+          "timeout": {
+            "httpx.Timeout": {
+              "connect": 10.0,
+              "pool": 30.0,
+              "read": 900.0,
+              "write": 30.0
+            }
+          }
+        },
+        "provider": "anthropic"
+      },
+      {
+        "kwargs": {
+          "api_key": "<env:GOOGLE_API_KEY>",
+          "http_options": {
+            "timeout": 900000
+          }
+        },
+        "provider": "google"
+      },
+      {
+        "kwargs": {
+          "api_key": "<env:OPENAI_API_KEY>",
+          "timeout": {
+            "httpx.Timeout": {
+              "connect": 10.0,
+              "pool": 30.0,
+              "read": 900.0,
+              "write": 30.0
+            }
+          }
+        },
+        "provider": "openai"
+      }
+    ]
+  },
+  "calls": [],
+  "models": [],
+  "prompts": {}
+}

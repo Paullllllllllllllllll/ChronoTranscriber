@@ -1,0 +1,4 @@
+The images are pages of historical documents. Transcribe the text as it
+appears, keeping the original spelling, punctuation, capitalization,
+abbreviations and line structure. Do not modernize, translate or correct
+the text.

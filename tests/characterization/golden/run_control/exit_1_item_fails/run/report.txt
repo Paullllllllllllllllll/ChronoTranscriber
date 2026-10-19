@@ -1,0 +1,1 @@
+[ERROR] Failed to process 'doc.pdf': 1 of 2 page(s) failed to transcribe for 'doc-139d544b/doc'

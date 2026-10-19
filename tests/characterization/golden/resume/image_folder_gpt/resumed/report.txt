@@ -1,0 +1,3 @@
+[INFO] Resume mode: skip (use --force to reprocess all)
+[INFO] Beginning processing of 1 item(s)...
+[INFO] Processing item 1/1: scans

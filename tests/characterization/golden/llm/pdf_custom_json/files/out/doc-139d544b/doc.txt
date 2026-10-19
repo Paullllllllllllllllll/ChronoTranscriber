@@ -1,0 +1,21 @@
+## Market Records, Part 01
+
+Grain deliveries to the city market fell in 1601, and the magis-
+trates fixed the bread assize twice.
+Wheat      12 sous      Rye      9 sous
+
+
+
+
+<page_number>1</page_number>
+## Market Records, Part 02
+
+Grain deliveries to the city market fell in 1602, and the magis-
+trates fixed the bread assize twice.
+Wheat      12 sous      Rye      9 sous
+
+
+
+
+<page_number>2</page_number>
+['## Market Records, Part 03', '', 'Grain deliveries to the city market fell in 1603, and the magis-', 'trates fixed the bread assize twice.', 'Wheat      12 sous      Rye      9 sous', '', '', '', '', '<page_number>3</page_number>']

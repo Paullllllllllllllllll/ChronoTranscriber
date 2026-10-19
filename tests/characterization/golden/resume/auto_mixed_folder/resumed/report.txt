@@ -1,0 +1,5 @@
+[INFO] Resume: skipping 2 already-completed file(s) (2 remaining)
+[INFO] Resume mode: skip (use --force to reprocess all)
+[INFO] Beginning processing of 2 item(s)...
+[INFO] Processing item 1/2: born.pdf
+[INFO] Processing item 2/2: scans

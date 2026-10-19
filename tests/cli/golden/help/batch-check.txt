@@ -1,0 +1,48 @@
+usage: chronotranscriber batch check [-h] [--input DIR] [--batch-ids IDS] [--adopt BATCH_ID |
+                                     --abandon SUBMISSION_ID] [--formats LIST] [--wait]
+                                     [--poll-minutes N] [--wait-hours N] [--json]
+                                     [--settings FILE]
+
+Check the batch submissions found below a folder and write the outputs of every finished batch, in
+the formats of the run that submitted it unless --formats names others.
+
+options:
+  -h, --help            show this help message and exit
+
+batches:
+  --input DIR           folder searched for batch submissions, subfolders included; default: the
+                        current directory
+  --batch-ids IDS       comma-separated batch IDs to check; default: every batch
+  --adopt BATCH_ID      record this provider batch for the unresolved submission it belongs to,
+                        then finalize it
+  --abandon SUBMISSION_ID
+                        give up an unresolved or submitted submission: its pages return to pending
+                        and its uploaded files are deleted; a submitted batch is not cancelled
+  --wait                check again every --poll-minutes until no batch work is pending, or until
+                        --wait-hours have passed
+  --poll-minutes N      minutes between two checks with --wait; default: 15
+  --wait-hours N        hours after which --wait starts no further check; a running check
+                        finishes; default: 50
+
+output:
+  --formats LIST        comma-separated output formats; from txt, md; default: the formats of the
+                        run that submitted the batch
+
+run control:
+  --json                print one JSON summary line on stdout
+  --settings FILE       alternate settings file; default: config/settings.yaml
+
+Precedence: a flag wins over the settings defaults: block, which wins over the code default.
+--settings FILE reads another settings file instead of config/settings.yaml.
+
+Exit codes:
+  0    every submission was finalized or is still running, or there was
+       none
+  1    a submission failed or waits unresolved; under --wait also when
+       --wait-hours passed first
+  2    usage error, a missing folder, a database the store refuses, or
+       --adopt or --abandon naming nothing to act on
+  130  interrupted (Ctrl+C or Ctrl+Break)
+
+With --json, stdout carries exactly one JSON summary line on every exit; progress, warnings and
+errors go to stderr.

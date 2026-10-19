@@ -1,0 +1,29 @@
+{
+  "batch": {
+    "calls": [
+      {
+        "batch_id": "<anthropic-batch-1>",
+        "call": "anthropic.messages.batches.cancel"
+      }
+    ],
+    "clients": [
+      {
+        "kwargs": {
+          "api_key": "<env:ANTHROPIC_API_KEY>",
+          "timeout": {
+            "httpx.Timeout": {
+              "connect": 10.0,
+              "pool": 30.0,
+              "read": 900.0,
+              "write": 30.0
+            }
+          }
+        },
+        "provider": "anthropic"
+      }
+    ]
+  },
+  "calls": [],
+  "models": [],
+  "prompts": {}
+}

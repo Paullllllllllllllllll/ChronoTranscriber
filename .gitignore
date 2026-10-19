@@ -1,0 +1,31 @@
+/.claude/
+CLAUDE.md
+AGENTS.md
+/docs/
+.venv/
+.mypy_cache/
+.pytest_cache/
+htmlcov/
+
+# Local staging workspace
+/staging/
+.coverage
+
+# Machine settings (config/settings.yaml); the example ships in the package.
+/config/*
+# Machine-local alternate config directories (never versioned)
+/config_*/
+
+# IDE and cache
+.idea/
+__pycache__/
+logs/
+
+# Local scratch area (ad-hoc tests, backups)
+scratch/
+
+# Local backup archives (kept locally, not versioned)
+backup/
+
+# Local environment files (never versioned)
+.env*

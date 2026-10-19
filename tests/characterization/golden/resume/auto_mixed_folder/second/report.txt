@@ -1,0 +1,4 @@
+[INFO] Resume: skipping 4 already-completed file(s) (0 remaining)
+[INFO] All files already processed. Nothing to do.
+[INFO] Resume mode: skip (use --force to reprocess all)
+[INFO] Beginning processing of 0 item(s)...

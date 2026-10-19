@@ -1,0 +1,140 @@
+{
+  "calls": [
+    {
+      "attempt": 1,
+      "bound": {},
+      "kwargs": {},
+      "messages": [
+        {
+          "blocks": [
+            {
+              "chars": 640,
+              "prompt": "prompt-1",
+              "type": "text"
+            }
+          ],
+          "role": "system"
+        },
+        {
+          "blocks": [
+            {
+              "text": "The image:",
+              "type": "text"
+            },
+            {
+              "height": 1024,
+              "mime": "image/jpeg",
+              "type": "image_url",
+              "width": 512
+            }
+          ],
+          "role": "human"
+        }
+      ],
+      "model": "org/fake-model",
+      "page": 0,
+      "provider": "custom",
+      "structured": null
+    },
+    {
+      "attempt": 1,
+      "bound": {},
+      "kwargs": {},
+      "messages": [
+        {
+          "blocks": [
+            {
+              "chars": 640,
+              "prompt": "prompt-1",
+              "type": "text"
+            }
+          ],
+          "role": "system"
+        },
+        {
+          "blocks": [
+            {
+              "text": "The image:",
+              "type": "text"
+            },
+            {
+              "height": 1024,
+              "mime": "image/jpeg",
+              "type": "image_url",
+              "width": 512
+            }
+          ],
+          "role": "human"
+        }
+      ],
+      "model": "org/fake-model",
+      "page": 1,
+      "provider": "custom",
+      "structured": null
+    },
+    {
+      "attempt": 1,
+      "bound": {},
+      "kwargs": {},
+      "messages": [
+        {
+          "blocks": [
+            {
+              "chars": 640,
+              "prompt": "prompt-1",
+              "type": "text"
+            }
+          ],
+          "role": "system"
+        },
+        {
+          "blocks": [
+            {
+              "text": "The image:",
+              "type": "text"
+            },
+            {
+              "height": 1024,
+              "mime": "image/jpeg",
+              "type": "image_url",
+              "width": 512
+            }
+          ],
+          "role": "human"
+        }
+      ],
+      "model": "org/fake-model",
+      "page": 2,
+      "provider": "custom",
+      "structured": null
+    }
+  ],
+  "models": [
+    {
+      "constructor": "ChatOpenAI",
+      "kwargs": {
+        "api_key": "<env:CT_FAKE_CUSTOM_API_KEY>",
+        "base_url": "https://fake-endpoint.invalid/v1/",
+        "http_async_client": "<_DefaultAsyncHttpxClient>",
+        "http_client": "<_DefaultHttpxClient>",
+        "max_retries": 0,
+        "max_tokens": 128000,
+        "model": "org/fake-model",
+        "temperature": 1.0,
+        "timeout": {
+          "httpx.Timeout": {
+            "connect": 10.0,
+            "pool": 30.0,
+            "read": 900.0,
+            "write": 30.0
+          }
+        },
+        "top_p": 1.0
+      },
+      "provider": "custom"
+    }
+  ],
+  "prompts": {
+    "prompt-1": "For transcription, follow the rules below and return only the page's text.\n\n- Text: transcribe all visible text verbatim, keeping the spelling, punctuation and word order as printed.\n- Line breaks: keep each line break where the image has one.\n- Columns: transcribe multi-column text column by column, finishing one column before starting the next.\n- Pages without text: return exactly [No transcribable text] when the image holds no text at all, and exactly [Transcription not possible] when it cannot be transcribed at all.\n- Output: return only the transcribed text, without explanations, comments, metadata or formatting instructions.\n\n"
+  }
+}

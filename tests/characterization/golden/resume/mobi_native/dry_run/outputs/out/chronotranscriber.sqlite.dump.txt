@@ -1,0 +1,327 @@
+## artifacts
+## documents
+{
+  "doc_id": 1,
+  "first_run_id": "<run-1>",
+  "image_settings": null,
+  "input_path": "<tmp>/books/notes.mobi",
+  "input_sha256": "<sha256>",
+  "kind": "mobi",
+  "last_run_id": "<run-2>",
+  "lease_generation": "<generation>",
+  "lease_run_id": null,
+  "lease_until": null,
+  "name": "notes-ab5aa970/notes",
+  "status": "partial",
+  "tool": "chronotranscriber",
+  "units_done": 1,
+  "units_failed": 0,
+  "units_pending": 1,
+  "units_total": 2,
+  "updated_at": "<datetime>"
+}
+## meta
+{
+  "component": "chronotranscriber",
+  "version": 1
+}
+{
+  "component": "core",
+  "version": 2
+}
+## notes
+## outputs
+{
+  "doc_id": 1,
+  "format": "txt",
+  "path": "notes-ab5aa970/notes.txt",
+  "rendered_at": "<datetime>",
+  "run_id": "<run-1>",
+  "sha256": "<sha256>",
+  "stale": 0
+}
+## responses
+## runs
+{
+  "command": "transcribe",
+  "ended_at": "<datetime>",
+  "exit_code": 0,
+  "run_id": "<run-1>",
+  "settings_fingerprint": null,
+  "spec": {
+    "audio.chunk_seconds": {
+      "source": "default",
+      "value": 600
+    },
+    "audio.language": {
+      "source": "default",
+      "value": null
+    },
+    "audio.whisper_model": {
+      "source": "default",
+      "value": "large-v3"
+    },
+    "images.detail": {
+      "source": "default",
+      "value": null
+    },
+    "images.dpi": {
+      "source": "default",
+      "value": null
+    },
+    "images.format": {
+      "source": "default",
+      "value": null
+    },
+    "images.grayscale": {
+      "source": "default",
+      "value": null
+    },
+    "images.jpeg_quality": {
+      "source": "default",
+      "value": null
+    },
+    "input.all": {
+      "source": "flag",
+      "value": true
+    },
+    "input.files": {
+      "source": "flag",
+      "value": []
+    },
+    "input.pages": {
+      "source": "default",
+      "value": null
+    },
+    "input.path": {
+      "source": "flag",
+      "value": "<tmp>/books/notes.mobi"
+    },
+    "input.recursive": {
+      "source": "default",
+      "value": false
+    },
+    "input.select": {
+      "source": "flag",
+      "value": null
+    },
+    "input.type": {
+      "source": "flag",
+      "value": "mobi"
+    },
+    "method.name": {
+      "source": "flag",
+      "value": "native"
+    },
+    "method.searchable_pdfs": {
+      "source": "default",
+      "value": "ocr"
+    },
+    "model.endpoint": {
+      "source": "default",
+      "value": null
+    },
+    "model.max_output_tokens": {
+      "source": "default",
+      "value": null
+    },
+    "model.model": {
+      "source": "default",
+      "value": "gpt-6-luna"
+    },
+    "model.provider": {
+      "source": "default",
+      "value": "openai"
+    },
+    "model.reasoning_effort": {
+      "source": "default",
+      "value": "xhigh"
+    },
+    "model.response_format": {
+      "source": "default",
+      "value": null
+    },
+    "model.service_tier": {
+      "source": "default",
+      "value": "default"
+    },
+    "model.temperature": {
+      "source": "default",
+      "value": 1.0
+    },
+    "model.top_p": {
+      "source": "default",
+      "value": 1.0
+    },
+    "model.verbosity": {
+      "source": "default",
+      "value": "medium"
+    },
+    "ocr.config": {
+      "source": "default",
+      "value": "--oem 3 --psm 6"
+    },
+    "ocr.preprocess": {
+      "source": "default",
+      "value": "default"
+    },
+    "output.directory": {
+      "source": "flag",
+      "value": "<tmp>/out"
+    },
+    "output.formats": {
+      "source": "default",
+      "value": [
+        "txt"
+      ]
+    },
+    "output.layout": {
+      "source": "default",
+      "value": "hash"
+    },
+    "prompt.context": {
+      "source": "default",
+      "value": null
+    },
+    "prompt.context_image": {
+      "source": "default",
+      "value": null
+    },
+    "prompt.fallback_context": {
+      "source": "default",
+      "value": null
+    },
+    "prompt.prompt": {
+      "source": "default",
+      "value": null
+    },
+    "prompt.schema": {
+      "source": "default",
+      "value": "markdown_transcription_schema"
+    },
+    "run.batch": {
+      "source": "default",
+      "value": false
+    },
+    "run.concurrency": {
+      "source": "default",
+      "value": 16
+    },
+    "run.dry_run": {
+      "source": "default",
+      "value": false
+    },
+    "run.force": {
+      "source": "default",
+      "value": false
+    },
+    "run.json": {
+      "source": "flag",
+      "value": true
+    },
+    "run.keep_working_files": {
+      "source": "default",
+      "value": false
+    },
+    "run.retry_errors": {
+      "source": "flag",
+      "value": false
+    },
+    "run.sync_fallback": {
+      "source": "default",
+      "value": false
+    }
+  },
+  "started_at": "<datetime>",
+  "tool": "chronotranscriber",
+  "tool_version": "<version>"
+}
+{
+  "command": "interrupted",
+  "ended_at": null,
+  "exit_code": null,
+  "run_id": "<run-2>",
+  "settings_fingerprint": null,
+  "spec": null,
+  "started_at": "<datetime>",
+  "tool": "chronotranscriber",
+  "tool_version": "<version>"
+}
+## submission_requests
+## submissions
+## units
+{
+  "attempts": 1,
+  "content": "# Title: Kindle Market Notes",
+  "doc_id": 1,
+  "error": null,
+  "error_type": null,
+  "idx": 0,
+  "kind": "text",
+  "label": null,
+  "model": "native",
+  "outcome": "ok",
+  "provenance": null,
+  "provider": "local",
+  "response_id": null,
+  "run_id": "<run-1>",
+  "source_index": null,
+  "stale": 0,
+  "status": "done",
+  "tool": "chronotranscriber",
+  "updated_at": "<datetime>",
+  "usage": null
+}
+{
+  "attempts": 0,
+  "content": null,
+  "doc_id": 1,
+  "error": null,
+  "error_type": null,
+  "idx": 1,
+  "kind": "text",
+  "label": null,
+  "model": "native",
+  "outcome": null,
+  "provenance": null,
+  "provider": "local",
+  "response_id": null,
+  "run_id": "<run-2>",
+  "source_index": 0,
+  "stale": 0,
+  "status": "pending",
+  "tool": "chronotranscriber",
+  "updated_at": "<datetime>",
+  "usage": null
+}
+## view page_text
+{
+  "document": "notes-ab5aa970/notes",
+  "error": null,
+  "image_name": null,
+  "kind": "text",
+  "model": "native",
+  "order_index": 0,
+  "outcome": "ok",
+  "page_index": null,
+  "provider": "local",
+  "run_id": "<run-1>",
+  "status": "done",
+  "text": "# Title: Kindle Market Notes",
+  "usage": null
+}
+{
+  "document": "notes-ab5aa970/notes",
+  "error": null,
+  "image_name": null,
+  "kind": "text",
+  "model": "native",
+  "order_index": 1,
+  "outcome": null,
+  "page_index": null,
+  "provider": "local",
+  "run_id": "<run-2>",
+  "status": "pending",
+  "text": null,
+  "usage": null
+}

@@ -1,0 +1,25 @@
+{
+  "exit_code": 0,
+  "json_line": {
+    "command": "repair",
+    "dry_run": false,
+    "failed": 0,
+    "repaired": 2,
+    "usage": {
+      "repair": {
+        "cached_tokens": 0,
+        "input_tokens": 3000,
+        "output_tokens": 800,
+        "reasoning_tokens": 0,
+        "total_tokens": 3800
+      },
+      "total": {
+        "cached_tokens": 0,
+        "input_tokens": 3000,
+        "output_tokens": 800,
+        "reasoning_tokens": 0,
+        "total_tokens": 3800
+      }
+    }
+  }
+}

@@ -1,0 +1,361 @@
+## artifacts
+## documents
+{
+  "doc_id": 1,
+  "first_run_id": "<run-1>",
+  "image_settings": {
+    "chunk_count": 1,
+    "chunk_plan_signature": "1x0s-e391a473",
+    "chunking": {
+      "chunk_format": "mp3",
+      "max_request_bytes": 20971520,
+      "mono": true,
+      "overlap_seconds": 0.0,
+      "sample_rate": 16000,
+      "target_seconds": 600
+    },
+    "method": "audio-api",
+    "model": "gemini-3.5-flash",
+    "provider": "google",
+    "source_bytes": 8044,
+    "source_file": "<tmp>/audio/talk.wav"
+  },
+  "input_path": "<tmp>/audio/talk.wav",
+  "input_sha256": "<sha256>",
+  "kind": "audio",
+  "last_run_id": "<run-1>",
+  "lease_generation": "<generation>",
+  "lease_run_id": null,
+  "lease_until": null,
+  "name": "talk-ce7611e7/talk",
+  "status": "complete",
+  "tool": "chronotranscriber",
+  "units_done": 1,
+  "units_failed": 0,
+  "units_pending": 0,
+  "units_total": 1,
+  "updated_at": "<datetime>"
+}
+## meta
+{
+  "component": "chronotranscriber",
+  "version": 1
+}
+{
+  "component": "core",
+  "version": 2
+}
+## notes
+## outputs
+{
+  "doc_id": 1,
+  "format": "txt",
+  "path": "talk-ce7611e7/talk.txt",
+  "rendered_at": "<datetime>",
+  "run_id": "<run-1>",
+  "sha256": "<sha256>",
+  "stale": 0
+}
+## responses
+{
+  "attempt": 1,
+  "created_at": "<datetime>",
+  "custom_id": null,
+  "doc_id": 1,
+  "error": null,
+  "error_type": null,
+  "http_status": null,
+  "idx": 0,
+  "kind": "chunk",
+  "latency": "<duration>",
+  "model": "gemini-3.5-flash",
+  "provider": "google",
+  "raw": {
+    "additional_kwargs": {},
+    "content": "Recording from second 0 to 20:      the council read the grain accounts aloud. The clerk noted the price of rye for 1700.",
+    "id": "lc_run--<uuid>-0",
+    "invalid_tool_calls": [],
+    "name": null,
+    "response_metadata": {
+      "finish_reason": "STOP",
+      "model_name": "fake"
+    },
+    "tool_calls": [],
+    "type": "ai",
+    "usage_metadata": {
+      "input_tokens": 1500,
+      "output_tokens": 400,
+      "total_tokens": 1900
+    }
+  },
+  "raw_kind": "sdk",
+  "request": null,
+  "response_id": 1,
+  "role": "audio",
+  "run_id": "<run-1>",
+  "submission_id": null,
+  "tool": "chronotranscriber",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 1500,
+    "output_tokens": 400,
+    "reasoning_tokens": 0,
+    "total_tokens": 1900
+  }
+}
+## runs
+{
+  "command": "transcribe",
+  "ended_at": "<datetime>",
+  "exit_code": 0,
+  "run_id": "<run-1>",
+  "settings_fingerprint": null,
+  "spec": {
+    "audio.chunk_seconds": {
+      "source": "default",
+      "value": 600
+    },
+    "audio.language": {
+      "source": "default",
+      "value": null
+    },
+    "audio.whisper_model": {
+      "source": "default",
+      "value": "large-v3"
+    },
+    "images.detail": {
+      "source": "default",
+      "value": null
+    },
+    "images.dpi": {
+      "source": "default",
+      "value": null
+    },
+    "images.format": {
+      "source": "default",
+      "value": null
+    },
+    "images.grayscale": {
+      "source": "default",
+      "value": null
+    },
+    "images.jpeg_quality": {
+      "source": "default",
+      "value": null
+    },
+    "input.all": {
+      "source": "flag",
+      "value": true
+    },
+    "input.files": {
+      "source": "flag",
+      "value": []
+    },
+    "input.pages": {
+      "source": "default",
+      "value": null
+    },
+    "input.path": {
+      "source": "flag",
+      "value": "<tmp>/audio/talk.wav"
+    },
+    "input.recursive": {
+      "source": "default",
+      "value": false
+    },
+    "input.select": {
+      "source": "flag",
+      "value": null
+    },
+    "input.type": {
+      "source": "flag",
+      "value": "audio"
+    },
+    "method.name": {
+      "source": "flag",
+      "value": "audio-api"
+    },
+    "method.searchable_pdfs": {
+      "source": "default",
+      "value": "ocr"
+    },
+    "model.endpoint": {
+      "source": "default",
+      "value": null
+    },
+    "model.max_output_tokens": {
+      "source": "default",
+      "value": null
+    },
+    "model.model": {
+      "source": "flag",
+      "value": "gemini-3.5-flash"
+    },
+    "model.provider": {
+      "source": "flag",
+      "value": "google"
+    },
+    "model.reasoning_effort": {
+      "source": "default",
+      "value": "xhigh"
+    },
+    "model.response_format": {
+      "source": "default",
+      "value": null
+    },
+    "model.service_tier": {
+      "source": "default",
+      "value": "default"
+    },
+    "model.temperature": {
+      "source": "default",
+      "value": 1.0
+    },
+    "model.top_p": {
+      "source": "default",
+      "value": 1.0
+    },
+    "model.verbosity": {
+      "source": "default",
+      "value": "medium"
+    },
+    "ocr.config": {
+      "source": "default",
+      "value": "--oem 3 --psm 6"
+    },
+    "ocr.preprocess": {
+      "source": "default",
+      "value": "default"
+    },
+    "output.directory": {
+      "source": "flag",
+      "value": "<tmp>/out"
+    },
+    "output.formats": {
+      "source": "default",
+      "value": [
+        "txt"
+      ]
+    },
+    "output.layout": {
+      "source": "default",
+      "value": "hash"
+    },
+    "prompt.context": {
+      "source": "default",
+      "value": null
+    },
+    "prompt.context_image": {
+      "source": "default",
+      "value": null
+    },
+    "prompt.fallback_context": {
+      "source": "default",
+      "value": null
+    },
+    "prompt.prompt": {
+      "source": "default",
+      "value": null
+    },
+    "prompt.schema": {
+      "source": "default",
+      "value": "markdown_transcription_schema"
+    },
+    "run.batch": {
+      "source": "default",
+      "value": false
+    },
+    "run.concurrency": {
+      "source": "default",
+      "value": 16
+    },
+    "run.dry_run": {
+      "source": "default",
+      "value": false
+    },
+    "run.force": {
+      "source": "default",
+      "value": false
+    },
+    "run.json": {
+      "source": "flag",
+      "value": true
+    },
+    "run.keep_working_files": {
+      "source": "default",
+      "value": false
+    },
+    "run.retry_errors": {
+      "source": "flag",
+      "value": false
+    },
+    "run.sync_fallback": {
+      "source": "default",
+      "value": false
+    }
+  },
+  "started_at": "<datetime>",
+  "tool": "chronotranscriber",
+  "tool_version": "<version>"
+}
+## submission_requests
+## submissions
+## units
+{
+  "attempts": 1,
+  "content": "Recording from second 0 to 20:      the council read the grain accounts aloud. The clerk noted the price of rye for 1700.",
+  "doc_id": 1,
+  "error": null,
+  "error_type": null,
+  "idx": 0,
+  "kind": "chunk",
+  "label": "talk_chunk_0001.wav",
+  "model": "gemini-3.5-flash",
+  "outcome": "ok",
+  "provenance": {
+    "byte_size": "<byte_size>",
+    "chunk_index": 0,
+    "duration_seconds": "<duration>",
+    "is_whole_file": true,
+    "sha256": "<sha256>",
+    "source_file": "<tmp>/audio/talk.wav",
+    "start_seconds": 0.0
+  },
+  "provider": "google",
+  "response_id": 1,
+  "run_id": "<run-1>",
+  "source_index": "0.000-0.000",
+  "stale": 0,
+  "status": "done",
+  "tool": "chronotranscriber",
+  "updated_at": "<datetime>",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 1500,
+    "output_tokens": 400,
+    "reasoning_tokens": 0,
+    "total_tokens": 1900
+  }
+}
+## view page_text
+{
+  "document": "talk-ce7611e7/talk",
+  "error": null,
+  "image_name": "talk_chunk_0001.wav",
+  "kind": "chunk",
+  "model": "gemini-3.5-flash",
+  "order_index": 0,
+  "outcome": "ok",
+  "page_index": null,
+  "provider": "google",
+  "run_id": "<run-1>",
+  "status": "done",
+  "text": "Recording from second 0 to 20:      the council read the grain accounts aloud. The clerk noted the price of rye for 1700.",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 1500,
+    "output_tokens": 400,
+    "reasoning_tokens": 0,
+    "total_tokens": 1900
+  }
+}

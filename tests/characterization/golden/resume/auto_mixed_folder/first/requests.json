@@ -1,0 +1,348 @@
+{
+  "calls": [
+    {
+      "attempt": 1,
+      "bound": {},
+      "kwargs": {},
+      "messages": [
+        {
+          "blocks": [
+            {
+              "chars": 3896,
+              "prompt": "prompt-1",
+              "type": "text"
+            }
+          ],
+          "role": "system"
+        },
+        {
+          "blocks": [
+            {
+              "text": "The image:",
+              "type": "text"
+            },
+            {
+              "detail": "original",
+              "height": 1667,
+              "mime": "image/jpeg",
+              "type": "image_url",
+              "width": 1250
+            }
+          ],
+          "role": "human"
+        }
+      ],
+      "model": "gpt-6-luna",
+      "page": 0,
+      "provider": "openai",
+      "structured": {
+        "include_raw": true,
+        "method": "json_schema",
+        "schema": {
+          "digest": "3fa216f6f53214c4",
+          "name": "markdown_transcription_schema",
+          "properties": [
+            "no_transcribable_text",
+            "transcription",
+            "transcription_not_possible"
+          ],
+          "strict": true
+        }
+      }
+    },
+    {
+      "attempt": 2,
+      "bound": {},
+      "kwargs": {},
+      "messages": [
+        {
+          "blocks": [
+            {
+              "chars": 3896,
+              "prompt": "prompt-1",
+              "type": "text"
+            }
+          ],
+          "role": "system"
+        },
+        {
+          "blocks": [
+            {
+              "text": "The image:",
+              "type": "text"
+            },
+            {
+              "detail": "original",
+              "height": 600,
+              "mime": "image/jpeg",
+              "type": "image_url",
+              "width": 400
+            }
+          ],
+          "role": "human"
+        }
+      ],
+      "model": "gpt-6-luna",
+      "page": 0,
+      "provider": "openai",
+      "structured": {
+        "include_raw": true,
+        "method": "json_schema",
+        "schema": {
+          "digest": "3fa216f6f53214c4",
+          "name": "markdown_transcription_schema",
+          "properties": [
+            "no_transcribable_text",
+            "transcription",
+            "transcription_not_possible"
+          ],
+          "strict": true
+        }
+      }
+    },
+    {
+      "attempt": 1,
+      "bound": {},
+      "kwargs": {},
+      "messages": [
+        {
+          "blocks": [
+            {
+              "chars": 3896,
+              "prompt": "prompt-1",
+              "type": "text"
+            }
+          ],
+          "role": "system"
+        },
+        {
+          "blocks": [
+            {
+              "text": "The image:",
+              "type": "text"
+            },
+            {
+              "detail": "original",
+              "height": 1667,
+              "mime": "image/jpeg",
+              "type": "image_url",
+              "width": 1250
+            }
+          ],
+          "role": "human"
+        }
+      ],
+      "model": "gpt-6-luna",
+      "page": 1,
+      "provider": "openai",
+      "structured": {
+        "include_raw": true,
+        "method": "json_schema",
+        "schema": {
+          "digest": "3fa216f6f53214c4",
+          "name": "markdown_transcription_schema",
+          "properties": [
+            "no_transcribable_text",
+            "transcription",
+            "transcription_not_possible"
+          ],
+          "strict": true
+        }
+      }
+    },
+    {
+      "attempt": 2,
+      "bound": {},
+      "kwargs": {},
+      "messages": [
+        {
+          "blocks": [
+            {
+              "chars": 3896,
+              "prompt": "prompt-1",
+              "type": "text"
+            }
+          ],
+          "role": "system"
+        },
+        {
+          "blocks": [
+            {
+              "text": "The image:",
+              "type": "text"
+            },
+            {
+              "detail": "original",
+              "height": 600,
+              "mime": "image/jpeg",
+              "type": "image_url",
+              "width": 400
+            }
+          ],
+          "role": "human"
+        }
+      ],
+      "model": "gpt-6-luna",
+      "page": 1,
+      "provider": "openai",
+      "structured": {
+        "include_raw": true,
+        "method": "json_schema",
+        "schema": {
+          "digest": "3fa216f6f53214c4",
+          "name": "markdown_transcription_schema",
+          "properties": [
+            "no_transcribable_text",
+            "transcription",
+            "transcription_not_possible"
+          ],
+          "strict": true
+        }
+      }
+    },
+    {
+      "attempt": 1,
+      "bound": {},
+      "kwargs": {},
+      "messages": [
+        {
+          "blocks": [
+            {
+              "chars": 3896,
+              "prompt": "prompt-1",
+              "type": "text"
+            }
+          ],
+          "role": "system"
+        },
+        {
+          "blocks": [
+            {
+              "text": "The image:",
+              "type": "text"
+            },
+            {
+              "detail": "original",
+              "height": 1667,
+              "mime": "image/jpeg",
+              "type": "image_url",
+              "width": 1250
+            }
+          ],
+          "role": "human"
+        }
+      ],
+      "model": "gpt-6-luna",
+      "page": 2,
+      "provider": "openai",
+      "structured": {
+        "include_raw": true,
+        "method": "json_schema",
+        "schema": {
+          "digest": "3fa216f6f53214c4",
+          "name": "markdown_transcription_schema",
+          "properties": [
+            "no_transcribable_text",
+            "transcription",
+            "transcription_not_possible"
+          ],
+          "strict": true
+        }
+      }
+    },
+    {
+      "attempt": 2,
+      "bound": {},
+      "kwargs": {},
+      "messages": [
+        {
+          "blocks": [
+            {
+              "chars": 3896,
+              "prompt": "prompt-1",
+              "type": "text"
+            }
+          ],
+          "role": "system"
+        },
+        {
+          "blocks": [
+            {
+              "text": "The image:",
+              "type": "text"
+            },
+            {
+              "detail": "original",
+              "height": 600,
+              "mime": "image/jpeg",
+              "type": "image_url",
+              "width": 400
+            }
+          ],
+          "role": "human"
+        }
+      ],
+      "model": "gpt-6-luna",
+      "page": 2,
+      "provider": "openai",
+      "structured": {
+        "include_raw": true,
+        "method": "json_schema",
+        "schema": {
+          "digest": "3fa216f6f53214c4",
+          "name": "markdown_transcription_schema",
+          "properties": [
+            "no_transcribable_text",
+            "transcription",
+            "transcription_not_possible"
+          ],
+          "strict": true
+        }
+      }
+    }
+  ],
+  "models": [
+    {
+      "constructor": "ChatOpenAI",
+      "kwargs": {
+        "api_key": "<env:OPENAI_API_KEY>",
+        "disabled_params": {
+          "frequency_penalty": null,
+          "presence_penalty": null,
+          "temperature": null,
+          "top_p": null
+        },
+        "frequency_penalty": null,
+        "http_async_client": "<_DefaultAsyncHttpxClient>",
+        "http_client": "<_DefaultHttpxClient>",
+        "max_completion_tokens": 128000,
+        "max_retries": 0,
+        "model": "gpt-6-luna",
+        "presence_penalty": null,
+        "prompt_cache_options": {
+          "ttl": "30m"
+        },
+        "reasoning": {
+          "effort": "xhigh"
+        },
+        "service_tier": "default",
+        "temperature": null,
+        "timeout": {
+          "httpx.Timeout": {
+            "connect": 10.0,
+            "pool": 30.0,
+            "read": 900.0,
+            "write": 30.0
+          }
+        },
+        "top_p": null,
+        "use_responses_api": true,
+        "verbosity": "medium"
+      },
+      "provider": "openai"
+    }
+  ],
+  "prompts": {
+    "prompt-1": "For transcription, follow the rules in the field descriptions of the JSON schema below; return only JSON that matches it.\n\nThe transcription is research text: later steps extract records from it and readers check it against the scan, so exact wording, spelling, numbers and names matter more than readability.\n\nThe JSON schema:\n{\n  \"name\": \"markdown_transcription_schema\",\n  \"strict\": true,\n  \"schema\": {\n    \"type\": \"object\",\n    \"properties\": {\n      \"transcription\": {\n        \"type\": [\n          \"string\",\n          \"null\"\n        ],\n        \"description\": \"The page's text as Markdown, transcribed in reading order. Text: always transcribe verbatim, keeping the wording, spelling, punctuation, capitalization, numbers and names exactly as printed, errors and archaic forms included, since readers check the text against the scan and search it for exact terms. Write only text visible in the image and never add, complete or correct anything. Illegible text: write [illegible] for a word or passage you cannot read, and [?] in place of the uncertain part of a partly legible word. Scope: include all visible text, headers, footers, margin text, captions and tables among it, unless the additional context makes exceptions. Line breaks: keep each line break where the image has one. Columns: transcribe multi-column text column by column, finishing one column before starting the next. Markdown: mark headings with # by level, italic type as *text*, bold type as **text**, and write tables as Markdown tables. Page numbers: wrap the printed page number of a header or footer in tags, as <page_number>N</page_number>, where it appears; numbers in the body text and in tables stay untagged. Footnotes: write a note marker in the text as [^N] and the note itself, in the body or the footer, as [^N]: followed by its text, N being the printed marker. Formulas: wrap math inside a sentence in single dollar signs, $...$, and an equation set on its own line in double dollar signs, $$...$$, which are for display equations only. Use only these two delimiters, not \\\\(...\\\\) or \\\\[...\\\\]. Apart from note markers, which follow the footnote rule, write every subscript and superscript, affiliation marks included, as _ or ^ inside $...$, not as HTML tags such as <sub> and <sup> and not as a bare ^ outside math. Keep every relation and symbol exactly as printed: > stays >, < stays <, a definition with \\\\equiv keeps \\\\equiv, and the layout of an equation stays as set. Use standard LaTeX commands such as \\\\frac{}{}, \\\\sqrt{}, \\\\sum, \\\\int and Greek letters, and \\\\mathrm{} for upright text in math; balance every \\\\left with a \\\\right, using \\\\left. or \\\\right. for a one-sided delimiter. Images: describe each image, chart or diagram where it appears as ![Image: description], naming what it shows, its labels and any trend it conveys. Two-page spreads: when the image shows two facing pages, transcribe the left page in full, then the right page, and tag each page's printed number. Cross-page continuity: the page is usually one of many, so transcribe a sentence that begins on the previous page or ends on the next exactly as far as this page shows it. Use null when the image holds no transcribable text.\"\n      },\n      \"no_transcribable_text\": {\n        \"type\": \"boolean\",\n        \"description\": \"True only when the image holds no text at all, such as a blank or purely pictorial page; false whenever any text can be transcribed, even in part.\"\n      },\n      \"transcription_not_possible\": {\n        \"type\": \"boolean\",\n        \"description\": \"True only when the image cannot be transcribed at all, such as a corrupted or entirely unreadable scan; false whenever any part can be transcribed, even with [illegible] markers.\"\n      }\n    },\n    \"required\": [\n      \"transcription\",\n      \"no_transcribable_text\",\n      \"transcription_not_possible\"\n    ],\n    \"additionalProperties\": false\n  }\n}"
+  }
+}

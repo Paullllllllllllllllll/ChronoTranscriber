@@ -1,0 +1,159 @@
+{
+  "calls": [
+    {
+      "attempt": 1,
+      "bound": {},
+      "kwargs": {},
+      "messages": [
+        {
+          "blocks": [
+            {
+              "chars": 640,
+              "prompt": "prompt-1",
+              "type": "text"
+            }
+          ],
+          "role": "system"
+        },
+        {
+          "blocks": [
+            {
+              "text": "The image:",
+              "type": "text"
+            },
+            {
+              "detail": "original",
+              "height": 1667,
+              "mime": "image/jpeg",
+              "type": "image_url",
+              "width": 1250
+            }
+          ],
+          "role": "human"
+        }
+      ],
+      "model": "gpt-5.6-luna",
+      "page": 0,
+      "provider": "openai",
+      "structured": null
+    },
+    {
+      "attempt": 1,
+      "bound": {},
+      "kwargs": {},
+      "messages": [
+        {
+          "blocks": [
+            {
+              "chars": 640,
+              "prompt": "prompt-1",
+              "type": "text"
+            }
+          ],
+          "role": "system"
+        },
+        {
+          "blocks": [
+            {
+              "text": "The image:",
+              "type": "text"
+            },
+            {
+              "detail": "original",
+              "height": 1667,
+              "mime": "image/jpeg",
+              "type": "image_url",
+              "width": 1250
+            }
+          ],
+          "role": "human"
+        }
+      ],
+      "model": "gpt-5.6-luna",
+      "page": 1,
+      "provider": "openai",
+      "structured": null
+    },
+    {
+      "attempt": 1,
+      "bound": {},
+      "kwargs": {},
+      "messages": [
+        {
+          "blocks": [
+            {
+              "chars": 640,
+              "prompt": "prompt-1",
+              "type": "text"
+            }
+          ],
+          "role": "system"
+        },
+        {
+          "blocks": [
+            {
+              "text": "The image:",
+              "type": "text"
+            },
+            {
+              "detail": "original",
+              "height": 1667,
+              "mime": "image/jpeg",
+              "type": "image_url",
+              "width": 1250
+            }
+          ],
+          "role": "human"
+        }
+      ],
+      "model": "gpt-5.6-luna",
+      "page": 2,
+      "provider": "openai",
+      "structured": null
+    }
+  ],
+  "models": [
+    {
+      "constructor": "ChatOpenAI",
+      "kwargs": {
+        "api_key": "<env:OPENAI_API_KEY>",
+        "disabled_params": {
+          "frequency_penalty": null,
+          "presence_penalty": null,
+          "temperature": null,
+          "top_p": null
+        },
+        "frequency_penalty": null,
+        "http_async_client": "<_DefaultAsyncHttpxClient>",
+        "http_client": "<_DefaultHttpxClient>",
+        "max_completion_tokens": 128000,
+        "max_retries": 0,
+        "model": "gpt-5.6-luna",
+        "presence_penalty": null,
+        "prompt_cache_options": {
+          "ttl": "30m"
+        },
+        "reasoning": {
+          "effort": "xhigh"
+        },
+        "service_tier": "default",
+        "temperature": null,
+        "timeout": {
+          "httpx.Timeout": {
+            "connect": 10.0,
+            "pool": 30.0,
+            "read": 900.0,
+            "write": 30.0
+          }
+        },
+        "top_p": null,
+        "use_responses_api": true,
+        "verbosity": "medium"
+      },
+      "provider": "openai"
+    }
+  ],
+  "prompts": {
+    "prompt-1": "For transcription, follow the rules below and return only the page's text.\n\n- Text: transcribe all visible text verbatim, keeping the spelling, punctuation and word order as printed.\n- Line breaks: keep each line break where the image has one.\n- Columns: transcribe multi-column text column by column, finishing one column before starting the next.\n- Pages without text: return exactly [No transcribable text] when the image holds no text at all, and exactly [Transcription not possible] when it cannot be transcribed at all.\n- Output: return only the transcribed text, without explanations, comments, metadata or formatting instructions.\n\n"
+  }
+}

@@ -1,0 +1,29 @@
+[
+  {
+    "call": "probe",
+    "file": "talk.wav",
+    "seconds": 75.0
+  },
+  {
+    "bytes": 12044,
+    "call": "cut",
+    "chunk_format": "mp3",
+    "duration": 30.0,
+    "mono": true,
+    "sample_rate": 16000,
+    "source": "talk.wav",
+    "start": 30.0,
+    "target": "talk_chunk_0002.mp3"
+  },
+  {
+    "bytes": 6044,
+    "call": "cut",
+    "chunk_format": "mp3",
+    "duration": null,
+    "mono": true,
+    "sample_rate": 16000,
+    "source": "talk.wav",
+    "start": 60.0,
+    "target": "talk_chunk_0003.mp3"
+  }
+]

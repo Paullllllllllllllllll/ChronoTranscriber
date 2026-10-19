@@ -1,0 +1,31 @@
+{
+  "calls": [
+    {
+      "attempt": 1,
+      "bytes": 8044,
+      "chunk": {
+        "seconds": 20.0,
+        "start_second": 0
+      },
+      "file": "talk.wav",
+      "kwargs": {
+        "beam_size": 3,
+        "language": "de",
+        "vad_filter": true
+      },
+      "provider": "faster-whisper"
+    }
+  ],
+  "models": [
+    {
+      "constructor": "WhisperModel",
+      "kwargs": {
+        "compute_type": "default",
+        "device": "auto",
+        "model_size_or_path": "large-v3"
+      },
+      "provider": "faster-whisper"
+    }
+  ],
+  "prompts": {}
+}

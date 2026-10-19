@@ -1,0 +1,144 @@
+
+ChronoTranscriber | new transcription   step 1
+? Task:
+ > new transcription
+   repair a transcription
+   check batches
+   cancel batches
+   render files again
+   drop documents from the store
+   Back
+  answer: new transcription
+
+ChronoTranscriber | new transcription   step 2
+? Input (file or folder): <tmp>/inputs/interview.wav
+  found 1 audio file
+
+ChronoTranscriber | new transcription   step 3
+? Input type:
+ > Audio  1 item
+   Back
+  answer: Audio
+? Method:
+ > Whisper (local speech-to-text)
+   Audio API (OpenAI or Google)
+   Back
+  answer: Whisper (local speech-to-text)
+
+ChronoTranscriber | new transcription   step 4
+? Where should the outputs go?
+ > Beside each input
+   Into one folder  created when missing
+   Back
+  answer: Into one folder
+? Output folder: <tmp>/out
+? Folder layout:
+ > One folder per item  hash-suffixed names
+   Mirror the input folders
+   Back
+  answer: One folder per item
+? Output formats (chronotranscriber.sqlite is always written):
+   [x] Plain text (.txt)
+   [ ] Markdown (.md)
+   [ ] Back
+  answer: Plain text (.txt)
+
+ChronoTranscriber | new transcription   step 5
+? Whisper model:
+   tiny
+   base
+ > small (s)
+   medium
+   large-v3
+   turbo
+   Back
+  answer: Back
+
+ChronoTranscriber | new transcription   step 4
+? Where should the outputs go?
+   Beside each input
+ > Into one folder  created when missing
+   Back
+  answer: Into one folder
+? Output folder: [<tmp>/out] <tmp>/out
+? Folder layout:
+ > One folder per item  hash-suffixed names
+   Mirror the input folders
+   Back
+  answer: One folder per item
+? Output formats (chronotranscriber.sqlite is always written):
+   [x] Plain text (.txt)
+   [ ] Markdown (.md)
+   [ ] Back
+  answer: Plain text (.txt), Markdown (.md)
+
+ChronoTranscriber | new transcription   step 5
+? Whisper model:
+   tiny
+   base
+ > small (s)
+   medium
+   large-v3
+   turbo
+   Back
+  answer: small
+? Spoken language (ISO 639-1 code, empty = detect): [de (s)] de
+? Chunk length in seconds: [600] 600
+
+ChronoTranscriber | new transcription   step 6
+? Which audio chunks?
+ > All audio chunks
+   A range  such as 5, first:5, last:5, 3-7, 3-, -7 or 1,3,5-8
+   Back
+  answer: All audio chunks
+
+ChronoTranscriber | new transcription   step 7
+? Run options:
+   [x] Retry units whose earlier result is an error
+   [ ] Transcribe complete items again (--force)
+   [ ] Keep working files (preprocessed images, audio chunks)
+   [ ] Dry run: show the plan, no API calls or writes
+   [ ] Back
+  answer: Retry units whose earlier result is an error
+? Parallel requests: [16] 16
+
+Review                                                                  (s) = from settings defaults
+  input    <tmp>/inputs/interview.wav  (1 audio file)
+  method   type audio | whisper
+  output   <tmp>/out | layout hash | formats txt, md (+ chronotranscriber.sqlite)
+  engine   Whisper small (s)
+  audio    language de (s) | chunks of 600 s
+  pages    all audio chunks
+  run      sync | resume | retry errors | concurrency 16
+
+Plan: 1 to process, 0 complete
+  interview.wav: new (whisper)
+
+Equivalent command:
+  chronotranscriber transcribe --input '<tmp>/inputs/interview.wav' --type audio --method whisper
+    --output '<tmp>/out' --formats txt,md --whisper-model small --language de
+    --settings '<tmp>/config/settings.yaml'
+? Start:
+ > Run
+   Edit a step
+   Copy command and quit
+   Quit
+   Back
+  answer: Run
+[1/1] interview.wav (audio)
+[1/1] interview.wav: complete; 1 chunk(s) ok, 0 failed, 0 deferred
+    outputs: <tmp>/out/interview-02540942/interview.txt, <tmp>/out/interview-02540942/interview.md
+Run summary
+┏━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━┳━━━━━━━━┳━━━━━━━━━━┳━━━━━━━┓
+┃ Item          ┃ Status               ┃ Unit  ┃ Ok ┃ Failed ┃ Deferred ┃ Error ┃
+┡━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━╇━━━━━━━━╇━━━━━━━━━━╇━━━━━━━┩
+│ interview.wav │ complete             │ chunk │  1 │      0 │        0 │       │
+├───────────────┼──────────────────────┼───────┼────┼────────┼──────────┼───────┤
+│ Total         │ 1 complete, 0 failed │       │  1 │      0 │        0 │       │
+└───────────────┴──────────────────────┴───────┴────┴────────┴──────────┴───────┘
+Outputs: <tmp>/out/interview-02540942/interview.txt, <tmp>/out/interview-02540942/interview.md
+Skipped (already complete): none
+Blocked (held by another run): none
+Databases written: <tmp>/out/chronotranscriber.sqlite
+Run time: <duration>
+Token usage: none reported

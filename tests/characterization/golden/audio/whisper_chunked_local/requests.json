@@ -1,0 +1,61 @@
+{
+  "calls": [
+    {
+      "attempt": 1,
+      "bytes": 12044,
+      "chunk": {
+        "seconds": 30.0,
+        "start_second": 0
+      },
+      "file": "talk_chunk_0001.mp3",
+      "kwargs": {
+        "beam_size": 5,
+        "language": null,
+        "vad_filter": true
+      },
+      "provider": "faster-whisper"
+    },
+    {
+      "attempt": 1,
+      "bytes": 12044,
+      "chunk": {
+        "seconds": 30.0,
+        "start_second": 30
+      },
+      "file": "talk_chunk_0002.mp3",
+      "kwargs": {
+        "beam_size": 5,
+        "language": null,
+        "vad_filter": true
+      },
+      "provider": "faster-whisper"
+    },
+    {
+      "attempt": 1,
+      "bytes": 6044,
+      "chunk": {
+        "seconds": 15.0,
+        "start_second": 60
+      },
+      "file": "talk_chunk_0003.mp3",
+      "kwargs": {
+        "beam_size": 5,
+        "language": null,
+        "vad_filter": true
+      },
+      "provider": "faster-whisper"
+    }
+  ],
+  "models": [
+    {
+      "constructor": "WhisperModel",
+      "kwargs": {
+        "compute_type": "default",
+        "device": "auto",
+        "model_size_or_path": "large-v3"
+      },
+      "provider": "faster-whisper"
+    }
+  ],
+  "prompts": {}
+}

@@ -221,7 +221,7 @@ def _check_completed(second: RunResult) -> None:
 # ============================================================================
 # Image folder
 # ============================================================================
-def test_resume_image_folder_gpt(
+def test_resume_images_llm(
     fake_llm: FakeLLM,
     missing_tesseract: Path,
     run_case: CaseRunner,
@@ -234,7 +234,7 @@ def test_resume_image_folder_gpt(
         )
         return resume_stages(run, [folder], [folder])
 
-    stages = run_case("image_folder_gpt", build)
+    stages = run_case("images_llm", build)
     first, second = stages["first"].result, stages["second"].result
     planned, resumed = stages["dry_run"].result, stages["resumed"].result
 

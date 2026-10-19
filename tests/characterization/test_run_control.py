@@ -167,7 +167,6 @@ def _pdf_folder(folder: Path, names: Sequence[str]) -> list[Path]:
     [
         ("resume_skip", {}, False),
         ("force", {"force": True}, True),
-        ("resume_mode_overwrite_config", {"force": True}, True),
     ],
 )
 def test_second_run_on_completed_item(
@@ -337,9 +336,9 @@ def test_files_selection(
 @pytest.mark.parametrize(
     ("case", "recursive", "layout", "selected"),
     [
-        ("non_recursive_pdfs", False, None, ("a.pdf",)),
-        ("recursive_pdfs_hash", True, None, NESTED),
-        ("recursive_pdfs_mirror", True, "mirror", NESTED),
+        ("non_recursive_pdf", False, None, ("a.pdf",)),
+        ("recursive_pdf_hash", True, None, NESTED),
+        ("recursive_pdf_mirror", True, "mirror", NESTED),
     ],
 )
 def test_nested_pdf_folder(
@@ -413,7 +412,7 @@ def test_outputs_beside_input(
         )
         return {"run": stage(result)}
 
-    result = run_case("input_paths_is_output_path", build)["run"].result
+    result = run_case("beside_input", build)["run"].result
 
     assert result.exit_code == 0
     docs = result.root / "docs"

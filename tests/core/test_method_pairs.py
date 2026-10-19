@@ -20,7 +20,7 @@ RUN_CASES: dict[tuple[str, str], str] = {
     ("mobi", "native"): "sources/mobi_native",
     ("audio", "whisper"): "audio/whisper_single_request",
     ("audio", "audio-api"): "audio/openai_single_request",
-    ("auto", "llm"): "sources/auto_mixed_example_config",
+    ("auto", "llm"): "sources/auto_mixed_defaults",
     ("auto", "tesseract"): "sources/auto_mixed_local_methods",
 }
 """The characterization case that runs each source and method pair end to end."""

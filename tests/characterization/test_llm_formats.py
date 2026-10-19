@@ -417,7 +417,7 @@ CASES: tuple[Case, ...] = (
     ),
     *(
         Case(
-            f"pdf_openai_schema_output_{suffix}",
+            f"pdf_openai_schema_formats_{suffix}",
             "pdf",
             options={"formats": suffix},
             check=_output_format_check(f".{suffix}"),

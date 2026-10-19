@@ -153,7 +153,7 @@ def test_native_pdf(
     golden("smoke/native_pdf", result)
 
 
-def test_gpt_pdf_default_model(
+def test_llm_pdf_default_model(
     fake_llm: FakeLLM, case_root: Callable[[str], Path], golden: GoldenCheck
 ) -> None:
     result = run_twice(case_root, lambda root: _transcribe_pdf(fake_llm, root, "llm"))
@@ -166,10 +166,10 @@ def test_gpt_pdf_default_model(
     assert structured["schema"]["name"] == "markdown_transcription_schema"
     output = result.output(result.root / "docs" / "doc.pdf")
     assert "Market Records, Part 01" in output.read_text(encoding="utf-8")
-    golden("smoke/gpt_pdf_default_model", result)
+    golden("smoke/llm_pdf_default_model", result)
 
 
-def test_check_batches_without_batch_files(
+def test_batch_check_without_submissions(
     fake_llm: FakeLLM, case_root: Callable[[str], Path], golden: GoldenCheck
 ) -> None:
     def build(root: Path) -> RunResult:
@@ -183,10 +183,10 @@ def test_check_batches_without_batch_files(
     assert result.summary is not None
     assert result.summary["finalized"] == 0
     assert result.created == []
-    golden("smoke/check_batches_without_batch_files", result)
+    golden("smoke/batch_check_without_submissions", result)
 
 
-def test_repair_clean_gpt_transcription(
+def test_repair_clean_llm_transcription(
     fake_llm: FakeLLM, case_root: Callable[[str], Path], golden: GoldenCheck
 ) -> None:
     def build(root: Path) -> RunResult:
@@ -205,4 +205,4 @@ def test_repair_clean_gpt_transcription(
     assert result.summary is not None
     assert (result.summary["repaired"], result.summary["failed"]) == (0, 0)
     assert result.calls == []
-    golden("smoke/repair_clean_gpt_transcription", result)
+    golden("smoke/repair_clean_llm_transcription", result)

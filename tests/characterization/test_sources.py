@@ -350,7 +350,7 @@ LOCAL_AUTO = {"method": "tesseract", "searchable_pdfs": "text"}
 @pytest.mark.parametrize(
     ("case", "options", "llm_pages", "ocr_pages"),
     [
-        ("auto_mixed_example_config", {}, 3 * PAGES, 0),
+        ("auto_mixed_defaults", {}, 3 * PAGES, 0),
         ("auto_mixed_local_methods", LOCAL_AUTO, 0, 2 * PAGES),
     ],
 )

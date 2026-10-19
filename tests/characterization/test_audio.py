@@ -19,7 +19,6 @@ from typing import Any
 import pytest
 
 from chronotranscriber.common.testing import WriteGuard
-from tests.characterization.adapter import RunResult, deep_merge, run_tool
 from tests.characterization.fakes import FakeLLM, permanent_error, transient_error
 from tests.characterization.fakes_audio import FakeAudio
 from tests.characterization.golden import (
@@ -29,6 +28,7 @@ from tests.characterization.golden import (
     snapshot,
 )
 from tests.characterization.inputs_audio import make_wav
+from tests.characterization.runner import RunResult, deep_merge, run_cli
 
 pytestmark = pytest.mark.integration
 
@@ -43,7 +43,7 @@ CHUNK_STARTS = [0, 30, 60]
 
 @dataclass
 class AudioRun:
-    """One ``run_tool`` call with the audio fakes' records of it."""
+    """One ``run_cli`` call with the audio fakes' records of it."""
 
     result: RunResult
     ffmpeg: list[dict[str, Any]]
@@ -52,10 +52,10 @@ class AudioRun:
 Build = Callable[[Path], AudioRun]
 
 
-def _base_audio_config(root: Path) -> dict[str, Any]:
+def _base_settings(root: Path) -> dict[str, Any]:
     missing = root / "no-ffmpeg"
     return {
-        "ffmpeg": {
+        "tools": {
             "ffmpeg_cmd": str(missing / "ffmpeg.exe"),
             "ffprobe_cmd": str(missing / "ffprobe.exe"),
         }
@@ -68,21 +68,20 @@ def transcribe_audio(
     root: Path,
     *,
     input: Path,
-    audio_config: Mapping[str, Any] | None = None,
-    **flags: Any,
+    settings: Mapping[str, Any] | None = None,
+    **options: Any,
 ) -> AudioRun:
     """Run ``transcribe --type audio`` on *input* into ``root/out``."""
     audio.reset_records()
-    config = deep_merge(_base_audio_config(root), audio_config or {})
-    result = run_tool(
+    result = run_cli(
         "transcribe",
         llm=llm,
         root=root,
-        config={"audio_config": config},
+        settings=deep_merge(_base_settings(root), settings or {}),
         input=input,
         output=root / "out",
         type="audio",
-        **flags,
+        **options,
     )
     result.models = [*result.models, *audio.models]
     result.calls = [*result.calls, *audio.calls]
@@ -149,7 +148,7 @@ def _starts(run: AudioRun) -> list[int]:
     return [call["chunk"]["start_second"] for call in run.result.calls]
 
 
-_OVERSIZED = {"chunking": {"max_request_bytes": SMALL_REQUEST_BYTES}}
+_OVERSIZED = {"audio_chunking": {"max_request_bytes": SMALL_REQUEST_BYTES}}
 
 
 # ============================================================================
@@ -161,7 +160,7 @@ def test_whisper_single_request(
     case_root: Callable[[str], Path],
     write_guard: WriteGuard,
 ) -> None:
-    config = {"local_whisper": {"beam_size": 3, "language": "de"}}
+    settings = {"whisper": {"beam_size": 3}}
     run = check_case(
         "whisper_single_request",
         case_root,
@@ -172,7 +171,8 @@ def test_whisper_single_request(
             root,
             input=_short(root),
             method="whisper",
-            audio_config=config,
+            language="de",
+            settings=settings,
         ),
     )
 
@@ -192,7 +192,7 @@ def test_whisper_chunked_local(
     case_root: Callable[[str], Path],
     write_guard: WriteGuard,
 ) -> None:
-    config = {"chunking": {"apply_to_local": True, "target_seconds": 30}}
+    settings = {"audio_chunking": {"apply_to_local": True}}
     run = check_case(
         "whisper_chunked_local",
         case_root,
@@ -203,7 +203,8 @@ def test_whisper_chunked_local(
             root,
             input=_long(root),
             method="whisper",
-            audio_config=config,
+            audio_chunk_seconds=30,
+            settings=settings,
         ),
     )
 
@@ -224,13 +225,11 @@ def test_openai_single_request(
     case_root: Callable[[str], Path],
     write_guard: WriteGuard,
 ) -> None:
-    config = {
-        "audio_transcription": {
-            "openai": {
-                "prompt": "Minutes of the grain market.",
-                "languages": ["de", "fr"],
-                "keywords": ["Roggen"],
-            }
+    settings = {
+        "audio_api": {
+            "prompt": "Minutes of the grain market.",
+            "languages": ["de", "fr"],
+            "keywords": ["Roggen"],
         }
     }
     run = check_case(
@@ -243,7 +242,7 @@ def test_openai_single_request(
             root,
             input=_short(root),
             method="audio-api",
-            audio_config=config,
+            settings=settings,
         ),
     )
 
@@ -275,7 +274,7 @@ def test_openai_oversized_chunked(
             root,
             input=_long(root),
             method="audio-api",
-            audio_config=_OVERSIZED,
+            settings=_OVERSIZED,
         ),
     )
 
@@ -291,12 +290,6 @@ def test_google_single_request(
     case_root: Callable[[str], Path],
     write_guard: WriteGuard,
 ) -> None:
-    config = {
-        "audio_transcription": {
-            "provider": "google",
-            "google": {"language_hint": "German"},
-        }
-    }
     run = check_case(
         "google_single_request",
         case_root,
@@ -307,7 +300,8 @@ def test_google_single_request(
             root,
             input=_short(root),
             method="audio-api",
-            audio_config=config,
+            provider="google",
+            language="German",
         ),
     )
 
@@ -321,7 +315,7 @@ def test_google_single_request(
     assert "Recording from second 0 to 20" in _text(run)
 
 
-def test_provider_and_model_overrides_route_to_audio_config(
+def test_provider_and_model_options_route_to_the_audio_api(
     fake_llm: FakeLLM,
     fake_audio: FakeAudio,
     case_root: Callable[[str], Path],
@@ -353,7 +347,6 @@ def test_model_override_keeps_configured_provider(
     case_root: Callable[[str], Path],
     write_guard: WriteGuard,
 ) -> None:
-    config = {"audio_transcription": {"openai": {"language": "de"}}}
     run = check_case(
         "model_override_openai",
         case_root,
@@ -365,7 +358,7 @@ def test_model_override_keeps_configured_provider(
             input=_short(root),
             method="audio-api",
             model="whisper-1",
-            audio_config=config,
+            language="de",
         ),
     )
 
@@ -392,7 +385,7 @@ def test_transient_chunk_error_is_retried(
             root,
             input=_long(root),
             method="audio-api",
-            audio_config=_OVERSIZED,
+            settings=_OVERSIZED,
         )
 
     run = check_case("transient_chunk_error", case_root, write_guard, build)
@@ -417,7 +410,7 @@ def test_permanent_chunk_error_fails_the_item(
             root,
             input=_long(root),
             method="audio-api",
-            audio_config=_OVERSIZED,
+            settings=_OVERSIZED,
         )
 
     run = check_case("permanent_chunk_error", case_root, write_guard, build)
@@ -449,7 +442,7 @@ def test_dry_run_reports_chunk_counts(
             input=folder,
             method="audio-api",
             dry_run=True,
-            audio_config=_OVERSIZED,
+            settings=_OVERSIZED,
         )
 
     run = check_case("dry_run_chunk_counts", case_root, write_guard, build, stdout=True)
@@ -481,7 +474,7 @@ def test_pages_select_audio_chunks(
             input=_long(root),
             method="audio-api",
             pages="2-3",
-            audio_config=_OVERSIZED,
+            settings=_OVERSIZED,
         ),
     )
 

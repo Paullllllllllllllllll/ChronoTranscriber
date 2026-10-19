@@ -1,7 +1,7 @@
 """Characterization of batch cancellation through the fake batch services.
 
 Each case seeds one pending batch per provider and one completed OpenAI
-batch, then runs ``cancel_batches --force``: with ``--batch-ids`` for the
+batch, then runs ``batch cancel``: with ``--batch-ids`` for the
 pending batch of one provider, or without ids, which cancels every
 non-terminal batch the listings of the three providers return. The snapshot adds
 ``batches.json`` (the state of every seeded batch after the run) and, in
@@ -19,7 +19,6 @@ from typing import Any
 import pytest
 
 from chronotranscriber.common.testing import WriteGuard
-from tests.characterization.adapter import RunResult, run_tool
 from tests.characterization.fakes import FakeLLM
 from tests.characterization.fakes_batch import FakeBatchService, Provider
 from tests.characterization.golden import (
@@ -28,6 +27,7 @@ from tests.characterization.golden import (
     normalizer_for,
     snapshot,
 )
+from tests.characterization.runner import RunResult, run_cli
 
 pytestmark = pytest.mark.integration
 
@@ -74,10 +74,8 @@ def cancel(
     root: Path,
     batch_ids: Sequence[str] | None,
 ) -> tuple[RunResult, dict[str, str]]:
-    """Run ``cancel_batches --force``; return the result and its snapshot."""
-    result = run_tool(
-        "cancel_batches", llm=llm, root=root, batch_ids=batch_ids, force=True
-    )
+    """Run ``batch cancel``; return the result and its snapshot."""
+    result = run_cli("batch cancel", llm=llm, root=root, batch_ids=batch_ids)
     replacements = service.id_replacements()
     files = snapshot(result, replacements=replacements)
     norm = normalizer_for(result, replacements)

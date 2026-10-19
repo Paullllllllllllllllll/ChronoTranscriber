@@ -12,21 +12,20 @@ from pathlib import Path
 
 import pytest
 
-from tests.characterization.adapter import RunResult, run_tool
 from tests.characterization.fakes import FakeLLM
 from tests.characterization.fakes_audio import FakeAudio
 from tests.characterization.fakes_ocr import (
     FakeTesseract,
     block_real_tesseract,
-    tesseract_cmd_config,
+    tesseract_cmd_settings,
 )
 from tests.characterization.inputs import make_image_folder
 from tests.characterization.inputs_audio import make_wav
+from tests.characterization.runner import RunResult, run_cli
 
 pytestmark = pytest.mark.integration
 
 PAGES = 3
-CHUNKED = {"chunking": {"apply_to_local": True, "target_seconds": 30}}
 
 
 def _working(result: RunResult, marker: str) -> list[Path]:
@@ -46,11 +45,11 @@ def test_tesseract_keeps_its_images_only_when_asked(
     missing = block_real_tesseract(monkeypatch, root)
     folder = make_image_folder(root / "scans", PAGES)
 
-    result = run_tool(
+    result = run_cli(
         "transcribe",
         llm=fake_llm,
         root=root,
-        config={"image_processing_config": tesseract_cmd_config(missing)},
+        settings=tesseract_cmd_settings(missing),
         input=folder,
         output=root / "out",
         type="images",
@@ -71,23 +70,24 @@ def test_whisper_keeps_its_chunks_only_when_asked(
 ) -> None:
     root = case_root()
     missing = root / "no-ffmpeg"
-    audio = {
-        "ffmpeg": {
+    settings = {
+        "tools": {
             "ffmpeg_cmd": str(missing / "ffmpeg.exe"),
             "ffprobe_cmd": str(missing / "ffprobe.exe"),
         },
-        **CHUNKED,
+        "audio_chunking": {"apply_to_local": True},
     }
 
-    result = run_tool(
+    result = run_cli(
         "transcribe",
         llm=fake_llm,
         root=root,
-        config={"audio_config": audio},
+        settings=settings,
         input=make_wav(root / "audio" / "talk.wav", 75),
         output=root / "out",
         type="audio",
         method="whisper",
+        audio_chunk_seconds=30,
         keep_working_files=keep,
     )
 

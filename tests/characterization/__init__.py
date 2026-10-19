@@ -1,1 +1,1 @@
-"""End-to-end characterization tests run through ``adapter.run_tool``."""
+"""End-to-end characterization tests run through ``runner.run_cli``."""

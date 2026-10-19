@@ -20,15 +20,14 @@ from typing import Any
 import pytest
 
 from chronotranscriber.output.store import DATABASE_NAME
-from tests.characterization.adapter import RunResult, run_tool
 from tests.characterization.fakes import FakeLLM, Reply, permanent_error
 from tests.characterization.fakes_batch import FakeBatchService
 from tests.characterization.inputs import make_scanned_pdf
+from tests.characterization.runner import RunResult, run_cli
 
 pytestmark = pytest.mark.integration
 
 LAYOUTS = ("hash", "mirror", "beside")
-_BESIDE = {"paths_config": {"general": {"input_paths_is_output_path": True}}}
 
 
 @pytest.fixture
@@ -52,42 +51,42 @@ class Case:
         self.folder = (self.docs if beside else root / "out").resolve()
         self.database = self.folder / DATABASE_NAME
 
-    def transcribe(self, **flags: Any) -> RunResult:
+    def transcribe(self, **options: Any) -> RunResult:
         beside = self.layout == "beside"
-        result = run_tool(
+        result = run_cli(
             "transcribe",
             llm=self.llm,
             root=self.root,
-            config=_BESIDE if beside else None,
             input=self.pdf,
             output=None if beside else self.root / "out",
-            output_mode="mirror" if self.layout == "mirror" else None,
-            type="pdfs",
-            method="gpt",
+            beside_input=beside,
+            layout="mirror" if self.layout == "mirror" else None,
+            type="pdf",
+            method="llm",
             batch=True,
-            **flags,
+            **options,
         )
         assert result.exit_code == 0, result.stdout + result.stderr
         return result
 
-    def check(self, *, failed: bool = False, **flags: Any) -> RunResult:
+    def check(self, *, failed: bool = False, **options: Any) -> RunResult:
         """Run a check; *failed*: it finalizes a failed page, so it exits 1."""
-        result = run_tool(
-            "check_batches",
+        result = run_cli(
+            "batch check",
             llm=self.llm,
             root=self.root,
-            directory=self.folder,
-            **flags,
+            input=self.folder,
+            **options,
         )
         assert result.exit_code == int(failed), result.stdout + result.stderr
         return result
 
     def repair(self, transcription: Path) -> RunResult:
-        result = run_tool(
+        result = run_cli(
             "repair",
             llm=self.llm,
             root=self.root,
-            transcription=transcription,
+            input=transcription,
             errors_only=True,
         )
         assert result.exit_code == 0, result.stdout + result.stderr
@@ -241,12 +240,12 @@ def test_every_format_registers_its_output(
 ) -> None:
     case = Case(fake_llm, case_root("case"), "hash")
 
-    submitted = case.transcribe(output_format="md")
+    submitted = case.transcribe(formats="md")
 
     assert case.document()["name"] == case.name(submitted)
     assert case.query("SELECT * FROM outputs") == []
 
-    checked = case.check(output_format="md")
+    checked = case.check(formats="md")
 
     assert checked.summary is not None
     assert checked.summary["finalized"] == 1

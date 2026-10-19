@@ -25,7 +25,7 @@ tests/
 ├── sources/               # PDF, EPUB, MOBI and auto-mode scanning
 ├── ui/                    # the wizard: steps, sessions, flows, parity with the CLI
 └── characterization/      # end-to-end runs compared with golden files
-    ├── adapter.py         # run_tool(), the only entry into the tool
+    ├── runner.py          # run_cli(), the only entry into the tool
     ├── fakes*.py          # fake chat model, batch service, Tesseract, audio
     ├── seams.py           # replaces external objects wherever the tool binds them
     ├── inputs*.py         # generated PDFs, image folders, EPUB, MOBI, audio
@@ -96,15 +96,16 @@ environment and blocks non-loopback connections.
 The tests in `tests/characterization/` run the real CLI code paths in
 process and compare everything a run produces with golden files.
 
-- `run_tool(command, *, llm, root, config=None, env=None, **flags)` in
-  `adapter.py` is the only function that knows how the tool is invoked.
-  `build_argv` translates its command and keywords into `chronotranscriber`
-  arguments; `--json` and `--settings` are always passed. Each `config`
-  override becomes a flag or a value of the temporary settings file, and
-  an override without one raises. The returned `RunResult` holds the exit
-  code, the JSON summary line, the console output (`stderr`), the files
-  the run created and the requests the fake chat model received;
-  `RunResult.output(item)` gives an item's output path.
+- `run_cli(command, *, llm, root, settings=None, env=None, **options)` in
+  `runner.py` is the only function that knows how the tool is invoked.
+  `command` is a subcommand (`transcribe`, `repair`, `batch check`,
+  `batch cancel`) and `options` are option names of its table in
+  `chronotranscriber/spec.py`; `build_argv` turns them into arguments, and
+  an option the command lacks raises. `settings` is written as the run's
+  `settings.yaml`; `--json` and `--settings` are always passed. The returned
+  `RunResult` holds the exit code, the JSON summary line, the console
+  output (`stderr`), the files the run created and the requests the fake
+  chat model received; `RunResult.output(item)` gives an item's output path.
 - The autouse `default_context` fixture makes `characterization/context/`
   the project context folder, which holds the default context, so the
   goldens do not depend on the repository's `context/`; the
@@ -126,7 +127,7 @@ process and compare everything a run produces with golden files.
 
 | File | Flow |
 | ------ | ------ |
-| `test_smoke.py` | one case per command; every `run_tool` keyword translates |
+| `test_smoke.py` | one case per command; the options the cases pass parse |
 | `test_sources.py` | PDF, image folder, EPUB, MOBI, auto mode; local methods |
 | `test_llm_formats.py` | LLM method: providers, custom endpoint, response formats, context |
 | `test_response_formats.py` | `--response-format` json and text on every provider |
@@ -172,4 +173,4 @@ authoritative list.
   `unit` or `integration` (markers are strict).
 - Write only under `tmp_path`; the write guard fails any other write.
 - Mock external services; no test calls a real LLM endpoint.
-- Run the tool in characterization tests only through `run_tool`.
+- Run the tool in characterization tests only through `run_cli`.

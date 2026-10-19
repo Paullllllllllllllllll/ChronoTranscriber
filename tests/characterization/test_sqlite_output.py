@@ -1,7 +1,7 @@
 """The store across runs: one database per output folder, read back read-only.
 
 Each case runs ``chronotranscriber transcribe`` more than once over the same
-output folder through ``run_tool`` and reads ``chronotranscriber.sqlite``
+output folder through ``run_cli`` and reads ``chronotranscriber.sqlite``
 back through short ``mode=ro`` connections, as outside readers do: the
 ``page_text`` and ``document_status`` views and the ``responses`` table. A
 complete item whose rendered file is gone is rendered again from the store
@@ -18,10 +18,10 @@ from typing import Any
 import pytest
 
 from chronotranscriber.output.store import DATABASE_NAME
-from tests.characterization.adapter import RunResult, run_tool
 from tests.characterization.conftest import GoldenCheck
 from tests.characterization.fakes import FakeLLM
 from tests.characterization.inputs import make_scanned_pdf
+from tests.characterization.runner import RunResult, run_cli
 
 pytestmark = pytest.mark.integration
 
@@ -45,16 +45,16 @@ def _page_text(database: Path) -> list[dict[str, Any]]:
     )
 
 
-def _run(llm: FakeLLM, root: Path, input_path: Path, **flags: Any) -> RunResult:
-    return run_tool(
+def _run(llm: FakeLLM, root: Path, input_path: Path, **options: Any) -> RunResult:
+    return run_cli(
         "transcribe",
         llm=llm,
         root=root,
         input=input_path,
         output=root / "out",
-        type="pdfs",
-        method="gpt",
-        **flags,
+        type="pdf",
+        method="llm",
+        **options,
     )
 
 

@@ -1,7 +1,7 @@
 """Characterization of response formats, providers, the custom endpoint and context.
 
-Each case transcribes a three-page PDF or image folder with the ``gpt``
-method through ``run_tool``, twice in fresh roots, and compares the second
+Each case transcribes a three-page PDF or image folder with the ``llm``
+method through ``run_cli``, twice in fresh roots, and compares the second
 run with ``golden/llm/<case>/``. Case names follow
 ``<source>_<provider>_<format>[_variant]``, where the format is the response
 format: ``schema`` (enforced through structured output), ``json`` (schema in
@@ -24,7 +24,6 @@ from typing import Any
 
 import pytest
 
-from tests.characterization.adapter import RunResult, custom_endpoint, run_tool
 from tests.characterization.conftest import CONTEXT_DIR, GoldenCheck
 from tests.characterization.fakes import (
     PREAMBLE,
@@ -40,6 +39,12 @@ from tests.characterization.inputs import (
     make_image_folder,
     make_named_images,
     make_scanned_pdf,
+)
+from tests.characterization.runner import (
+    RunResult,
+    custom_endpoint_options,
+    custom_endpoint_settings,
+    run_cli,
 )
 
 pytestmark = pytest.mark.integration
@@ -80,8 +85,8 @@ def _images(root: Path) -> Path:
 
 
 SOURCES: dict[str, tuple[str, Callable[[Path], Path]]] = {
-    "pdf": ("pdfs", _pdf),
-    "scanned": ("pdfs", _scanned_pdf),
+    "pdf": ("pdf", _pdf),
+    "scanned": ("pdf", _scanned_pdf),
     "images": ("images", _images),
 }
 
@@ -121,15 +126,15 @@ def _source(result: RunResult) -> Path:
 class Case:
     """One characterization case.
 
-    ``flags`` go to ``run_tool``; ``setup`` writes extra files into the case
-    root and returns more flags; ``script`` scripts the fake LLM before each
-    run; ``check`` asserts the behavior the golden pins.
+    ``options`` and ``settings`` go to ``run_cli``; ``setup`` writes extra
+    files into the case root and returns more options; ``script`` scripts the
+    fake LLM before each run; ``check`` asserts the behavior the golden pins.
     """
 
     name: str
     source: str
-    flags: Mapping[str, Any] = field(default_factory=dict)
-    config: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    options: Mapping[str, Any] = field(default_factory=dict)
+    settings: Mapping[str, Any] = field(default_factory=dict)
     setup: Setup | None = None
     script: Script | None = None
     check: Check | None = None
@@ -349,7 +354,7 @@ CASES: tuple[Case, ...] = (
         Case(
             f"pdf_openai_schema_{variant}",
             "pdf",
-            flags={"schema": schema},
+            options={"schema": schema},
             check=_schema_check(schema),
         )
         for variant, schema in SCHEMAS.items()
@@ -357,45 +362,48 @@ CASES: tuple[Case, ...] = (
     Case(
         "pdf_anthropic_schema",
         "pdf",
-        flags={"provider": "anthropic", "model": "claude-sonnet-4-5"},
+        options={"provider": "anthropic", "model": "claude-sonnet-4-5"},
         check=_check_anthropic,
     ),
     Case(
         "images_google_schema",
         "images",
-        flags={"provider": "google", "model": "gemini-3-flash"},
+        options={"provider": "google", "model": "gemini-3-flash"},
         check=_check_google,
     ),
     Case(
         "pdf_openrouter_schema",
         "pdf",
-        flags={"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"},
+        options={"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"},
         check=_check_openrouter,
     ),
     Case(
         "pdf_custom_schema",
         "pdf",
-        config={"model_config": custom_endpoint("schema")},
+        options=custom_endpoint_options("schema"),
+        settings=custom_endpoint_settings("schema"),
         check=_custom_schema_check(SCHEMAS["markdown"]),
     ),
     Case(
         "pdf_custom_schema_plain_text",
         "pdf",
-        flags={"schema": SCHEMAS["plain_text"]},
-        config={"model_config": custom_endpoint("schema")},
+        options={"schema": SCHEMAS["plain_text"], **custom_endpoint_options("schema")},
+        settings=custom_endpoint_settings("schema"),
         check=_custom_schema_check(SCHEMAS["plain_text"]),
     ),
     Case(
         "pdf_custom_json",
         "pdf",
-        config={"model_config": custom_endpoint("json")},
+        options=custom_endpoint_options("json"),
+        settings=custom_endpoint_settings("json"),
         script=_script_custom_json,
         check=_check_custom_json,
     ),
     Case(
         "pdf_custom_text",
         "pdf",
-        config={"model_config": custom_endpoint("text")},
+        options=custom_endpoint_options("text"),
+        settings=custom_endpoint_settings("text"),
         script=_script_custom_text,
         check=_check_custom_text,
     ),
@@ -404,14 +412,14 @@ CASES: tuple[Case, ...] = (
         "pdf",
         # OpenAI documents no structured outputs for o3-deep-research; o1-pro,
         # the earlier model of this case, has them.
-        flags={"provider": "openai", "model": "o3-deep-research"},
+        options={"provider": "openai", "model": "o3-deep-research"},
         check=_check_prompted_json,
     ),
     *(
         Case(
             f"pdf_openai_schema_output_{suffix}",
             "pdf",
-            flags={"output_format": suffix},
+            options={"formats": suffix},
             check=_output_format_check(f".{suffix}"),
         )
         for suffix in ("txt", "md")
@@ -455,9 +463,9 @@ CASES: tuple[Case, ...] = (
     Case(
         "pdf_openai_schema_overrides",
         "pdf",
-        flags={
+        options={
             "reasoning_effort": "low",
-            "model_verbosity": "concise",
+            "verbosity": "low",
             "max_output_tokens": 4096,
             "service_tier": "priority",
         },
@@ -501,16 +509,16 @@ def _run(case: Case, llm: FakeLLM, root: Path) -> RunResult:
     kind, make = SOURCES[case.source]
     source = make(root)
     extra = case.setup(root) if case.setup is not None else {}
-    return run_tool(
+    return run_cli(
         "transcribe",
         llm=llm,
         root=root,
-        config=case.config,
+        settings=case.settings,
         input=source,
         output=root / "out",
         type=kind,
-        method="gpt",
-        **{**dict(case.flags), **extra},
+        method="llm",
+        **{**dict(case.options), **extra},
     )
 
 

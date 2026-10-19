@@ -1,7 +1,7 @@
 """Characterization of chunk overlap for an oversized recording.
 
 The 75-second recording exceeds the request cap, so the audio API path cuts
-it into 30-second chunks; with ``chunking.overlap_seconds`` above 0 each
+it into 30-second chunks; with ``audio_chunking.overlap_seconds`` above 0 each
 chunk after the first starts that many seconds before the previous one ends.
 ``ffmpeg.json`` in ``golden/audio/openai_oversized_overlap/`` records the cut
 boundaries.
@@ -38,8 +38,8 @@ def test_oversized_recording_with_overlap(
     case_root: Callable[[str], Path],
     write_guard: WriteGuard,
 ) -> None:
-    config = {
-        "chunking": {
+    settings = {
+        "audio_chunking": {
             "max_request_bytes": SMALL_REQUEST_BYTES,
             "overlap_seconds": OVERLAP_SECONDS,
         }
@@ -54,7 +54,7 @@ def test_oversized_recording_with_overlap(
             root,
             input=make_wav(root / "audio" / "talk.wav", LONG_SECONDS),
             method="audio-api",
-            audio_config=config,
+            settings=settings,
         ),
     )
 

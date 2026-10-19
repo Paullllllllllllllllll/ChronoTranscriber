@@ -19,10 +19,15 @@ from typing import Any
 
 import pytest
 
-from tests.characterization.adapter import RunResult, custom_endpoint, run_tool
 from tests.characterization.conftest import GoldenCheck
 from tests.characterization.fakes import NO_TEXT_MARKER, FakeLLM, Reply
 from tests.characterization.inputs import make_born_digital_pdf, make_image_folder
+from tests.characterization.runner import (
+    RunResult,
+    custom_endpoint_options,
+    custom_endpoint_settings,
+    run_cli,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -30,11 +35,7 @@ PAGES = 3
 RETRIED_PAGE = 1
 NO_TEXT_PAGE = 2
 MARKERS_SCHEMA = "plain_text_transcription_with_markers_schema"
-VALIDATION = {
-    "concurrency_config": {
-        "concurrency": {"transcription": {"retry": {"validation_attempts": 2}}}
-    }
-}
+VALIDATION = {"retry": {"validation_attempts": 2}}
 
 PROVIDERS: Mapping[str, tuple[str, str]] = {
     "openai": ("gpt-5.6-luna", "pdf"),
@@ -47,13 +48,13 @@ PROVIDERS: Mapping[str, tuple[str, str]] = {
 
 @dataclass(frozen=True)
 class FormatCase:
-    """One response-format case; ``flags`` and ``config`` go to ``run_tool``."""
+    """One response-format case; ``options`` and ``settings`` go to ``run_cli``."""
 
     name: str
     fmt: str
     source: str
-    flags: Mapping[str, Any] = field(default_factory=dict)
-    config: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    options: Mapping[str, Any] = field(default_factory=dict)
+    settings: Mapping[str, Any] = field(default_factory=dict)
 
 
 def _registry_case(fmt: str, provider: str) -> FormatCase:
@@ -62,8 +63,8 @@ def _registry_case(fmt: str, provider: str) -> FormatCase:
         f"{fmt}_{provider}_{source}",
         fmt,
         source,
-        flags={"provider": provider, "model": model, "response_format": fmt},
-        config=VALIDATION if fmt == "json" else {},
+        options={"provider": provider, "model": model, "response_format": fmt},
+        settings=VALIDATION if fmt == "json" else {},
     )
 
 
@@ -77,15 +78,15 @@ CASES: tuple[FormatCase, ...] = (
         "schema_custom_images",
         "schema",
         "images",
-        flags={"schema": MARKERS_SCHEMA},
-        config={"model_config": custom_endpoint("schema")},
+        options={"schema": MARKERS_SCHEMA, **custom_endpoint_options("schema")},
+        settings=custom_endpoint_settings("schema"),
     ),
 )
 
 
 def _source(case: FormatCase, root: Path) -> tuple[str, Path]:
     if case.source == "pdf":
-        return "pdfs", make_born_digital_pdf(root / "docs" / "doc.pdf", PAGES)
+        return "pdf", make_born_digital_pdf(root / "docs" / "doc.pdf", PAGES)
     return "images", make_image_folder(root / "scans" / "pages", PAGES)
 
 
@@ -154,21 +155,21 @@ def test_response_format_case(
     root = case_root("run")
     kind, source = _source(case, root)
 
-    result = run_tool(
+    result = run_cli(
         "transcribe",
         llm=fake_llm,
         root=root,
-        config=case.config,
+        settings=case.settings,
         input=source,
         output=root / "out",
         type=kind,
-        method="gpt",
-        **dict(case.flags),
+        method="llm",
+        **dict(case.options),
     )
 
     assert result.exit_code == 0, result.stdout + result.stderr
     assert {model["provider"] for model in result.models} == {
-        "custom" if case.fmt == "schema" else case.flags["provider"]
+        "custom" if case.fmt == "schema" else case.options["provider"]
     }
     _check(case, result)
     golden(f"formats/{case.name}", result)

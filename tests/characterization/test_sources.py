@@ -20,13 +20,12 @@ from typing import Any
 import pytest
 
 from chronotranscriber.common.testing import WriteGuard
-from tests.characterization.adapter import RunResult, run_tool
 from tests.characterization.fakes import FakeLLM
 from tests.characterization.fakes_ocr import (
     FakeTesseract,
     block_real_tesseract,
     ocr_text,
-    tesseract_cmd_config,
+    tesseract_cmd_settings,
 )
 from tests.characterization.golden import check_files, compare, snapshot
 from tests.characterization.inputs import (
@@ -42,6 +41,7 @@ from tests.characterization.inputs_ebooks import (
     make_epub,
     make_mobi,
 )
+from tests.characterization.runner import RunResult, run_cli
 
 pytestmark = pytest.mark.integration
 
@@ -101,39 +101,24 @@ def _dumps(value: Any) -> str:
     return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
 
-def _config(
-    missing: Path,
-    general: Mapping[str, Any] | None = None,
-) -> dict[str, dict[str, Any]]:
-    config: dict[str, dict[str, Any]] = {
-        "image_processing_config": tesseract_cmd_config(missing)
-    }
-    if general:
-        config["paths_config"] = {"general": dict(general)}
-    return config
-
-
 def _transcribe(
     llm: FakeLLM,
     root: Path,
     missing: Path,
     *,
     input: Path,
-    type: str | None,
-    method: str | None,
-    general: Mapping[str, Any] | None = None,
-    **flags: Any,
+    type: str,
+    **options: Any,
 ) -> RunResult:
-    return run_tool(
+    return run_cli(
         "transcribe",
         llm=llm,
         root=root,
-        config=_config(missing, general),
+        settings=tesseract_cmd_settings(missing),
         input=input,
         output=root / "out",
         type=type,
-        method=method,
-        **flags,
+        **options,
     )
 
 
@@ -166,10 +151,10 @@ def test_pdf_native_born_digital_pages(
             root,
             missing_tesseract,
             input=pdf,
-            type="pdfs",
+            type="pdf",
             method="native",
             pages="1,3",
-            output_format=output_format,
+            formats=output_format,
         )
 
     result = source_case(case, build)
@@ -199,7 +184,7 @@ def test_pdf_native_scanned(
             root,
             missing_tesseract,
             input=pdf,
-            type="pdfs",
+            type="pdf",
             method="native",
         )
 
@@ -225,7 +210,7 @@ def test_pdf_tesseract(
             root,
             missing_tesseract,
             input=pdf,
-            type="pdfs",
+            type="pdf",
             method="tesseract",
         )
 
@@ -268,7 +253,7 @@ def test_image_folder_tesseract(
             input=folder,
             type="images",
             method="tesseract",
-            general={"keep_preprocessed_images": keep},
+            keep_working_files=keep,
         )
 
     result = source_case(case, build)
@@ -308,7 +293,7 @@ def test_epub_native(
             root,
             missing_tesseract,
             input=book,
-            type="epubs",
+            type="epub",
             method="native",
             pages=pages,
         )
@@ -334,7 +319,7 @@ def test_mobi_native(
             root,
             missing_tesseract,
             input=book,
-            type="mobis",
+            type="mobi",
             method="native",
         )
 
@@ -358,24 +343,20 @@ def _mixed_folder(root: Path) -> Path:
     return folder
 
 
-LOCAL_AUTO = {
-    "auto_mode_pdf_use_ocr_for_scanned": True,
-    "auto_mode_pdf_use_ocr_for_searchable": False,
-    "auto_mode_pdf_ocr_method": "tesseract",
-    "auto_mode_image_ocr_method": "tesseract",
-}
+LOCAL_AUTO = {"method": "tesseract", "searchable_pdfs": "text"}
+"""Tesseract for scanned PDFs and image folders, the text layer of the others."""
 
 
 @pytest.mark.parametrize(
-    ("case", "general", "llm_pages", "ocr_pages"),
+    ("case", "options", "llm_pages", "ocr_pages"),
     [
-        ("auto_mixed_example_config", None, 3 * PAGES, 0),
+        ("auto_mixed_example_config", {}, 3 * PAGES, 0),
         ("auto_mixed_local_methods", LOCAL_AUTO, 0, 2 * PAGES),
     ],
 )
 def test_auto_mixed_folder(
     case: str,
-    general: Mapping[str, Any] | None,
+    options: Mapping[str, Any],
     llm_pages: int,
     ocr_pages: int,
     fake_llm: FakeLLM,
@@ -389,10 +370,8 @@ def test_auto_mixed_folder(
             root,
             missing_tesseract,
             input=_mixed_folder(root),
-            type=None,
-            method=None,
-            auto=True,
-            general=general,
+            type="auto",
+            **options,
         )
 
     result = source_case(case, build)

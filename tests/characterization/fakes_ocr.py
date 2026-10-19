@@ -55,9 +55,9 @@ def block_real_tesseract(monkeypatch: pytest.MonkeyPatch, root: Path) -> Path:
     return missing
 
 
-def tesseract_cmd_config(missing: Path) -> dict[str, Any]:
-    """Return an ``image_processing_config`` override naming *missing*."""
-    return {"tesseract_image_processing": {"ocr": {"tesseract_cmd": str(missing)}}}
+def tesseract_cmd_settings(missing: Path) -> dict[str, Any]:
+    """Return settings whose ``tools.tesseract_cmd`` names *missing*."""
+    return {"tools": {"tesseract_cmd": str(missing)}}
 
 
 class FakeTesseract:
@@ -139,5 +139,5 @@ __all__ = [
     "block_real_tesseract",
     "ocr_text",
     "page_number",
-    "tesseract_cmd_config",
+    "tesseract_cmd_settings",
 ]

@@ -1,6 +1,6 @@
 """Characterization of resume for image folders, EPUB, MOBI, audio and auto mode.
 
-Each case runs four stages through ``run_tool`` in one root: a full run
+Each case runs four stages through ``run_cli`` in one root: a full run
 (``first``), a resumed run on the completed item (``second``), then, after
 the test recreates the files of an interrupted run, a ``--dry-run``
 (``dry_run``) and a resumed run (``resumed``). An interrupted image folder,
@@ -26,13 +26,12 @@ import pytest
 
 from chronotranscriber.common.testing import WriteGuard
 from chronotranscriber.output.store import document_name, open_store
-from tests.characterization.adapter import ItemPaths, RunResult, run_tool
 from tests.characterization.fakes import FakeLLM
 from tests.characterization.fakes_audio import FakeAudio
 from tests.characterization.fakes_ocr import (
     FakeTesseract,
     block_real_tesseract,
-    tesseract_cmd_config,
+    tesseract_cmd_settings,
 )
 from tests.characterization.golden import check_files, compare, normalizer_for
 from tests.characterization.inputs import make_born_digital_pdf, make_image_folder
@@ -43,6 +42,7 @@ from tests.characterization.inputs_ebooks import (
     make_epub,
     make_mobi,
 )
+from tests.characterization.runner import ItemPaths, RunResult, run_cli
 from tests.characterization.test_audio import transcribe_audio
 from tests.characterization.test_run_control import Stage, stage
 
@@ -52,14 +52,14 @@ CASE_PREFIX = "resume"
 PAGES = 3
 LONG_SECONDS = 75
 CHUNK_STARTS = [0, 30, 60]
-OVERSIZED = {"chunking": {"max_request_bytes": 12_000}}
-"""Audio config that splits the long recording into three chunks."""
+OVERSIZED = {"audio_chunking": {"max_request_bytes": 12_000}}
+"""Audio settings that split the long recording into three chunks."""
 
 RUN_LINES = ("Resume", "Beginning processing", "Processing item", "Nothing to do")
 DRY_RUN_LINES = ("[DRY RUN]", "Resume")
 
 Run = Callable[..., tuple[RunResult, dict[str, str]]]
-"""Run the case's command with extra flags; return the result and extra files."""
+"""Run the case's command with extra options; return the result and extra files."""
 
 Build = Callable[[Path], dict[str, Stage]]
 CaseRunner = Callable[[str, Build], dict[str, Stage]]
@@ -160,11 +160,11 @@ def resume_stages(
     """
 
     def staged(
-        flags: dict[str, Any],
+        options: dict[str, Any],
         outputs: Sequence[Path] = (),
         report: Sequence[str] = (),
     ) -> Stage:
-        result, extra = run(**flags)
+        result, extra = run(**options)
         current = stage(result, outputs=outputs, report=report)
         current.files.update(extra)
         return current
@@ -173,25 +173,25 @@ def resume_stages(
     assert first.result.exit_code == 0, first.result.stdout + first.result.stderr
     paths = {item: first.result.paths(item) for item in items}
     outputs = [entry.output for entry in paths.values()]
-    second = staged({"resume": True}, outputs, RUN_LINES)
+    second = staged({}, outputs, RUN_LINES)
     for item in partial:
         interrupt(paths[item])
     stores = sorted({paths[item].database for item in partial})
-    planned = staged({"resume": True, "dry_run": True}, stores, DRY_RUN_LINES)
-    resumed = staged({"resume": True}, stores, RUN_LINES)
+    planned = staged({"dry_run": True}, stores, DRY_RUN_LINES)
+    resumed = staged({}, stores, RUN_LINES)
     return {"first": first, "second": second, "dry_run": planned, "resumed": resumed}
 
 
 def _document_run(llm: FakeLLM, root: Path, missing: Path, **base: Any) -> Run:
-    def run(**flags: Any) -> tuple[RunResult, dict[str, str]]:
-        result = run_tool(
+    def run(**options: Any) -> tuple[RunResult, dict[str, str]]:
+        result = run_cli(
             "transcribe",
             llm=llm,
             root=root,
-            config={"image_processing_config": tesseract_cmd_config(missing)},
+            settings=tesseract_cmd_settings(missing),
             output=root / "out",
             **base,
-            **flags,
+            **options,
         )
         return result, {}
 
@@ -230,7 +230,7 @@ def test_resume_image_folder_gpt(
         fake_llm.pages.clear()
         folder = make_image_folder(root / "scans", PAGES)
         run = _document_run(
-            fake_llm, root, missing_tesseract, input=folder, type="images", method="gpt"
+            fake_llm, root, missing_tesseract, input=folder, type="images", method="llm"
         )
         return resume_stages(run, [folder], [folder])
 
@@ -258,8 +258,8 @@ def test_resume_image_folder_gpt(
 @pytest.mark.parametrize(
     ("case", "name", "kind", "make", "expected"),
     [
-        ("epub_native", "annals.epub", "epubs", make_epub, CHAPTERS[0][1]),
-        ("mobi_native", "notes.mobi", "mobis", make_mobi, MOBI_PARAGRAPHS[0]),
+        ("epub_native", "annals.epub", "epub", make_epub, CHAPTERS[0][1]),
+        ("mobi_native", "notes.mobi", "mobi", make_mobi, MOBI_PARAGRAPHS[0]),
     ],
     ids=["epub", "mobi"],
 )
@@ -305,15 +305,15 @@ def test_resume_audio_chunked(
     def build(root: Path) -> dict[str, Stage]:
         audio = make_wav(root / "audio" / "talk.wav", LONG_SECONDS)
 
-        def run(**flags: Any) -> tuple[RunResult, dict[str, str]]:
+        def run(**options: Any) -> tuple[RunResult, dict[str, str]]:
             outcome = transcribe_audio(
                 fake_llm,
                 fake_audio,
                 root,
                 input=audio,
                 method="audio-api",
-                audio_config=OVERSIZED,
-                **flags,
+                settings=OVERSIZED,
+                **options,
             )
             norm = normalizer_for(outcome.result)
             ffmpeg = json.dumps(
@@ -363,7 +363,7 @@ def test_resume_auto_mixed_folder(
         make_image_folder(mixed / "scans", PAGES)
         make_epub(mixed / "annals.epub")
         make_mobi(mixed / "notes.mobi")
-        run = _document_run(fake_llm, root, missing_tesseract, input=mixed, auto=True)
+        run = _document_run(fake_llm, root, missing_tesseract, input=mixed, type="auto")
         return resume_stages(
             run,
             [mixed / name for name in AUTO_ITEMS],

@@ -8,10 +8,10 @@ from pathlib import Path
 import pytest
 
 from chronotranscriber.common.testing import WriteGuard
-from tests.characterization.adapter import RunResult
 from tests.characterization.fakes import PROVIDER_CLASSES, FakeLLM
 from tests.characterization.fakes_audio import FakeAudio
 from tests.characterization.golden import check_golden
+from tests.characterization.runner import RunResult
 from tests.characterization.seams import replace
 
 GoldenCheck = Callable[..., None]

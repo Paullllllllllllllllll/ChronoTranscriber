@@ -1,6 +1,6 @@
 """Characterization of repair and ``--retry-errors``.
 
-Each case first transcribes a four-page scanned PDF with the ``gpt`` method.
+Each case first transcribes a four-page scanned PDF with the ``llm`` method.
 The fake LLM gives page 2 a permanent error, page 3 the no-text flag and
 page 4 the not-possible flag, so the output holds one placeholder line of
 each kind. The scripts are then healed, so every page re-sent afterwards
@@ -31,7 +31,6 @@ from typing import Any
 import pytest
 
 from chronotranscriber.common.testing import WriteGuard
-from tests.characterization.adapter import Command, RunResult, run_tool
 from tests.characterization.fakes import FakeLLM, Reply, permanent_error
 from tests.characterization.fakes_batch import FakeBatchService, Provider
 from tests.characterization.golden import (
@@ -41,6 +40,7 @@ from tests.characterization.golden import (
     snapshot,
 )
 from tests.characterization.inputs import make_scanned_pdf
+from tests.characterization.runner import Command, RunResult, run_cli
 
 pytestmark = pytest.mark.integration
 
@@ -129,7 +129,7 @@ def run_stage(
     before = _contents(root)
     if service is not None:
         service.reset_records()
-    result = run_tool(command, **kwargs)
+    result = run_cli(command, **kwargs)
     after = _contents(root)
     changed = sorted(
         path for path, data in after.items() if path in before and before[path] != data
@@ -190,13 +190,12 @@ def transcribe(
     llm: FakeLLM,
     root: Path,
     *,
-    resume: bool = False,
     retry_errors: bool = False,
     **model: Any,
 ) -> Stage:
-    """Run ``transcribe --method gpt`` on the case's PDF.
+    """Run ``transcribe --method llm`` on the case's PDF; a rerun resumes.
 
-    *model* holds the ``provider`` and ``model`` keywords, if any.
+    *model* holds the ``provider`` and ``model`` options, if any.
     """
     pdf = root / "docs" / "doc.pdf"
     if not pdf.exists():
@@ -207,9 +206,8 @@ def transcribe(
         root=root,
         input=pdf,
         output=root / "out",
-        type="pdfs",
-        method="gpt",
-        resume=resume,
+        type="pdf",
+        method="llm",
         retry_errors=retry_errors,
         **model,
     )
@@ -239,16 +237,16 @@ def repair(
     first: Stage,
     *,
     service: FakeBatchService | None = None,
-    **flags: Any,
+    **options: Any,
 ) -> Stage:
-    """Run ``repair --transcription`` on the first run's output."""
+    """Run ``repair --input`` on the first run's output."""
     return run_stage(
         "repair",
         service=service,
         llm=llm,
         root=root,
-        transcription=_output(first.result),
-        **flags,
+        input=_output(first.result),
+        **options,
     )
 
 
@@ -301,10 +299,8 @@ def test_retry_errors(
 ) -> None:
     def build(root: Path) -> dict[str, Stage]:
         stages = {"first": first_run(fake_llm, root)}
-        stages["resume"] = transcribe(fake_llm, root, resume=True)
-        stages["retry_errors"] = transcribe(
-            fake_llm, root, resume=True, retry_errors=True
-        )
+        stages["resume"] = transcribe(fake_llm, root)
+        stages["retry_errors"] = transcribe(fake_llm, root, retry_errors=True)
         return stages
 
     stages = run_twice(case_root, build)
@@ -332,11 +328,11 @@ def test_retry_errors(
 def _sync_case(
     llm: FakeLLM,
     case_root: Callable[[str], Path],
-    flags: Callable[[Stage], dict[str, Any]],
+    options: Callable[[Stage], dict[str, Any]],
 ) -> dict[str, Stage]:
     def build(root: Path) -> dict[str, Stage]:
         first = first_run(llm, root)
-        return {"first": first, "repair": repair(llm, root, first, **flags(first))}
+        return {"first": first, "repair": repair(llm, root, first, **options(first))}
 
     return run_twice(case_root, build)
 

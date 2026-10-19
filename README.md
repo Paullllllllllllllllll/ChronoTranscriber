@@ -838,6 +838,9 @@ The tables of the Command Reference mirror the option tables in
 differ. A new option needs an option-table entry and a wizard step
 that sets it; `tests/ui/test_parity.py` enforces the step.
 
+Evaluation data for a subset of historical sources (ground-truth transcriptions and
+benchmark runs) is available from the author upon request.
+
 ## Versioning
 
 Every release is described in [CHANGELOG.md](CHANGELOG.md).

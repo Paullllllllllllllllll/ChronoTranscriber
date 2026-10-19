@@ -1,6 +1,6 @@
 """Characterization of run control: resume, selection, layouts, pages, exit codes.
 
-Each case builds its inputs, runs one or more stages through ``run_tool`` in
+Each case builds its inputs, runs one or more stages through ``run_cli`` in
 the same root and snapshots every stage. The case runs twice in fresh roots;
 both snapshots must match before each stage is compared with
 ``golden/run_control/<case>/<stage>/``. Besides the standard snapshot, a stage
@@ -20,7 +20,6 @@ from typing import Any
 import pytest
 
 from chronotranscriber.common.testing import WriteGuard
-from tests.characterization.adapter import RunResult, run_tool
 from tests.characterization.fakes import FakeLLM, Reply, permanent_error
 from tests.characterization.golden import (
     check_files,
@@ -33,6 +32,7 @@ from tests.characterization.inputs import (
     make_image_folder,
     page_text,
 )
+from tests.characterization.runner import RunResult, run_cli
 
 pytestmark = pytest.mark.integration
 
@@ -49,7 +49,7 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 # ============================================================================
 @dataclasses.dataclass
 class Stage:
-    """One ``run_tool`` call of a case and its golden files."""
+    """One ``run_cli`` call of a case and its golden files."""
 
     result: RunResult
     files: dict[str, str]
@@ -134,24 +134,20 @@ def _transcribe(
     input: Path,
     type: str,
     method: str,
-    config: Mapping[str, Mapping[str, Any]] | None = None,
-    **flags: Any,
+    **options: Any,
 ) -> RunResult:
-    return run_tool(
+    """Run ``transcribe`` into ``root/out`` unless ``beside_input`` is given."""
+    if not options.get("beside_input"):
+        options["output"] = root / "out"
+    return run_cli(
         "transcribe",
         llm=llm,
         root=root,
-        config=config,
         input=input,
-        output=root / "out",
         type=type,
         method=method,
-        **flags,
+        **options,
     )
-
-
-def _general(**values: Any) -> dict[str, dict[str, Any]]:
-    return {"paths_config": {"general": values}}
 
 
 def _text(path: Path) -> str:
@@ -164,25 +160,19 @@ def _pdf_folder(folder: Path, names: Sequence[str]) -> list[Path]:
 
 
 # ============================================================================
-# Resume, --force and resume_mode
+# Resume and --force
 # ============================================================================
 @pytest.mark.parametrize(
-    ("case", "flags", "config", "reprocessed"),
+    ("case", "options", "reprocessed"),
     [
-        ("resume_skip", {"resume": True}, None, False),
-        ("force", {"force": True}, None, True),
-        (
-            "resume_mode_overwrite_config",
-            {},
-            _general(resume_mode="overwrite"),
-            True,
-        ),
+        ("resume_skip", {}, False),
+        ("force", {"force": True}, True),
+        ("resume_mode_overwrite_config", {"force": True}, True),
     ],
 )
 def test_second_run_on_completed_item(
     case: str,
-    flags: Mapping[str, Any],
-    config: Mapping[str, Mapping[str, Any]] | None,
+    options: Mapping[str, Any],
     reprocessed: bool,
     fake_llm: FakeLLM,
     run_case: Callable[[str, Build], dict[str, Stage]],
@@ -190,17 +180,11 @@ def test_second_run_on_completed_item(
     def build(root: Path) -> dict[str, Stage]:
         fake_llm.pages.clear()
         pdf = make_born_digital_pdf(root / "docs" / "doc.pdf", PAGES)
-        first = _transcribe(fake_llm, root, input=pdf, type="pdfs", method="gpt")
+        first = _transcribe(fake_llm, root, input=pdf, type="pdf", method="llm")
         assert first.exit_code == 0, first.stdout + first.stderr
         fake_llm.script(0, transcription=REVISED)
         second = _transcribe(
-            fake_llm,
-            root,
-            input=pdf,
-            type="pdfs",
-            method="gpt",
-            config=config,
-            **flags,
+            fake_llm, root, input=pdf, type="pdf", method="llm", **options
         )
         return {
             "first": stage(first),
@@ -236,12 +220,12 @@ def test_dry_run_on_partly_completed_folder(
         docs = root / "docs"
         _pdf_folder(docs, ("a.pdf", "b.pdf", "c.pdf"))
         done = _transcribe(
-            fake_llm, root, input=docs, type="pdfs", method="native", files=["a.pdf"]
+            fake_llm, root, input=docs, type="pdf", method="native", files=["a.pdf"]
         )
         assert done.exit_code == 0, done.stdout + done.stderr
         completed = stage(done)
         planned = _transcribe(
-            fake_llm, root, input=docs, type="pdfs", method="native", dry_run=True
+            fake_llm, root, input=docs, type="pdf", method="native", dry_run=True
         )
         return {
             "completed_one": completed,
@@ -264,24 +248,24 @@ def test_dry_run_on_partly_completed_folder(
 # ============================================================================
 def _exit_success(llm: FakeLLM, root: Path) -> RunResult:
     pdf = make_born_digital_pdf(root / "docs" / "doc.pdf", PAGES)
-    return _transcribe(llm, root, input=pdf, type="pdfs", method="native")
+    return _transcribe(llm, root, input=pdf, type="pdf", method="native")
 
 
 def _exit_item_fails(llm: FakeLLM, root: Path) -> RunResult:
     llm.script(1, always=Reply(permanent_error()))
     pdf = make_born_digital_pdf(root / "docs" / "doc.pdf", PAGES)
-    return _transcribe(llm, root, input=pdf, type="pdfs", method="gpt")
+    return _transcribe(llm, root, input=pdf, type="pdf", method="llm")
 
 
 def _exit_missing_input(llm: FakeLLM, root: Path) -> RunResult:
     return _transcribe(
-        llm, root, input=root / "docs" / "missing.pdf", type="pdfs", method="native"
+        llm, root, input=root / "docs" / "missing.pdf", type="pdf", method="native"
     )
 
 
 def _exit_invalid_pages(llm: FakeLLM, root: Path) -> RunResult:
     pdf = make_born_digital_pdf(root / "docs" / "doc.pdf", PAGES)
-    return _transcribe(llm, root, input=pdf, type="pdfs", method="native", pages="3-1")
+    return _transcribe(llm, root, input=pdf, type="pdf", method="native", pages="3-1")
 
 
 @pytest.mark.parametrize(
@@ -333,7 +317,7 @@ def test_files_selection(
             fake_llm,
             root,
             input=docs,
-            type="pdfs",
+            type="pdf",
             method="native",
             files=["a.pdf", "c.pdf"],
         )
@@ -351,7 +335,7 @@ def test_files_selection(
 
 
 @pytest.mark.parametrize(
-    ("case", "recursive", "output_mode", "selected"),
+    ("case", "recursive", "layout", "selected"),
     [
         ("non_recursive_pdfs", False, None, ("a.pdf",)),
         ("recursive_pdfs_hash", True, None, NESTED),
@@ -361,7 +345,7 @@ def test_files_selection(
 def test_nested_pdf_folder(
     case: str,
     recursive: bool,
-    output_mode: str | None,
+    layout: str | None,
     selected: tuple[str, ...],
     fake_llm: FakeLLM,
     run_case: Callable[[str, Build], dict[str, Stage]],
@@ -373,10 +357,10 @@ def test_nested_pdf_folder(
             fake_llm,
             root,
             input=docs,
-            type="pdfs",
+            type="pdf",
             method="native",
             recursive=recursive,
-            output_mode=output_mode,
+            layout=layout,
         )
         return {"run": stage(result)}
 
@@ -387,7 +371,7 @@ def test_nested_pdf_folder(
     for name in NESTED:
         output = result.output(docs / name)
         assert (output in result.created) == (name in selected)
-    if output_mode == "mirror":
+    if layout == "mirror":
         nested = result.output(docs / "sub" / "deep" / "c.pdf")
         assert nested.relative_to(result.root / "out").parts[:2] == ("sub", "deep")
 
@@ -401,7 +385,7 @@ def test_recursive_image_folders(
         for volume in ("vol1", "vol2"):
             make_image_folder(scans / volume, PAGES)
         result = _transcribe(
-            fake_llm, root, input=scans, type="images", method="gpt", recursive=True
+            fake_llm, root, input=scans, type="images", method="llm", recursive=True
         )
         return {"run": stage(result)}
 
@@ -423,9 +407,9 @@ def test_outputs_beside_input(
             fake_llm,
             root,
             input=pdf,
-            type="pdfs",
+            type="pdf",
             method="native",
-            config=_general(input_paths_is_output_path=True),
+            beside_input=True,
         )
         return {"run": stage(result)}
 
@@ -465,7 +449,7 @@ def test_pages_on_pdf(
     def build(root: Path) -> dict[str, Stage]:
         pdf = make_born_digital_pdf(root / "docs" / "doc.pdf", RANGE_PAGES)
         result = _transcribe(
-            fake_llm, root, input=pdf, type="pdfs", method="native", pages=pages
+            fake_llm, root, input=pdf, type="pdf", method="native", pages=pages
         )
         return {"run": stage(result)}
 
@@ -489,7 +473,7 @@ def test_pages_on_image_folder(
         fake_llm.pages.clear()
         folder = make_image_folder(root / "scans", RANGE_PAGES)
         result = _transcribe(
-            fake_llm, root, input=folder, type="images", method="gpt", pages=pages
+            fake_llm, root, input=folder, type="images", method="llm", pages=pages
         )
         return {"run": stage(result)}
 

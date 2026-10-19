@@ -1,7 +1,7 @@
 """Characterization of batch transcription through fake batch services.
 
-Each case submits with ``transcribe --batch --method gpt`` and finalizes with
-``check_batches --directory``; the real OpenAI, Anthropic and Google backends
+Each case submits with ``transcribe --batch --method llm`` and finalizes with
+``batch check --input``; the real OpenAI, Anthropic and Google backends
 run against the fake SDK clients of ``fakes_batch``. Every stage is
 snapshotted: the files the run created, the files it changed (under
 ``changed/``), the JSON summary and ``requests.json``, whose ``batch`` entry
@@ -21,7 +21,6 @@ from typing import Any
 import pytest
 
 from chronotranscriber.common.testing import WriteGuard
-from tests.characterization.adapter import Command, RunResult, run_tool
 from tests.characterization.fakes import FakeLLM, Reply, permanent_error
 from tests.characterization.fakes_batch import FakeBatchService, Provider
 from tests.characterization.golden import (
@@ -31,6 +30,7 @@ from tests.characterization.golden import (
     snapshot,
 )
 from tests.characterization.inputs import make_image_folder, make_scanned_pdf
+from tests.characterization.runner import Command, RunResult, run_cli
 
 pytestmark = pytest.mark.integration
 
@@ -116,14 +116,11 @@ def run_stage(
 ) -> Stage:
     """Run one command with fresh service records and snapshot it."""
     root: Path = kwargs["root"]
-    watched = tuple(
-        path
-        for path in (kwargs.get("directory"), kwargs.get("output"))
-        if isinstance(path, Path)
-    ) or (root,)
+    folder = kwargs.get("input" if command == "batch check" else "output")
+    watched = (folder,) if isinstance(folder, Path) else (root,)
     before = _contents(watched)
     service.reset_records()
-    result = run_tool(command, **kwargs)
+    result = run_cli(command, **kwargs)
     after = _contents(watched)
     changed = sorted(
         path for path, data in after.items() if path in before and before[path] != data
@@ -175,10 +172,10 @@ def submit(
     provider: Provider,
     *,
     source: Path | None = None,
-    type: str = "pdfs",
+    type: str = "pdf",
     sync_fallback: bool = False,
 ) -> Stage:
-    """Run ``transcribe --batch --method gpt`` for *provider* on *source*."""
+    """Run ``transcribe --batch --method llm`` for *provider* on *source*."""
     return run_stage(
         service,
         "transcribe",
@@ -188,7 +185,7 @@ def submit(
         input=source if source is not None else _pdf(root),
         output=root / "out",
         type=type,
-        method="gpt",
+        method="llm",
         batch=True,
         provider=provider,
         model=MODELS[provider],
@@ -197,15 +194,8 @@ def submit(
 
 
 def check(llm: FakeLLM, service: FakeBatchService, root: Path) -> Stage:
-    """Run ``check_batches`` on the output folder without diagnostics."""
-    return run_stage(
-        service,
-        "check_batches",
-        llm=llm,
-        root=root,
-        directory=root / "out",
-        no_diagnostics=True,
-    )
+    """Run ``batch check`` on the output folder."""
+    return run_stage(service, "batch check", llm=llm, root=root, input=root / "out")
 
 
 def round_trip(

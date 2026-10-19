@@ -34,7 +34,7 @@ from typing import Any
 
 from chronotranscriber.common.sqlite import read
 from chronotranscriber.output.store import DATABASE_NAME
-from tests.characterization.adapter import RunResult
+from tests.characterization.runner import RunResult
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 UPDATE_ENV = "CT_UPDATE_GOLDEN"
@@ -161,7 +161,7 @@ def normalizer_for(
     """
     roots = {
         result.root: "<tmp>",
-        result.config_dir.parent: "<test_tmp>",
+        result.settings_dir.parent: "<test_tmp>",
         REPO_ROOT: "<repo>",
     }
     dirs = [result.root, *result.scan_dirs]

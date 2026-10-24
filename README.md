@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.0.0
+# ChronoTranscriber v1.0.1
 
 ChronoTranscriber transcribes PDFs, folders of page images, EPUB and MOBI ebooks
 and audio recordings. Scanned pages go to a vision-language model or to local

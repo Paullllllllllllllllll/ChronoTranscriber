@@ -1,5 +1,12 @@
 # Changelog
 
+- **v1.0.5** (27 October 2026) -- The lockfile moves `filelock` from 3.32.2
+  to 4.2.4 and `setuptools` from 83.0.0 to 84.2.1, which closes the open
+  Dependabot advisories (one high and one low for `filelock`, fixed in 4.2.1;
+  one low for `setuptools`, fixed in 84.1.0). Both are transitive: `filelock`
+  comes through `huggingface-hub` and `setuptools` through `ctranslate2`, both
+  under the `audio` extra. The code imports neither, and the test suite,
+  ruff and mypy pass unchanged.
 - **v1.0.4** (27 October 2026) -- The capability table knows `gpt-6.1-terra`:
   it takes text and image input and structured outputs like `gpt-6.1-sol`,
   accepts the reasoning efforts none to max, and shares the GPT-6 handling of

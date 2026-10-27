@@ -217,8 +217,7 @@ class Settings:
     extensions: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
 
     def state_directory(self) -> Path:
-        """Return the folder of the tool's state files: ``state_dir``, else
-        ``~/.chronotranscriber``."""
+        """Return ``state_dir``, else ``~/.chronotranscriber``, for state files."""
         return state_directory(self.state_dir, STATE_DIR_NAME)
 
     def log_file(self) -> Path:

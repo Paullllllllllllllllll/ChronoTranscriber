@@ -60,10 +60,14 @@ class SubmitOutcome(Protocol):
     """
 
     @property
-    def status(self) -> str: ...
+    def status(self) -> str:
+        """``submitted``, ``refused`` or ``unresolved``."""
+        ...
 
     @property
-    def detail(self) -> str | None: ...
+    def detail(self) -> str | None:
+        """Why the submission was not accepted."""
+        ...
 
 
 class BatchSubmitter(Protocol):
@@ -79,7 +83,9 @@ class BatchSubmitter(Protocol):
         schema_path: Path | None,
         context: str | None = None,
         context_image: Path | None = None,
-    ) -> SubmitOutcome: ...
+    ) -> SubmitOutcome:
+        """Submit *payloads* as one batch of *document* and return the outcome."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -184,11 +190,21 @@ class Transcriber(Protocol):
     paths, raising when the item fails; ``close`` releases the resources.
     """
 
-    async def open(self) -> None: ...
+    async def open(self) -> None:
+        """Build what every item shares, before the first item."""
+        ...
 
-    async def transcribe(self, item: Item) -> list[Path]: ...
+    async def transcribe(self, item: Item) -> list[Path]:
+        """Write the outputs of *item* and return their paths.
 
-    async def close(self) -> None: ...
+        Raises:
+            Exception: The item failed.
+        """
+        ...
+
+    async def close(self) -> None:
+        """Release the resources :meth:`open` built."""
+        ...
 
 
 @dataclass
@@ -203,6 +219,7 @@ class PageCounter:
     done: int = field(default=0, init=False)
 
     def __call__(self, index: int, failed: bool) -> None:
+        """Count unit *index* as done and report it."""
         self.done += 1
         self.events.page_done(
             PageDone(

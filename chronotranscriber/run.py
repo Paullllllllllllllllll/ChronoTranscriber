@@ -204,8 +204,7 @@ class SelectionError(PlanError):
 
 
 class AmbiguousSelectionError(PlanError):
-    """Several items were found without ``--all``, ``--select`` or ``--files``
-    (exit 2)."""
+    """Several items without ``--all``, ``--select`` or ``--files`` (exit 2)."""
 
 
 @dataclass(frozen=True)
@@ -368,8 +367,10 @@ class RunPlan:
         return tuple(item for item in self.blocked if item.resume.leased_by)
 
     def effective_spec(self) -> dict[str, dict[str, Any]]:
-        """Return ``{field: {"value": ..., "source": ...}}`` for every field,
-        as the store records it with the run."""
+        """Return every field's value and source as the store records them.
+
+        The shape is ``{field: {"value": ..., "source": ...}}``.
+        """
         return effective_spec(self.spec, self.sources)
 
     def resolved_spec(self) -> dict[str, dict[str, Any]]:
@@ -500,8 +501,10 @@ def discover(spec: RunSpec) -> list[SourceItem]:
 
 
 def selection_order(items: Sequence[SourceItem]) -> list[SourceItem]:
-    """Return *items* in the order ``--select`` numbers them: by path, with
-    numbers in names compared by value."""
+    """Return *items* in the order ``--select`` numbers them.
+
+    The order is by path, with numbers in names compared by value.
+    """
     return sorted(items, key=lambda item: natural_sort_key(item.path.as_posix()))
 
 

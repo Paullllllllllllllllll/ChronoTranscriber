@@ -1,5 +1,12 @@
 # Changelog
 
+- **v1.0.3** (27 October 2026) -- Documentation patch: ruff now checks
+  docstrings with the pydocstyle rules (`D`) under the Google convention, and
+  the package's docstrings follow it, with one-sentence summaries and new
+  docstrings for the protocol members of the run events, the batch submitter,
+  the transcription methods and the submitted document. The vendored
+  `chronotranscriber/common/` modules are exempt, since they stay
+  byte-identical with the other tools. Behavior is unchanged.
 - **v1.0.2** (26 October 2026) -- Security patch: the lockfile moves Pillow to
   13.0.0, which closes the Pillow 12.3.0 advisories, among them the TIFF decoder
   reads GHSA-c6hw-5grf-ff96 and GHSA-q45j-58j2-45rg and the MIC frame-count loop

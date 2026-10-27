@@ -136,10 +136,10 @@ def describe_access(
     settings: Settings,
     args: argparse.Namespace | None = None,
 ) -> str:
-    """Return how calls of *provider* (or of the named *endpoint*) with a
-    client of *kind* authenticate, for the review screen.
+    """Return how a client's calls authenticate, for the review screen.
 
-    Here: the settings' key variable of the provider.
+    The calls are those of *provider* (or of the named *endpoint*) with a
+    client of *kind*. Here: the settings' key variable of the provider.
 
     Raises:
         SettingsError: The settings name no key variable for the provider.

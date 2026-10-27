@@ -205,6 +205,7 @@ class Parser(argparse.ArgumentParser):
     """
 
     def error(self, message: str) -> NoReturn:
+        """Raise :class:`UsageError` with *message* and this parser's usage."""
         raise UsageError(message, prog=self.prog, usage=self.format_usage())
 
 
@@ -223,8 +224,10 @@ def _add_command(  # noqa: PLR0913 - the parser's texts and the extension switch
     usage: str | None = None,
     calls_providers: bool = True,
 ) -> argparse.ArgumentParser:
-    """Add one subcommand; the extension's arguments go to those that call
-    providers (*calls_providers*)."""
+    """Add one subcommand to *commands* and return its parser.
+
+    The extension's arguments are added only when *calls_providers* is true.
+    """
     parser: argparse.ArgumentParser = commands.add_parser(
         name,
         help=help,

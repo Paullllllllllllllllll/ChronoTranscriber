@@ -1,3 +1,5 @@
+"""Extract the title, authors and reading-order text of an EPUB file."""
+
 from __future__ import annotations
 
 import logging

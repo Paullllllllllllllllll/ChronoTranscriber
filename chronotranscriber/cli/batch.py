@@ -280,8 +280,7 @@ def _execute_check(args: argparse.Namespace, summary: Summary) -> int:
 
 
 def _work_fields(checks: Sequence[SubmissionCheck]) -> dict[str, Any]:
-    """Return the documents, failed pages, files and tokens the finalized
-    *checks* produced."""
+    """Return the documents, failed pages, files and tokens of finalized *checks*."""
     return {
         "complete": sum(check.complete for check in checks),
         "failed_pages": failed_units(checks),

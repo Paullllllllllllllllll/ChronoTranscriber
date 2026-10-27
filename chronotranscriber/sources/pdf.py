@@ -85,8 +85,7 @@ def render_pdf_page(
 
 
 def _get_effective_dpi(page: fitz.Page, dpi: int, max_pixels: int) -> int:
-    """Return DPI reduced so the rendered page stays within max_pixels,
-    or dpi unchanged."""
+    """Return *dpi*, reduced where the rendered page would exceed *max_pixels*."""
     if max_pixels <= 0:
         return dpi
     rect = page.rect
@@ -118,8 +117,7 @@ class PDFProcessor:
         self.doc: fitz.Document | None = None
 
     def is_native_pdf(self) -> bool:
-        """
-        Check if the PDF is native (searchable) or scanned.
+        """Check if the PDF is native (searchable) or scanned.
 
         Returns:
             bool: True if native, False otherwise.
@@ -132,9 +130,7 @@ class PDFProcessor:
             return False
 
     def open_pdf(self) -> None:
-        """
-        Open the PDF document.
-        """
+        """Open the PDF document."""
         try:
             self.doc = fitz.open(self.pdf_path)
         except Exception as e:
@@ -142,9 +138,7 @@ class PDFProcessor:
             raise
 
     def close_pdf(self) -> None:
-        """
-        Close the opened PDF document.
-        """
+        """Close the opened PDF document."""
         if self.doc:
             self.doc.close()
             self.doc = None
@@ -258,9 +252,9 @@ class PDFProcessor:
         embed_dpi: bool,
         max_pixels: int = 0,
     ) -> bool:
-        """
-        Thread worker: open PDF, render a single page, preprocess for
-        Tesseract, and write output. Returns True on success.
+        """Render one page, preprocess it for Tesseract and write the image.
+
+        Runs in a worker thread with its own document. Returns True on success.
         """
         try:
             # A document per thread: PyMuPDF documents are not thread-safe.
@@ -325,8 +319,7 @@ def native_extract_pdf_pages(pdf_path: Path, page_indices: list[int]) -> dict[in
 def native_extract_pdf_text(
     pdf_path: Path, page_indices: list[int] | None = None
 ) -> str:
-    """
-    Extract text from a native (searchable) PDF using PyMuPDF.
+    """Extract text from a native (searchable) PDF using PyMuPDF.
 
     Args:
         pdf_path: Path to the PDF file.

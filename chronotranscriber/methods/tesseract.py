@@ -109,8 +109,7 @@ class TesseractTranscriber:
         )
 
     async def open(self) -> None:
-        """Use the settings' Tesseract executable; availability is checked
-        per item."""
+        """Use the settings' Tesseract executable; each item checks it exists."""
         use_tesseract_command(self.job.settings.tools.tesseract_cmd)
 
     async def close(self) -> None:

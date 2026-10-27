@@ -414,8 +414,11 @@ class RepairControl:
 
 @dataclass(frozen=True)
 class RepairSpec:
-    """One repair: a transcription file or its input, a folder whose
-    databases at or below it are searched, or a database."""
+    """The options of one repair.
+
+    *input* is a transcription file or its input, a folder whose databases
+    at or below it are searched, or a database.
+    """
 
     input: Path
     selection: RepairSelection
@@ -450,8 +453,11 @@ class BatchCheckSpec:
 
 @dataclass(frozen=True)
 class BatchCancelSpec:
-    """Cancel the named batches, every unfinished batch with ``all``, or the
-    open submissions of the databases below ``directory``."""
+    """Cancel batches.
+
+    The cancel covers the named batches, every unfinished batch with ``all``,
+    or the open submissions of the databases below ``directory``.
+    """
 
     batch_ids: tuple[str, ...]
     all: bool
@@ -472,8 +478,11 @@ class RenderSpec:
 
 @dataclass(frozen=True)
 class DropSpec:
-    """The options of ``drop``: the store and exactly one selection of its
-    documents (``select``, ``files`` or ``all``)."""
+    """The options of ``drop``.
+
+    They name the store and exactly one selection of its documents
+    (``select``, ``files`` or ``all``).
+    """
 
     input: Path
     select: str | None = None

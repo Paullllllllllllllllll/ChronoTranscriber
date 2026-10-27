@@ -170,8 +170,11 @@ class _InputQuestions:
         return inventory
 
     def path(self) -> Nav:
-        """Ask the input; one with nothing to process, subfolders included,
-        is asked again in place."""
+        """Ask the input.
+
+        An input with nothing to process, subfolders included, is asked
+        again in place.
+        """
         state = self.state
         current = _input(state)
         while True:
@@ -266,9 +269,12 @@ def _relative(item: SourceItem, root: Path) -> str:
 
 
 def run_items(state: State) -> list[SourceItem]:
-    """Return the items the run finds for the chosen input, type and subfolder
-    search, before any selection, in the order ``--select`` numbers them
-    (:func:`chronotranscriber.run.selection_order`)."""
+    """Return the items the run finds, before any selection.
+
+    The chosen input, type and subfolder search decide the items; they come
+    in the order ``--select`` numbers them
+    (:func:`chronotranscriber.run.selection_order`).
+    """
     location = _input(state)
     if location is None:
         return []
@@ -485,8 +491,7 @@ class _MethodQuestions:
         return DONE
 
     def pick(self) -> Nav | None:
-        """Ask the items from a checklist: ``--files`` names, or numbers in
-        auto mode."""
+        """Ask the items from a checklist: ``--files`` names, auto mode numbers."""
         if self.how != _LIST:
             return None
         state = self.state

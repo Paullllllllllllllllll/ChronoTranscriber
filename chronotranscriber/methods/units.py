@@ -192,8 +192,10 @@ class DocumentHandle:
         )
 
     async def discard(self, count: int | None = None) -> int:
-        """Delete the units of other kinds and, with *count*, those of this
-        kind from index *count* on; responses stay. Returns the count.
+        """Delete units, keeping their responses; return the count deleted.
+
+        Deletes the units of other kinds and, with *count*, those of this
+        kind from index *count* on.
 
         Raises:
             SubmissionStateError: An open or unresolved batch submission

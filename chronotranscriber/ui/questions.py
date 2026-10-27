@@ -725,8 +725,11 @@ class ResponseQuestions:
     def _value_questions(
         self, name: str, mode_of: Callable[[Any], str], key: str, label: str
     ) -> list[Question]:
-        """Return the text and file questions of *name* after its mode
-        (``self.chosen[key]``) is text or file; *label* opens the prompts."""
+        """Return the text and file questions of *name*.
+
+        Each applies when the mode ``self.chosen[key]`` is text or file;
+        *label* opens the prompts.
+        """
         state = self.state
 
         def text() -> Nav | None:
@@ -764,8 +767,11 @@ class ResponseQuestions:
         return [text, file]
 
     def _text_context(self) -> list[Question]:
-        """Return the context questions: automatic (with the fallback for
-        items without a sidecar), topics as text, a text file, or none."""
+        """Return the context questions.
+
+        The context is automatic (with the fallback for items without a
+        sidecar), topics as text, a text file, or none.
+        """
         state = self.state
 
         def mode() -> Nav:

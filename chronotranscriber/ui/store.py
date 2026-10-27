@@ -400,8 +400,11 @@ def _clear_documents(state: State) -> None:
 
 
 class _DocumentQuestions:
-    """Which stored documents to drop: all, by number or range, by name
-    search, or from a checklist of their names (``--files``)."""
+    """Which stored documents to drop.
+
+    The choice is all, by number or range, by name search, or from a
+    checklist of their names (``--files``).
+    """
 
     def __init__(self, ctx: StepContext) -> None:
         self.ctx = ctx
@@ -592,8 +595,11 @@ def _selected(outcome: DropOutcome) -> tuple[str, ...]:
 def _execute_drop(
     spec: DropSpec, console: Console, reviewed: tuple[str, ...] | None
 ) -> int:
-    """Drop what *spec* selects; a real drop first checks that the selection
-    still names the *reviewed* documents."""
+    """Drop what *spec* selects.
+
+    A real drop first checks that the selection still names the *reviewed*
+    documents.
+    """
     if not spec.dry_run:
         current = _preview_drop(spec)
         if isinstance(current, DropOutcome) and _selected(current) != reviewed:

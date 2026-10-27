@@ -66,8 +66,8 @@ def format_page_line(text: str, page_number: int | None, image_name: str | None)
 
 
 def _extract_from_responses_object(data: dict[str, Any]) -> str:
-    """
-    Normalize **Responses API** output into a string.
+    """Normalize **Responses API** output into a string.
+
     Tries `output_text`; if missing, reconstructs from `output[*].content[].text`.
     """
     if isinstance(data, dict) and isinstance(data.get("output_text"), str):
@@ -207,8 +207,7 @@ def _salvage_last_json_object(text: str) -> dict[str, Any] | None:
 
 
 def _check_transcription_flags(parsed: dict[str, Any]) -> str | None:
-    """Return a placeholder string if schema flags indicate no usable text,
-    else None."""
+    """Return a placeholder when the schema flags mark no usable text, else None."""
     if parsed.get("no_transcribable_text", False):
         return "[No transcribable text]"
     if parsed.get("transcription_not_possible", False):

@@ -1,5 +1,4 @@
-"""Console entry point: dispatch the subcommand; bare ``chronotranscriber``
-prints help.
+"""Dispatch the console subcommand; bare ``chronotranscriber`` prints help.
 
 On Windows, Ctrl+Break (``SIGBREAK``) is handled like Ctrl+C
 (:mod:`chronotranscriber.common.interrupt`), so an interrupted run releases

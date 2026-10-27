@@ -651,8 +651,7 @@ def _check_access(
 
 
 def _fallback(spec: RepairSpec) -> tuple[str | None, list[str]]:
-    """Return the ``--fallback-context`` text under ``--context auto`` and its
-    warning."""
+    """Return the ``--fallback-context`` text under ``--context auto`` and warnings."""
     if spec.prompt.context is not None:
         return None, []
     text, warning = fallback_context(spec.prompt.fallback_context)
@@ -662,8 +661,7 @@ def _fallback(spec: RepairSpec) -> tuple[str | None, list[str]]:
 def _context(
     spec: RepairSpec, document: RepairDocument, path: Path, fallback: str | None
 ) -> tuple[str | None, Path | None]:
-    """Return the context text and image of the transcribed input, as
-    transcription resolved them.
+    """Return the context text and image as transcription resolved them.
 
     Raises:
         RepairPlanError: The ``--context`` file or the ``--context-image``

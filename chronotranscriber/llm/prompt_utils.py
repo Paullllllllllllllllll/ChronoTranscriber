@@ -26,8 +26,8 @@ def _closing_brace(text: str, start: int) -> int:
 
 
 def render_prompt_with_schema(prompt_text: str, schema_obj: dict[str, Any]) -> str:
-    """
-    Inject a JSON schema into a prompt using one of three strategies:
+    """Return *prompt_text* with the JSON schema inserted.
+
     - If the token "{{TRANSCRIPTION_SCHEMA}}" exists, replace it with a
       pretty-printed schema.
     - If the marker "The JSON schema:" exists, replace any parsable JSON object
@@ -63,8 +63,7 @@ def render_prompt_with_schema(prompt_text: str, schema_obj: dict[str, Any]) -> s
 
 
 def inject_additional_context(prompt_text: str, context: str) -> str:
-    """
-    Inject additional context into a prompt using the {{ADDITIONAL_CONTEXT}} marker.
+    """Inject additional context into a prompt using the {{ADDITIONAL_CONTEXT}} marker.
 
     If the marker exists and context is provided, the marker is replaced with
     the context. If the marker exists but context is empty/None, the entire
@@ -79,7 +78,7 @@ def inject_additional_context(prompt_text: str, context: str) -> str:
     context : str
         The additional context to inject
 
-    Returns
+    Returns:
     -------
     str
         The prompt with context injected or section removed
@@ -115,8 +114,7 @@ def prepare_prompt_with_context(
     schema_obj: dict[str, Any] | None = None,
     context: str | None = None,
 ) -> str:
-    """
-    Prepare a complete prompt by rendering schema and injecting context.
+    """Prepare a complete prompt by rendering schema and injecting context.
 
     This is a convenience function that combines render_prompt_with_schema
     and inject_additional_context into a single call.
@@ -130,7 +128,7 @@ def prepare_prompt_with_context(
     context : Optional[str]
         The additional context to inject. If None/empty, the context section is removed.
 
-    Returns
+    Returns:
     -------
     str
         The fully prepared prompt with schema and context applied

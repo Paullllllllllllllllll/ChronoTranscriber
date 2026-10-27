@@ -116,19 +116,29 @@ class SubmitDocument(Protocol):
     """
 
     @property
-    def store(self) -> Store: ...
+    def store(self) -> Store:
+        """The open store the submission is recorded in."""
+        ...
 
     @property
-    def lease(self) -> Lease: ...
+    def lease(self) -> Lease:
+        """The document's lease in *store*."""
+        ...
 
     @property
-    def doc_id(self) -> int: ...
+    def doc_id(self) -> int:
+        """The document's id in *store*."""
+        ...
 
     @property
-    def name(self) -> str: ...
+    def name(self) -> str:
+        """The document's name."""
+        ...
 
     @property
-    def kind(self) -> str: ...
+    def kind(self) -> str:
+        """The kind of the document's units."""
+        ...
 
 
 def _probe_id(position: int) -> str:

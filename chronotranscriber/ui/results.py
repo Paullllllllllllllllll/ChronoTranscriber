@@ -1,5 +1,4 @@
-"""Result screens of the guided UI: batch check and cancel, repair, render,
-drop.
+"""Build the guided UI's result screens of batch, repair, render and drop.
 
 Each function returns a rich renderable with the facts the CLI prints for
 the same command: one row per submission, batch, document or database, the

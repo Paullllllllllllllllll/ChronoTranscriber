@@ -136,8 +136,6 @@ convention = "google"
 "tests/**" = ["PLR0913", "D"]
 "notebooks/**" = ["D"]
 "scratch/**" = ["D"]
-# Vendored byte-identically from the shared modules (hash-pinned in MANIFEST.json).
-"chronotranscriber/common/**" = ["D"]
 "chronotranscriber/cli/**" = ["T201"]
 "chronotranscriber/ui/**" = ["T201"]
 

@@ -47,10 +47,15 @@ def test_ctrl_break_releases_the_lease_and_a_rerun_resumes(
 ) -> None:
     pdf = make_pdf(pages=3)
     out = tmp_path / "out"
+    # The child runs outside the autouse isolation, so it gets its own settings.
+    settings = tmp_path / "settings.yaml"
+    settings.write_text(
+        f"logs_dir: '{(tmp_path / 'logs').as_posix()}'\n", encoding="utf-8"
+    )
     log = tmp_path / "child.err"
     with log.open("w", encoding="utf-8") as errors:
         process = subprocess.Popen(
-            [sys.executable, CHILD, str(pdf), str(out)],
+            [sys.executable, CHILD, str(pdf), str(out), str(settings)],
             cwd=REPO_ROOT,
             stdout=subprocess.PIPE,
             stderr=errors,

@@ -1,5 +1,14 @@
 # Changelog
 
+- **v1.0.4** (27 October 2026) -- The capability table knows `gpt-6.1-terra`:
+  it takes text and image input and structured outputs like `gpt-6.1-sol`,
+  accepts the reasoning efforts none to max, and shares the GPT-6 handling of
+  verbosity, Flex and prompt caching. Before, the model resolved as text-only
+  and image transcription refused it. The vendored `chronotranscriber/common/`
+  modules now meet the Google docstring rules as well, so ruff no longer
+  exempts them. The Ctrl+Break test hands its child process a settings file in
+  the test's temporary folder, so the child no longer reads
+  `config/settings.yaml` or writes to the repository's `logs/`.
 - **v1.0.3** (27 October 2026) -- Documentation patch: ruff now checks
   docstrings with the pydocstyle rules (`D`) under the Google convention, and
   the package's docstrings follow it, with one-sentence summaries and new

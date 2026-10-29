@@ -135,13 +135,21 @@ ChronoTranscriber | new transcription   step 7
   answer: Recommended for openai models
 
 ChronoTranscriber | new transcription   step 8
+? Decision-model pre-pass (page types before transcription):
+ > Off
+   Shadow  record page types only
+   Apply  skip no-text pages under a threshold
+   Back
+  answer: Off
+
+ChronoTranscriber | new transcription   step 9
 ? Which pages?
  > All pages
    A range  such as 5, first:5, last:5, 3-7, 3-, -7 or 1,3,5-8
    Back
   answer: All pages
 
-ChronoTranscriber | new transcription   step 9
+ChronoTranscriber | new transcription   step 10
 ? Submission:
  > Synchronous  results now
    Batch API  collected later with batch check

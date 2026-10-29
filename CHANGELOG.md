@@ -1,5 +1,10 @@
 # Changelog
 
+- **v1.1.2** (29 October 2026) -- The guided UI asks for the decision-model
+  pre-pass of an LLM transcription after the page images: off, shadow or
+  apply, and with the pass on, the decision model, its API and its endpoint.
+  The printed command carries the answers as `--decisions`,
+  `--decision-model`, `--decision-provider` and `--decision-endpoint`.
 - **v1.1.1** (29 October 2026) -- The decision pre-pass keeps the retry budgets of
   the transcription calls: timed-out attempts stop at `retry.timeout_attempts`,
   malformed answers count against `retry.validation_attempts`, and the vendored

@@ -11,6 +11,7 @@ import pytest
 from chronotranscriber.common.testing import KEEP, ScriptedPrompter, ScriptError
 from chronotranscriber.common.wizard import (
     BACK,
+    DONE,
     Choice,
     Decision,
     State,
@@ -60,22 +61,29 @@ def every_type(mixed_folder: Path) -> Path:
     return mixed_folder
 
 
-DECISION_ONLY_CLI = (
-    "decisions",
-    "decision_model",
-    "decision_provider",
-    "decision_endpoint",
-)
-"""The decision-model options are set by flag or settings default, not by a step."""
-
-
 def test_the_steps_set_every_option_but_json_and_settings(session: Session) -> None:
     steps = build_steps(session)
     assert set().union(*(step.sets for step in steps)) == set(OPTIONS.names) - {
         "json",
         "settings",
-        *DECISION_ONLY_CLI,
     }
+
+
+def test_the_decision_step_asks_the_model_only_when_on(session: Session) -> None:
+    state = new_state(session, OPTIONS)
+    result, prompter = _ask(session, state, "decisions", ["off"])
+    assert result is DONE
+    assert list(prompter.offered) == [
+        "Decision-model pre-pass (page types before transcription):"
+    ]
+    result, prompter = _ask(
+        session, state, "decisions", ["shadow", "openai/gpt-6-luna", None, ""]
+    )
+    assert result is DONE
+    assert state.value("decisions") == "shadow"
+    assert state.value("decision_model") == "openai/gpt-6-luna"
+    assert state.value("decision_provider") is None
+    assert state.value("decision_endpoint") is None
 
 
 def test_the_type_question_offers_auto_and_the_types_found(
@@ -139,6 +147,7 @@ def _llm_pdf_answers(pdf: Path, end: Sequence[Any]) -> list[Any]:
         KEEP,  # items without a sidecar
         KEEP,  # context image
         KEEP,  # page images
+        KEEP,  # decision pre-pass
         KEEP,  # pages
         KEEP,  # submission
         [],  # run options
@@ -212,6 +221,7 @@ def test_steps_of_other_methods_are_skipped(
         "model",
         "response",
         "images",
+        "decisions",
         "pages",
         "run",
     ]

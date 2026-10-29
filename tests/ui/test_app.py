@@ -91,6 +91,7 @@ def _transcribe(pdf: Path, out: Path, *review: Any) -> list[Any]:
         KEEP,  # items without a sidecar
         KEEP,  # context image
         KEEP,  # page images
+        KEEP,  # decision pre-pass
         KEEP,  # pages
         KEEP,  # submission
         [],  # run flags

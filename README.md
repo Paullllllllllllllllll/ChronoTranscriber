@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.1.1
+# ChronoTranscriber v1.1.2
 
 ChronoTranscriber transcribes PDFs, folders of page images, EPUB and MOBI ebooks
 and audio recordings. Scanned pages go to a vision-language model or to local
@@ -325,7 +325,8 @@ several items, `Which items?`: all of them, by number or range, by name search,
 or from a checklist. Then come the output location and formats, the model, the
 response format with the prompt and the context (`Automatic (sidecar)`, with a
 choice for items without a sidecar, `Topics as text`, `A text file` or `None`),
-page images, Tesseract or audio options, pages, and the run options with batch
+page images, the decision-model pre-pass (its model, API and endpoint only when
+it is on), Tesseract or audio options, pages, and the run options with batch
 or sync; a batch run asks `If a batch submission fails:` (stop with an error, or
 transcribe synchronously as `--sync-fallback` does). `Parallel requests:` is asked
 only where calls are synchronous, so not for a batch run without the sync fallback.

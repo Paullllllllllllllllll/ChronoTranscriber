@@ -72,6 +72,7 @@ def _answers(pdf: Path, out: Path, flags: Sequence[str], end: str) -> list[Any]:
         KEEP,  # items without a sidecar
         KEEP,  # context image
         KEEP,  # page images
+        KEEP,  # decision pre-pass
         KEEP,  # pages
         KEEP,  # submission
         list(flags),

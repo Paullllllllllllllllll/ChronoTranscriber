@@ -44,6 +44,8 @@ from chronotranscriber.spec import (
     REPAIR_OPTIONS,
     RepairSpec,
     Resolution,
+    repair_cause_flags,
+    repair_causes,
     to_argv,
 )
 from chronotranscriber.ui.progress import RichProgress
@@ -73,7 +75,13 @@ from chronotranscriber.ui.session import (
 __all__ = ["CAUSE_FLAGS", "PROGRAM", "cause_flags", "flow", "selected_causes"]
 
 PROGRAM: Final = ("chronotranscriber", "repair")
-CAUSE_FLAGS: Final = ("errors_only", "not_possible", "no_text", "all_failures")
+CAUSE_FLAGS: Final = (
+    "errors_only",
+    "not_possible",
+    "no_text",
+    "all_failures",
+    "skipped",
+)
 _FAILURE_OPTIONS: Final = (*CAUSE_FLAGS, "indices")
 _RUN_OPTIONS: Final = ("batch", "dry_run")
 
@@ -81,35 +89,24 @@ _CAUSE_TITLES: Mapping[str, str] = {
     "api_error": "Transcription errors",
     "not_possible": "Transcription not possible",
     "no_text": "No transcribable text",
+    "skipped": "Skipped by the decision pre-pass",
 }
 _CAUSE_TEXTS: Mapping[str, str] = {
     "api_error": "errors",
     "not_possible": "not possible",
     "no_text": "no text",
+    "skipped": "skipped",
 }
 
 
 def selected_causes(state: State) -> tuple[str, ...]:
     """Return the failure causes the state's cause flags select."""
-    if state.value("all_failures"):
-        return REPAIR_CAUSES
-    wanted = {name for name in ("not_possible", "no_text") if state.value(name)}
-    if state.value("errors_only") or not wanted:
-        wanted.add("api_error")
-    return tuple(cause for cause in REPAIR_CAUSES if cause in wanted)
+    return repair_causes({name: state.value(name) for name in CAUSE_FLAGS})
 
 
 def cause_flags(causes: Sequence[str]) -> dict[str, bool]:
     """Return the cause flags that spell *causes* on the command line."""
-    wanted = set(causes)
-    if wanted == set(REPAIR_CAUSES):
-        return {"all_failures": True}
-    flags: dict[str, bool] = {
-        name: True for name in ("not_possible", "no_text") if name in wanted
-    }
-    if "api_error" in wanted and flags:
-        flags["errors_only"] = True
-    return flags
+    return repair_cause_flags(causes)
 
 
 def _existing(text: str) -> str | None:

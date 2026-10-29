@@ -147,7 +147,7 @@
 ## meta
 {
   "component": "chronotranscriber",
-  "version": 1
+  "version": 2
 }
 {
   "component": "core",
@@ -191,6 +191,7 @@
   "sha256": "<sha256>",
   "stale": 0
 }
+## page_types
 ## responses
 {
   "attempt": 1,
@@ -487,6 +488,22 @@
     "audio.whisper_model": {
       "source": "default",
       "value": "large-v3"
+    },
+    "decision.endpoint": {
+      "source": "default",
+      "value": null
+    },
+    "decision.mode": {
+      "source": "default",
+      "value": "off"
+    },
+    "decision.model": {
+      "source": "default",
+      "value": "typesafe/jev-1.14"
+    },
+    "decision.provider": {
+      "source": "default",
+      "value": null
     },
     "images.detail": {
       "source": "default",
@@ -1011,6 +1028,7 @@
   "order_index": 0,
   "outcome": "ok",
   "page_index": null,
+  "page_type": null,
   "provider": "local",
   "run_id": "<run-1>",
   "status": "done",
@@ -1026,6 +1044,7 @@
   "order_index": 1,
   "outcome": "ok",
   "page_index": null,
+  "page_type": null,
   "provider": "local",
   "run_id": "<run-1>",
   "status": "done",
@@ -1041,6 +1060,7 @@
   "order_index": 2,
   "outcome": "ok",
   "page_index": null,
+  "page_type": null,
   "provider": "local",
   "run_id": "<run-1>",
   "status": "done",
@@ -1056,6 +1076,7 @@
   "order_index": 3,
   "outcome": "ok",
   "page_index": null,
+  "page_type": null,
   "provider": "local",
   "run_id": "<run-1>",
   "status": "done",
@@ -1071,6 +1092,7 @@
   "order_index": 0,
   "outcome": "ok",
   "page_index": 0,
+  "page_type": null,
   "provider": "openai",
   "run_id": "<run-1>",
   "status": "done",
@@ -1092,6 +1114,7 @@
   "order_index": 1,
   "outcome": null,
   "page_index": 1,
+  "page_type": null,
   "provider": "openai",
   "run_id": "<run-2>",
   "status": "pending",
@@ -1107,6 +1130,7 @@
   "order_index": 2,
   "outcome": null,
   "page_index": 2,
+  "page_type": null,
   "provider": "openai",
   "run_id": "<run-2>",
   "status": "pending",
@@ -1122,6 +1146,7 @@
   "order_index": 0,
   "outcome": "ok",
   "page_index": null,
+  "page_type": null,
   "provider": "local",
   "run_id": "<run-1>",
   "status": "done",
@@ -1137,6 +1162,7 @@
   "order_index": 1,
   "outcome": "ok",
   "page_index": null,
+  "page_type": null,
   "provider": "local",
   "run_id": "<run-1>",
   "status": "done",
@@ -1152,6 +1178,7 @@
   "order_index": 0,
   "outcome": "ok",
   "page_index": null,
+  "page_type": null,
   "provider": "openai",
   "run_id": "<run-1>",
   "status": "done",
@@ -1173,6 +1200,7 @@
   "order_index": 1,
   "outcome": null,
   "page_index": null,
+  "page_type": null,
   "provider": "openai",
   "run_id": "<run-3>",
   "status": "pending",
@@ -1188,6 +1216,7 @@
   "order_index": 2,
   "outcome": null,
   "page_index": null,
+  "page_type": null,
   "provider": "openai",
   "run_id": "<run-3>",
   "status": "pending",

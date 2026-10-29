@@ -8,7 +8,8 @@ a document's input (:func:`plan_repair` plans that one document). A
 no database records as an input names every document of the databases at
 or below it. For each document the plan selects the page units of the
 chosen failure causes (a transcription error is a failed unit;
-``not_possible`` and ``no_text`` are their outcomes), narrowed by
+``not_possible`` and ``no_text`` are their outcomes; ``--skipped`` selects
+the pages the decision pre-pass skipped), narrowed by
 ``--indices`` (page indices; one document only), leaves out the units an
 open or unresolved batch submission holds, picks the image settings the
 pages were rendered with, resolves the schema, prompt and context and checks
@@ -141,6 +142,7 @@ CAUSE_OUTCOMES: Mapping[str, str] = {
     "api_error": "failed",
     "not_possible": "not_possible",
     "no_text": "no_text",
+    "skipped": "skipped_no_text",
 }
 """The unit outcome each failure cause of ``--errors-only`` and its kin selects."""
 

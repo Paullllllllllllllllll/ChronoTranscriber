@@ -60,11 +60,21 @@ def every_type(mixed_folder: Path) -> Path:
     return mixed_folder
 
 
+DECISION_ONLY_CLI = (
+    "decisions",
+    "decision_model",
+    "decision_provider",
+    "decision_endpoint",
+)
+"""The decision-model options are set by flag or settings default, not by a step."""
+
+
 def test_the_steps_set_every_option_but_json_and_settings(session: Session) -> None:
     steps = build_steps(session)
     assert set().union(*(step.sets for step in steps)) == set(OPTIONS.names) - {
         "json",
         "settings",
+        *DECISION_ONLY_CLI,
     }
 
 

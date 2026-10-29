@@ -1,5 +1,18 @@
 # Changelog
 
+- **v1.1.0** (29 October 2026) -- `--decisions shadow|apply` adds a decision-model
+  pre-pass to `--method llm`: OpenAI's `/v1/decisions` or OpenRouter's decision
+  API (default `typesafe/jev-1.14`) gives every page still to transcribe one of
+  18 general page types, or 21 under `decisions.profile: culinary`, read in
+  groups of `decisions.pages_per_request` downscaled pages. The types land in
+  the new `page_types` table and the `page_type` column of `page_text` (store
+  component version 2). `apply` skips pages that are likely binding, blank or
+  scan target, with the outcome `skipped_no_text`, but only where
+  `decisions.thresholds` holds a threshold for the run's request fingerprint;
+  `repair --skipped` transcribes such pages. The vendored common package gains
+  `decisions.py` (request bodies and typed answers for both dialects),
+  `decision_client.py`, `page_types.py` and the shared decision options and
+  settings block.
 - **v1.0.5** (27 October 2026) -- The lockfile moves `filelock` from 3.32.2
   to 4.2.4 and `setuptools` from 83.0.0 to 84.2.1, which closes the open
   Dependabot advisories (one high and one low for `filelock`, fixed in 4.2.1;

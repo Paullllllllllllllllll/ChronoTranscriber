@@ -72,6 +72,10 @@ EXEMPT: Final[Mapping[str, str]] = MappingProxyType(
         "wait": "the guided batch check makes one pass; waiting serves scripts",
         "poll_minutes": "applies with --wait only, which the UI does not offer",
         "wait_hours": "applies with --wait only, which the UI does not offer",
+        "decisions": "decision-model pre-pass; set by flag or settings default",
+        "decision_model": "decision-model pre-pass; set by flag or settings default",
+        "decision_provider": "decision-model pre-pass; set by flag or settings default",
+        "decision_endpoint": "decision-model pre-pass; set by flag or settings default",
     }
 )
 WIDTH: Final = 100
@@ -667,7 +671,7 @@ def repair_reasoning_defaults(ws: Workspace) -> Script:
     defaults = {"reasoning_effort": "low", "service_tier": "priority"}
     answers = [
         str(ws.transcription),
-        ["api_error", "not_possible", "no_text"],
+        ["api_error", "not_possible", "no_text", "skipped"],
         KEEP,
         "openai",
         "gpt-5.6-terra",

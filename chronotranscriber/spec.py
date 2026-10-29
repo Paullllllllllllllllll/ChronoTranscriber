@@ -25,7 +25,7 @@ accumulate (:class:`~chronotranscriber.common.options.Option`).
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass, fields, is_dataclass, replace
+from dataclasses import asdict, dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
 from typing import Any, Final, Literal
 
@@ -49,6 +49,7 @@ from chronotranscriber.common.options import (
 from chronotranscriber.common.polling import DEFAULT_POLL_MINUTES, wait_options
 from chronotranscriber.common.selection import parse_page_range
 from chronotranscriber.common.standard_options import (
+    DEFAULT_DECISION_MODEL,
     DRY_RUN_HELP,
     IMAGE_DETAILS,
     IMAGE_FORMATS,
@@ -65,6 +66,7 @@ from chronotranscriber.common.standard_options import (
     batch_option,
     check_input_option,
     concurrency_option,
+    decision_options,
     dry_run_option,
     flag_option,
     force_option,
@@ -111,6 +113,7 @@ __all__ = [
     "PROVIDERS",
     "REASONING_EFFORTS",
     "RENDER_OPTIONS",
+    "FAILURE_CAUSES",
     "REPAIR_CAUSES",
     "REPAIR_OPTIONS",
     "RESPONSE_FORMATS",
@@ -129,6 +132,7 @@ __all__ = [
     "ImageSpec",
     "InputSpec",
     "MethodSpec",
+    "DecisionSpec",
     "ModelSpec",
     "OcrSpec",
     "OutputSpec",
@@ -151,6 +155,8 @@ __all__ = [
     "parse_render",
     "parse_repair",
     "recommended_images",
+    "repair_cause_flags",
+    "repair_causes",
     "resolve_batch_cancel",
     "resolve_batch_check",
     "resolve_drop",
@@ -179,7 +185,9 @@ DEFAULT_WAIT_HOURS = 50.0
 (Gemini, 48 hours) plus margin."""
 OCR_PRESETS = ("default", "sauvola", "none")
 AUDIO_API_PROVIDERS = ("openai", "google")
-REPAIR_CAUSES = ("api_error", "not_possible", "no_text")
+REPAIR_CAUSES = ("api_error", "not_possible", "no_text", "skipped")
+FAILURE_CAUSES = ("api_error", "not_possible", "no_text")
+"""The causes of ``--all-failures``; a skipped page is no failure."""
 
 DEFAULT_MODEL = "gpt-6-luna"
 DEFAULT_AUDIO_MODEL = "gpt-transcribe"
@@ -381,6 +389,21 @@ class RunControl:
 
 
 @dataclass(frozen=True)
+class DecisionSpec:
+    """The decision-model pre-pass of the llm method.
+
+    ``mode`` is ``off``, ``shadow`` (record page types) or ``apply`` (also
+    skip pages without text of the book, at the threshold the settings hold
+    for the request). ``provider`` None is resolved from the model id.
+    """
+
+    mode: str
+    model: str
+    provider: str | None
+    endpoint: str | None
+
+
+@dataclass(frozen=True)
 class RunSpec:
     """Everything one transcribe run needs besides the machine settings."""
 
@@ -393,6 +416,9 @@ class RunSpec:
     ocr: OcrSpec
     audio: AudioSpec
     run: RunControl
+    decision: DecisionSpec = field(
+        default_factory=lambda: DecisionSpec("off", DEFAULT_DECISION_MODEL, None, None)
+    )
 
 
 @dataclass(frozen=True)
@@ -642,6 +668,13 @@ _AUDIO = Condition("method", frozenset({"whisper", "audio-api"}))
 _TYPED = Condition("type", frozenset(SOURCE_TYPES) - {"auto"})
 
 
+def _decision_options() -> list[Option]:
+    return decision_options(
+        "decision-model pre-pass of --method llm: shadow records each page's "
+        "type; apply also skips pages without text of the book"
+    )
+
+
 def _prompt_options() -> list[Option]:
     return [
         Option(
@@ -795,6 +828,7 @@ _GROUP_TITLES = {
     "output": "output",
     "prompt": "schema, prompt and context",
     "model": "model",
+    "decision model": "decision model",
     "images": "images",
     "ocr": "Tesseract",
     "audio": "audio",
@@ -997,6 +1031,7 @@ OPTIONS = OptionTable(
         *_output_options(),
         *_prompt_options(),
         *_model_options(),
+        *_decision_options(),
         *image_options(),
         *_engine_options(),
         *_run_options(),
@@ -1045,6 +1080,10 @@ REPAIR_OPTIONS = OptionTable(
         _repair_flag("not_possible", "repair pages marked transcription not possible"),
         _repair_flag("no_text", "repair pages marked no transcribable text"),
         _repair_flag("all_failures", "repair every failure cause"),
+        _repair_flag(
+            "skipped",
+            "transcribe pages the decision pre-pass skipped as without text",
+        ),
         Option(
             "indices",
             "--indices",
@@ -1418,16 +1457,22 @@ def resolve_spec(
         ocr=OcrSpec(**_part(values, "ocr")),
         audio=AudioSpec(**_part(values, "audio")),
         run=RunControl(**_part(values, "run")),
+        decision=DecisionSpec(**_part(values, "decision")),
     )
+    if spec.decision.mode != "off" and method != "llm":
+        raise SpecError("--decisions runs with --method llm only")
     return Resolution(spec, sources)
 
 
-def _repair_causes(flags: Mapping[str, Any]) -> tuple[str, ...]:
-    if flags.get("all_failures"):
-        return REPAIR_CAUSES
+def repair_causes(flags: Mapping[str, Any]) -> tuple[str, ...]:
+    """Return the repair causes the cause flags in *flags* select."""
     causes = {name for name in ("not_possible", "no_text") if flags.get(name)}
-    if flags.get("errors_only") or not causes:
+    if flags.get("all_failures"):
+        causes.update(FAILURE_CAUSES)
+    if flags.get("errors_only") or not (causes or flags.get("skipped")):
         causes.add("api_error")
+    if flags.get("skipped"):
+        causes.add("skipped")
     return tuple(cause for cause in REPAIR_CAUSES if cause in causes)
 
 
@@ -1448,10 +1493,10 @@ def resolve_repair(
     _settle_provider(resolved)
     _check_model_level(resolved)
     values, sources = REPAIR_OPTIONS.by_targets(resolved)
-    cause_flags = ("errors_only", "not_possible", "no_text", "all_failures")
+    cause_flags = ("errors_only", "not_possible", "no_text", "all_failures", "skipped")
     indices = flags.get("indices")
     selection = RepairSelection(
-        causes=_repair_causes(flags),
+        causes=repair_causes(flags),
         indices=None if indices is None else _parse_indices(indices),
     )
     sources = {
@@ -1691,16 +1736,19 @@ def _with_keywords(given: dict[str, Any]) -> dict[str, Any]:
     return given
 
 
-def _cause_flags(causes: Sequence[str]) -> dict[str, bool]:
+def repair_cause_flags(causes: Sequence[str]) -> dict[str, bool]:
+    """Return the cause flags that spell *causes* on the command line."""
     wanted = set(causes)
-    if wanted == set(REPAIR_CAUSES):
-        return {"all_failures": True}
+    skipped = {"skipped": True} if "skipped" in wanted else {}
+    failures = wanted - {"skipped"}
+    if failures == set(FAILURE_CAUSES):
+        return {"all_failures": True, **skipped}
     given: dict[str, bool] = {
-        name: True for name in ("not_possible", "no_text") if name in wanted
+        name: True for name in ("not_possible", "no_text") if name in failures
     }
-    if "api_error" in wanted and given:
+    if "api_error" in failures and (given or skipped):
         given["errors_only"] = True
-    return given
+    return {**given, **skipped}
 
 
 def to_argv(spec: CommandSpec, defaults: Mapping[str, Any] | None = None) -> list[str]:
@@ -1765,7 +1813,7 @@ def _transcribe_argv(spec: RunSpec, defaults: Mapping[str, Any]) -> list[str]:
 
 def _repair_argv(spec: RepairSpec, defaults: Mapping[str, Any]) -> list[str]:
     given = _spell_values(REPAIR_OPTIONS, _flatten(spec), defaults)
-    given.update(_cause_flags(spec.selection.causes))
+    given.update(repair_cause_flags(spec.selection.causes))
     if spec.selection.indices is not None:
         given["indices"] = _format_indices(spec.selection.indices)
     _spell_provider(

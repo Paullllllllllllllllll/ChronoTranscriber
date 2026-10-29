@@ -9,23 +9,32 @@ concurrently through
 committed to the store as it finishes; under ``--batch`` they are submitted
 to the provider's batch API instead. The method writes no file: the run core
 renders the item from the store.
+
+With ``--decisions shadow`` or ``apply`` a decision model first gives every
+page still to do its page type (:mod:`chronotranscriber.llm.decide`), stored
+in the ``page_types`` table. Under ``apply``, with a threshold the settings
+hold for the request's fingerprint, a page whose no-text probability reaches
+it is written as done with outcome ``skipped_no_text`` and never sent to the
+vision model.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 from chronotranscriber.common.native import changed_image_settings
+from chronotranscriber.common.page_types import VERSION as TAXONOMY_VERSION
 from chronotranscriber.common.store import PlannedUnit
+from chronotranscriber.llm.decide import SKIPPED_OUTCOME, PageDecider, page_bytes
 from chronotranscriber.llm.transcription import ROLE, PageTranscriber
 from chronotranscriber.methods import Item, Job, NothingSelectedError, PageCounter
 from chronotranscriber.methods.pages import transcribe_payload
 from chronotranscriber.methods.units import DocumentHandle, run_unit_stream
-from chronotranscriber.output.store import image_settings_record
+from chronotranscriber.output.store import image_settings_record, page_type_rows
 from chronotranscriber.sources.images import (
     FolderPages,
     PageImage,
@@ -93,9 +102,15 @@ class LlmTranscriber:
     def __init__(self, job: Job) -> None:
         self.job = job
         self._client: PageTranscriber | None = None
+        self._decider: PageDecider | None = None
 
     async def open(self) -> None:
-        """Build the transcription client; in batch mode only for the fallback."""
+        """Build the transcription client; in batch mode only for the fallback.
+
+        The decision client is built whenever ``--decisions`` is not off.
+        """
+        if self.job.spec.decision.mode != "off":
+            self._decider = PageDecider(self.job.spec.decision, self.job.env)
         if self.job.batch and not self.job.spec.run.sync_fallback:
             return
         spec = self.job.spec
@@ -113,6 +128,9 @@ class LlmTranscriber:
         client, self._client = self._client, None
         if client is not None:
             await client.close()
+        decider, self._decider = self._decider, None
+        if decider is not None:
+            await decider.aclose()
 
     async def transcribe(self, item: Item) -> list[Path]:
         """Transcribe one PDF or image folder into its store document.
@@ -156,7 +174,8 @@ class LlmTranscriber:
         )
         if self._client is not None:
             self._client.page_detail = str(img_cfg.get("resolved_detail") or "") or None
-        await self._record_settings(handle, image_settings_record(img_cfg, model_type))
+        record = image_settings_record(img_cfg, model_type)
+        await self._record_settings(handle, record)
         await handle.plan(units)
         if self.job.force:
             await handle.discard()
@@ -166,14 +185,16 @@ class LlmTranscriber:
         already = len(selected) - len(needed)
         if already:
             logger.info("Skipped %d pages already stored for %s", already, item.name)
-        if not needed:
-            return []
 
         async def source(indices: list[int]) -> AsyncIterator[PageImage]:
             pages_type = FolderPages if is_folder else PdfPages
             pages = pages_type(item.path, img_cfg, model_type, section=section)
             async for page in stream_pages(pages, indices):
                 yield page
+
+        needed = await self._decide(handle, needed, source, record)
+        if not needed:
+            return []
 
         if self.job.batch:
             payloads = [payload async for payload in source(needed)]
@@ -200,6 +221,78 @@ class LlmTranscriber:
             on_unit=counter,
         )
         return []
+
+    async def _decide(
+        self,
+        handle: DocumentHandle,
+        needed: list[int],
+        source: Callable[[list[int]], AsyncIterator[PageImage]],
+        upstream: Mapping[str, Any],
+    ) -> list[int]:
+        """Record the page types of *needed*; return the pages still to send.
+
+        Without a decision model, *needed* comes back unchanged. *upstream*
+        is the image-settings record the pages are rendered with.
+
+        Under ``apply`` with a threshold for the request, pages at or above it
+        are written as skipped and left out of the returned list.
+        """
+        decider = self._decider
+        if decider is None or not needed:
+            return needed
+
+        async def images() -> AsyncIterator[tuple[int, bytes]]:
+            async for page in source(needed):
+                if page.render_error is None and page.base64:
+                    yield page.index, page_bytes(page.base64)
+
+        decisions = await decider.classify(handle.name, images())
+        if not decisions:
+            return needed
+        fingerprint = decider.fingerprint(upstream)
+        await handle.store.write(
+            handle.lease,
+            page_type_rows(
+                handle.name,
+                [(d.idx, d.page_type, d.probabilities) for d in decisions],
+                taxonomy=TAXONOMY_VERSION,
+                profile=decider.profile,
+                model=decider.spec.model,
+                fingerprint=fingerprint,
+                run_id=handle.run_id,
+            ),
+        )
+        threshold = decider.threshold(fingerprint)
+        if self.job.spec.decision.mode != "apply" or threshold is None:
+            if self.job.spec.decision.mode == "apply":
+                self.job.events.warning(
+                    f"No validated decision threshold for request {fingerprint}; "
+                    f"'{handle.name}' is recorded only (see decisions.thresholds)."
+                )
+            return needed
+        skipped = {d.idx: d for d in decisions if d.no_text >= threshold}
+        for idx, decision in skipped.items():
+            await handle.write(
+                idx,
+                status="done",
+                content=f"[No transcribable text: {decision.page_type}]",
+                outcome=SKIPPED_OUTCOME,
+                provenance={
+                    "decision": {
+                        "page_type": decision.page_type,
+                        "no_text": round(decision.no_text, 4),
+                        "threshold": threshold,
+                        "fingerprint": fingerprint,
+                    }
+                },
+                model=decider.spec.model,
+                provider=decider.dialect,
+            )
+        if skipped:
+            logger.info(
+                "Skipped %d pages without text in %s", len(skipped), handle.name
+            )
+        return [idx for idx in needed if idx not in skipped]
 
     @staticmethod
     def _units(path: Path, is_folder: bool) -> list[PlannedUnit]:

@@ -3,7 +3,8 @@
 Every output root (the output folder, or the input's folder when writing
 beside the input) holds one ``chronotranscriber.sqlite``. Its core tables come
 from :mod:`chronotranscriber.common.store`; this module adds the tool's
-component, which defines no table of its own, only the views below.
+component: the ``page_types`` table of the decision pre-pass and the views
+below.
 
 A document is one input item, named by its rendered output path relative to
 the output root, without suffix (``doc-139d544b/doc``). Its units are:
@@ -35,8 +36,11 @@ them may change between versions, the views stay stable.
     section position of a text unit), ``text``, ``status``
     (pending, done or failed), ``model``, ``usage`` (JSON token counts),
     ``outcome`` (ok, no_text, not_possible or failed), ``error``,
-    ``provider`` and ``run_id``. Units a ``--pages`` run did not select are
-    pending, with NULL text.
+    ``provider``, ``run_id`` and ``page_type`` (the type the decision
+    pre-pass gave a page unit, else NULL). Units a ``--pages`` run did not
+    select are pending, with NULL text. A page the pre-pass skipped under
+    ``--decisions apply`` is done with outcome ``skipped_no_text`` and a
+    ``[No transcribable text: <type>]`` placeholder.
 
 ``document_status``
     One row per document: ``document``, ``kind`` (pdf, images, epub, mobi or
@@ -112,6 +116,7 @@ __all__ = [
     "image_settings_record",
     "lease_reason",
     "open_store",
+    "page_type_rows",
     "read_only_connection",
     "read_store",
     "tool_version",
@@ -184,8 +189,48 @@ LEFT JOIN documents AS d ON d.doc_id = r.doc_id
 ORDER BY r.response_id;
 """
 
-COMPONENT: Final = Component(TOOL, (_VIEWS_V1,))
-"""The tool's schema component: version 1 adds the views."""
+_PAGE_TYPES_V2 = """
+CREATE TABLE page_types (
+    doc_id INTEGER NOT NULL REFERENCES documents (doc_id),
+    idx INTEGER NOT NULL,
+    page_type TEXT NOT NULL,
+    probabilities TEXT NOT NULL,
+    taxonomy TEXT NOT NULL,
+    profile TEXT NOT NULL,
+    model TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    run_id TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (doc_id, idx)
+);
+DROP VIEW page_text;
+CREATE VIEW page_text AS
+SELECT
+    d.name AS document,
+    u.kind AS kind,
+    CASE WHEN u.kind = 'page' AND typeof(u.source_index) = 'integer'
+        THEN u.source_index END AS page_index,
+    u.label AS image_name,
+    u.idx AS order_index,
+    u.content AS text,
+    u.status AS status,
+    u.model AS model,
+    u.usage AS usage,
+    u.outcome AS outcome,
+    u.error AS error,
+    u.provider AS provider,
+    u.run_id AS run_id,
+    pt.page_type AS page_type
+FROM units AS u
+JOIN documents AS d ON d.doc_id = u.doc_id
+LEFT JOIN page_types AS pt
+    ON pt.doc_id = u.doc_id AND pt.idx = u.idx AND u.kind = 'page'
+ORDER BY d.name, u.idx, u.kind;
+"""
+
+COMPONENT: Final = Component(TOOL, (_VIEWS_V1, _PAGE_TYPES_V2))
+"""The tool's schema component: version 1 adds the views, version 2 the
+``page_types`` table and the ``page_type`` column of ``page_text``."""
 
 _COMPONENTS: Final = (COMPONENT,)
 
@@ -521,3 +566,48 @@ def classify(
         note=note,
         total=total,
     )
+
+
+def page_type_rows(
+    document: str,
+    decisions: Sequence[tuple[int, str, Mapping[str, float]]],
+    *,
+    taxonomy: str,
+    profile: str,
+    model: str,
+    fingerprint: str,
+    run_id: str | None,
+) -> Callable[[sqlite3.Connection], None]:
+    """Return a write that replaces the page types of *document*'s pages.
+
+    *decisions* holds ``(idx, page_type, probabilities)``; pass the write to
+    ``Store.write`` so it runs under the document's lease. The rows belong to
+    the document's id, so dropping the document removes them.
+    """
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    rows = [
+        (
+            document,
+            idx,
+            page_type,
+            json.dumps(dict(probabilities), sort_keys=True),
+            taxonomy,
+            profile,
+            model,
+            fingerprint,
+            run_id,
+            now,
+        )
+        for idx, page_type, probabilities in decisions
+    ]
+
+    def write(connection: sqlite3.Connection) -> None:
+        connection.executemany(
+            "INSERT OR REPLACE INTO page_types (doc_id, idx, page_type, "
+            "probabilities, taxonomy, profile, model, fingerprint, run_id, "
+            "created_at) SELECT doc_id, ?, ?, ?, ?, ?, ?, ?, ?, ? "
+            "FROM documents WHERE name = ?",
+            [(*row[1:], row[0]) for row in rows],
+        )
+
+    return write

@@ -60,7 +60,7 @@
 ## meta
 {
   "component": "chronotranscriber",
-  "version": 1
+  "version": 2
 }
 {
   "component": "core",
@@ -68,6 +68,7 @@
 }
 ## notes
 ## outputs
+## page_types
 ## responses
 ## runs
 {
@@ -88,6 +89,22 @@
     "audio.whisper_model": {
       "source": "default",
       "value": "large-v3"
+    },
+    "decision.endpoint": {
+      "source": "default",
+      "value": null
+    },
+    "decision.mode": {
+      "source": "default",
+      "value": "off"
+    },
+    "decision.model": {
+      "source": "default",
+      "value": "typesafe/jev-1.14"
+    },
+    "decision.provider": {
+      "source": "default",
+      "value": null
     },
     "images.detail": {
       "source": "default",
@@ -536,6 +553,7 @@
   "order_index": 0,
   "outcome": null,
   "page_index": 0,
+  "page_type": null,
   "provider": "anthropic",
   "run_id": "<run-1>",
   "status": "pending",
@@ -551,6 +569,7 @@
   "order_index": 1,
   "outcome": null,
   "page_index": 1,
+  "page_type": null,
   "provider": "anthropic",
   "run_id": "<run-1>",
   "status": "pending",

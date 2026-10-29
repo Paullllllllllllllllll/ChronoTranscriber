@@ -95,6 +95,14 @@ prompt_caching:
   openrouter:
     anthropic_cache_control: true
 
+# Decision-model pre-pass of --decisions shadow|apply (page types, skips).
+decisions:
+  image_max_px: 768       # longer side of the page images sent
+  pages_per_request: 20   # consecutive pages per request
+  profile: general        # page types: general, or culinary (adds recipes, menus, carving)
+  timeout_s: 120
+  thresholds: {}          # request fingerprint: no-text probability at which apply skips
+
 # Folder of the tool's state files; '' uses ~/.chronotranscriber.
 state_dir: ''
 

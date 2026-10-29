@@ -44,6 +44,7 @@ from chronotranscriber.batch.repair import batch_refusal
 from chronotranscriber.common.batch import supports_batch
 from chronotranscriber.common.context import ContextError
 from chronotranscriber.common.contract import ExitCode, exit_code_for
+from chronotranscriber.common.decisions import dialect_for
 from chronotranscriber.common.options import Source
 from chronotranscriber.common.selection import (
     PageRange,
@@ -638,6 +639,17 @@ def _missing_keys(
             if needs == method:
                 needs = f"--method {method}"
             missing.append(MissingKey(variables[0], model.provider, needs))
+    if "llm" in methods and spec.decision.mode != "off":
+        dialect = dialect_for(spec.decision.model, spec.decision.provider)
+        try:
+            variables = ext.key_variables(
+                dialect, kind="decision", settings=settings, args=args
+            )
+        except SettingsError as exc:
+            raise ConfigurationError(str(exc), items_total=total) from exc
+        if variables and not any(os.environ.get(name) for name in variables):
+            needs = f"--decisions {spec.decision.mode}"
+            missing.append(MissingKey(variables[0], dialect, needs))
     return missing
 
 

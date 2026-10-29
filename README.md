@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.0.5
+# ChronoTranscriber v1.1.0
 
 ChronoTranscriber transcribes PDFs, folders of page images, EPUB and MOBI ebooks
 and audio recordings. Scanned pages go to a vision-language model or to local
@@ -104,6 +104,10 @@ option given twice keeps the values of both.
 | `--top-p P` | nucleus sampling, 0.0 to 1.0; sent only when supported | 1.0 | yes |
 | `--service-tier {auto,default,flex,priority}` | OpenAI service tier; only for provider openai | default | yes |
 | `--response-format {schema,json,text}` | schema (API-enforced), json (prompted, validated) or text (plain) | schema when the model supports it, else json | yes |
+| `--decisions {off,shadow,apply}` | decision-model pre-pass of --method llm: shadow records each page's type; apply also skips pages without text of the book | off | yes |
+| `--decision-model ID` | decision model id; only for decisions apply, shadow | typesafe/jev-1.14 | yes |
+| `--decision-provider {openai,openrouter}` | decision API dialect; only for decisions apply, shadow | from the model id | yes |
+| `--decision-endpoint URL` | decision endpoint URL; only for decisions apply, shadow | the provider's | yes |
 | `--dpi native\|N` | render resolution: native or a DPI value | the provider's recommended value | yes |
 | `--image-detail {low,high,auto,original}` | image detail sent to the model | the provider's recommended value | yes |
 | `--image-format {jpeg,png}` | page image format | the provider's recommended value | yes |
@@ -162,6 +166,7 @@ is the transcription model.
 | `--not-possible` | repair pages marked transcription not possible | | no |
 | `--no-text` | repair pages marked no transcribable text | | no |
 | `--all-failures` | repair every failure cause | | no |
+| `--skipped` | transcribe pages the decision pre-pass skipped as without text | | no |
 | `--indices LIST` | 0-based page indices (order in the item) among the selected failures of one document: 0,5,12 or 3-7 | every selected failure | no |
 | `--model NAME` | model name; a provider: prefix (anthropic:NAME) selects the provider | gpt-6-luna | yes |
 | `--batch`, `--no-batch` | submit the repairs to the provider's batch API | off | yes |
@@ -442,6 +447,14 @@ prompt_caching:
   openrouter:
     anthropic_cache_control: true
 
+# Decision-model pre-pass of --decisions shadow|apply (page types, skips).
+decisions:
+  image_max_px: 768       # longer side of the page images sent
+  pages_per_request: 20   # consecutive pages per request
+  profile: general        # page types: general, or culinary (adds recipes, menus, carving)
+  timeout_s: 120
+  thresholds: {}          # request fingerprint: no-text probability at which apply skips
+
 # Folder of the tool's state files; '' uses ~/.chronotranscriber.
 state_dir: ''
 
@@ -578,6 +591,30 @@ block. The context image follows the same sidecar lookup with
 `_transcr_context_image.{ext}`, else takes `context/transcr_context_image.{ext}`
 in the repository, and is sent before every page.
 
+### Decision pre-pass
+
+With `--method llm` and `--decisions shadow` or `apply`, a decision model gives
+every page still to transcribe a page type before transcription: binding, blank,
+scan_target, library_mark, handwritten, half_title, title_page, illustration,
+preface_or_dedication, privilege_or_approval, contents_or_index, section_title,
+body_text, table_or_chart, errata, advertisement, colophon or other. The settings
+key `decisions.profile: culinary` adds recipe_text, menu_or_bill_of_fare and
+carving_or_table_service. Pages go out `decisions.pages_per_request` at a time,
+downscaled to `decisions.image_max_px`, and the types land in the store's
+`page_types` table and the `page_type` column of `page_text`. The decision model
+is OpenAI's `/v1/decisions` (a model id without `/`) or OpenRouter's decision API
+(a model id with `/`, the default `typesafe/jev-1.14`); it uses the provider's key
+variable from the settings.
+
+`shadow` only records. `apply` also skips the pages whose probability of binding,
+blank or scan_target reaches a threshold, marks them done with the outcome
+`skipped_no_text`, and transcribes the rest. A threshold holds only for the
+request settings it was validated on: `decisions.thresholds` maps a request
+fingerprint (the hash of tool, provider, model, endpoint, taxonomy version,
+profile and image settings) to the threshold, and `apply` without an entry for
+the run's fingerprint records only and names the fingerprint in a warning.
+`repair --skipped` transcribes skipped pages.
+
 ## Audio
 
 Audio files are MP3, WAV, M4A, MP4, MPGA, MPEG, WebM, FLAC, OGG, AAC or AIFF;
@@ -634,15 +671,17 @@ documented views, which stay stable; the tables behind them may change.
 
 | View | One row per | Columns |
 | --- | --- | --- |
-| `page_text` | unit, by document and position | `document`, `kind`, `page_index`, `image_name`, `order_index`, `text`, `status`, `model`, `usage`, `outcome`, `error`, `provider`, `run_id` |
+| `page_text` | unit, by document and position | `document`, `kind`, `page_index`, `image_name`, `order_index`, `text`, `status`, `model`, `usage`, `outcome`, `error`, `provider`, `run_id`, `page_type` |
 | `document_status` | document | `document`, `kind`, `input_path`, `status`, `units_total`, `units_done`, `units_failed`, `units_pending`, `last_run_id`, `updated_at` |
 | `page_attempts` | provider attempt, in order | `document`, `kind`, `order_index`, `response_id`, `run_id`, `provider`, `model`, `attempt`, `submission_id`, `custom_id`, `raw`, `raw_kind`, `usage`, `error`, `http_status`, `created_at` |
 
 A document is named by its rendered path relative to the output root, without
 suffix (`book-1a2b3c4d/book`). In `page_text`, `kind` is `page`, `chunk` or `text`
 (native text), `page_index` the 0-based PDF page of a page unit, `status`
-`pending`, `done` or `failed`, `outcome` `ok`, `no_text`, `not_possible` or
-`failed`, and `usage` JSON token counts (`input_tokens`, `output_tokens`,
+`pending`, `done` or `failed`, `outcome` `ok`, `no_text`, `not_possible`,
+`skipped_no_text` (skipped by `--decisions apply`) or `failed`, `page_type` the
+type the decision pre-pass gave a page unit (null without one), and `usage` JSON
+token counts (`input_tokens`, `output_tokens`,
 `total_tokens`, `cached_tokens`, `reasoning_tokens`, in synchronous and batch
 rows alike). The `error` columns keep the first 2,000 characters of an error
 text; `raw` in `page_attempts` holds the response body as received. Open the

@@ -39,8 +39,8 @@ from chronotranscriber.spec import (
     REPAIR_CAUSES,
     REPAIR_OPTIONS,
     CommandSpec,
-    _cause_flags,
     parse_repair,
+    repair_cause_flags,
 )
 from chronotranscriber.ui import repair as repair_ui
 from chronotranscriber.ui.session import RunRequest, Session, absolute, build_wizard
@@ -188,8 +188,8 @@ def test_the_failure_types_spell_the_cause_flags_of_the_spec(
     causes: list[str],
 ) -> None:
     state, _prompter = ask_failures([causes, ""])
-    assert state.answers == _cause_flags(causes)
-    assert repair_ui.cause_flags(causes) == _cause_flags(causes)
+    assert state.answers == repair_cause_flags(causes)
+    assert repair_ui.cause_flags(causes) == repair_cause_flags(causes)
     assert repair_ui.selected_causes(state) == tuple(causes)
 
 

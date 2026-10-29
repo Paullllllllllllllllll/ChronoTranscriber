@@ -17,6 +17,7 @@ failures to repair:
   --not-possible        repair pages marked transcription not possible
   --no-text             repair pages marked no transcribable text
   --all-failures        repair every failure cause
+  --skipped             transcribe pages the decision pre-pass skipped as without text
   --indices LIST        0-based page indices (order in the item) among the selected failures of
                         one document: 0,5,12 or 3-7; default: every selected failure
 

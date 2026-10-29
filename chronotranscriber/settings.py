@@ -12,7 +12,7 @@ parsed values.
 
 The shared blocks (``api_keys``, ``endpoints``, ``timeouts``,
 ``rate_limits``, ``retry``, ``concurrency``, ``images``, ``prompt_caching``,
-``state_dir``, ``logs_dir``) are read by
+``decisions``, ``state_dir``, ``logs_dir``) are read by
 :mod:`chronotranscriber.common.settings_schema` with this tool's defaults;
 ``tools``, ``whisper``, ``audio_chunking`` and ``audio_api`` are this tool's
 own.
@@ -33,6 +33,7 @@ from chronotranscriber.common.settings_loader import SettingsError, load_setting
 from chronotranscriber.common.settings_schema import (
     DEFAULT_API_KEYS,
     BlockParser,
+    Decisions,
     Endpoint,
     Images,
     Reader,
@@ -43,6 +44,7 @@ from chronotranscriber.common.settings_schema import (
     log_file,
     read_api_keys,
     read_concurrency,
+    read_decisions,
     read_endpoints,
     read_extensions,
     read_images,
@@ -210,6 +212,7 @@ class Settings:
     audio_api: AudioApi = field(default_factory=AudioApi)
     images: Images = field(default_factory=Images)
     prompt_caching: PromptCaching = field(default_factory=PromptCaching)
+    decisions: Decisions = field(default_factory=Decisions)
     logs_dir: Path | None = None
     state_dir: Path | None = None
     defaults: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
@@ -301,6 +304,7 @@ class Settings:
             prompt_caching=read_prompt_caching(
                 reader, data.get("prompt_caching"), PromptCaching()
             ),
+            decisions=read_decisions(reader, data.get("decisions"), Decisions()),
             logs_dir=read_logs_dir(reader, data),
             state_dir=read_state_dir(reader, data),
             defaults=MappingProxyType(dict(defaults or {})),
@@ -323,6 +327,7 @@ _TOP_KEYS = frozenset(
         "audio_api",
         "images",
         "prompt_caching",
+        "decisions",
         "logs_dir",
         "state_dir",
     }

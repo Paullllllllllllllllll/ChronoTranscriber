@@ -66,6 +66,7 @@ PAGE_TEXT_COLUMNS = (
     "error",
     "provider",
     "run_id",
+    "page_type",
 )
 
 
@@ -183,7 +184,9 @@ def _query(database: Path, sql: str) -> tuple[tuple[str, ...], list[tuple[Any, .
         connection.close()
 
 
-def test_the_component_adds_the_views_at_version_1(tmp_path: Path) -> None:
+def test_the_component_adds_the_views_and_page_types_at_version_2(
+    tmp_path: Path,
+) -> None:
     database = build_store(tmp_path, [page(0)])
 
     _, meta = _query(database, "SELECT component, version FROM meta ORDER BY 1")
@@ -193,7 +196,7 @@ def test_the_component_adds_the_views_at_version_1(tmp_path: Path) -> None:
 
     assert database.name == DATABASE_NAME
     assert COMPONENT.name == TOOL
-    assert meta == [("chronotranscriber", 1), ("core", 2)]
+    assert meta == [("chronotranscriber", 2), ("core", 2)]
     assert sorted(name for (name,) in views) == sorted(VIEWS)
 
 
@@ -232,19 +235,19 @@ def test_page_text_returns_every_unit_in_page_order(tmp_path: Path) -> None:
     usage = json.dumps(USAGE)
     assert rows == [
         (NAME, "page", 0, "page_0001_pre_processed.jpg", 0, "Page 1 text", "done",
-         MODEL, usage, "ok", None, PROVIDER, run_id),
+         MODEL, usage, "ok", None, PROVIDER, run_id, None),
         (NAME, "page", 1, "page_0002_pre_processed.jpg", 1, "[transcription error]",
-         "failed", MODEL, None, "failed", "Error code: 400", PROVIDER, run_id),
+         "failed", MODEL, None, "failed", "Error code: 400", PROVIDER, run_id, None),
         (NAME, "page", 2, "page_0003_pre_processed.jpg", 2, "Page 3 text", "done",
-         MODEL, usage, "ok", None, PROVIDER, run_id),
+         MODEL, usage, "ok", None, PROVIDER, run_id, None),
         (NAME, "page", 3, "page_0004_pre_processed.jpg", 3, None, "pending",
-         MODEL, None, None, None, PROVIDER, run_id),
+         MODEL, None, None, None, PROVIDER, run_id, None),
         ("ledger-fe14010b/ledger", "page", None, "a.png_pre_processed.jpg", 0,
-         "Ledger one", "done", MODEL, None, None, None, PROVIDER, run_id),
+         "Ledger one", "done", MODEL, None, None, None, PROVIDER, run_id, None),
         ("ledger-fe14010b/ledger", "page", None, "b.png_pre_processed.jpg", 1,
-         "Ledger two", "done", MODEL, None, None, None, PROVIDER, run_id),
+         "Ledger two", "done", MODEL, None, None, None, PROVIDER, run_id, None),
         ("talk-ce7611e7/talk", "chunk", None, "talk_chunk_0001.mp3", 0,
-         "Spoken words", "done", MODEL, None, None, None, PROVIDER, run_id),
+         "Spoken words", "done", MODEL, None, None, None, PROVIDER, run_id, None),
     ]  # fmt: skip
 
 

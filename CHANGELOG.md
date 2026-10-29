@@ -1,5 +1,11 @@
 # Changelog
 
+- **v1.1.1** (29 October 2026) -- The decision pre-pass keeps the retry budgets of
+  the transcription calls: timed-out attempts stop at `retry.timeout_attempts`,
+  malformed answers count against `retry.validation_attempts`, and the vendored
+  `decision_client.py` raises `DecisionStatusError`, whose HTTP status the retry
+  ladder reads. A pre-pass that fails after its retries leaves every page to
+  transcription with a warning instead of stopping the document.
 - **v1.1.0** (29 October 2026) -- `--decisions shadow|apply` adds a decision-model
   pre-pass to `--method llm`: OpenAI's `/v1/decisions` or OpenRouter's decision
   API (default `typesafe/jev-1.14`) gives every page still to transcribe one of

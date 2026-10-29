@@ -25,7 +25,16 @@ from .decisions import (
     request_body,
 )
 
-__all__ = ["DecisionClient"]
+__all__ = ["DecisionClient", "DecisionStatusError"]
+
+
+class DecisionStatusError(httpx.HTTPStatusError):
+    """An error status from a decision endpoint, readable by the retry ladder."""
+
+    @property
+    def status_code(self) -> int:
+        """The response's HTTP status."""
+        return self.response.status_code
 
 
 class DecisionClient:
@@ -62,7 +71,7 @@ class DecisionClient:
         """Return the model's answers to *questions* about *parts*.
 
         Raises:
-            httpx.HTTPStatusError: The endpoint answered with an error status.
+            DecisionStatusError: The endpoint answered with an error status.
             httpx.TransportError: The request did not complete.
             MalformedAnswer: The response does not answer the questions.
             ValueError: The request itself is invalid (see ``request_body``).
@@ -76,7 +85,13 @@ class DecisionClient:
                 httpx.USE_CLIENT_DEFAULT if self._timeout is None else self._timeout
             ),
         )
-        response.raise_for_status()
+        if response.is_error:
+            raise DecisionStatusError(
+                f"decision endpoint answered {response.status_code} "
+                f"{response.reason_phrase}",
+                request=response.request,
+                response=response,
+            )
         try:
             payload = response.json()
         except ValueError as exc:

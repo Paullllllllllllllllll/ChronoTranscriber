@@ -26,6 +26,9 @@ from collections.abc import AsyncIterator, Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+import httpx
+
+from chronotranscriber.common.decisions import MalformedAnswer
 from chronotranscriber.common.native import changed_image_settings
 from chronotranscriber.common.page_types import VERSION as TAXONOMY_VERSION
 from chronotranscriber.common.store import PlannedUnit
@@ -246,7 +249,14 @@ class LlmTranscriber:
                 if page.render_error is None and page.base64:
                     yield page.index, page_bytes(page.base64)
 
-        decisions = await decider.classify(handle.name, images())
+        try:
+            decisions = await decider.classify(handle.name, images())
+        except (httpx.HTTPError, MalformedAnswer, OSError) as exc:
+            self.job.events.warning(
+                f"The decision pre-pass failed for '{handle.name}' ({exc}); "
+                "its pages are transcribed without it."
+            )
+            return needed
         if not decisions:
             return needed
         fingerprint = decider.fingerprint(upstream)

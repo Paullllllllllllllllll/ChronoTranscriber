@@ -39,6 +39,7 @@ from chronotranscriber.common.decisions import (
     DecisionResult,
     Image,
     Json,
+    MalformedAnswer,
     Part,
     Question,
     Text,
@@ -51,7 +52,13 @@ from chronotranscriber.common.page_types import (
     no_text_probability,
     page_type_question,
 )
-from chronotranscriber.common.retry import RetryHooks, call_with_retry
+from chronotranscriber.common.retry import (
+    Decision,
+    ErrorKind,
+    RetryHooks,
+    call_with_retry,
+    classify_error,
+)
 from chronotranscriber.common.usage import Usage
 from chronotranscriber.llm.caller import CallEnv
 from chronotranscriber.llm.retrying import AttemptDecisions
@@ -107,6 +114,7 @@ class PageDecider:
         self.pages_per_request = min(block.pages_per_request, MAX_QUESTIONS)
         self._thresholds = block.thresholds
         self._policy = settings.retry.policy()
+        self._timeout_attempts = settings.retry.timeout_attempts
         variables = ext.key_variables(self.dialect, kind=KIND, settings=settings)
         if variables and not any(os.environ.get(name) for name in variables):
             raise OSError(f"the decision model needs the key variable {variables[0]}")
@@ -239,11 +247,24 @@ class PageDecider:
                 self._record(call.usage)
                 return result
 
-        hooks = RetryHooks(
-            on_error=decisions.decide, gate=self.env.limiters.get(self.dialect)
-        )
+        timeouts = 0
+
+        def decide(exc: BaseException) -> Decision:
+            nonlocal timeouts
+            decision = decisions.decide(exc)
+            retrying = decision in (Decision.RETRY, Decision.SWITCH_KEY)
+            if not retrying or classify_error(exc) is not ErrorKind.TIMEOUT:
+                return decision
+            timeouts += 1
+            return decision if timeouts < self._timeout_attempts else Decision.FAIL
+
+        hooks = RetryHooks(on_error=decide, gate=self.env.limiters.get(self.dialect))
         return await call_with_retry(
-            one_attempt, policy=self._policy, hooks=hooks, label=label
+            one_attempt,
+            policy=self._policy,
+            hooks=hooks,
+            label=label,
+            validation_errors=(MalformedAnswer,),
         )
 
     def _record(self, usage: Usage | None) -> None:

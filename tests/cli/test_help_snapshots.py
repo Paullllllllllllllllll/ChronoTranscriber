@@ -32,6 +32,9 @@ CASES = {
     "batch-cancel": ("batch", "cancel"),
     "render": ("render",),
     "drop": ("drop",),
+    "classify": ("classify",),
+    "classify-pages": ("classify", "pages"),
+    "classify-documents": ("classify", "documents"),
     "ui": ("ui",),
 }
 

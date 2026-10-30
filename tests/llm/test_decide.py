@@ -82,6 +82,55 @@ def test_pages_go_out_in_groups_downscaled_with_the_document_as_context() -> Non
     assert decider.env.usage.get("decide").input_tokens == 200
 
 
+def test_the_runner_sends_the_pre_pass_request_as_before() -> None:
+    seen: list[dict[str, Any]] = []
+    decider = _decider(_env(pages_per_request=2), seen, "blank")
+    pages = [(4, _jpeg((60, 90))), (5, _jpeg((60, 90))), (6, _jpeg((60, 90)))]
+
+    asyncio.run(decider.classify("doc-1/doc", _stream(pages)))
+
+    first, last = seen
+    assert [part["type"] for part in first["state"]] == [
+        "text",
+        "text",
+        "image_url",
+        "text",
+        "image_url",
+    ]
+    assert [first["state"][i]["text"] for i in (1, 3)] == ["Image 1:", "Image 2:"]
+    assert list(first["questions"]) == ["page_type__01", "page_type__02"]
+    assert "image 2" in first["questions"]["page_type__02"]["instructions"]
+    assert list(last["questions"]) == ["page_type__01"]
+    assert last["state"][1]["text"] == "Image 1:"
+
+
+def test_a_malformed_answer_counts_its_billed_usage() -> None:
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        body = json.loads(request.content)
+        if len(calls) == 1:
+            return httpx.Response(
+                200, json={"answers": {}, "usage": {"input_tokens": 70}}
+            )
+        return httpx.Response(200, json=_answers(body, "blank"))
+
+    env = _env()
+    decider = PageDecider(DecisionSpec("shadow", "typesafe/jev-1.14", None, None), env)
+    decider._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    settings = replace(
+        env.settings, retry=replace(env.settings.retry, validation_attempts=2)
+    )
+    decider.runner.seam = replace(decider.runner.seam, retry=settings.retry)
+
+    decisions = asyncio.run(decider.classify("doc", _stream([(0, _jpeg((60, 90)))])))
+
+    assert [d.page_type for d in decisions] == ["blank"]
+    assert calls == [1, 1]
+    assert env.usage.get("decide").input_tokens == 170
+
+
 def test_a_client_error_follows_the_attempt_decision_and_is_not_retried() -> None:
     calls: list[int] = []
 

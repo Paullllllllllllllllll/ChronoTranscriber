@@ -16,6 +16,7 @@ from chronotranscriber.settings import EXAMPLE_SETTINGS_PATH
 from chronotranscriber.spec import (
     BATCH_CANCEL_OPTIONS,
     BATCH_CHECK_OPTIONS,
+    CLASSIFY_OPTIONS,
     DROP_OPTIONS,
     OPTIONS,
     RENDER_OPTIONS,
@@ -38,6 +39,8 @@ TABLES: dict[str, OptionTable] = {
     "batch cancel": BATCH_CANCEL_OPTIONS,
     "render": RENDER_OPTIONS,
     "drop": DROP_OPTIONS,
+    "classify pages": CLASSIFY_OPTIONS["page"],
+    "classify documents": CLASSIFY_OPTIONS["document"],
     "ui": OPTIONS.subset(("settings",)),
 }
 SHARED_GROUPS = frozenset({"prompt", "model", "images"})
@@ -280,8 +283,10 @@ DRIFT = [
         id="flipped-defaults-column",
     ),
     pytest.param(
-        "| `--recursive`, `--no-recursive` |",
-        "| `--recursive` |",
+        "| `--recursive`, `--no-recursive` | search the subfolders of the input "
+        "folder; only for type audio",
+        "| `--recursive` | search the subfolders of the input folder; only for "
+        "type audio",
         "transcribe: --no-recursive: 0 README rows",
         id="missing-no-form",
     ),

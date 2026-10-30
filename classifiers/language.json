@@ -1,0 +1,30 @@
+{
+  "name": "language",
+  "version": 1,
+  "unit": "page",
+  "description": "The main language of the text on each page: one of the main European languages, Latin, another language, or none.",
+  "per_request": 20,
+  "questions": [
+    {
+      "name": "language",
+      "type": "choice",
+      "instructions": "In which language is most of the text on the page written?",
+      "choices": {
+        "english": "English.",
+        "french": "French.",
+        "german": "German.",
+        "dutch": "Dutch or Flemish.",
+        "italian": "Italian.",
+        "spanish": "Spanish.",
+        "portuguese": "Portuguese.",
+        "swedish": "Swedish.",
+        "danish": "Danish or Norwegian.",
+        "polish": "Polish.",
+        "czech": "Czech.",
+        "latin": "Latin.",
+        "other": "Another language.",
+        "none": "The page carries no text."
+      }
+    }
+  ]
+}

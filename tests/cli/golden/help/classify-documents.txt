@@ -1,0 +1,70 @@
+usage: chronotranscriber classify documents --input PATH --classifier NAME|PATH [options]
+
+Send the classifier's selection of each item's pages (the first 10 by default) in one request and
+record one answer per document and question.
+
+options:
+  -h, --help            show this help message and exit
+
+input:
+  --input PATH          PDF or image folder, or a folder of these
+  --type {auto,pdf,images}
+                        input type; auto takes the PDFs and image folders of the input; default:
+                        auto
+  --files LIST          comma-separated names of files or folders inside the input folder; only
+                        for type images, pdf
+  --select EXPR         select items by number (1,3), range (1-5) or name search
+  --all                 process every discovered item
+  --recursive, --no-recursive
+                        search the subfolders of the input folder; default: off; only for type
+                        images, pdf
+
+output:
+  --output DIR          output folder; default: beside the input
+  --beside-input        write outputs beside each input
+  --layout {hash,mirror}
+                        output folder layout: hash (one hash-suffixed folder per item) or mirror
+                        (the input folder tree); default: hash
+
+classifier:
+  --classifier NAME|PATH
+                        classifier: a file path, a file name in the classifier folder without
+                        .json, or the name field of a classifier there; default: required
+
+decision model:
+  --decision-model ID   decision model id; default: typesafe/jev-1.14
+  --decision-provider {openai,openrouter}
+                        decision API dialect; default: from the model id
+  --decision-endpoint URL
+                        decision endpoint URL; default: the provider's
+
+run control:
+  --force               ask again about every document instead of reusing stored answers
+  --dry-run             plan without API calls or writes
+  --json                print one JSON summary line on stdout
+  --settings FILE       alternate settings file; default: config/settings.yaml
+
+Precedence: a flag wins over the settings defaults: block, which wins over the code default.
+--settings FILE reads another settings file instead of config/settings.yaml.
+
+Exit codes:
+  0    every item was classified, its answers asked or reused; a dry run
+       that planned, also without API keys
+  1    a request failed after its retries, or an item was refused because
+       the store holds its document with another input file
+  2    usage or configuration error: no classifier, a classifier of another
+       unit, no item found, several items without --all, --select or
+       --files, a database the store refuses, or an unset API key variable
+  130  interrupted (Ctrl+C or Ctrl+Break)
+
+With --json, stdout carries exactly one JSON summary line on every exit; progress, warnings and
+errors go to stderr.
+
+Classification only records answers in the store's classifications view; it
+changes no transcription. Answers stored for the same pages, classifier and
+decision model are reused unless --force is given.
+
+Examples:
+  The document type of every item of a folder, as a dry run:
+    chronotranscriber classify documents --input scans --all --output out
+      --classifier document_type --dry-run --json

@@ -1,0 +1,23 @@
+{
+  "name": "document_type",
+  "version": 1,
+  "unit": "document",
+  "description": "The type of each document, judged from its first ten pages.",
+  "selection": {"first_pages": 10},
+  "questions": [
+    {
+      "name": "type",
+      "type": "choice",
+      "instructions": "What type of document are these its first pages of?",
+      "choices": {
+        "printed_book": "A printed book.",
+        "periodical": "A periodical or a newspaper.",
+        "manuscript": "A manuscript or a letter.",
+        "account_book": "An account book or a ledger.",
+        "register": "A register or a list, such as a census, an inventory or a directory.",
+        "form_or_ephemera": "A printed form or ephemera, such as a handbill, a ticket or a menu card.",
+        "other": "Another type of document."
+      }
+    }
+  ]
+}

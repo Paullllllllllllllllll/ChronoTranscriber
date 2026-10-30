@@ -1,8 +1,9 @@
 """Parity between the CLI and the wizard for the seven tasks.
 
-Every option of a task's table must be an argument of its subcommand and must
-be set by some scripted wizard session, through a step that lists it, apart
-from the exemptions below. Each session's printed command, parsed by the real
+Every subcommand is a wizard task or listed in ``NON_WIZARD`` with its
+reason. Every option of a task's table must be an argument of its subcommand
+and must be set by some scripted wizard session, through a step that lists
+it, apart from the exemptions below. Each session's printed command, parsed by the real
 parser and resolved with the settings file it names, must resolve to the spec
 the session's answers resolve to; it must also do so with an empty defaults
 block. The service tier of a provider other than OpenAI is left out of the
@@ -74,6 +75,20 @@ EXEMPT: Final[Mapping[str, str]] = MappingProxyType(
         "wait_hours": "applies with --wait only, which the UI does not offer",
     }
 )
+NON_WIZARD: Final[Mapping[tuple[str, ...], str]] = MappingProxyType(
+    {
+        ("ui",): "the guided UI itself",
+        ("classify", "pages"): (
+            "shadow classification for scripts and agents; the UI offers no "
+            "classify task"
+        ),
+        ("classify", "documents"): (
+            "shadow classification for scripts and agents; the UI offers no "
+            "classify task"
+        ),
+    }
+)
+"""The subcommands without a wizard task, each with the reason."""
 WIDTH: Final = 100
 _MISSING: Final = object()
 
@@ -909,6 +924,31 @@ def test_the_ui_parser_accepts_the_settings_option(tmp_path: Path) -> None:
     path = tmp_path / "other.yaml"
     args = build_parser().parse_args(["ui", "--settings", str(path)])
     assert args.settings == path
+
+
+def _leaf_commands(
+    parser: argparse.ArgumentParser, prefix: tuple[str, ...] = ()
+) -> set[tuple[str, ...]]:
+    """Return the word paths of the subcommands that run, such as batch check."""
+    groups = [
+        action
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+    ]
+    if not groups:
+        return {prefix}
+    return {
+        leaf
+        for name, child in groups[0].choices.items()
+        for leaf in _leaf_commands(child, (*prefix, name))
+    }
+
+
+def test_every_command_is_a_wizard_task_or_exempt() -> None:
+    tasks = {FLOWS[task]().program[1:] for task in FLOWS}
+    assert all(reason.strip() for reason in NON_WIZARD.values())
+    assert not tasks & set(NON_WIZARD)
+    assert _leaf_commands(build_parser()) == tasks | set(NON_WIZARD)
 
 
 def test_the_tasks_are_the_flows() -> None:

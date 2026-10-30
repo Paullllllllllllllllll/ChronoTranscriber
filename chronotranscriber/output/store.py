@@ -3,8 +3,10 @@
 Every output root (the output folder, or the input's folder when writing
 beside the input) holds one ``chronotranscriber.sqlite``. Its core tables come
 from :mod:`chronotranscriber.common.store`; this module adds the tool's
-component: the ``page_types`` table of the decision pre-pass and the views
-below.
+component (the ``page_types`` table of the decision pre-pass and the views
+below) and registers the shared ``classifications`` component of
+:mod:`chronotranscriber.common.classify_store` beside it, whose rows the
+``classify`` commands write.
 
 A document is one input item, named by its rendered output path relative to
 the output root, without suffix (``doc-139d544b/doc``). Its units are:
@@ -55,6 +57,13 @@ them may change between versions, the views stay stable.
     response body as received), ``raw_kind``, ``usage``, ``error``,
     ``http_status`` and ``created_at``.
 
+``classifications``
+    The latest answer per document, unit, classifier and question, as
+    :mod:`chronotranscriber.common.classify_store` documents it. A page row
+    joins ``page_text`` on ``document`` and ``ordinal`` = ``order_index``,
+    whatever method transcribed the page; its ``locator`` is the page-image
+    name, for information. A document row has the locator ``document``.
+
 Open the database read-only and close it after the query, so that a running
 transcription never waits on the reader::
 
@@ -88,6 +97,8 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any, Final
 
+from chronotranscriber.common.classify_store import COMPONENT as CLASSIFICATIONS
+from chronotranscriber.common.classify_store import VIEW as CLASSIFICATIONS_VIEW
 from chronotranscriber.common.native import changed_image_settings
 from chronotranscriber.common.sqlite import read, read_only
 from chronotranscriber.common.store import (
@@ -130,7 +141,7 @@ KIND_CHUNK: Final = "chunk"
 KIND_TEXT: Final = "text"
 UNIT_KINDS: Final = (KIND_PAGE, KIND_CHUNK, KIND_TEXT)
 
-VIEWS: Final = ("page_text", "document_status", "page_attempts")
+VIEWS: Final = ("page_text", "document_status", "page_attempts", CLASSIFICATIONS_VIEW)
 
 _VIEWS_V1 = """
 CREATE VIEW page_text AS
@@ -228,11 +239,21 @@ LEFT JOIN page_types AS pt
 ORDER BY d.name, u.idx, u.kind;
 """
 
-COMPONENT: Final = Component(TOOL, (_VIEWS_V1, _PAGE_TYPES_V2))
-"""The tool's schema component: version 1 adds the views, version 2 the
-``page_types`` table and the ``page_type`` column of ``page_text``."""
 
-_COMPONENTS: Final = (COMPONENT,)
+def _classifications_v3(connection: sqlite3.Connection) -> None:
+    """Change nothing: version 3 marks a store that holds classifications.
+
+    The ``classifications`` component adds the tables; this step makes a
+    tool that knows version 2 only refuse such a store as newer.
+    """
+
+
+COMPONENT: Final = Component(TOOL, (_VIEWS_V1, _PAGE_TYPES_V2, _classifications_v3))
+"""The tool's schema component: version 1 adds the views, version 2 the
+``page_types`` table and the ``page_type`` column of ``page_text``, version 3
+nothing of its own (it comes with the ``classifications`` component)."""
+
+_COMPONENTS: Final = (COMPONENT, CLASSIFICATIONS)
 
 
 def tool_version() -> str:

@@ -37,6 +37,7 @@ __all__ = [
     "Summary",
     "cancel_fields",
     "check_fields",
+    "classify_fields",
     "condition_warnings",
     "drop_fields",
     "guarded",
@@ -223,6 +224,44 @@ def drop_fields(
     }
 
 
+def classify_fields(  # noqa: PLR0913 - one keyword per summary field
+    *,
+    unit: str = "",
+    classifier: str = "",
+    items: int = 0,
+    units_asked: int = 0,
+    units_reused: int = 0,
+    units_failed: int = 0,
+    refused: int = 0,
+    failed: int = 0,
+    usage: Mapping[str, Usage] | None = None,
+) -> dict[str, Any]:
+    """Return the fields of the classify summary.
+
+    *unit* is ``page`` or ``document``; *items* counts the items classified,
+    *refused* and *failed* the items refused (changed input) and failed.
+    *units_asked* counts the units a request of the run answered,
+    *units_reused* those whose stored answers it kept, *units_failed* those
+    left without answers. *usage* holds the tokens per role (``classify``).
+    """
+    return {
+        "command": "classify",
+        "unit": unit,
+        "classifier": classifier,
+        "items_total": items,
+        "units_asked": units_asked,
+        "units_reused": units_reused,
+        "units_failed": units_failed,
+        "items_refused": refused,
+        "items_failed": failed,
+        USAGE_KEY: usage_field(usage),
+    }
+
+
+_CLASSIFY_UNITS = {"pages": "page", "documents": "document"}
+"""The unit of each classify subcommand."""
+
+
 class Summary:
     """The JSON summary line of one command, written at most once.
 
@@ -268,6 +307,9 @@ def summary_for(argv: Sequence[str]) -> Summary:
         return Summary(stream, render_fields(), dry_run=dry_run)
     if words[:1] == ["drop"]:
         return Summary(stream, drop_fields(), dry_run=dry_run)
+    if words[:1] == ["classify"]:
+        unit = _CLASSIFY_UNITS.get(words[1] if len(words) > 1 else "", "")
+        return Summary(stream, classify_fields(unit=unit), dry_run=dry_run)
     return Summary(stream, summary_fields(), dry_run=dry_run)
 
 

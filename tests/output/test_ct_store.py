@@ -23,7 +23,9 @@ import pytest
 
 from chronotranscriber.common.native import image_settings_fingerprint
 from chronotranscriber.common.store import (
+    Component,
     Lease,
+    NewerSchemaError,
     PlannedUnit,
     ResponseRow,
     Store,
@@ -184,7 +186,7 @@ def _query(database: Path, sql: str) -> tuple[tuple[str, ...], list[tuple[Any, .
         connection.close()
 
 
-def test_the_component_adds_the_views_and_page_types_at_version_2(
+def test_the_components_add_the_views_page_types_and_classifications(
     tmp_path: Path,
 ) -> None:
     database = build_store(tmp_path, [page(0)])
@@ -196,8 +198,48 @@ def test_the_component_adds_the_views_and_page_types_at_version_2(
 
     assert database.name == DATABASE_NAME
     assert COMPONENT.name == TOOL
-    assert meta == [("chronotranscriber", 2), ("core", 2)]
+    assert meta == [("chronotranscriber", 3), ("classifications", 1), ("core", 2)]
     assert sorted(name for (name,) in views) == sorted(VIEWS)
+
+
+def test_a_tool_of_component_version_2_refuses_the_upgraded_store(
+    tmp_path: Path,
+) -> None:
+    database = build_store(tmp_path, [page(0)])
+    older = Component(TOOL, COMPONENT.steps[:2])
+
+    with pytest.raises(NewerSchemaError, match="version 3"):
+        Store(database, TOOL, components=(older,)).check()
+
+    async def open_older() -> None:
+        async with Store(database, TOOL, components=(older,)):
+            pass
+
+    with pytest.raises(NewerSchemaError):
+        asyncio.run(open_older())
+
+
+def test_a_version_2_store_upgrades_without_changing_its_rows(tmp_path: Path) -> None:
+    database = database_path(tmp_path)
+    older = Component(TOOL, COMPONENT.steps[:2])
+
+    async def seed() -> None:
+        async with Store(database, TOOL, components=(older,)) as store:
+            await store.begin_run("transcribe")
+            await seed_document(store, [page(0), page(1, "failed")])
+
+    async def upgrade() -> None:
+        async with open_store(tmp_path):
+            pass
+
+    asyncio.run(seed())
+    _, before = _query(database, "SELECT * FROM page_text")
+    asyncio.run(upgrade())
+    _, after = _query(database, "SELECT * FROM page_text")
+    _, meta = _query(database, "SELECT component, version FROM meta ORDER BY 1")
+
+    assert after == before
+    assert meta == [("chronotranscriber", 3), ("classifications", 1), ("core", 2)]
 
 
 def test_page_text_returns_every_unit_in_page_order(tmp_path: Path) -> None:

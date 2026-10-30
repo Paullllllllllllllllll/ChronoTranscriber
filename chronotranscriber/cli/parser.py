@@ -11,6 +11,7 @@ from chronotranscriber.common.options import HelpFormatter, OptionTable
 from chronotranscriber.spec import (
     BATCH_CANCEL_OPTIONS,
     BATCH_CHECK_OPTIONS,
+    CLASSIFY_OPTIONS,
     DROP_OPTIONS,
     OPTIONS,
     RENDER_OPTIONS,
@@ -170,6 +171,50 @@ Examples:
     chronotranscriber drop --input out --select ledger --dry-run
   Drop documents 2 and 3 of the store:
     chronotranscriber drop --input out --select 2,3
+"""
+)
+
+CLASSIFY_EPILOG = (
+    PRECEDENCE
+    + """\
+Exit codes:
+  0    every item was classified, its answers asked or reused; a dry run
+       that planned, also without API keys
+  1    a request failed after its retries, or an item was refused because
+       the store holds its document with another input file
+  2    usage or configuration error: no classifier, a classifier of another
+       unit, no item found, several items without --all, --select or
+       --files, a database the store refuses, or an unset API key variable
+  130  interrupted (Ctrl+C or Ctrl+Break)
+"""
+    + JSON_LINE
+    + """
+Classification only records answers in the store's classifications view; it
+changes no transcription. Answers stored for the same pages, classifier and
+decision model are reused unless --force is given.
+"""
+)
+
+CLASSIFY_PAGES_EPILOG = (
+    CLASSIFY_EPILOG
+    + """
+Examples:
+  The script and hand of every page of one PDF:
+    chronotranscriber classify pages --input book.pdf --output out
+      --classifier script_and_hand
+  The page kinds of the first 20 pages of every item of a folder:
+    chronotranscriber classify pages --input scans --all --output out
+      --classifier page_kind --pages first:20
+"""
+)
+
+CLASSIFY_DOCUMENTS_EPILOG = (
+    CLASSIFY_EPILOG
+    + """
+Examples:
+  The document type of every item of a folder, as a dry run:
+    chronotranscriber classify documents --input scans --all --output out
+      --classifier document_type --dry-run --json
 """
 )
 
@@ -349,6 +394,51 @@ def add_drop_command(commands: Commands) -> argparse.ArgumentParser:
     )
 
 
+def add_classify_command(commands: Commands) -> argparse.ArgumentParser:
+    """Add the classify subcommand with its pages and documents subcommands."""
+    classify: argparse.ArgumentParser = commands.add_parser(
+        "classify",
+        help="record a classifier's answers about pages or documents",
+        description=(
+            "Ask a decision model a classifier's questions about the pages or "
+            "the documents of PDFs and image folders and record the answers "
+            "in the store, without transcribing."
+        ),
+        formatter_class=HelpFormatter,
+    )
+    actions = classify.add_subparsers(
+        dest="classify_command", metavar="COMMAND", title="commands"
+    )
+    _add_command(
+        actions,
+        "pages",
+        CLASSIFY_OPTIONS["page"],
+        help="answer a page classifier about every selected page",
+        description=(
+            "Render the selected pages of each item, ask a classifier of unit "
+            "page about them in groups and record one answer per page and "
+            "question."
+        ),
+        epilog=CLASSIFY_PAGES_EPILOG,
+        usage="%(prog)s --input PATH --classifier NAME|PATH [options]",
+    )
+    _add_command(
+        actions,
+        "documents",
+        CLASSIFY_OPTIONS["document"],
+        help="answer a document classifier about each item",
+        description=(
+            "Send the classifier's selection of each item's pages (the first "
+            "10 by default) in one request and record one answer per document "
+            "and question."
+        ),
+        epilog=CLASSIFY_DOCUMENTS_EPILOG,
+        usage="%(prog)s --input PATH --classifier NAME|PATH [options]",
+    )
+    classify.set_defaults(classify_parser=classify)
+    return classify
+
+
 def add_ui_command(commands: Commands) -> argparse.ArgumentParser:
     """Add the ui subcommand: the settings option and the extension arguments."""
     ui: argparse.ArgumentParser = commands.add_parser(
@@ -369,6 +459,7 @@ SUBCOMMANDS: tuple[Callable[[Commands], argparse.ArgumentParser], ...] = (
     add_batch_command,
     add_render_command,
     add_drop_command,
+    add_classify_command,
     add_ui_command,
 )
 

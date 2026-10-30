@@ -7,6 +7,10 @@ under the same names, so a settings default of those options applies there
 too. Image options left unset take the provider's recommended value
 (:func:`recommended_images`).
 
+The classify tables (:data:`CLASSIFY_OPTIONS`) reuse transcribe's input,
+selection and output rows; there only the output rows and the decision model
+take settings defaults.
+
 A folder with several items needs ``--all``, ``--select`` or ``--files``;
 the three are alternatives (see :func:`chronotranscriber.run.plan`).
 
@@ -65,6 +69,7 @@ from chronotranscriber.common.standard_options import (
     batch_ids_option,
     batch_option,
     check_input_option,
+    classifier_options,
     concurrency_option,
     decision_options,
     dry_run_option,
@@ -91,6 +96,9 @@ __all__ = [
     "AUDIO_API_PROVIDERS",
     "BATCH_CANCEL_OPTIONS",
     "BATCH_CHECK_OPTIONS",
+    "CLASSIFY_OPTIONS",
+    "CLASSIFY_TYPES",
+    "CLASSIFY_UNITS",
     "CONTEXT_AUTO",
     "CONTEXT_NONE",
     "DEFAULT_AUDIO_MODEL",
@@ -124,6 +132,9 @@ __all__ = [
     "AudioSpec",
     "BatchCancelSpec",
     "BatchCheckSpec",
+    "ClassifierSpec",
+    "ClassifyOutput",
+    "ClassifySpec",
     "CommandSpec",
     "ContextChoice",
     "Dpi",
@@ -151,6 +162,7 @@ __all__ = [
     "parse",
     "parse_batch_cancel",
     "parse_batch_check",
+    "parse_classify",
     "parse_drop",
     "parse_render",
     "parse_repair",
@@ -159,6 +171,7 @@ __all__ = [
     "repair_causes",
     "resolve_batch_cancel",
     "resolve_batch_check",
+    "resolve_classify",
     "resolve_drop",
     "resolve_render",
     "resolve_repair",
@@ -185,6 +198,9 @@ DEFAULT_WAIT_HOURS = 50.0
 (Gemini, 48 hours) plus margin."""
 OCR_PRESETS = ("default", "sauvola", "none")
 AUDIO_API_PROVIDERS = ("openai", "google")
+CLASSIFY_UNITS = ("page", "document")
+"""The units of the classify commands: ``classify pages`` and ``documents``."""
+CLASSIFY_TYPES = ("auto", "pdf", "images")
 REPAIR_CAUSES = ("api_error", "not_possible", "no_text", "skipped")
 FAILURE_CAUSES = ("api_error", "not_possible", "no_text")
 """The causes of ``--all-failures``; a skipped page is no failure."""
@@ -518,8 +534,54 @@ class DropSpec:
     json: bool = False
 
 
+@dataclass(frozen=True)
+class ClassifierSpec:
+    """The classifier of a classify command and the decision model it asks.
+
+    ``classifier`` is a path, a file stem in ``classifiers/`` or a
+    classifier name there. ``force`` asks again instead of reusing stored
+    answers. ``provider`` None is resolved from the model id.
+    """
+
+    classifier: str
+    force: bool
+    model: str
+    provider: str | None
+    endpoint: str | None
+
+
+@dataclass(frozen=True)
+class ClassifyOutput:
+    """The output root and layout whose document names classify writes under."""
+
+    directory: Path | None
+    layout: str
+
+
+@dataclass(frozen=True)
+class ClassifySpec:
+    """The options of ``classify pages`` (unit page) or ``classify documents``.
+
+    ``input`` selects the items as for transcribe; ``input.pages`` stays None
+    for documents, whose pages are the classifier's selection.
+    """
+
+    unit: str
+    input: InputSpec
+    output: ClassifyOutput
+    classify: ClassifierSpec
+    dry_run: bool = False
+    json: bool = False
+
+
 type CommandSpec = (
-    RunSpec | RepairSpec | BatchCheckSpec | BatchCancelSpec | RenderSpec | DropSpec
+    RunSpec
+    | RepairSpec
+    | BatchCheckSpec
+    | BatchCancelSpec
+    | RenderSpec
+    | DropSpec
+    | ClassifySpec
 )
 
 
@@ -1195,6 +1257,66 @@ DROP_OPTIONS = OptionTable(
     group_titles={**_GROUP_TITLES, "documents": "documents to drop"},
 )
 
+_CLASSIFY_TYPED = Condition("type", frozenset(CLASSIFY_TYPES) - {"auto"})
+
+_CLASSIFY_FORCE_HELP = {
+    "page": "ask again about every selected page instead of reusing stored answers",
+    "document": "ask again about every document instead of reusing stored answers",
+}
+
+
+def _classify_options(unit: str) -> list[Option]:
+    """Return the rows of ``classify pages`` (unit page) or ``classify documents``.
+
+    The input, selection and output rows are transcribe's, so the items and
+    their document names are the same; only the output rows and the decision
+    model take settings defaults.
+    """
+    rows = [
+        replace(
+            OPTIONS["input"],
+            help="PDF or image folder, or a folder of these",
+        ),
+        Option(
+            "type",
+            "--type",
+            "input type; auto takes the PDFs and image folders of the input",
+            group="input",
+            choices=CLASSIFY_TYPES,
+            default="auto",
+            target="input.type",
+            settable=False,
+        ),
+        replace(OPTIONS["files"], condition=_CLASSIFY_TYPED),
+        replace(OPTIONS["select"], settable=False),
+        replace(OPTIONS["all"], settable=False),
+        replace(OPTIONS["recursive"], condition=_CLASSIFY_TYPED, settable=False),
+    ]
+    if unit == "page":
+        rows.append(
+            replace(
+                OPTIONS["pages"],
+                help="pages or images: 5, first:5, last:5, 3-7, 3-, -7 or 1,3,5-8",
+            )
+        )
+    rows += [OPTIONS["output"], OPTIONS["beside_input"], OPTIONS["layout"]]
+    classifier, force, *model = classifier_options(
+        force_help=_CLASSIFY_FORCE_HELP[unit]
+    )
+    rows += [classifier, *model, force]
+    rows += [dry_run_option("dry_run"), json_option("json"), settings_option()]
+    return rows
+
+
+CLASSIFY_OPTIONS: Mapping[str, OptionTable] = {
+    unit: OptionTable(
+        _classify_options(unit),
+        group_titles={**_GROUP_TITLES, "classify": "classifier"},
+    )
+    for unit in CLASSIFY_UNITS
+}
+"""The tables of ``classify pages`` and ``classify documents``, by unit."""
+
 
 def _parse_table(table: OptionTable, argv: Sequence[str]) -> dict[str, Any]:
     """Parse *argv* with *table*; argparse exits with status 2 on errors."""
@@ -1583,6 +1705,48 @@ def resolve_drop(flags: Mapping[str, Any]) -> Resolution[DropSpec]:
     return Resolution(DropSpec(**values), sources)
 
 
+def resolve_classify(
+    unit: str, flags: Mapping[str, Any], defaults: Mapping[str, Any] | None = None
+) -> Resolution[ClassifySpec]:
+    """Resolve the options of ``classify pages`` (*unit* page) or ``documents``.
+
+    The output options and the decision model take settings defaults.
+
+    Raises:
+        SpecError: No input path, no classifier, or ``--files`` with
+            ``--type auto``.
+    """
+    table = CLASSIFY_OPTIONS[unit]
+    resolved = _resolve_table(table, flags, defaults)
+    values, sources = table.by_targets(resolved)
+    if values["input.path"] is None:
+        raise SpecError("an input path is required (--input PATH)")
+    if values["classify.classifier"] is None:
+        raise SpecError("a classifier is required (--classifier NAME|PATH)")
+    if values["input.type"] == "auto" and values["input.files"]:
+        raise SpecError(
+            "--files selects items of one input type; set --type pdf or images, "
+            "or use --select or --all"
+        )
+    spec = ClassifySpec(
+        unit=unit,
+        input=InputSpec(**{"pages": None, **_part(values, "input")}),
+        output=ClassifyOutput(**_part(values, "output")),
+        classify=ClassifierSpec(**_part(values, "classify")),
+        dry_run=values["dry_run"],
+        json=values["json"],
+    )
+    return Resolution(spec, sources)
+
+
+def parse_classify(
+    unit: str, argv: Sequence[str], defaults: Mapping[str, Any] | None = None
+) -> ClassifySpec:
+    """Parse classify arguments; argparse exits with status 2 on errors."""
+    table = CLASSIFY_OPTIONS[unit]
+    return resolve_classify(unit, _parse_table(table, argv), defaults).spec
+
+
 def parse(argv: Sequence[str], defaults: Mapping[str, Any] | None = None) -> RunSpec:
     """Parse transcribe arguments; argparse exits with status 2 on errors."""
     return resolve_spec(_parse_table(OPTIONS, argv), defaults).spec
@@ -1768,7 +1932,10 @@ def to_argv(spec: CommandSpec, defaults: Mapping[str, Any] | None = None) -> lis
         return _transcribe_argv(spec, _applicable(OPTIONS, defaults))
     if isinstance(spec, RepairSpec):
         return _repair_argv(spec, _applicable(REPAIR_OPTIONS, defaults))
-    table = _TABLES[type(spec)]
+    if isinstance(spec, ClassifySpec):
+        table = CLASSIFY_OPTIONS[spec.unit]
+    else:
+        table = _TABLES[type(spec)]
     given = _spell_values(table, _flatten(spec), _applicable(table, defaults))
     return _argv(table, given)
 

@@ -1,0 +1,22 @@
+{
+  "name": "script_and_hand",
+  "version": 1,
+  "unit": "page",
+  "description": "Whether each page is printed in roman, italic or blackletter type, written by hand, a mixture, or without text.",
+  "per_request": 20,
+  "questions": [
+    {
+      "name": "script",
+      "type": "choice",
+      "instructions": "Which script or hand does most of the text on the page use?",
+      "choices": {
+        "printed_roman": "Printed in roman (upright antiqua) type.",
+        "printed_italic": "Printed in italic type.",
+        "blackletter": "Printed in blackletter type, such as Fraktur, textura or schwabacher.",
+        "handwritten": "Written by hand.",
+        "mixed": "Two or more of these, each in a substantial part of the page.",
+        "no_text": "The page carries no text."
+      }
+    }
+  ]
+}

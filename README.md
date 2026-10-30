@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.1.3
+# ChronoTranscriber v1.2.0
 
 ChronoTranscriber transcribes PDFs, folders of page images, EPUB and MOBI ebooks
 and audio recordings. Scanned pages go to a vision-language model or to local
@@ -57,6 +57,7 @@ uv run chronotranscriber transcribe --input scans --select 1-3 --output out
 uv run chronotranscriber transcribe --input pages --type images --method tesseract
 uv run chronotranscriber transcribe --input talk.mp3 --type audio --method whisper
 uv run chronotranscriber transcribe --input scans --all --dry-run --json
+uv run chronotranscriber classify pages --input book.pdf --output out --classifier layout
 uv run chronotranscriber ui
 ```
 
@@ -227,6 +228,61 @@ and an entry that names two documents is refused.
 | `--dry-run` | plan without API calls or writes | | no |
 | `--json` | print one JSON summary line on stdout | | no |
 
+### classify pages
+
+`classify pages` and `classify documents` find and number the items of the
+input as `transcribe` does and skip, with a warning, a selected EPUB or MOBI
+item. An item takes the name of the stored document whose recorded input path
+is the item, else the name `transcribe` would give it under `--output` and
+`--layout`. `--classifier` is required; [Classifiers](#classifiers) describes
+the files.
+
+| Flag | Description | Default | In `defaults:` |
+| --- | --- | --- | --- |
+| `--input PATH` | PDF or image folder, or a folder of these | | no |
+| `--type {auto,pdf,images}` | input type; auto takes the PDFs and image folders of the input | auto | no |
+| `--files LIST` | comma-separated names of files or folders inside the input folder; only for type images, pdf | | no |
+| `--select EXPR` | select items by number (1,3), range (1-5) or name search | | no |
+| `--all` | process every discovered item | | no |
+| `--recursive`, `--no-recursive` | search the subfolders of the input folder; only for type images, pdf | off | no |
+| `--pages RANGE` | pages or images: 5, first:5, last:5, 3-7, 3-, -7 or 1,3,5-8 | all | no |
+| `--output DIR` | output folder | beside the input | yes |
+| `--beside-input` | write outputs beside each input | | no |
+| `--layout {hash,mirror}` | output folder layout: hash (one hash-suffixed folder per item) or mirror (the input folder tree) | hash | yes |
+| `--classifier NAME\|PATH` | classifier: a file path, a file name in the classifier folder without .json, or the name field of a classifier there | required | no |
+| `--decision-model ID` | decision model id | typesafe/jev-1.14 | yes |
+| `--decision-provider {openai,openrouter}` | decision API dialect | from the model id | yes |
+| `--decision-endpoint URL` | decision endpoint URL | the provider's | yes |
+| `--force` | ask again about every selected page instead of reusing stored answers | | no |
+| `--dry-run` | plan without API calls or writes | | no |
+| `--json` | print one JSON summary line on stdout | | no |
+| `--settings FILE` | alternate settings file | config/settings.yaml | no |
+
+### classify documents
+
+`classify documents` takes the options of `classify pages` except `--pages`:
+the pages it sends are the classifier's selection.
+
+| Flag | Description | Default | In `defaults:` |
+| --- | --- | --- | --- |
+| `--input PATH` | PDF or image folder, or a folder of these | | no |
+| `--type {auto,pdf,images}` | input type; auto takes the PDFs and image folders of the input | auto | no |
+| `--files LIST` | comma-separated names of files or folders inside the input folder; only for type images, pdf | | no |
+| `--select EXPR` | select items by number (1,3), range (1-5) or name search | | no |
+| `--all` | process every discovered item | | no |
+| `--recursive`, `--no-recursive` | search the subfolders of the input folder; only for type images, pdf | off | no |
+| `--output DIR` | output folder | beside the input | yes |
+| `--beside-input` | write outputs beside each input | | no |
+| `--layout {hash,mirror}` | output folder layout: hash (one hash-suffixed folder per item) or mirror (the input folder tree) | hash | yes |
+| `--classifier NAME\|PATH` | classifier: a file path, a file name in the classifier folder without .json, or the name field of a classifier there | required | no |
+| `--decision-model ID` | decision model id | typesafe/jev-1.14 | yes |
+| `--decision-provider {openai,openrouter}` | decision API dialect | from the model id | yes |
+| `--decision-endpoint URL` | decision endpoint URL | the provider's | yes |
+| `--force` | ask again about every document instead of reusing stored answers | | no |
+| `--dry-run` | plan without API calls or writes | | no |
+| `--json` | print one JSON summary line on stdout | | no |
+| `--settings FILE` | alternate settings file | config/settings.yaml | no |
+
 ### ui
 
 | Flag | Description | Default | In `defaults:` |
@@ -238,8 +294,8 @@ and an entry that names two documents is refused.
 | Code | Meaning |
 | --- | --- |
 | 0 | every item completed or, under `--batch`, was submitted, or nothing was left to do; a dry run that planned, also without API keys |
-| 1 | an item failed (refused items included), another run leases an item (the final message names each blocked item with its reason and a lease with its expiry; an item waiting for a batch is named but does not change the exit code), a repaired page stayed unrepaired, a batch failed or waits unresolved, `batch check --wait` reached `--wait-hours` with work pending, a cancellation failed, a file could not be rendered, `drop` refused a document, or an unexpected error |
-| 2 | usage or configuration error: invalid flags or settings, an unset API key variable (except in a dry run), a provider without a batch API under `--batch`, no items in the input, several items without `--all`, `--select` or `--files`, two items that would share one output file (`book.pdf` and `book.epub` beside the input), a `--select` that matches nothing, `repair --indices` with several documents, a `drop` selection that names no stored document, a missing input path or store, a database that is not a ChronoTranscriber store, newer than the tool or unreadable |
+| 1 | an item failed (refused items included), a classify request failed or a classify item was refused for a changed input, another run leases an item (the final message names each blocked item with its reason and a lease with its expiry; an item waiting for a batch is named but does not change the exit code), a repaired page stayed unrepaired, a batch failed or waits unresolved, `batch check --wait` reached `--wait-hours` with work pending, a cancellation failed, a file could not be rendered, `drop` refused a document, or an unexpected error |
+| 2 | usage or configuration error: invalid flags or settings, an unset API key variable (except in a dry run), a provider without a batch API under `--batch`, no items in the input, several items without `--all`, `--select` or `--files`, two items that would share one output file (`book.pdf` and `book.epub` beside the input), a `--select` that matches nothing, `repair --indices` with several documents, a `drop` selection that names no stored document, a classifier that is missing, invalid or of another unit, a missing input path or store, a database that is not a ChronoTranscriber store, newer than the tool or unreadable |
 | 130 | interrupted (Ctrl+C, or Ctrl+Break on Windows) |
 
 An interrupted `transcribe` run releases its leases, so a rerun right away
@@ -263,6 +319,7 @@ every exit path, zero where nothing ran, unless stated otherwise.
 | `batch cancel` | `command` (`cancel_batches`), `cancelled`, `failed` |
 | `render` | `command` (`render`), `databases`, `documents`, `written`, `unchanged`, `kept`, `stale`, `skipped`, `outputs` |
 | `drop` | `command` (`drop`), `dropped`, `refused`, `deleted_files`, `kept_files` |
+| `classify pages`, `classify documents` | `command` (`classify`), `unit` (`page` or `document`), `classifier`, `items_total`, `units_asked`, `units_reused`, `units_failed`, `items_refused`, `items_failed`, `usage` |
 
 For `transcribe`, `items_total` counts the items processed (on a plan error, the
 items the run would have processed), `items_skipped` the complete, unstored and
@@ -304,6 +361,16 @@ deleted, `refused` lists each document left in place with its `doc_id`, `name`
 and `reason`, `deleted_files` the rendered files deleted and `kept_files` each
 file left in place with its `path` and `reason`; a dry run lists what a drop
 would do.
+
+For `classify`, `classifier` is the classifier's `name` (empty before it
+resolved), `items_total` counts the items classified, `units_asked` the pages or
+documents a request of the run answered, `units_reused` those whose stored
+answers it kept, `units_failed` those left without answers, `items_refused` the
+items whose stored document records another input file and `items_failed` the
+items with a failed request. `usage` holds the tokens of the decision calls under
+`classify`. A dry run adds `to_classify` (each item's `name`, `type`, `document`,
+`units` and the most `requests` it sends), `refused` (`name` and `reason`) and
+`spec`.
 
 When the environment variable `CHRONO_HEARTBEAT_FILE` names a file, `transcribe`
 and `batch check --wait` also write their progress there as one JSON object for a
@@ -616,6 +683,65 @@ profile and image settings) to the threshold, and `apply` without an entry for
 the run's fingerprint records only and names the fingerprint in a warning.
 `repair --skipped` transcribes skipped pages.
 
+## Classifiers
+
+A classifier is a JSON file of questions that a decision model answers about
+each unit. `classify pages` takes classifiers of unit `page` and asks about
+every selected page of a PDF or image folder; `classify documents` takes unit
+`document` and sends the classifier's `selection` of each item, by default its
+first 10 pages, in one request per item, so its answers describe the item as a
+whole.
+
+```json
+{
+  "name": "front_matter",
+  "version": 1,
+  "unit": "page",
+  "description": "Find the title page.",
+  "per_request": 10,
+  "questions": [
+    {"name": "title", "type": "predicate",
+     "instructions": "The page is the book's title page."},
+    {"name": "script", "type": "choice", "instructions": "Which script?",
+     "choices": {"roman": "Roman type.", "blackletter": null}}
+  ]
+}
+```
+
+A question is a `predicate` (the probability that its instructions hold), a
+`choice` (one of `choices`, each value with an optional description), a `score`
+(the expected level of `levels`, lowest first) or `page_types` (the page types of
+the decision pre-pass under a `profile`, page units only). `per_request` (default
+
+1) groups up to that many pages into one request, at most 20 images; a document
+classifier sets `selection.first_pages` (at most 20). `--classifier` takes a path,
+else the stem of a file in the repository's `classifiers/` folder, else the `name`
+of a classifier there. The repository ships `page_kind` (the general page types),
+`script_and_hand` (printed roman, printed italic, blackletter, handwritten, mixed
+or no text), `language` (the main European languages and Latin, other, or none),
+`layout` (single column, multi-column, table or list, structured, or no text; its
+description names the schema that suits each) and `document_type` (printed book,
+periodical, manuscript or letter, account book, register or list, printed form or
+ephemera, or other).
+
+Pages are rendered as `transcribe` renders them for the default model, then
+downscaled to `decisions.image_max_px` and sent with the document name as
+context, through the decision model and key variable of the
+[decision pre-pass](#decision-pre-pass). Classification is shadow only: it
+appends the answers to the store's `classifications` view, creates no document
+or unit and changes no transcription. Each answer records the input identity:
+a file's SHA-256, or for an image folder a digest of its image names and their
+SHA-256s; a rerun on a changed input flags the answers of the old version stale.
+Image-folder answers describe the folder as classified, so classify a folder
+again after changing it.
+A rerun reuses the stored answers of a request whose pages, classifier, decision
+model and image settings are unchanged and records them again under the new
+run, at the pages' current positions; `--force` asks again. A `--pages` range
+that selects no page fails the item, and a document whose selected pages do not
+all render is not asked and counts as failed. An item whose document the store
+holds with another input file is refused (exit 1) until the changed file is
+transcribed; a document dropped while a run classifies it fails the item.
+
 ## Audio
 
 Audio files are MP3, WAV, M4A, MP4, MPGA, MPEG, WebM, FLAC, OGG, AAC or AIFF;
@@ -675,6 +801,7 @@ documented views, which stay stable; the tables behind them may change.
 | `page_text` | unit, by document and position | `document`, `kind`, `page_index`, `image_name`, `order_index`, `text`, `status`, `model`, `usage`, `outcome`, `error`, `provider`, `run_id`, `page_type` |
 | `document_status` | document | `document`, `kind`, `input_path`, `status`, `units_total`, `units_done`, `units_failed`, `units_pending`, `last_run_id`, `updated_at` |
 | `page_attempts` | provider attempt, in order | `document`, `kind`, `order_index`, `response_id`, `run_id`, `provider`, `model`, `attempt`, `submission_id`, `custom_id`, `raw`, `raw_kind`, `usage`, `error`, `http_status`, `created_at` |
+| `classifications` | latest answer per document, unit, classifier and question | `document`, `doc_id`, `unit`, `locator`, `ordinal`, `input_sha256`, `content_sha256`, `request_sha256`, `classifier`, `classifier_version`, `classifier_sha256`, `question`, `kind`, `value`, `probability`, `probabilities`, `refusal`, `model`, `dialect`, `fingerprint`, `run_id`, `created_at`, `reused` |
 
 A document is named by its rendered path relative to the output root, without
 suffix (`book-1a2b3c4d/book`). In `page_text`, `kind` is `page`, `chunk` or `text`
@@ -684,10 +811,18 @@ suffix (`book-1a2b3c4d/book`). In `page_text`, `kind` is `page`, `chunk` or `tex
 type the decision pre-pass gave a page unit (null without one), and `usage` JSON
 token counts (`input_tokens`, `output_tokens`,
 `total_tokens`, `cached_tokens`, `reasoning_tokens`, in synchronous and batch
-rows alike). The `error` columns keep the first 2,000 characters of an error
-text; `raw` in `page_attempts` holds the response body as received. Open the
-database read-only and close it after the query, so a running transcription never
-waits on the reader:
+rows alike). A page answer in `classifications` joins `page_text` on `document`
+and `ordinal` = `order_index`, the page's 0-based position whatever method
+transcribed it; its `locator` is the page-image name, for information, and a
+document answer has the locator `document`; `value` is the chosen value of a
+choice or the expected 0-based level of a score, `probability` that of a
+predicate or of the chosen value, and `probabilities` a JSON object by value or
+level. The view shows the answers of each unit's latest classifier revision and
+leaves out those whose document now records another input file. The `error`
+columns keep the first 2,000 characters of an error text; `raw` in
+`page_attempts` holds the response body as received. Open the database
+read-only and close it after the query, so a running transcription never waits
+on the reader:
 
 ```python
 import sqlite3
@@ -816,6 +951,7 @@ chronotranscriber/
   spec.py       run specifications and the option tables
   settings.py   typed settings: machine values and the defaults block
   run.py        core: discover, plan, run
+  classify.py   core of classify pages and classify documents
   events.py     run events reported to the front ends
   ext.py        extension seam with pass-through defaults
   providers.py  provider names and inference from model names
@@ -830,6 +966,7 @@ chronotranscriber/
   output/       store views, resume classification, renderers, drop, paths
   resources/    prompts and the settings example
 schemas/        public transcription schemas
+classifiers/    public classifiers of the classify commands
 context/        default transcription context
 ```
 
@@ -876,7 +1013,9 @@ API have fakes. After an intended change, rewrite the golden files with
 The tables of the Command Reference mirror the option tables in
 `chronotranscriber/spec.py`; `tests/cli/test_readme_options.py` fails when the two
 differ. A new option needs an option-table entry and a wizard step
-that sets it; `tests/ui/test_parity.py` enforces the step.
+that sets it; `tests/ui/test_parity.py` enforces the step, except for the
+commands it lists without a wizard task (`classify pages` and `classify
+documents`).
 
 Evaluation data for a subset of historical sources (ground-truth transcriptions and
 benchmark runs) is available from the author upon request.

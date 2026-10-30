@@ -1,5 +1,27 @@
 # Changelog
 
+- **v1.2.0** (30 October 2026) -- `classify pages` and `classify documents`
+  ask a decision model the questions of a classifier file about the pages of
+  PDFs and image folders, or about each item from its first pages, and record
+  the answers without transcribing or gating anything. The commands select
+  items as `transcribe` does, take the name of the stored document of the same
+  input path, join `page_text` on the page's ordinal, reuse the stored answers
+  of an unchanged request unless `--force` is given, flag the answers of a
+  changed input (a file's SHA-256 or an image folder's digest) stale, refuse an
+  item whose stored document records another input file, and report the asked, reused and
+  failed units with their `classify` usage in the JSON summary. Five public
+  classifiers ship in `classifiers/` (`page_kind`, `script_and_hand`,
+  `language`, `layout`, `document_type`). The answers land in the new
+  `classifications` view of the store, whose component registers beside the
+  tool's own; that component steps to version 3, so earlier releases refuse an
+  upgraded store. The vendored common package gains the shared classification
+  core: classifier files (`classifiers.py`), request planning and the decision
+  runner (`decision_runner.py`), the `classifications` store component
+  (`classify_store.py`), `images.decision_jpeg`, `store.write_unleased` and the
+  shared classify options. The page-type pre-pass of `--decisions` runs on the
+  shared runner and sends the same requests as before; as a deliberate change,
+  it now counts the billed usage of a malformed answer, which the earlier pass
+  dropped.
 - **v1.1.3** (29 October 2026) -- The Pillow requirement is raised to
   13.0, the first release that fixes the FlashPix, TIFF-writer and
   multi-frame loader advisories, so that no install resolves a vulnerable

@@ -1,0 +1,10 @@
+{
+  "name": "page_kind",
+  "version": 1,
+  "unit": "page",
+  "description": "The kind of each page, from the general page types of the decision pre-pass: binding, blank, scan target, library mark, handwritten, half title, title page, illustration, preface or dedication, privilege or approval, contents or index, section title, body text, table or chart, errata, advertisement, colophon or other.",
+  "per_request": 20,
+  "questions": [
+    {"name": "kind", "type": "page_types", "profile": "general"}
+  ]
+}

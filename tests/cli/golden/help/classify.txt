@@ -1,0 +1,12 @@
+usage: chronotranscriber classify [-h] COMMAND ...
+
+Ask a decision model a classifier's questions about the pages or the documents of PDFs and image
+folders and record the answers in the store, without transcribing.
+
+options:
+  -h, --help   show this help message and exit
+
+commands:
+  COMMAND
+    pages      answer a page classifier about every selected page
+    documents  answer a document classifier about each item

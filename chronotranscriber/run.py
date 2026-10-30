@@ -119,7 +119,7 @@ from chronotranscriber.sources.audio import chunk_settings, describe_chunks
 from chronotranscriber.sources.audio.ffmpeg import configure_ffmpeg_executables
 from chronotranscriber.sources.auto import decide, file_item, scan
 from chronotranscriber.sources.images import resolve_image_settings
-from chronotranscriber.spec import RunSpec, effective_spec
+from chronotranscriber.spec import InputSpec, RunSpec, effective_spec
 
 __all__ = [
     "BUSY_TIMEOUT",
@@ -136,7 +136,9 @@ __all__ = [
     "RunResult",
     "SelectionError",
     "StoreRefusedError",
+    "choose_items",
     "discover",
+    "item_location",
     "plan",
     "run",
     "selection_order",
@@ -509,8 +511,8 @@ def selection_order(items: Sequence[SourceItem]) -> list[SourceItem]:
     return sorted(items, key=lambda item: natural_sort_key(item.path.as_posix()))
 
 
-def _select(
-    items: list[SourceItem], spec: RunSpec, input_path: Path
+def choose_items(
+    items: list[SourceItem], selection: InputSpec, input_path: Path
 ) -> tuple[list[SourceItem], list[str]]:
     """Apply ``--all``, ``--select`` or ``--files``; one item needs none.
 
@@ -522,7 +524,6 @@ def _select(
         SelectionError: ``--select`` matched no item.
         AmbiguousSelectionError: Several items and no selection.
     """
-    selection = spec.input
     if selection.all or selection.files:
         return items, []
     if selection.select:
@@ -543,7 +544,7 @@ def _select(
         return picked, warnings
     if len(items) == 1:
         return items, []
-    if spec.input.type == "auto":
+    if selection.type == "auto":
         # plan() refuses --files in auto mode, so the hint names only the
         # two selections that work here.
         raise AmbiguousSelectionError(
@@ -708,6 +709,31 @@ def _chunk_notes(
     ]
 
 
+def item_location(
+    item: SourceItem,
+    *,
+    output_dir: Path | None,
+    layout: str,
+    input_root: Path,
+    output_format: str = "txt",
+) -> tuple[Path, str, Path]:
+    """Return the output root, document name and output path of *item*.
+
+    *output_dir* None writes beside the input; the document name does not
+    depend on *output_format*, the suffix of the returned output path.
+    """
+    output = item_paths(
+        item.path,
+        output_dir=output_dir,
+        layout=layout,
+        input_root=input_root,
+        output_format=output_format,
+        mirror=item.type not in _EBOOKS,
+    ).output
+    root = output_dir if output_dir is not None else item.path.parent
+    return root, document_name(output, root), output
+
+
 @dataclass(frozen=True)
 class _Classifier:
     """Classifies the items of one plan from the stores of their roots.
@@ -722,16 +748,13 @@ class _Classifier:
 
     def locate(self, item: SourceItem) -> tuple[Path, str, Path]:
         """Return the output root, document name and output path of *item*."""
-        output = item_paths(
-            item.path,
+        return item_location(
+            item,
             output_dir=self.output_dir,
             layout=self.spec.output.layout,
             input_root=self.input_root,
             output_format=text_formats(self.spec.output.formats)[0],
-            mirror=item.type not in _EBOOKS,
-        ).output
-        root = self.output_dir if self.output_dir is not None else item.path.parent
-        return root, document_name(output, root), output
+        )
 
     def planned(self, item: SourceItem, method: str) -> PlannedItem:
         """Return *item* planned with its resume state; write nothing.
@@ -826,7 +849,7 @@ def plan(
     input_path = _input_path(spec)
     logger.info("Input=%s, Output=%s", input_path, output_dir or "beside input")
     found, warnings = _discover(spec, input_path)
-    discovered, notes = _select(found, spec, input_path)
+    discovered, notes = choose_items(found, spec.input, input_path)
     warnings += notes
 
     image = _image(spec, settings, discovered)

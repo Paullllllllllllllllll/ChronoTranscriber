@@ -23,13 +23,19 @@ _HANDLERS: dict[tuple[str, ...], tuple[str, str]] = {
     ("batch", "cancel"): ("chronotranscriber.cli.batch", "execute_cancel"),
     ("render",): ("chronotranscriber.cli.store", "execute_render"),
     ("drop",): ("chronotranscriber.cli.store", "execute_drop"),
+    ("classify", "pages"): ("chronotranscriber.cli.classify", "execute_pages"),
+    ("classify", "documents"): ("chronotranscriber.cli.classify", "execute_documents"),
     ("ui",): ("chronotranscriber.ui.app", "execute"),
 }
 
+_GROUPS = ("batch", "classify")
+"""The subcommands that hold subcommands of their own."""
+
 
 def _command(namespace: argparse.Namespace) -> tuple[str, ...]:
-    if namespace.command == "batch":
-        return ("batch", namespace.batch_command or "")
+    if namespace.command in _GROUPS:
+        action = getattr(namespace, f"{namespace.command}_command", None)
+        return (namespace.command, action or "")
     return (namespace.command or "",)
 
 
@@ -49,7 +55,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return report_usage_error(error, args)
     handler = _HANDLERS.get(_command(namespace))
     if handler is None:
-        help_parser = getattr(namespace, "batch_parser", None) or parser
+        help_parser = getattr(namespace, f"{namespace.command}_parser", None) or parser
         help_parser.print_help()
         return 0
     module_name, function = handler

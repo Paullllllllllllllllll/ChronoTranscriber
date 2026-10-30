@@ -18,6 +18,8 @@ PROVIDER_COMMANDS = (
     ("repair",),
     ("batch", "check"),
     ("batch", "cancel"),
+    ("classify", "pages"),
+    ("classify", "documents"),
     ("ui",),
 )
 OFFLINE_COMMANDS = (("render",), ("drop",))

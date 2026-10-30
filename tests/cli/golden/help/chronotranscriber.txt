@@ -13,6 +13,7 @@ commands:
     batch       check, finalize or cancel batch submissions
     render      render the txt and md views from the store again
     drop        remove documents from the store, to transcribe them from scratch
+    classify    record a classifier's answers about pages or documents
     ui          guided run in an interactive terminal
 
 Run 'chronotranscriber <command> --help' for the options of a command.

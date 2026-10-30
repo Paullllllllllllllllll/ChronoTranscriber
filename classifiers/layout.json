@@ -1,0 +1,21 @@
+{
+  "name": "layout",
+  "version": 1,
+  "unit": "page",
+  "description": "The layout of each page. Structured pages and tables or lists suit the schema markdown_transcription_schema, which keeps headings, marginalia and table rows; single-column and multi-column prose suit plain_text_transcription_schema.",
+  "per_request": 20,
+  "questions": [
+    {
+      "name": "layout",
+      "type": "choice",
+      "instructions": "How is the text on the page laid out?",
+      "choices": {
+        "single_column": "One column of running prose.",
+        "multi_column": "Two or more columns of running prose.",
+        "table_or_list": "A table, or a list of entries such as an index, a register or accounts.",
+        "structured": "Prose structured by headings, marginalia, footnotes or numbered sections.",
+        "no_text": "The page carries no text."
+      }
+    }
+  ]
+}

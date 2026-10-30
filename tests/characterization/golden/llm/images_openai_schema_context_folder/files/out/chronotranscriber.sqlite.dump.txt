@@ -20,6 +20,7 @@
   "sha256": "<sha256>",
   "text": "Folder context: scanned pages of a bakers' guild register."
 }
+## classification_rows
 ## documents
 {
   "doc_id": 1,
@@ -69,7 +70,11 @@
 ## meta
 {
   "component": "chronotranscriber",
-  "version": 2
+  "version": 3
+}
+{
+  "component": "classifications",
+  "version": 1
 }
 {
   "component": "core",

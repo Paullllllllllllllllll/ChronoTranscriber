@@ -1,5 +1,12 @@
 # Changelog
 
+- **v1.2.3** (30 October 2026) -- A complete document no longer takes a
+  requested file the store holds no record of as current: such a file is
+  rendered, so the overwrite guard records it when it matches the rendering and
+  otherwise keeps it with the warning about a file changed outside the tool.
+  Earlier the run skipped it silently. `set_units_stale` in the shared
+  `common/store.py` also marks the document's rendered files stale when it
+  flags a unit.
 - **v1.2.2** (30 October 2026) -- A rendered file no longer stays current after
   a later run changes the units it was rendered from. Each write that creates,
   writes, resets or deletes a document's units, and the abandonment of a batch

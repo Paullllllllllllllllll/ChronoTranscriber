@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.2.2
+# ChronoTranscriber v1.2.3
 
 ChronoTranscriber transcribes PDFs, folders of page images, EPUB and MOBI ebooks
 and audio recordings. Scanned pages go to a vision-language model or to local
@@ -936,7 +936,7 @@ Resume is the default and reads only the store; a dry run shows each item's stat
 | --- | --- | --- |
 | `none` | no stored units | transcribe from the start |
 | `partial` | units are pending or failed (failed ones not under `--no-retry-errors`) | transcribe those units |
-| `complete` | no pending or failed units (failed units count as done under `--no-retry-errors`) | skip; missing or stale files are rendered again without calls (a run that writes units marks every rendered file of the document stale and renders only its own formats) |
+| `complete` | no pending or failed units (failed units count as done under `--no-retry-errors`) | skip; missing or stale files are rendered again without calls (a run that writes units marks every rendered file of the document stale and renders only its own formats; a file the store holds no record of counts as stale) |
 | `unstored` | a rendered file exists without store rows, such as a hand-edited file `drop` kept | skip and list; `--force` redoes it |
 | `blocked` | another live run holds the item, or its pages wait for a batch | skip; a held item makes the run exit 1 |
 | `refused` | the input changed since it was transcribed, its identity cannot be computed, or units remain but the stored pages used other image settings | not processed, counted as failed; `--force` starts it over, except for an unreadable input |

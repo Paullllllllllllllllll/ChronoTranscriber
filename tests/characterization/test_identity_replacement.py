@@ -228,6 +228,21 @@ def test_a_format_rendered_before_later_pages_is_rendered_again(
     assert _query(tmp_path, "SELECT stale FROM outputs") == [(0,), (0,)]
 
 
+def test_an_unregistered_file_at_an_output_path_is_not_taken_as_current(
+    tmp_path: Path, transcribe: Callable[..., RunResult]
+) -> None:
+    pdf = make_born_digital_pdf(tmp_path / "docs" / "book.pdf", 3)
+    first = _native(transcribe, pdf, formats="txt")
+    assert first.exit_code == 0, first.stderr
+    markdown = first.output(pdf).with_suffix(".md")
+    markdown.write_text("notes of my own\n", encoding="utf-8")
+
+    again = _native(transcribe, pdf, formats="md")
+
+    assert "changed outside the tool" in again.stderr
+    assert markdown.read_text(encoding="utf-8") == "notes of my own\n"
+
+
 def _as_partial(root: Path) -> None:
     _execute(
         root,

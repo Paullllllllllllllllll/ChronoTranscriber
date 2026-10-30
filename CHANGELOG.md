@@ -1,5 +1,14 @@
 # Changelog
 
+- **v1.2.2** (30 October 2026) -- A rendered file no longer stays current after
+  a later run changes the units it was rendered from. Each write that creates,
+  writes, resets or deletes a document's units, and the abandonment of a batch
+  submission that holds them, marks every rendered file of the document stale
+  in the same transaction, and rendering clears the flag of each file it
+  records. Earlier, a format rendered by a partial run (`--pages 1 --formats
+  txt`) stayed current after a run in another format completed the document,
+  so a later `--formats txt` run kept the incomplete file. The change is in the
+  shared `common/store.py`, which ChronoMiner and AutoExcerpter vendor.
 - **v1.2.1** (30 October 2026) -- A resumed document no longer mixes two
   versions of its input. Every document now records the identity of its input,
   a file's SHA-256 or, for an image folder, which recorded none before, the

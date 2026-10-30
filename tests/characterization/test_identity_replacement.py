@@ -26,7 +26,11 @@ from tests.characterization.fakes_ocr import (
     block_real_tesseract,
     tesseract_cmd_settings,
 )
-from tests.characterization.inputs import make_born_digital_pdf, make_scanned_pdf
+from tests.characterization.inputs import (
+    make_born_digital_pdf,
+    make_scanned_pdf,
+    page_text,
+)
 from tests.characterization.runner import RunResult, run_cli
 from tests.characterization.test_input_identity import CHANGED
 from tests.characterization.test_repair import (  # noqa: F401
@@ -204,6 +208,23 @@ def test_a_forced_replacement_marks_the_unrendered_formats_stale(
 
     assert rendered.exit_code == 0, rendered.stderr
     assert CHANGED[0] in markdown.read_text(encoding="utf-8")
+    assert _query(tmp_path, "SELECT stale FROM outputs") == [(0,), (0,)]
+
+
+def test_a_format_rendered_before_later_pages_is_rendered_again(
+    tmp_path: Path, transcribe: Callable[..., RunResult]
+) -> None:
+    pdf = make_born_digital_pdf(tmp_path / "docs" / "book.pdf", 3)
+    first = _native(transcribe, pdf, pages="1", formats="txt")
+    assert first.exit_code == 0, first.stderr
+    text = first.output(pdf)
+    assert page_text(2) not in text.read_text(encoding="utf-8")
+    assert _native(transcribe, pdf, formats="md").exit_code == 0
+
+    again = _native(transcribe, pdf, formats="txt")
+
+    assert again.exit_code == 0, again.stderr
+    assert page_text(2) in text.read_text(encoding="utf-8")
     assert _query(tmp_path, "SELECT stale FROM outputs") == [(0,), (0,)]
 
 

@@ -1,5 +1,7 @@
 # ChronoTranscriber v1.2.3
 
+<img src="assets/logo.svg" alt="ChronoTranscriber logo" width="64" align="right">
+
 ChronoTranscriber transcribes PDFs, folders of page images, EPUB and MOBI ebooks
 and audio recordings. Scanned pages go to a vision-language model or to local
 Tesseract OCR, born-digital files give up their text layer, and recordings go to a

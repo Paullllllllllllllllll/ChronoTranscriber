@@ -16,12 +16,13 @@ from typing import Any
 
 import httpx
 import pytest
+from PIL import Image
 
 from chronotranscriber import __main__ as entry
 from chronotranscriber import classify
 from chronotranscriber.common.classifiers import load_classifier
-from chronotranscriber.common.store import file_sha256
-from chronotranscriber.output.store import database_path, open_store
+from chronotranscriber.common.store import PlannedUnit, file_sha256
+from chronotranscriber.output.store import KIND_PAGE, database_path, open_store
 from chronotranscriber.run import item_location
 from chronotranscriber.sources import SourceItem
 from tests.characterization.inputs import make_image_folder, make_scanned_pdf
@@ -395,6 +396,56 @@ def test_an_item_whose_stored_input_changed_is_refused(
     assert (payload["items_refused"], payload["items_total"]) == (1, 0)
     assert decisions.bodies == []
     assert _count(out, "classification_rows") == 0
+
+
+async def _seed_pages(out: Path, name: str, labels: list[str]) -> None:
+    async with open_store(out) as store:
+        await store.begin_run("transcribe")
+        doc_id = await store.ensure_document(name, kind="images")
+        lease = await store.acquire(doc_id)
+        assert lease is not None
+        units = [PlannedUnit(idx, label=label) for idx, label in enumerate(labels)]
+        await store.plan_units(lease, KIND_PAGE, units, model="m", provider="p")
+        await store.release(lease)
+
+
+@pytest.mark.parametrize(
+    ("first", "refused"), [("page_1.png", True), ("page_01.png", False)]
+)
+def test_a_legacy_folder_whose_stored_pages_moved_is_refused(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    decisions: FakeDecisions,
+    first: str,
+    refused: bool,
+) -> None:
+    folder = tmp_path / "scans"
+    folder.mkdir()
+    for image, color in (("page_1.png", "white"), ("page_01.png", "black")):
+        Image.new("RGB", (40, 60), color).save(folder / image)
+    out = tmp_path / "out"
+    name = item_location(
+        SourceItem(folder, "images"), output_dir=out, layout="hash", input_root=folder
+    )[1]
+    second = "page_01.png" if first == "page_1.png" else "page_1.png"
+    labels = [f"{image}_pre_processed.jpg" for image in (first, second)]
+    asyncio.run(_seed_pages(out, name, labels))
+
+    _code, payload = _run(
+        capsys,
+        "pages",
+        "--input",
+        str(folder),
+        "--type",
+        "images",
+        "--output",
+        str(out),
+        "--classifier",
+        "layout",
+    )
+
+    assert payload["items_refused"] == (1 if refused else 0)
+    assert _count(out, "classification_rows") == (0 if refused else 2)
 
 
 def test_a_change_found_at_the_write_refuses_the_item(

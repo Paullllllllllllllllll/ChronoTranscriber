@@ -37,7 +37,7 @@
     "target_dpi": 300
   },
   "input_path": "<tmp>/scans/pages",
-  "input_sha256": null,
+  "input_sha256": "<sha256>",
   "kind": "images",
   "last_run_id": "<run-1>",
   "lease_generation": "<generation>",

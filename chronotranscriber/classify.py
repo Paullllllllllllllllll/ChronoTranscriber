@@ -7,11 +7,13 @@ classifier name there), finds and selects the PDFs and image folders of the
 input in ``transcribe``'s discovery order (EPUB and MOBI items it selects
 are skipped with a warning), and names each item's store document: the name
 of a stored document whose recorded input path is the item, else the name
-``transcribe`` computes. It records the input identity of each item (a
-file's SHA-256, an image folder's digest of its sorted image names and
-their SHA-256s) and checks the decision model's key variable. An item whose
-document the store holds with another input SHA-256 is refused, as the
-store would refuse its rows.
+``transcribe`` computes. It records the input identity of each item, the
+one transcription records
+(:func:`~chronotranscriber.sources.identity.input_identity`); an item whose
+identity cannot be computed is refused. It checks the decision model's key
+variable. An item whose document the store holds with another identity is
+refused, as the store would refuse its rows; a document that records none
+(transcribed before v1.2.1) is not checked.
 
 :func:`run` renders the selected pages through the page pipeline (the image
 settings of the default transcription model), converts them with
@@ -38,8 +40,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
-import hashlib
-import json
 import logging
 import math
 import os
@@ -88,13 +88,14 @@ from chronotranscriber.common.images import decision_jpeg
 from chronotranscriber.common.options import Source
 from chronotranscriber.common.selection import parse_page_range
 from chronotranscriber.common.sqlite import read
-from chronotranscriber.common.store import Store, StoreError, WriterOptions, file_sha256
+from chronotranscriber.common.store import Store, StoreError, WriterOptions
 from chronotranscriber.common.usage import Usage
 from chronotranscriber.events import ItemFinished, ItemStarted, NullEvents, RunEvents
 from chronotranscriber.llm.caller import CallEnv
 from chronotranscriber.llm.decide import DecisionModel
 from chronotranscriber.llm.prompts import PROJECT_ROOT
 from chronotranscriber.output.store import (
+    KIND_PAGE,
     image_settings_record,
     open_store,
     read_store,
@@ -112,6 +113,7 @@ from chronotranscriber.run import (
 from chronotranscriber.settings import Settings, SettingsError
 from chronotranscriber.sources import DiscoveryError, SourceItem, discover_items
 from chronotranscriber.sources.auto import file_item, scan
+from chronotranscriber.sources.identity import input_identity, reordered
 from chronotranscriber.sources.images import (
     FolderPages,
     list_folder_images,
@@ -354,23 +356,14 @@ def _supported(
     return kept, warnings
 
 
-def _input_sha256(item: SourceItem) -> str | None:
-    """Return the input identity: a file's SHA-256, or a folder's image digest.
-
-    A folder's digest hashes its supported images' file names, sorted, each
-    with its SHA-256, so any added, removed or changed image changes it.
-    """
+def _identity(item: SourceItem) -> tuple[str | None, str]:
+    """Return the item's input identity, or None and why it cannot be computed."""
     try:
-        if item.path.is_file():
-            return file_sha256(item.path)
-        if item.type == "images" and item.path.is_dir():
-            images = sorted(list_folder_images(item.path), key=lambda p: p.name)
-            listing = [[path.name, file_sha256(path)] for path in images]
-            text = json.dumps(listing, ensure_ascii=False)
-            return hashlib.sha256(text.encode("utf-8")).hexdigest()
+        return input_identity(item.path), ""
     except OSError as exc:
-        logger.warning("Could not hash %s: %s", item.path, exc)
-    return None
+        return None, (
+            f"Cannot compute the input identity of '{item.name}' ({exc}). Skipping it."
+        )
 
 
 def _same_path(recorded: str | None, path: Path) -> bool:
@@ -414,17 +407,40 @@ def _stored(
 
 
 def _refusal(item: ClassifyItem, stores: dict[Path, Store | None]) -> str:
-    """Return why the store refuses *item*'s rows, or ''."""
+    """Return why the store refuses *item*'s rows, or ''.
+
+    A stored image folder's page units must still fit its images
+    (:func:`~chronotranscriber.sources.identity.reordered`), so that rows
+    joined on the ordinal name the transcription of the same image.
+    """
     store = stores.get(item.root)
     stored = store.document(item.document) if store is not None else None
-    if stored is None or stored.input_sha256 is None:
+    if store is None or stored is None:
         return ""
-    if stored.input_sha256 == item.input_sha256:
+    if stored.input_sha256 is not None and stored.input_sha256 != item.input_sha256:
+        return (
+            f"'{item.name}': the store holds document {item.document} with input "
+            f"SHA-256 {stored.input_sha256[:12]}..., the file has "
+            f"{str(item.input_sha256)[:12]}...; transcribe the changed file first"
+        )
+    if item.source.type != "images":
+        return ""
+    labels = {
+        unit.idx: unit.label
+        for unit in store.units(stored.doc_id)
+        if unit.kind == KIND_PAGE
+    }
+    if not labels:
+        return ""
+    try:
+        moved = reordered(item.name, item.path, labels)
+    except OSError as exc:
+        return f"Cannot list the images of '{item.name}' ({exc}). Skipping it."
+    if moved is None:
         return ""
     return (
-        f"'{item.name}': the store holds document {item.document} with input "
-        f"SHA-256 {stored.input_sha256[:12]}..., the file has "
-        f"{str(item.input_sha256)[:12]}...; transcribe the changed file first"
+        f"'{item.name}': the stored pages of document {item.document} no longer "
+        "fit the folder's images; transcribe it again with --force first"
     )
 
 
@@ -581,11 +597,15 @@ def plan(
             layout=spec.output.layout,
             input_root=input_path,
         )
-        item = ClassifyItem(source, root, name, _input_sha256(source))
+        identity, unreadable = _identity(source)
+        item = ClassifyItem(source, root, name, identity, reason=unreadable)
         name, doc_id = _stored(item, stores)
         items.append(replace(item, document=name, doc_id=doc_id))
     _check_shared(items)
-    checked = [replace(item, reason=_refusal(item, stores)) for item in items]
+    checked = [
+        item if item.reason else replace(item, reason=_refusal(item, stores))
+        for item in items
+    ]
     to_classify = [item for item in checked if not item.reason]
     refused = [item for item in checked if item.reason]
     if spec.dry_run:

@@ -41,6 +41,7 @@ from chronotranscriber.methods.audio_api import (
 from chronotranscriber.methods.recording import CHUNK_FOLDER, SIGNATURE_KEY
 from chronotranscriber.methods.units import DocumentHandle, UnitsFailedError
 from chronotranscriber.methods.whisper import WhisperTranscriber
+from chronotranscriber.output import store as output_store
 from chronotranscriber.output.store import database_path, open_store
 from chronotranscriber.settings import Concurrency, RetrySettings, Settings
 from chronotranscriber.sources.audio import chunk_settings, plan_recording
@@ -348,6 +349,32 @@ class TestChunkUnits:
         rows = _units(root)
         assert {unit["kind"] for unit in rows} == {"chunk"}
         assert len(rows) == _chunk_count(job, recording)
+
+    async def test_an_interrupted_forced_shorter_plan_keeps_the_old_chunks(
+        self,
+        recording: Path,
+        root: Path,
+        cuts: list[Path],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        fine = _job(recording, audio_chunk_seconds=30)
+        coarse = _job(recording, audio_chunk_seconds=60, force=True)
+        assert _chunk_count(coarse, recording) < _chunk_count(fine, recording)
+        await _run(
+            root, _api(fine, FakeBackend(database_path(root))), recording, "audio-api"
+        )
+        before = (_units(root), _record(root))
+
+        def interrupted(connection: Any, doc_id: int | None = None) -> None:
+            raise RuntimeError("interrupted")
+
+        monkeypatch.setattr(output_store, "refresh_documents", interrupted)
+        backend = FakeBackend(database_path(root))
+        with pytest.raises(RuntimeError, match="interrupted"):
+            await _run(root, _api(coarse, backend), recording, "audio-api")
+
+        assert backend.calls == []
+        assert (_units(root), _record(root)) == before
 
     async def test_the_same_plan_resets_nothing(
         self, recording: Path, root: Path, cuts: list[Path]

@@ -75,11 +75,9 @@ class NativeTranscriber:
             return await self._tesseract.pdf(item, indices)
         handle = self._handle(item)
         total = PDFProcessor(item.path).page_count()
-        await handle.plan(
-            [PlannedUnit(index, source_index=index) for index in range(total)]
-        )
+        units = [PlannedUnit(index, source_index=index) for index in range(total)]
         selected = indices if indices is not None else list(range(total))
-        work = await units_to_do(self.job, handle, selected)
+        work = await units_to_do(self.job, handle, selected, units)
         if not work:
             return []
         pages = await asyncio.to_thread(native_extract_pdf_pages, item.path, work)
@@ -109,11 +107,10 @@ class NativeTranscriber:
                 )
 
         handle = self._handle(item)
-        await handle.plan(
-            [PlannedUnit(0)]
-            + [PlannedUnit(i + 1, source_index=i) for i in range(len(sections))]
-        )
-        work = await units_to_do(self.job, handle, [0] + [i + 1 for i in keep])
+        units = [PlannedUnit(0)] + [
+            PlannedUnit(i + 1, source_index=i) for i in range(len(sections))
+        ]
+        work = await units_to_do(self.job, handle, [0] + [i + 1 for i in keep], units)
         if not work:
             return []
         header = metadata_header(extraction.title, extraction.authors)

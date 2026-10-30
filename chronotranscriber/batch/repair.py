@@ -90,12 +90,15 @@ from chronotranscriber.output.render import TEXT_FORMATS, render_item
 from chronotranscriber.output.store import (
     DATABASE_NAME,
     KIND_PAGE,
+    changed_input,
     database_path,
+    identity_write,
     open_store,
     read_store,
 )
 from chronotranscriber.settings import Settings, SettingsError
 from chronotranscriber.sources.audio.ffmpeg import configure_ffmpeg_executables
+from chronotranscriber.sources.identity import input_identity, reordered
 from chronotranscriber.sources.images import (
     PageImage,
     detect_model_type,
@@ -170,6 +173,7 @@ class RepairDocument:
     formats: tuple[str, ...]
     lease_run_id: str | None = None
     lease_until: float | None = None
+    input_sha256: str | None = None
 
     @property
     def database(self) -> Path:
@@ -239,8 +243,11 @@ class RepairPlan:
     """What a repair will do, decided before anything is written.
 
     *units* are the selected page units; *message* explains a plan with
-    nothing to repair. *warnings* are for the front end to show. *args*
-    holds the parsed command line, if any.
+    nothing to repair. *refused* marks a plan whose input changed since
+    transcription: its units stay unrepaired. *identity* is the input
+    identity computed at planning, checked again under the lease and
+    recorded there when the document records none. *warnings* are for the front
+    end to show. *args* holds the parsed command line, if any.
     """
 
     spec: RepairSpec
@@ -255,6 +262,8 @@ class RepairPlan:
     message: str | None = None
     warnings: tuple[str, ...] = ()
     args: argparse.Namespace | None = None
+    refused: bool = False
+    identity: str | None = None
 
     @property
     def failures(self) -> list[int]:
@@ -279,6 +288,7 @@ class RepairPlan:
     def outcome(self) -> RepairResult:
         """Return the result of the plan before any page is sent."""
         return RepairResult(
+            failed=len(self.units) if self.refused else 0,
             selected=len(self.units) if self.to_repair else 0,
             mode=self.mode,
             dry_run=self.dry_run and self.to_repair,
@@ -288,6 +298,7 @@ class RepairPlan:
 
 
 NOTHING_TO_REPAIR = "No failed pages detected matching your criteria."
+REFUSED_REPAIR = "No page was repaired: the input changed since it was transcribed."
 
 
 @dataclass
@@ -295,13 +306,16 @@ class RepairSet:
     """The repairs of one ``repair`` command: one plan per document.
 
     *plans* hold the documents with pages to repair; *message* explains a
-    set with none. *warnings* are for the front end to show.
+    set with none. *refused* counts the selected pages of documents whose
+    input changed since transcription; they count as failed. *warnings* are
+    for the front end to show.
     """
 
     spec: RepairSpec
     plans: list[RepairPlan] = field(default_factory=list)
     message: str | None = None
     warnings: tuple[str, ...] = ()
+    refused: int = 0
 
     @property
     def mode(self) -> str:
@@ -326,6 +340,7 @@ class RepairSet:
     def outcome(self) -> RepairResult:
         """Return the result of the set before any page is sent."""
         return RepairResult(
+            failed=self.refused,
             selected=self.selected,
             mode=self.mode,
             dry_run=self.dry_run and self.to_repair,
@@ -391,6 +406,7 @@ def _document(
         formats=formats,
         lease_run_id=row.lease_run_id,
         lease_until=row.lease_until,
+        input_sha256=row.input_sha256,
     )
 
 
@@ -689,6 +705,69 @@ def _lease_warning(document: RepairDocument, now: float) -> str | None:
     )
 
 
+def _input_refusal(
+    document: RepairDocument, units: Sequence[UnitRow]
+) -> tuple[str | None, str | None]:
+    """Return why *document*'s input refuses a repair, and its current identity.
+
+    The repair renders pages from the input, so an input whose identity
+    differs from the recorded one, or cannot be computed, refuses it, and so
+    does a folder whose stored page *units* no longer fit its images. A
+    document without a recorded identity is otherwise trusted.
+    """
+    path = document.input_path
+    if path is None:
+        return None, None
+    try:
+        current = input_identity(path)
+        moved = None
+        if path.is_dir() and document.input_sha256 in (None, current):
+            labels = {unit.idx: unit.label for unit in units if unit.kind == KIND_PAGE}
+            moved = reordered(document.name, path, labels)
+    except OSError as exc:
+        return (
+            f"Cannot compute the input identity of '{document.name}' ({exc}). "
+            "Skipping it."
+        ), None
+    if moved is not None:
+        return moved, None
+    if document.input_sha256 is None or current == document.input_sha256:
+        return None, current
+    return changed_input(document.name, document.input_sha256, current), None
+
+
+def _leased_refusal(store: Store, plan: RepairPlan) -> str | None:
+    """Return why the leased document no longer fits the plan's input, or None.
+
+    The stored identity must still be the one planned on, and the input must
+    still have the identity computed at planning.
+    """
+    document = plan.document
+    assert document is not None
+    row = store.document(document.doc_id)
+    stored = row.input_sha256 if row is not None else None
+    if stored != document.input_sha256:
+        return (
+            f"The stored input identity of '{document.name}' changed since the "
+            "repair was planned. Skipping it."
+        )
+    if plan.identity is None or document.input_path is None:
+        return None
+    try:
+        current = input_identity(document.input_path)
+    except OSError as exc:
+        return (
+            f"Cannot compute the input identity of '{document.name}' ({exc}). "
+            "Skipping it."
+        )
+    if current == plan.identity:
+        return None
+    return (
+        f"Input changed for '{document.name}' during the repair (planned "
+        f"{plan.identity[:12]}..., now {current[:12]}...). Skipping it."
+    )
+
+
 def _plan_document(
     spec: RepairSpec,
     settings: Settings,
@@ -722,6 +801,11 @@ def _plan_document(
     if leased is not None:
         warnings.append(leased)
     if message is not None:
+        plan.warnings = tuple(warnings)
+        return plan
+    refusal, plan.identity = _input_refusal(document, units)
+    if refusal is not None:
+        plan.message, plan.refused = refusal, True
         plan.warnings = tuple(warnings)
         return plan
     try:
@@ -861,20 +945,25 @@ def plan_repairs(
     fallback, warnings = _fallback(spec)
     several = len(documents) > 1
     plans: list[RepairPlan] = []
+    refused = 0
     for document, anchor in documents:
         plan = _plan_document(
             spec, settings, document, anchor, fallback=fallback, args=args
         )
         prefix = f"'{document.name}': " if several else ""
         warnings += [prefix + warning for warning in plan.warnings]
-        if plan.to_repair:
+        if plan.refused:
+            refused += len(plan.units)
+            warnings.append(str(plan.message))
+        elif plan.to_repair:
             plans.append(plan)
         elif not several and plan.message is not None:
             return RepairSet(spec, [], plan.message, tuple(warnings))
     if not plans:
-        return RepairSet(spec, [], NOTHING_TO_REPAIR, tuple(warnings))
+        message = REFUSED_REPAIR if refused else NOTHING_TO_REPAIR
+        return RepairSet(spec, [], message, tuple(warnings), refused)
     warnings += _check_access(spec, settings, args)
-    return RepairSet(spec, plans, None, tuple(warnings))
+    return RepairSet(spec, plans, None, tuple(warnings), refused)
 
 
 class _DetailedTranscriber:
@@ -1132,6 +1221,20 @@ async def _repair(
         result.message = message
         result.failed = result.selected
         return
+    refusal = _leased_refusal(store, plan)
+    if refusal is not None:
+        events.warning(refusal)
+        await store.add_note(refusal, doc_id=document.doc_id)
+        result.message = refusal
+        result.selected = result.failed = len(plan.units)
+        return
+    if document.input_sha256 is None and plan.identity is not None:
+        await store.write(lease, identity_write(document.doc_id, plan.identity))
+        await store.add_note(
+            f"Recorded the input identity of '{document.name}' for the first time.",
+            doc_id=document.doc_id,
+            level="info",
+        )
     blocked = set(store.blocked_units(document.doc_id))
     units = [unit for unit in plan.units if unit.key not in blocked]
     if len(units) < len(plan.units):

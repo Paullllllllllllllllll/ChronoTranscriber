@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.2.0
+# ChronoTranscriber v1.2.1
 
 ChronoTranscriber transcribes PDFs, folders of page images, EPUB and MOBI ebooks
 and audio recordings. Scanned pages go to a vision-language model or to local
@@ -729,11 +729,13 @@ downscaled to `decisions.image_max_px` and sent with the document name as
 context, through the decision model and key variable of the
 [decision pre-pass](#decision-pre-pass). Classification is shadow only: it
 appends the answers to the store's `classifications` view, creates no document
-or unit and changes no transcription. Each answer records the input identity:
-a file's SHA-256, or for an image folder a digest of its image names and their
-SHA-256s; a rerun on a changed input flags the answers of the old version stale.
-Image-folder answers describe the folder as classified, so classify a folder
-again after changing it.
+or unit and changes no transcription. Each answer records the input identity
+that transcription records (see [Resume](#resume)); a rerun on a changed input
+flags the answers of the old version stale, and the view hides answers whose
+document records another identity. A document transcribed before v1.2.1 may
+record none until its next transcription run, and its answers are then not
+checked against it. Image-folder answers describe the folder as classified, so
+classify a folder again after changing it.
 A rerun reuses the stored answers of a request whose pages, classifier, decision
 model and image settings are unchanged and records them again under the new
 run, at the pages' current positions; `--force` asks again. A `--pages` range
@@ -811,11 +813,13 @@ suffix (`book-1a2b3c4d/book`). In `page_text`, `kind` is `page`, `chunk` or `tex
 type the decision pre-pass gave a page unit (null without one), and `usage` JSON
 token counts (`input_tokens`, `output_tokens`,
 `total_tokens`, `cached_tokens`, `reasoning_tokens`, in synchronous and batch
-rows alike). A page answer in `classifications` joins `page_text` on `document`
-and `ordinal` = `order_index`, the page's 0-based position whatever method
-transcribed it; its `locator` is the page-image name, for information, and a
-document answer has the locator `document`; `value` is the chosen value of a
-choice or the expected 0-based level of a score, `probability` that of a
+rows alike). Stores written before v1.2.1 show a `page_index` for the Tesseract
+pages of image folders until the next `--force` run of the folder. A page
+answer in `classifications` joins `page_text` on `document` and `ordinal` =
+`order_index`, the page's 0-based position whatever method transcribed it; its
+`locator` is the page-image name, for information, and a document answer has
+the locator `document`; `value` is the chosen value of a choice or the expected
+0-based level of a score, `probability` that of a
 predicate or of the chosen value, and `probabilities` a JSON object by value or
 level. The view shows the answers of each unit's latest classifier revision and
 leaves out those whose document now records another input file. The `error`
@@ -935,13 +939,47 @@ Resume is the default and reads only the store; a dry run shows each item's stat
 | `complete` | no pending or failed units (failed units count as done under `--no-retry-errors`) | skip; missing or stale files are rendered again without calls |
 | `unstored` | a rendered file exists without store rows, such as a hand-edited file `drop` kept | skip and list; `--force` redoes it |
 | `blocked` | another live run holds the item, or its pages wait for a batch | skip; a held item makes the run exit 1 |
-| `refused` | units remain, but the stored pages used other image settings | not processed, counted as failed; `--force` starts it over |
+| `refused` | the input changed since it was transcribed, its identity cannot be computed, or units remain but the stored pages used other image settings | not processed, counted as failed; `--force` starts it over, except for an unreadable input |
 
 Besides the reset its option row describes, `--force` deletes the units another
 method stored (for example the `text` units of `native`), and with `--pages` it
 leaves the document partial. A resume with another model proceeds with a warning,
 and each unit records its model. `repair` transcribes failed units again without
 a rerun.
+
+Every document records the identity of its input: a file's SHA-256, or for an
+image folder the SHA-256 of its images in page order, each with its file name and
+SHA-256. Page order is natural order with the file name breaking ties
+(`page_01.png` before `page_1.png`), so it does not depend on how the file system
+lists the folder. A run computes the identity of every item while it plans,
+complete items included; reading the inputs once costs about as long as copying
+them (1,004 scans of 0.51 GiB took 1.6 s on first read, 0.7 s on the second). An
+item whose stored document records another identity is refused, partial and
+complete alike, with both identities named; `--force` transcribes it from scratch
+and records the new identity, and `repair` refuses such a document the same way.
+A run also refuses an item whose input changed between planning and the item's
+turn (it compares file sizes and modification times and hashes again only when
+they differ), and an input whose identity cannot be computed. A document that
+records no identity, such as an image folder transcribed before v1.2.1, is
+trusted: the next run or repair that writes it records the current identity and
+leaves a note. Until then a complete document of that kind is not verified.
+
+The stored pages of an image folder must also fit its images: one page unit per
+image, each labeled with the image the page order puts at its index. A resume
+or repair refuses a folder document that fails this check, with or without a
+recorded identity, until `--force`: an image added or removed, or a page stored
+under another image (images whose names tie, listed the other way round before
+v1.2.1, or a Tesseract image named like a PDF page). A label of another form can
+only be trusted in a document without a recorded identity whose image names do
+not tie. A run and `repair` check the input and the stored identity again once
+they hold the document's lease, and record an identity only there. `--force`
+replaces the document in one transaction: the new unit plan (units outside it
+deleted, the others `pending`), the image settings, the new identity, no page
+types of the decision pre-pass, and every rendered file marked stale, so a
+format the run does not write is rendered again by the next run that asks for
+it. An open or unresolved batch submission that holds any unit of the document
+refuses the replacement. A forced run whose `--pages` selects nothing changes
+none of this.
 
 ## Architecture
 

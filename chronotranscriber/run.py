@@ -54,6 +54,7 @@ from chronotranscriber.common.selection import (
 from chronotranscriber.common.spec_view import resolved_view
 from chronotranscriber.common.sqlite import DEFAULT_BUSY_TIMEOUT, DEFAULT_WARN_INTERVAL
 from chronotranscriber.common.store import (
+    DocumentRow,
     Lease,
     LeaseKeeper,
     LeaseLostError,
@@ -62,7 +63,6 @@ from chronotranscriber.common.store import (
     UnitRow,
     WriterOptions,
     bounded_error,
-    file_sha256,
 )
 from chronotranscriber.common.usage import Usage
 from chronotranscriber.events import (
@@ -102,11 +102,14 @@ from chronotranscriber.output.render import format_path, render_item, text_forma
 from chronotranscriber.output.store import (
     Classification,
     ItemState,
+    changed_input,
     classify,
     database_path,
     document_name,
+    identity_write,
     lease_reason,
     open_store,
+    read_store,
 )
 from chronotranscriber.settings import Settings, SettingsError
 from chronotranscriber.sources import (
@@ -118,6 +121,12 @@ from chronotranscriber.sources import (
 from chronotranscriber.sources.audio import chunk_settings, describe_chunks
 from chronotranscriber.sources.audio.ffmpeg import configure_ffmpeg_executables
 from chronotranscriber.sources.auto import decide, file_item, scan
+from chronotranscriber.sources.identity import (
+    Snapshot,
+    input_identity,
+    input_snapshot,
+    reordered,
+)
 from chronotranscriber.sources.images import resolve_image_settings
 from chronotranscriber.spec import InputSpec, RunSpec, effective_spec
 
@@ -246,7 +255,9 @@ class PlannedItem:
     the item is the document *document*; *output* is its rendered output
     path of the first format. *context* and *context_image* are resolved for
     LLM items; *chunks* describes the chunk count of a recording in a dry
-    run.
+    run. *input_sha256* is the input identity computed at planning
+    (:func:`~chronotranscriber.sources.identity.input_identity`) and
+    *snapshot* the input's file sizes and times at that moment.
     """
 
     source: SourceItem
@@ -258,6 +269,8 @@ class PlannedItem:
     context: str | None = None
     context_image: Path | None = None
     chunks: str | None = None
+    input_sha256: str | None = None
+    snapshot: Snapshot = ()
 
     @property
     def path(self) -> Path:
@@ -759,6 +772,10 @@ class _Classifier:
     def planned(self, item: SourceItem, method: str) -> PlannedItem:
         """Return *item* planned with its resume state; write nothing.
 
+        The input identity is computed here, its snapshot first; an input
+        whose identity cannot be computed is refused, also under --force,
+        so that no document records it as unknown.
+
         Raises:
             StoreRefusedError: The root's database is refused.
         """
@@ -766,6 +783,16 @@ class _Classifier:
         formats = text_formats(self.spec.output.formats)
         outputs = [format_path(output, fmt) for fmt in formats]
         keyed = method in _KEYED_METHODS
+        identity: str | None = None
+        snapshot: Snapshot = ()
+        unreadable: str | None = None
+        try:
+            snapshot = input_snapshot(item.path)
+            identity = input_identity(item.path)
+        except OSError as exc:
+            unreadable = (
+                f"Cannot compute the input identity of '{name}' ({exc}). Skipping it."
+            )
 
         try:
             state = classify(
@@ -775,14 +802,68 @@ class _Classifier:
                 image_settings=self.image if method == "llm" else None,
                 model=self.spec.model.model if keyed else None,
                 retry_errors=self.spec.run.retry_errors,
+                input_sha256=identity,
             )
         except StoreError as exc:
             raise StoreRefusedError(str(exc)) from exc
+        if item.type == "images" and unreadable is None:
+            moved = _misplaced_pages(root, name, item.path, state)
+            if moved is not None:
+                state = Classification(
+                    ItemState.REFUSED, name, state.doc_id, reason=moved
+                )
         if self.spec.run.force and state.state is not ItemState.BLOCKED:
             state = Classification(
                 ItemState.NONE, name, state.doc_id, reason="overwrite mode"
             )
-        return PlannedItem(item, method, state, root, name, output)
+        if unreadable is not None and state.state is not ItemState.BLOCKED:
+            state = Classification(
+                ItemState.REFUSED, name, state.doc_id, reason=unreadable
+            )
+        return PlannedItem(
+            item,
+            method,
+            state,
+            root,
+            name,
+            output,
+            input_sha256=identity,
+            snapshot=snapshot,
+        )
+
+
+def _misplaced_pages(
+    root: Path, name: str, folder: Path, state: Classification
+) -> str | None:
+    """Return why a stored folder document's pages no longer fit its images.
+
+    A partial or complete document is checked page by page
+    (:func:`~chronotranscriber.sources.identity.reordered`), whether it
+    records an identity or not.
+
+    Raises:
+        StoreRefusedError: The root's database is refused.
+    """
+    if state.doc_id is None or state.state not in (
+        ItemState.PARTIAL,
+        ItemState.COMPLETE,
+    ):
+        return None
+    try:
+        store = read_store(root)
+    except StoreError as exc:
+        raise StoreRefusedError(str(exc)) from exc
+    if store is None:
+        return None
+    labels = {
+        unit.idx: unit.label
+        for unit in store.units(state.doc_id)
+        if unit.kind == "page"
+    }
+    try:
+        return reordered(name, folder, labels)
+    except OSError as exc:
+        return f"Cannot list the images of '{name}' ({exc}). Skipping it."
 
 
 def _image(
@@ -1174,16 +1255,6 @@ async def _note(
         logger.warning("Could not record a note in %s: %s", store.path, exc)
 
 
-def _input_sha256(path: Path) -> str | None:
-    if not path.is_file():
-        return None
-    try:
-        return file_sha256(path)
-    except OSError as exc:
-        logger.warning("Could not hash %s: %s", path, exc)
-        return None
-
-
 @dataclass(frozen=True)
 class _Blocked:
     """An item whose document another run leased after planning."""
@@ -1191,30 +1262,140 @@ class _Blocked:
     reason: str
 
 
+def _changed_during_run(planned: PlannedItem) -> str | None:
+    """Return why *planned*'s input no longer has its planned identity, or None.
+
+    The input is hashed again only when its snapshot changed.
+    """
+    try:
+        if input_snapshot(planned.path) == planned.snapshot:
+            return None
+        current = input_identity(planned.path)
+    except OSError as exc:
+        return (
+            f"Cannot compute the input identity of '{planned.document}' ({exc}). "
+            "Skipping it."
+        )
+    if current == planned.input_sha256:
+        return None
+    return (
+        f"Input changed for '{planned.document}' during the run (planned "
+        f"{str(planned.input_sha256)[:12]}..., now {current[:12]}...). Skipping it."
+    )
+
+
 @dataclass
 class _ItemRun:
     """One item of a run: its store document, lease, method and render.
 
     *held* is the reason the item could not be leased, once :meth:`lease`
-    found another run holding it.
+    found another run holding it; *refused* the reason its input refused it.
+    *replacement* is the identity a --force run records with the units'
+    reset, when the stored units belong to another input.
     """
 
     job: Job
     planned: PlannedItem
     stores: _Stores
     held: str | None = None
+    refused: str | None = None
+    replacement: str | None = None
+
+    def _refusal(self, stored: DocumentRow | None) -> str | None:
+        """Return why the stored document refuses the item's input, or None.
+
+        A stored identity that differs from the planned one refuses it when
+        the document has units, unless --force.
+        """
+        planned = self.planned
+        if (
+            planned.input_sha256 is None
+            or stored is None
+            or stored.input_sha256 is None
+            or stored.input_sha256 == planned.input_sha256
+            or stored.units_total == 0
+            or self.job.force
+        ):
+            return None
+        return changed_input(
+            planned.document, stored.input_sha256, planned.input_sha256
+        )
+
+    async def _settle_identity(
+        self, store: Store, doc_id: int, lease: Lease
+    ) -> str | None:
+        """Check and record the input identity under *lease*; return a refusal.
+
+        The leased document is read again: an input that changed since
+        planning or a stored identity that differs refuses the item (unless
+        --force, which records the planned one with the units' reset, see
+        :attr:`replacement`); a document without one takes the planned one,
+        with a note when it already has units.
+        """
+        planned = self.planned
+        refused = _changed_during_run(planned)
+        stored = store.document(doc_id)
+        if refused is None:
+            refused = self._refusal(stored)
+        if refused is not None or planned.input_sha256 is None or stored is None:
+            return refused
+        if stored.input_sha256 == planned.input_sha256:
+            return None
+        if stored.units_total > 0 and self.job.force:
+            self.replacement = planned.input_sha256
+            return None
+        await store.write(lease, identity_write(doc_id, planned.input_sha256))
+        if stored.units_total > 0:
+            message = (
+                f"Recorded the input identity of '{planned.document}' for the "
+                "first time."
+            )
+            logger.info(message)
+            with contextlib.suppress(sqlite3.Error):
+                await store.add_note(message, doc_id=doc_id, level="info")
+        return None
 
     async def lease(self) -> tuple[Store, int, Lease] | None:
-        """Ensure the item's document and lease it; None when another holds it."""
+        """Ensure the item's document and lease it; None when it is not leased.
+
+        A stored identity that differs, or an input that changed since
+        planning, refuses the item before the document row is written; the
+        row never takes an identity there. Under the
+        lease the input and the stored identity are checked again and the
+        identity recorded (:meth:`_settle_identity`). :attr:`refused` says
+        why a refused item was not leased.
+        """
         planned = self.planned
         store = await self.stores.get(planned.root)
+        stored = store.document(planned.document)
+        self.refused = self._refusal(stored) or _changed_during_run(planned)
+        if self.refused is not None:
+            await _note(
+                store,
+                stored.doc_id if stored is not None else None,
+                self.refused,
+                self.job.events,
+            )
+            return None
         doc_id = await store.ensure_document(
             planned.document,
             input_path=planned.path,
-            input_sha256=_input_sha256(planned.path),
+            input_sha256=None,
             kind=planned.type,
         )
         lease = await store.acquire(doc_id)
+        if lease is not None:
+            try:
+                self.refused = await self._settle_identity(store, doc_id, lease)
+            except BaseException:
+                with contextlib.suppress(sqlite3.Error):
+                    await store.release(lease)
+                raise
+            if self.refused is not None:
+                with contextlib.suppress(sqlite3.Error):
+                    await store.release(lease)
+                await _note(store, doc_id, self.refused, self.job.events)
+                return None
         if lease is None:
             state = None
             with contextlib.suppress(StoreError, sqlite3.Error):
@@ -1288,6 +1469,7 @@ class _ItemRun:
             lease,
             model=spec.model.model,
             provider=spec.model.provider,
+            identity=self.replacement,
         )
         item = Item(
             path=planned.path,
@@ -1335,6 +1517,8 @@ async def _run_item(
     events = job.events
     item_run = _ItemRun(job, planned, stores)
     leased = await item_run.lease()
+    if leased is None and item_run.refused is not None:
+        return ItemResult(planned.name, False, (), item_run.refused)
     if leased is None:
         return _Blocked(item_run.held or "another run holds its document")
     store, doc_id, lease = leased
@@ -1395,14 +1579,17 @@ def _short_of_complete(store: Store, doc_id: int) -> bool:
 
 async def _render_only(
     job: Job, planned: PlannedItem, stores: _Stores
-) -> tuple[str, ...] | _Blocked:
+) -> tuple[str, ...] | _Blocked | ItemResult:
     """Render a complete item whose files are missing or stale; no model call.
 
-    Return the files that hold the rendering, or :class:`_Blocked` when
-    another run holds the item's document.
+    Return the files that hold the rendering, :class:`_Blocked` when
+    another run holds the item's document, or a failed :class:`ItemResult`
+    when its input changed since planning.
     """
     item_run = _ItemRun(job, planned, stores)
     leased = await item_run.lease()
+    if leased is None and item_run.refused is not None:
+        return ItemResult(planned.name, False, (), item_run.refused)
     if leased is None:
         return _Blocked(item_run.held or "another run holds its document")
     store, doc_id, lease = leased
@@ -1445,11 +1632,16 @@ class _Held:
 
 
 async def _render_again(
-    job: Job, run_plan: RunPlan, stores: _Stores, held: _Held
+    job: Job,
+    run_plan: RunPlan,
+    stores: _Stores,
+    held: _Held,
+    failed: list[ItemResult],
 ) -> list[str]:
     """Render the plan's complete items whose files are missing or stale.
 
-    Return the files rendered; an item another run holds goes to *held*.
+    Return the files rendered; an item another run holds goes to *held*,
+    one whose input changed since planning to *failed*.
     """
     rendered: list[str] = []
     for planned in run_plan.render_only:
@@ -1457,6 +1649,9 @@ async def _render_again(
         if isinstance(outcome, _Blocked):
             held.complete.add(id(planned))
             held.add(planned, outcome)
+        elif isinstance(outcome, ItemResult):
+            held.complete.add(id(planned))
+            failed.append(outcome)
         else:
             rendered += outcome
     return rendered
@@ -1600,7 +1795,7 @@ async def run(run_plan: RunPlan, events: RunEvents | None = None) -> RunResult:
             if run_plan.output_dir is not None:
                 run_plan.output_dir.mkdir(parents=True, exist_ok=True)
             await _note_blocked(job, run_plan, stores)
-            rendered = await _render_again(job, run_plan, stores, held)
+            rendered = await _render_again(job, run_plan, stores, held, results)
             total = len(run_plan.to_process)
             for index, planned in enumerate(run_plan.to_process, start=1):
                 try:

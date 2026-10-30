@@ -14,7 +14,9 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 from chronotranscriber.common.images import check_failure_rate
 from chronotranscriber.common.store import PlannedUnit
@@ -35,7 +37,7 @@ from chronotranscriber.methods.units import (
     PayloadResult,
     run_unit_files,
 )
-from chronotranscriber.output.paths import natural_sort_key
+from chronotranscriber.output.paths import page_order_key
 from chronotranscriber.output.store import KIND_PAGE
 from chronotranscriber.sources.pdf import PDFProcessor
 
@@ -79,17 +81,26 @@ def store_document(
 
 
 async def units_to_do(
-    job: Job, handle: DocumentHandle, selected: list[int]
+    job: Job,
+    handle: DocumentHandle,
+    selected: list[int],
+    units: Sequence[PlannedUnit],
+    *,
+    image_settings: Mapping[str, Any] | None = None,
 ) -> list[int]:
-    """Return the selected units still to do, after ``--force`` resets them.
+    """Plan the item's *units*; return the selected units still to do.
 
-    ``--force`` deletes the units another method stored under another kind
-    and returns every unit of the handle's kind to ``pending``; the
-    responses stay. Failed units are to do with ``--retry-errors``.
+    The units are created as ``pending`` where missing. ``--force`` starts
+    the document over instead
+    (:meth:`~chronotranscriber.methods.units.DocumentHandle.replace_units`,
+    which also records *image_settings*): units outside the plan are
+    deleted, the planned ones are ``pending``; the responses stay. Failed
+    units are to do with ``--retry-errors``.
     """
     if job.force:
-        await handle.discard()
-        await handle.reset()
+        await handle.replace_units(units, image_settings=image_settings)
+    else:
+        await handle.plan(units)
     todo = set(handle.todo(retry_errors=job.retry_errors))
     return [index for index in selected if index in todo]
 
@@ -154,18 +165,16 @@ class TesseractTranscriber:
         handle = self._handle(item)
         settings = self.settings
         total = PDFProcessor(item.path).page_count()
-        await handle.plan(
-            [
-                PlannedUnit(
-                    index,
-                    label=f"page_{index + 1:04d}_tess_preprocessed{settings.suffix}",
-                    source_index=index,
-                )
-                for index in range(total)
-            ]
-        )
+        units = [
+            PlannedUnit(
+                index,
+                label=f"page_{index + 1:04d}_tess_preprocessed{settings.suffix}",
+                source_index=index,
+            )
+            for index in range(total)
+        ]
         selected = indices if indices is not None else list(range(total))
-        work = await units_to_do(self.job, handle, selected)
+        work = await units_to_do(self.job, handle, selected, units)
         if not work:
             return []
         with self.job.working_dir(item.path) as base:
@@ -203,13 +212,11 @@ class TesseractTranscriber:
             self.job.events.warning(f"No images found or processed in {item.path}.")
             return []
         handle = self._handle(item)
-        await handle.plan(
-            [
-                PlannedUnit(index, label=name, source_index=name)
-                for index, name in enumerate(names)
-            ]
-        )
-        work = await units_to_do(self.job, handle, selected)
+        units = [
+            PlannedUnit(index, label=name, source_index=name)
+            for index, name in enumerate(names)
+        ]
+        work = await units_to_do(self.job, handle, selected, units)
         if not work:
             return []
         with self.job.working_dir(item.path) as base:
@@ -224,7 +231,7 @@ class TesseractTranscriber:
             if not files:
                 self.job.events.warning(f"No images found or processed in {item.path}.")
                 return []
-            files.sort(key=lambda path: natural_sort_key(path.name))
+            files.sort(key=lambda path: page_order_key(path.name))
             await self._ocr(
                 item,
                 handle,

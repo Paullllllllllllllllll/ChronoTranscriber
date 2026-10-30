@@ -60,6 +60,7 @@ from chronotranscriber.llm.pool import (
 )
 from chronotranscriber.llm.response_parsing import detect_transcription_cause
 from chronotranscriber.output.attempts import AttemptRows
+from chronotranscriber.output.store import forced_replacement
 
 __all__ = [
     "UNIT_KIND",
@@ -131,8 +132,10 @@ class DocumentHandle:
 
     *name* is the document's unique name (the item name), *model* and
     *provider* the stamps of its units when no attempt names others, and
-    *kind* the unit kind. The run core builds the handle after acquiring
-    the lease; the lease keeper renews it while the handle is in use.
+    *kind* the unit kind. *identity* is the input identity a ``--force``
+    replacement records (:meth:`replace_units`); None keeps the recorded
+    one. The run core builds the handle after acquiring the lease; the lease
+    keeper renews it while the handle is in use.
     """
 
     store: Store
@@ -142,6 +145,7 @@ class DocumentHandle:
     model: str
     provider: str
     kind: str = UNIT_KIND
+    identity: str | None = None
 
     @property
     def tool(self) -> str:
@@ -203,6 +207,40 @@ class DocumentHandle:
         """
         return await self.store.delete_units(self.lease, self.kind, count=count)
 
+    async def replace_units(
+        self,
+        units: Sequence[PlannedUnit],
+        *,
+        image_settings: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Start the document over for ``--force`` with the planned *units*.
+
+        One lease-checked transaction deletes the units the new plan does
+        not hold (other kinds included), creates the planned units or
+        returns them to ``pending``, deletes the decision pre-pass's page
+        types, marks the registered outputs stale and records
+        :attr:`identity` and *image_settings* (None keeps the recorded
+        ones), so an interruption leaves the old state or the new one. The
+        responses stay.
+
+        Raises:
+            SubmissionStateError: An open or unresolved batch submission
+                holds a unit of the document; nothing is changed.
+        """
+        await self.store.write(
+            self.lease,
+            forced_replacement(
+                self.store,
+                self.doc_id,
+                self.kind,
+                units,
+                model=self.model,
+                provider=self.provider,
+                input_sha256=self.identity,
+                image_settings=image_settings,
+            ),
+        )
+
     async def write(  # noqa: PLR0913 - mirrors the UnitResult fields; tests call it
         self,
         idx: int,
@@ -254,18 +292,20 @@ def absolute_order(
 ) -> dict[str, int]:
     """Map each image name to its absolute 0-based position in the item.
 
-    PDF Tesseract images carry their page number in the name; folder images
-    take their position in the full listing from *order*; other names fall
-    back to their position in *files*.
+    Folder images take their position in the full listing from *order*,
+    also when their name looks like a PDF page's (``page_1.png`` becomes
+    ``page_1_tess_preprocessed.png``); PDF Tesseract images carry their
+    page number in the name; other names fall back to their position in
+    *files*.
     """
     override = order or {}
     mapping: dict[str, int] = {}
     for position, path in enumerate(files):
         match = _TESS_PAGE_RE.match(path.name)
-        if match:
-            mapping[path.name] = int(match.group(1)) - 1
-        elif path.name in override:
+        if path.name in override:
             mapping[path.name] = override[path.name]
+        elif match:
+            mapping[path.name] = int(match.group(1)) - 1
         else:
             mapping[path.name] = position
     return mapping
@@ -489,8 +529,10 @@ async def run_unit_files(
     units = _Units(handle, on_unit)
     positions = absolute_order(files, order)
 
+    folder = order or {}
+
     async def handle_file(path: Path, idx: int) -> None:
-        page = _TESS_PAGE_RE.match(path.name) is not None
+        page = path.name not in folder and _TESS_PAGE_RE.match(path.name) is not None
         await units.run(
             idx,
             path.name,

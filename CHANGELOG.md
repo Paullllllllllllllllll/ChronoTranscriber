@@ -1,5 +1,36 @@
 # Changelog
 
+- **v1.2.1** (30 October 2026) -- A resumed document no longer mixes two
+  versions of its input. Every document now records the identity of its input,
+  a file's SHA-256 or, for an image folder, which recorded none before, the
+  SHA-256 of its images in page order with their file names, and a
+  transcription run refuses an item whose stored identity differs, partial and
+  complete alike, until `--force` transcribes it from scratch; `repair` refuses
+  such a document too, and so does a run whose input changes between planning
+  and the item's turn or cannot be hashed. Earlier, a resume recorded the new
+  file's hash and transcribed only the pending pages from it. Planning now reads
+  every input once. A document that records no identity, such as every image
+  folder transcribed so far, is trusted and records its identity on the next run
+  that writes it, with a note. The page order of an image folder breaks ties of
+  the natural order by file name (`page_01.png` before `page_1.png`), so it no
+  longer depends on how the file system lists the folder; this reorders only
+  folders whose names tie. Tesseract no longer files a folder image named like
+  a PDF page (`page_1.png`) under the page number in its name, which could
+  store a page at another image's index; it takes its place in the page order
+  and records its file name as source index. A resume or repair refuses a
+  folder document, with or without an identity, whose stored pages no longer
+  fit its images (an image added or removed, or a page labeled with another
+  image than the one at its index) until `--force`, and the classify commands
+  refuse it, so that no answer joins the page of another image. A run and
+  `repair` check the input and the stored identity again under the document's
+  lease and
+  record an identity only there. A forced replacement writes the new unit
+  plan, the image settings and the new identity, drops the old pre-pass page
+  types and the units outside the plan, and marks every rendered file stale,
+  all in one transaction that an open or unresolved batch submission holding
+  any of the document's units refuses. The classify
+  commands record the same identity; folder answers recorded by v1.2.0 count
+  as answers about another input, so classify those folders again.
 - **v1.2.0** (30 October 2026) -- `classify pages` and `classify documents`
   ask a decision model the questions of a classifier file about the pages of
   PDFs and image folders, or about each item from its first pages, and record

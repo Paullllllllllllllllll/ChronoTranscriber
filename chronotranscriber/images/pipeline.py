@@ -21,7 +21,7 @@ import numpy as np
 from PIL import Image, ImageOps
 
 from chronotranscriber.llm.media import SUPPORTED_IMAGE_EXTENSIONS
-from chronotranscriber.output.paths import natural_sort_key
+from chronotranscriber.output.paths import page_order_key
 
 __all__ = [
     "OCR_PRESETS",
@@ -313,7 +313,7 @@ class ImageProcessor:
             for p in source_folder.iterdir()
             if p.is_file() and p.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
         ]
-        image_files.sort(key=lambda p: natural_sort_key(p.name))
+        image_files.sort(key=lambda p: page_order_key(p.name))
         return image_files
 
     @staticmethod

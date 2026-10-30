@@ -178,11 +178,11 @@ class LlmTranscriber:
         if self._client is not None:
             self._client.page_detail = str(img_cfg.get("resolved_detail") or "") or None
         record = image_settings_record(img_cfg, model_type)
-        await self._record_settings(handle, record)
-        await handle.plan(units)
         if self.job.force:
-            await handle.discard()
-            await handle.reset()
+            await handle.replace_units(units, image_settings=record)
+        else:
+            await self._record_settings(handle, record)
+            await handle.plan(units)
         todo = set(handle.todo(retry_errors=self.job.retry_errors))
         needed = [index for index in selected if index in todo]
         already = len(selected) - len(needed)
@@ -326,7 +326,8 @@ class LlmTranscriber:
         """Compare the document's image settings with *record*, then store it.
 
         A changed model alone passes; a changed user setting refuses
-        the item while it holds stored pages, unless ``--force``.
+        the item while it holds stored pages. ``--force`` records the
+        settings with the replacement instead.
 
         Raises:
             ImageSettingsChangedError: A user image setting changed.
@@ -334,7 +335,7 @@ class LlmTranscriber:
         row = handle.store.document(handle.doc_id)
         recorded = _recorded(row.image_settings) if row is not None else None
         stored = row is not None and (row.units_done + row.units_failed) > 0
-        if recorded is not None and stored and not self.job.force:
+        if recorded is not None and stored:
             changed = changed_image_settings(recorded, record)
             if changed:
                 raise ImageSettingsChangedError(

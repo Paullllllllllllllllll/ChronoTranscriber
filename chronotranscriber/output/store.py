@@ -92,6 +92,7 @@ import sqlite3
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from importlib import metadata
 from pathlib import Path
@@ -102,12 +103,16 @@ from chronotranscriber.common.classify_store import VIEW as CLASSIFICATIONS_VIEW
 from chronotranscriber.common.native import changed_image_settings
 from chronotranscriber.common.sqlite import read, read_only
 from chronotranscriber.common.store import (
+    BLOCKING_SUBMISSIONS,
     Component,
+    PlannedUnit,
     SchemaState,
     Store,
+    SubmissionStateError,
     UnitKey,
     WriterOptions,
     check_schema,
+    refresh_documents,
 )
 
 __all__ = [
@@ -121,9 +126,12 @@ __all__ = [
     "VIEWS",
     "Classification",
     "ItemState",
+    "changed_input",
     "classify",
     "database_path",
     "document_name",
+    "forced_replacement",
+    "identity_write",
     "image_settings_record",
     "lease_reason",
     "open_store",
@@ -414,7 +422,10 @@ def _path_key(path: Path, root: Path) -> str:
 
 def _details(
     connection: sqlite3.Connection, doc_id: int
-) -> tuple[list[str], dict[str, int]]:
+) -> tuple[list[str], dict[str, int], str | None]:
+    (input_sha256,) = connection.execute(
+        "SELECT input_sha256 FROM documents WHERE doc_id = ?", (doc_id,)
+    ).fetchone()
     models = [
         str(row[0])
         for row in connection.execute(
@@ -429,7 +440,7 @@ def _details(
             "SELECT path, stale FROM outputs WHERE doc_id = ?", (doc_id,)
         )
     }
-    return models, outputs
+    return models, outputs, input_sha256
 
 
 def _model_note(
@@ -447,6 +458,18 @@ def _model_note(
     )
 
 
+def changed_input(name: str, stored: str, current: str) -> str:
+    """Return the refusal of item *name* whose input changed since it was stored.
+
+    *stored* and *current* are the recorded and the current input identity.
+    """
+    return (
+        f"Input changed for '{name}' since it was transcribed (stored "
+        f"{stored[:12]}..., now {current[:12]}...). Skipping it; use --force to "
+        "transcribe it from scratch."
+    )
+
+
 def lease_reason(holder: str | None, until: float | None) -> str:
     """Name the run that leases a document and when its lease expires.
 
@@ -459,7 +482,7 @@ def lease_reason(holder: str | None, until: float | None) -> str:
     return reason
 
 
-def classify(
+def classify(  # noqa: PLR0913 - one keyword per resume input
     root: Path,
     name: str,
     *,
@@ -469,6 +492,7 @@ def classify(
     retry_errors: bool = False,
     holder: str | None = None,
     now: float | None = None,
+    input_sha256: str | None = None,
 ) -> Classification:
     """Classify item *name* of output root *root* from the store; never write.
 
@@ -477,10 +501,13 @@ def classify(
     that render no page images) and *model* its model. Failed units count
     as done unless *retry_errors*; pending units make the item partial. A
     lease held by another run than *holder* that has not expired at *now*
-    blocks the item, as an open or unresolved batch submission does. A
-    changed user image setting refuses a partial item; a changed model alone
-    resumes with a note. Raises the store's errors for a versionless, newer
-    or unreadable database.
+    blocks the item, as an open or unresolved batch submission does. An
+    item with stored units whose recorded input identity differs from
+    *input_sha256*, the current one, is refused, partial or complete; a
+    document without a recorded identity is trusted. A changed user image
+    setting refuses a partial item; a changed model alone resumes with a
+    note. Raises the store's errors for a versionless, newer or unreadable
+    database.
     """
     path = database_path(root)
     present = tuple(output for output in outputs if _nonempty(output))
@@ -529,7 +556,20 @@ def classify(
             ),
         )
 
-    models, registered = read(path, lambda connection: _details(connection, doc_id))
+    models, registered, stored_sha256 = read(
+        path, lambda connection: _details(connection, doc_id)
+    )
+    if (
+        stored_sha256 is not None
+        and input_sha256 is not None
+        and stored_sha256 != input_sha256
+    ):
+        return Classification(
+            ItemState.REFUSED,
+            name,
+            doc_id,
+            reason=changed_input(name, stored_sha256, input_sha256),
+        )
     recorded = resume.image_settings
     recorded = _plain(recorded) if isinstance(recorded, Mapping) else None
     current = _plain(image_settings) if image_settings is not None else None
@@ -587,6 +627,130 @@ def classify(
         note=note,
         total=total,
     )
+
+
+def identity_write(
+    doc_id: int, input_sha256: str
+) -> Callable[[sqlite3.Connection], None]:
+    """Return a write that records a document's input identity.
+
+    Pass it to ``Store.write`` so it runs under the document's lease.
+    """
+
+    def write(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            "UPDATE documents SET input_sha256 = ? WHERE doc_id = ?",
+            (input_sha256, doc_id),
+        )
+
+    return write
+
+
+_HOLDERS: Final = (
+    "SELECT DISTINCT r.submission_id FROM submission_requests AS r "
+    "JOIN submissions AS s ON s.submission_id = r.submission_id "
+    "WHERE s.status IN (SELECT value FROM json_each(:blocking)) "
+    "AND r.doc_id = :doc ORDER BY r.submission_id"
+)
+_REPLACED: Final = (
+    "doc_id = :doc AND (kind != :kind OR idx NOT IN "
+    "(SELECT value FROM json_each(:idxs)))"
+)
+_REPLAN_UNIT: Final = """
+INSERT INTO units (
+    doc_id, kind, idx, status, source_index, label, tool, model, provider,
+    run_id, attempts, stale, updated_at
+) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, 0, 0, ?)
+ON CONFLICT (doc_id, kind, idx) DO UPDATE SET
+    status = 'pending', outcome = NULL, content = NULL, usage = NULL,
+    error = NULL, error_type = NULL, provenance = NULL, response_id = NULL,
+    attempts = 0, stale = 0, source_index = excluded.source_index,
+    label = excluded.label, run_id = excluded.run_id,
+    updated_at = excluded.updated_at
+"""
+
+
+def forced_replacement(  # noqa: PLR0913 - one keyword per part of the new plan
+    store: Store,
+    doc_id: int,
+    kind: str,
+    units: Sequence[PlannedUnit],
+    *,
+    model: str,
+    provider: str,
+    input_sha256: str | None = None,
+    image_settings: Mapping[str, Any] | None = None,
+) -> Callable[[sqlite3.Connection], None]:
+    """Return the one write that starts document *doc_id* over for ``--force``.
+
+    Pass it to ``Store.write`` so it runs under the document's lease, in one
+    transaction: it deletes the units of other kinds and those of *kind*
+    that *units* (the new plan) does not hold, with their settled batch
+    requests; creates the planned units, or returns them to ``pending``
+    with the planned label and source index; deletes the decision
+    pre-pass's ``page_types`` rows; marks every registered output stale;
+    and records *input_sha256* and *image_settings* (None keeps the
+    recorded value). The responses stay.
+
+    Raises:
+        SubmissionStateError: An open or unresolved batch submission holds
+            a unit of the document; nothing is changed.
+    """
+    run_id = store.run_id
+    if run_id is None:
+        raise RuntimeError("Begin a run before replacing a document's units.")
+    now = datetime.fromtimestamp(store.clock(), tz=UTC).isoformat(
+        timespec="milliseconds"
+    )
+    values = {
+        "doc": doc_id,
+        "kind": kind,
+        "idxs": json.dumps([unit.idx for unit in units]),
+        "blocking": json.dumps(list(BLOCKING_SUBMISSIONS)),
+    }
+    rows = [
+        (
+            doc_id,
+            kind,
+            unit.idx,
+            unit.source_index,
+            unit.label,
+            store.tool,
+            model,
+            provider,
+            run_id,
+            now,
+        )
+        for unit in units
+    ]
+
+    def write(connection: sqlite3.Connection) -> None:
+        held = [str(row[0]) for row in connection.execute(_HOLDERS, values)]
+        if held:
+            raise SubmissionStateError(
+                f"Submission {', '.join(held)} still holds units of document "
+                f"{doc_id}; run batch check, or abandon it, first."
+            )
+        connection.execute(f"DELETE FROM submission_requests WHERE {_REPLACED}", values)
+        connection.execute(f"DELETE FROM units WHERE {_REPLACED}", values)
+        connection.executemany(_REPLAN_UNIT, rows)
+        connection.execute("DELETE FROM page_types WHERE doc_id = ?", (doc_id,))
+        connection.execute("UPDATE outputs SET stale = 1 WHERE doc_id = ?", (doc_id,))
+        if input_sha256 is not None:
+            identity_write(doc_id, input_sha256)(connection)
+        if image_settings is not None:
+            connection.execute(
+                "UPDATE documents SET image_settings = ? WHERE doc_id = ?",
+                (json.dumps(image_settings, ensure_ascii=False, default=str), doc_id),
+            )
+        refresh_documents(connection, doc_id)
+        connection.execute(
+            "UPDATE documents SET last_run_id = COALESCE(?, last_run_id), "
+            "updated_at = ? WHERE doc_id = ?",
+            (run_id, now, doc_id),
+        )
+
+    return write
 
 
 def page_type_rows(

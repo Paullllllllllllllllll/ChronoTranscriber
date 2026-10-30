@@ -45,7 +45,7 @@
     "target_dpi": "native"
   },
   "input_path": "<tmp>/scans",
-  "input_sha256": null,
+  "input_sha256": "<sha256>",
   "kind": "images",
   "last_run_id": "<run-1>",
   "lease_generation": "<generation>",

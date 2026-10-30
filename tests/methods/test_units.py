@@ -333,6 +333,16 @@ def test_absolute_order_uses_page_names_then_the_folder_listing() -> None:
     }
 
 
+def test_absolute_order_puts_folder_images_named_like_pages_at_their_listing() -> None:
+    files = [
+        Path("page_1_tess_preprocessed.png"),
+        Path("page_01_tess_preprocessed.png"),
+    ]
+    order = {files[0].name: 1, files[1].name: 0}
+
+    assert absolute_order(files, order) == order
+
+
 def test_todo_and_reset_follow_the_store(tmp_path: Path) -> None:
     db = tmp_path / "chronotranscriber.sqlite"
 

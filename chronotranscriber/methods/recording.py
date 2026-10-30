@@ -133,16 +133,15 @@ async def _reset_changed_plan(
     """Replace the chunk units of a changed plan of *count* chunks.
 
     A plan with other boundaries describes other audio: the units beyond
-    the new plan are deleted and, unless ``--force`` resets them anyway,
-    the others return to ``pending`` with a warning, so the recording is
-    transcribed again. The responses of the earlier chunks stay.
+    the new plan are deleted and the others return to ``pending`` with a
+    warning, so the recording is transcribed again. The responses of the
+    earlier chunks stay. ``--force`` replaces the plan in one transaction
+    instead (:func:`~chronotranscriber.methods.tesseract.units_to_do`).
     """
     stored = _stored_signature(handle)
     if stored is None or stored == signature:
         return
     await handle.discard(count)
-    if job.force:
-        return
     earlier = handle.store.units(handle.doc_id, kind=handle.kind)
     if not any(unit.status != "pending" for unit in earlier):
         return
@@ -185,15 +184,20 @@ async def transcribe_recording(
     record = recording_record(
         item.path, item.method, (provider, model), settings, plan.specs
     )
-    await _reset_changed_plan(
-        job, handle, item.name, record[SIGNATURE_KEY], len(plan.specs)
-    )
-    await handle.store.set_image_settings(handle.lease, record)
+    if not job.force:
+        await _reset_changed_plan(
+            job, handle, item.name, record[SIGNATURE_KEY], len(plan.specs)
+        )
+        await handle.store.set_image_settings(handle.lease, record)
     names = chunk_names(item.path, plan.specs, settings.chunk_format)
-    await handle.plan(
-        [PlannedUnit(spec.index, label=names[n]) for n, spec in enumerate(plan.specs)]
+    units = [
+        PlannedUnit(spec.index, label=names[n]) for n, spec in enumerate(plan.specs)
+    ]
+    todo = set(
+        await units_to_do(
+            job, handle, [spec.index for spec in selected], units, image_settings=record
+        )
     )
-    todo = set(await units_to_do(job, handle, [spec.index for spec in selected]))
     if not todo:
         return []
 

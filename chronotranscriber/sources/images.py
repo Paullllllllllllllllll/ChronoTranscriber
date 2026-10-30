@@ -37,7 +37,7 @@ from chronotranscriber.llm.media import (
     SUPPORTED_IMAGE_EXTENSIONS,
     SUPPORTED_IMAGE_FORMATS,
 )
-from chronotranscriber.output.paths import natural_sort_key
+from chronotranscriber.output.paths import page_order_key
 from chronotranscriber.sources.audio.ffmpeg import get_ffmpeg_command
 from chronotranscriber.spec import IMAGE_PRESETS, ImageSpec
 
@@ -86,13 +86,13 @@ numeric render and one section per model family."""
 
 
 def list_folder_images(folder: Path) -> list[Path]:
-    """List the supported images in *folder* in natural filename order."""
+    """List the supported images in *folder* in page order (:func:`page_order_key`)."""
     files = [
         path
         for path in folder.iterdir()
         if path.is_file() and path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
     ]
-    files.sort(key=lambda path: natural_sort_key(path.name))
+    files.sort(key=lambda path: page_order_key(path.name))
     return files
 
 

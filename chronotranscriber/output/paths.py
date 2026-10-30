@@ -27,6 +27,16 @@ def natural_sort_key(name: str) -> list[object]:
     return [int(p) if p.isdigit() else p for p in parts]
 
 
+def page_order_key(name: str) -> tuple[list[object], str]:
+    """Return the sort key of a folder image in page order.
+
+    Natural order (:func:`natural_sort_key`), with the file name breaking
+    ties such as ``page_1`` and ``page_01``, so the order never depends on
+    how the file system lists the folder.
+    """
+    return natural_sort_key(name), name
+
+
 WINDOWS_MAX_PATH = 260
 MAX_SAFE_NAME_LENGTH = 80
 HASH_LENGTH = 8
@@ -217,6 +227,7 @@ __all__ = [
     "item_paths",
     "mirror_output_path",
     "natural_sort_key",
+    "page_order_key",
     "prepare_item_paths",
     "relative_key",
 ]

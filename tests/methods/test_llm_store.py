@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-import fitz  # PyMuPDF
+import pymupdf
 import pytest
 from PIL import Image
 
@@ -44,7 +44,7 @@ PAGES = [_page(f"page {i} text") for i in range(4)]
 
 def _pdf(path: Path, pages: int = 4) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    document = fitz.open()
+    document = pymupdf.open()
     for index in range(pages):
         page = document.new_page(width=200, height=300)
         page.insert_text((50, 100), f"Page {index + 1}")

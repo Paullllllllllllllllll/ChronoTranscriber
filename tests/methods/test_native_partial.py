@@ -22,7 +22,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-import fitz  # PyMuPDF
+import pymupdf
 import pytest
 from ebooklib import epub
 
@@ -35,7 +35,7 @@ SECTIONS = ["Erstes Kapitel: Suppe.", "Zweites: Brot.", "Drittes: Kuchen."]
 
 def _pdf(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    document = fitz.open()
+    document = pymupdf.open()
     for index in range(3):
         page = document.new_page(width=200, height=300)
         page.insert_text((50, 100), f"Seite {index + 1}")

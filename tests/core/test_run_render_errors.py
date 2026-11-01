@@ -23,7 +23,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-import fitz  # PyMuPDF
+import pymupdf
 import pytest
 
 import chronotranscriber.run as core
@@ -49,7 +49,7 @@ windows_only = pytest.mark.skipif(
 
 def _pdf(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    document = fitz.open()
+    document = pymupdf.open()
     page = document.new_page(width=200, height=300)
     page.insert_text((50, 100), path.stem)
     document.save(path)

@@ -15,7 +15,7 @@ import types
 from pathlib import Path
 from typing import Any, ClassVar
 
-import fitz
+import pymupdf
 from PIL import Image
 
 from chronotranscriber.common.images import PdfPageSource
@@ -84,7 +84,7 @@ def render_pdf_page(
         return page_image(pages.build_payload(page_index), pages)
 
 
-def _get_effective_dpi(page: fitz.Page, dpi: int, max_pixels: int) -> int:
+def _get_effective_dpi(page: pymupdf.Page, dpi: int, max_pixels: int) -> int:
     """Return *dpi*, reduced where the rendered page would exceed *max_pixels*."""
     if max_pixels <= 0:
         return dpi
@@ -114,7 +114,7 @@ class PDFProcessor:
     ) -> None:
         self.pdf_path = pdf_path
         self.tesseract = tesseract if tesseract is not None else TesseractSettings()
-        self.doc: fitz.Document | None = None
+        self.doc: pymupdf.Document | None = None
 
     def is_native_pdf(self) -> bool:
         """Check if the PDF is native (searchable) or scanned.
@@ -123,7 +123,7 @@ class PDFProcessor:
             bool: True if native, False otherwise.
         """
         try:
-            with fitz.open(self.pdf_path) as doc:
+            with pymupdf.open(self.pdf_path) as doc:
                 return any(page.get_text().strip() for page in doc)
         except Exception as e:  # noqa: BLE001 - any unreadable PDF counts as scanned
             logger.error(f"Error checking if PDF is native: {self.pdf_path}, {e}")
@@ -132,7 +132,7 @@ class PDFProcessor:
     def open_pdf(self) -> None:
         """Open the PDF document."""
         try:
-            self.doc = fitz.open(self.pdf_path)
+            self.doc = pymupdf.open(self.pdf_path)
         except Exception as e:
             logger.error(f"Failed to open PDF: {self.pdf_path}, {e}")
             raise
@@ -258,11 +258,11 @@ class PDFProcessor:
         """
         try:
             # A document per thread: PyMuPDF documents are not thread-safe.
-            with fitz.open(pdf_path) as doc:
+            with pymupdf.open(pdf_path) as doc:
                 page = doc[page_index]
                 effective_dpi = _get_effective_dpi(page, target_dpi, max_pixels)
                 pix = page.get_pixmap(
-                    matrix=fitz.Matrix(effective_dpi / 72, effective_dpi / 72),
+                    matrix=pymupdf.Matrix(effective_dpi / 72, effective_dpi / 72),
                     alpha=False,
                 )
                 # samples_mv avoids the bytes copy that pix.samples makes; PIL
@@ -295,7 +295,7 @@ class PDFProcessor:
 
     def page_count(self) -> int:
         """Return the number of pages; the document is closed afterwards."""
-        with fitz.open(self.pdf_path) as doc:
+        with pymupdf.open(self.pdf_path) as doc:
             return int(doc.page_count)
 
 

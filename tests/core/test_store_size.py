@@ -17,7 +17,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-import fitz  # PyMuPDF
+import pymupdf
 import pytest
 
 import chronotranscriber.run as core
@@ -41,7 +41,7 @@ MAX_BYTES_PER_PAGE = 16_384
 
 def _pdf(path: Path, pages: int) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    document = fitz.open()
+    document = pymupdf.open()
     for _ in range(pages):
         document.new_page(width=100, height=150)
     document.save(path)

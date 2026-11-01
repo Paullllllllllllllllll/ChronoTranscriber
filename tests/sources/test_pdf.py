@@ -10,7 +10,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-import fitz
+import pymupdf
 import pytest
 
 from chronotranscriber.sources.pdf import (
@@ -22,7 +22,7 @@ from chronotranscriber.sources.pdf import (
 
 def _write_text_pdf(path: Path, text: str = "Hello PDF") -> None:
     """Write a minimal searchable PDF containing *text* to *path*."""
-    doc = fitz.open()
+    doc = pymupdf.open()
     try:
         page = doc.new_page(width=300, height=400)
         page.insert_text((72, 72), text)
@@ -33,7 +33,7 @@ def _write_text_pdf(path: Path, text: str = "Hello PDF") -> None:
 
 def _write_image_only_pdf(path: Path) -> None:
     """Write a PDF with a blank page and no text layer."""
-    doc = fitz.open()
+    doc = pymupdf.open()
     try:
         doc.new_page(width=200, height=200)  # no insert_text call
         doc.save(str(path))
@@ -121,7 +121,7 @@ class TestNativeExtractPDFText:
     def test_page_indices_filter(self, tmp_path: Path) -> None:
         """When page_indices is given, only those pages' text is returned."""
         pdf = tmp_path / "two_pages.pdf"
-        doc = fitz.open()
+        doc = pymupdf.open()
         try:
             page1 = doc.new_page(width=300, height=300)
             page1.insert_text((72, 72), "PageOneText")
@@ -152,7 +152,7 @@ class TestTesseractPreprocessing:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         pdf = tmp_path / "doc.pdf"
-        doc = fitz.open()
+        doc = pymupdf.open()
         try:
             for _ in range(3):
                 doc.new_page(width=72, height=72)
@@ -187,7 +187,7 @@ class TestGetEffectiveDPI:
     def test_returns_unchanged_when_no_budget(self, tmp_path: Path) -> None:
         pdf = tmp_path / "p.pdf"
         _write_text_pdf(pdf)
-        with fitz.open(str(pdf)) as doc:
+        with pymupdf.open(str(pdf)) as doc:
             page = doc[0]
             assert _get_effective_dpi(page, 300, 0) == 300
 
@@ -195,14 +195,14 @@ class TestGetEffectiveDPI:
     def test_returns_unchanged_when_under_budget(self, tmp_path: Path) -> None:
         """A small page well under the pixel budget keeps its target DPI."""
         pdf = tmp_path / "small.pdf"
-        doc = fitz.open()
+        doc = pymupdf.open()
         try:
             doc.new_page(width=72, height=72)  # 1 inch x 1 inch
             doc.save(str(pdf))
         finally:
             doc.close()
 
-        with fitz.open(str(pdf)) as d:
+        with pymupdf.open(str(pdf)) as d:
             page = d[0]
             # At 300 DPI this is 300x300 = 90_000 pixels, well under 10 MP
             assert _get_effective_dpi(page, 300, 10_000_000) == 300
@@ -211,7 +211,7 @@ class TestGetEffectiveDPI:
     def test_clamps_dpi_when_over_budget(self, tmp_path: Path) -> None:
         """A large page above the pixel budget gets a reduced DPI."""
         pdf = tmp_path / "large.pdf"
-        doc = fitz.open()
+        doc = pymupdf.open()
         try:
             # Create a large page: 20x20 inches at 300 DPI -> 36 MP
             doc.new_page(width=72 * 20, height=72 * 20)
@@ -219,7 +219,7 @@ class TestGetEffectiveDPI:
         finally:
             doc.close()
 
-        with fitz.open(str(pdf)) as d:
+        with pymupdf.open(str(pdf)) as d:
             page = d[0]
             budget = 4_000_000  # cap at 4 MP
             effective = _get_effective_dpi(page, 300, budget)

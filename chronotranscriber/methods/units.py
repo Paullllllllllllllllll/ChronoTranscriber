@@ -44,7 +44,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from chronotranscriber.common.capture import use_recorder
+from chronotranscriber.common.capture import error_type_of, use_recorder
 from chronotranscriber.common.store import (
     Lease,
     LeaseLostError,
@@ -428,7 +428,7 @@ class _Units:
         error_type: str | None = None
         if raised is not None:
             error = str(raised) or type(raised).__name__
-            error_type = type(raised).__name__
+            error_type = error_type_of(raised)
         elif failed:
             last = recorder.stored[-1].record if recorder.stored else None
             error = raw_dict.get("error") or (last.error if last else None) or content

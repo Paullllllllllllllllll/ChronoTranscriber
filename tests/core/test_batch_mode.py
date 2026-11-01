@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import fitz  # PyMuPDF
+import pymupdf
 import pytest
 
 import chronotranscriber.batch.submit as submit_module
@@ -46,7 +46,7 @@ def make_pdf(tmp_path: Path) -> MakePdf:
     def make(name: str, pages: int = 1, text: bool = True) -> Path:
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        document = fitz.open()
+        document = pymupdf.open()
         for index in range(pages):
             page = document.new_page(width=200, height=300)
             if text:

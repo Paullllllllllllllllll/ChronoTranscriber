@@ -19,7 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import fitz  # PyMuPDF
+import pymupdf
 import pytest
 from ebooklib import epub
 from PIL import Image
@@ -82,7 +82,7 @@ def root(tmp_path: Path) -> Path:
 
 def _blank_pdf(path: Path, pages: int) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    document = fitz.open()
+    document = pymupdf.open()
     for _ in range(pages):
         document.new_page(width=72, height=96)
     document.save(path)
@@ -92,7 +92,7 @@ def _blank_pdf(path: Path, pages: int) -> Path:
 
 def _text_pdf(path: Path, lines: list[str]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    document = fitz.open()
+    document = pymupdf.open()
     for line in lines:
         page = document.new_page(width=300, height=200)
         page.insert_text((20, 50), line)

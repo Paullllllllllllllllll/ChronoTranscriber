@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-import fitz  # PyMuPDF
+import pymupdf
 import pytest
 from PIL import Image
 
@@ -32,7 +32,7 @@ from tests.recording_events import RecordingEvents
 
 def _scan(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    document = fitz.open()
+    document = pymupdf.open()
     document.new_page(width=200, height=300)
     document.save(path)
     document.close()

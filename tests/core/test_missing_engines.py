@@ -6,7 +6,7 @@ import asyncio
 import json
 from pathlib import Path
 
-import fitz  # PyMuPDF
+import pymupdf
 import pytest
 
 import chronotranscriber.methods.audio_api as audio_api
@@ -100,7 +100,7 @@ def test_native_on_a_scanned_pdf_without_tesseract_fails(
     monkeypatch.setattr(tesseract_method, "ensure_tesseract_available", lambda: False)
     scan = tmp_path / "in" / "scan.pdf"
     scan.parent.mkdir()
-    document = fitz.open()
+    document = pymupdf.open()
     document.new_page(width=200, height=300)
     document.save(scan)
     document.close()

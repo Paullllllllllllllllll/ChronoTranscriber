@@ -140,13 +140,13 @@ class MOBIProcessor:
     ) -> MOBITextExtraction:
         """Extract text from the unpacked PDF using PyMuPDF."""
         try:
-            import fitz
+            import pymupdf
 
             sections: list[str] = []
             title = None
             authors: list[str] = []
 
-            with fitz.open(str(pdf_path)) as doc:
+            with pymupdf.open(str(pdf_path)) as doc:
                 metadata = doc.metadata
                 if metadata:
                     title = metadata.get("title", "").strip() or None

@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-import fitz  # PyMuPDF
+import pymupdf
 import pytest
 
 import chronotranscriber.run as core
@@ -56,7 +56,7 @@ PAGE: dict[str, Any] = {
 
 def _pdf(path: Path, pages: int) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    document = fitz.open()
+    document = pymupdf.open()
     for index in range(pages):
         page = document.new_page(width=200, height=300)
         page.insert_text((50, 100), f"Page {index + 1}")

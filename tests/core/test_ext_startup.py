@@ -13,7 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import fitz  # PyMuPDF
+import pymupdf
 import pytest
 
 import chronotranscriber.cli.transcribe as transcribe_cli
@@ -45,7 +45,7 @@ def make_pdf(tmp_path: Path) -> MakePdf:
     def make(name: str = "doc.pdf") -> Path:
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        document = fitz.open()
+        document = pymupdf.open()
         document.new_page(width=200, height=300).insert_text((50, 100), "Page 1")
         document.save(path)
         document.close()

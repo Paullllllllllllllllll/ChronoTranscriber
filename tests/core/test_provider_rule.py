@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import fitz  # PyMuPDF
+import pymupdf
 import pytest
 
 from chronotranscriber import __main__ as entry
@@ -125,7 +125,7 @@ def test_a_flag_provider_with_a_flag_model_runs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    document = fitz.open()
+    document = pymupdf.open()
     document.new_page(width=200, height=300).insert_text((50, 100), "Page 1")
     document.save(tmp_path / "doc.pdf")
     document.close()

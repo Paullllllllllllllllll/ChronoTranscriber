@@ -18,7 +18,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
-import fitz  # PyMuPDF
+import pymupdf
 import pytest
 
 from chronotranscriber.common.store import PlannedUnit, UnitResult
@@ -74,7 +74,7 @@ def _old(text: str) -> str:
 
 
 def _text_pdf(path: Path) -> Path:
-    document = fitz.open()
+    document = pymupdf.open()
     for text in PAGES:
         page = document.new_page(width=300, height=200)
         if text:

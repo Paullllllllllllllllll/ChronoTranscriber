@@ -226,6 +226,11 @@ CASES = {
         ItemState.BLOCKED,
         reason="other-run",
     ),
+    "leased_without_units": Case(
+        seeded([], render=False, sql=_lease("other-run", 600)),
+        ItemState.BLOCKED,
+        reason="other-run",
+    ),
     "expired_foreign_lease": Case(
         seeded(PAGES_RUN, sql=_lease("other-run", -1)), ItemState.PARTIAL, (0, 3)
     ),

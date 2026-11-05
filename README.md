@@ -302,8 +302,11 @@ the pages it sends are the classifier's selection.
 
 An interrupted `transcribe` run releases its leases, so a rerun right away
 resumes with the units still to do. A run that is killed instead keeps its
-leases until they expire (10 minutes); until then a rerun reports its items as
-blocked and exits 1. A lease taken while a run plans or processes its items also
+leases until they expire, at most 10 minutes later. A live run renews its
+leases every minute, so a rerun reads the leases on its items again every 90
+seconds: it waits until an unrenewed lease expires and then transcribes the
+item, and it reports an item whose lease was renewed as blocked and exits 1. A
+lease taken while a run plans or processes its items also
 counts, including for a complete item whose files would be rendered again.
 
 `<command> --help` lists the exit codes of each command. Progress, warnings and

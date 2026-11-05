@@ -384,8 +384,9 @@ class Classification:
     complete item to re-render its files without model calls; *missing*
     lists those files absent on disk. *note* records a model change, which
     resumes. *total* counts the stored units of a complete or partial item.
-    *leased_by* names the run whose lease blocks the item; it is None for an
-    item blocked by a batch submission.
+    *leased_by* names the run whose lease blocks the item and *lease_until*
+    its expiry in seconds since the epoch; both are None for an item blocked
+    by a batch submission.
     """
 
     state: ItemState
@@ -398,6 +399,7 @@ class Classification:
     note: str | None = None
     total: int = 0
     leased_by: str | None = None
+    lease_until: float | None = None
 
     @property
     def indices(self) -> tuple[int, ...]:
@@ -517,6 +519,22 @@ def classify(  # noqa: PLR0913 - one keyword per resume input
         store = Store(path, TOOL, components=_COMPONENTS)
     resume = store.resume_state(name) if store is not None else None
     doc_id = resume.doc_id if resume is not None else None
+    moment = time.time() if now is None else now
+    if (
+        resume is not None
+        and resume.lease_run_id is not None
+        and resume.lease_run_id != holder
+        and resume.lease_until is not None
+        and resume.lease_until > moment
+    ):
+        return Classification(
+            ItemState.BLOCKED,
+            name,
+            doc_id,
+            reason=lease_reason(resume.lease_run_id, resume.lease_until),
+            leased_by=resume.lease_run_id,
+            lease_until=resume.lease_until,
+        )
     if resume is None or not resume.counts:
         if present:
             return Classification(
@@ -531,20 +549,6 @@ def classify(  # noqa: PLR0913 - one keyword per resume input
         return Classification(ItemState.NONE, name, doc_id, reason="no stored units")
     assert doc_id is not None
 
-    moment = time.time() if now is None else now
-    if (
-        resume.lease_run_id is not None
-        and resume.lease_run_id != holder
-        and resume.lease_until is not None
-        and resume.lease_until > moment
-    ):
-        return Classification(
-            ItemState.BLOCKED,
-            name,
-            doc_id,
-            reason=lease_reason(resume.lease_run_id, resume.lease_until),
-            leased_by=resume.lease_run_id,
-        )
     if resume.blocked:
         return Classification(
             ItemState.BLOCKED,

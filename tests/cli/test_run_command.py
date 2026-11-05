@@ -239,21 +239,34 @@ def test_an_interrupted_run_reports_the_tokens_spent(
     assert payload["usage"]["total"]["total_tokens"] == 6
 
 
-def test_a_blocked_item_exits_1_and_is_named_with_its_lease(
-    tmp_path: Path, make_pdf: MakePdf, capsys: pytest.CaptureFixture[str]
-) -> None:
-    argv = _native(tmp_path, make_pdf)
-    assert _transcribe(*argv) == 0
-    capsys.readouterr()
+def _lease_elsewhere(tmp_path: Path, holder: str, seconds: float) -> None:
     connection = sqlite3.connect(tmp_path / "out" / "chronotranscriber.sqlite")
     try:
         connection.execute(
-            "UPDATE documents SET lease_run_id = 'other-run', lease_until = ?",
-            (time.time() + 600,),
+            f"UPDATE documents SET lease_run_id = {holder}, lease_until = ?",
+            (time.time() + seconds,),
         )
         connection.commit()
     finally:
         connection.close()
+
+
+def _renewed_elsewhere(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let the other run renew its lease, so the wait finds it live at once."""
+    monkeypatch.setattr(transcribe_cli, "wait_for_stale_leases", lambda *_a: None)
+
+
+def test_a_blocked_item_exits_1_and_is_named_with_its_lease(
+    tmp_path: Path,
+    make_pdf: MakePdf,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    argv = _native(tmp_path, make_pdf)
+    assert _transcribe(*argv) == 0
+    capsys.readouterr()
+    _lease_elsewhere(tmp_path, "'other-run'", 600)
+    _renewed_elsewhere(monkeypatch)
 
     assert _transcribe(*argv, "--json") == 1
 
@@ -263,6 +276,21 @@ def test_a_blocked_item_exits_1_and_is_named_with_its_lease(
     assert "Not processed (blocked): 'doc.pdf': leased by run other-run until" in err
     assert "Processing incomplete: 1 item(s) leased by another run" in err
     assert "Processing complete!" not in err
+
+
+def test_a_lease_its_run_stopped_renewing_is_waited_out(
+    tmp_path: Path, make_pdf: MakePdf, capsys: pytest.CaptureFixture[str]
+) -> None:
+    argv = _native(tmp_path, make_pdf)
+    assert _transcribe(*argv, "--pages", "1") == 0
+    capsys.readouterr()
+    _lease_elsewhere(tmp_path, "'killed-run'", 0.5)
+
+    assert _transcribe(*argv, "--json") == 0
+
+    payload, err = _one_line(capsys)
+    assert (payload["items_complete"], payload["items_blocked"]) == (1, 0)
+    assert "waiting until" in err.lower()
 
 
 def test_an_item_pages_left_partial_counts_neither_complete_nor_failed(
@@ -282,7 +310,10 @@ def test_an_item_pages_left_partial_counts_neither_complete_nor_failed(
 
 
 def test_blocked_items_of_one_name_keep_their_own_reasons(
-    tmp_path: Path, make_pdf: MakePdf, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    make_pdf: MakePdf,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     for folder in ("a", "b"):
         make_pdf(f"in/{folder}/doc.pdf")
@@ -300,15 +331,8 @@ def test_blocked_items_of_one_name_keep_their_own_reasons(
     ]
     assert _transcribe(*argv) == 0
     capsys.readouterr()
-    connection = sqlite3.connect(tmp_path / "out" / "chronotranscriber.sqlite")
-    try:
-        connection.execute(
-            "UPDATE documents SET lease_run_id = 'run-' || doc_id, lease_until = ?",
-            (time.time() + 600,),
-        )
-        connection.commit()
-    finally:
-        connection.close()
+    _lease_elsewhere(tmp_path, "'run-' || doc_id", 600)
+    _renewed_elsewhere(monkeypatch)
 
     assert _transcribe(*argv, "--json") == 1
 

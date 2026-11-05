@@ -1,5 +1,12 @@
 # Changelog
 
+- **v1.3.1** (5 November 2026) -- A rerun of `transcribe` after a killed run no longer
+  skips the killed run's items for the 10 minutes its leases stay valid. Before the
+  run it reads the leases on its items again every 90 seconds; a lease whose expiry
+  does not move belongs to a run that has stopped, and the rerun waits until it
+  expires and then transcribes the item, while an item whose lease is renewed stays
+  blocked and exits 1. A leased document without stored units is now blocked at
+  planning.
 - **v1.3.0** (1 November 2026) -- Refresh the dependencies within their current majors
   and cap `anthropic`, `openai` and PyMuPDF below their next majors. PDF and MOBI code
   imports `pymupdf` instead of the deprecated `fitz`, whose warning broke the interrupt

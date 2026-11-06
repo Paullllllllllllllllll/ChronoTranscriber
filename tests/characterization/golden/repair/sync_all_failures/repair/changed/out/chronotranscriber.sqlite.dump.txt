@@ -487,7 +487,15 @@
       "source": "default",
       "value": null
     },
+    "model.frequency_penalty": {
+      "source": "default",
+      "value": null
+    },
     "model.max_output_tokens": {
+      "source": "default",
+      "value": null
+    },
+    "model.min_p": {
       "source": "default",
       "value": null
     },
@@ -499,6 +507,10 @@
       "source": "default",
       "value": null
     },
+    "model.presence_penalty": {
+      "source": "default",
+      "value": null
+    },
     "model.provider": {
       "source": "default",
       "value": "openai"
@@ -506,6 +518,10 @@
     "model.reasoning_effort": {
       "source": "default",
       "value": "xhigh"
+    },
+    "model.repetition_penalty": {
+      "source": "default",
+      "value": null
     },
     "model.response_format": {
       "source": "default",
@@ -518,6 +534,10 @@
     "model.temperature": {
       "source": "default",
       "value": 1.0
+    },
+    "model.top_k": {
+      "source": "default",
+      "value": null
     },
     "model.top_p": {
       "source": "default",
@@ -641,7 +661,15 @@
       "source": "flag",
       "value": null
     },
+    "model.frequency_penalty": {
+      "source": "flag",
+      "value": null
+    },
     "model.max_output_tokens": {
+      "source": "flag",
+      "value": null
+    },
+    "model.min_p": {
       "source": "flag",
       "value": null
     },
@@ -653,6 +681,10 @@
       "source": "flag",
       "value": null
     },
+    "model.presence_penalty": {
+      "source": "flag",
+      "value": null
+    },
     "model.provider": {
       "source": "flag",
       "value": "openai"
@@ -660,6 +692,10 @@
     "model.reasoning_effort": {
       "source": "flag",
       "value": "xhigh"
+    },
+    "model.repetition_penalty": {
+      "source": "flag",
+      "value": null
     },
     "model.response_format": {
       "source": "flag",
@@ -672,6 +708,10 @@
     "model.temperature": {
       "source": "flag",
       "value": 1.0
+    },
+    "model.top_k": {
+      "source": "flag",
+      "value": null
     },
     "model.top_p": {
       "source": "flag",

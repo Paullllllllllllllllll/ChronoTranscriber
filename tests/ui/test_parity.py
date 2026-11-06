@@ -373,6 +373,40 @@ def llm_named_endpoint(ws: Workspace) -> Script:
     return Script("transcribe", ws.session(), answers)
 
 
+def llm_endpoint_samplers(ws: Workspace) -> Script:
+    """The named endpoint with every sampler without a code default."""
+    answers = [
+        str(ws.archive),
+        KEEP,
+        "images",
+        "llm",
+        "list",
+        ["volume_2"],
+        "beside",
+        KEEP,
+        "endpoint:local",
+        "qwen-vl",
+        "customize",
+        KEEP,
+        KEEP,
+        KEEP,
+        "1.5",
+        "-0.5",
+        "20",
+        "0.05",
+        "1.1",
+        "text",
+        *RESPONSE_KEEPS[:4],
+        "recommended",
+        KEEP,
+        KEEP,
+        [],
+        KEEP,
+        "copy",
+    ]
+    return Script("transcribe", ws.session(), answers)
+
+
 def llm_provider_without_implied_model(ws: Workspace) -> Script:
     """OpenRouter with a typed model name that implies no provider, topics as
     the fallback context."""
@@ -689,6 +723,32 @@ def repair_endpoint_with_back(ws: Workspace) -> Script:
     return Script("repair", ws.session(), answers)
 
 
+def repair_endpoint_samplers(ws: Workspace) -> Script:
+    """Errors at the named endpoint with every sampler without a code default."""
+    answers = [
+        str(ws.transcription),
+        ["api_error"],
+        "",
+        "endpoint:local",
+        "qwen-vl",
+        "customize",
+        KEEP,
+        KEEP,
+        KEEP,
+        "1.5",
+        "-0.5",
+        "20",
+        "0.05",
+        "1.1",
+        "text",
+        *RESPONSE_KEEPS[:4],
+        "recommended",
+        KEEP,
+        "copy",
+    ]
+    return Script("repair", ws.session(), answers)
+
+
 def repair_reasoning_defaults(ws: Workspace) -> Script:
     """Every cause, reasoning and verbosity, over settings defaults."""
     defaults = {"reasoning_effort": "low", "service_tier": "priority"}
@@ -839,6 +899,7 @@ SESSIONS: Final[Mapping[str, Callable[[Workspace], Script]]] = MappingProxyType(
             llm_pdf_customized,
             llm_reasoning_and_schema_file,
             llm_named_endpoint,
+            llm_endpoint_samplers,
             llm_provider_without_implied_model,
             tesseract_images_with_back,
             auto_folder_tesseract,
@@ -853,6 +914,7 @@ SESSIONS: Final[Mapping[str, Callable[[Workspace], Script]]] = MappingProxyType(
             transcribe_force_action,
             repair_customized,
             repair_endpoint_with_back,
+            repair_endpoint_samplers,
             repair_reasoning_defaults,
             repair_provider,
             check_adopt,
@@ -1132,6 +1194,11 @@ def _texts(ws: Workspace) -> list[tuple[str, list[str]]]:
         ("Max output tokens", ["", "4000"]),
         ("Temperature", ["0.3", "1.5"]),
         ("Top p", ["0.5", "1"]),
+        ("Presence penalty", ["1.5", "-0.5"]),
+        ("Frequency penalty", ["0.5"]),
+        ("Top k", ["20"]),
+        ("Min p", ["0.05"]),
+        ("Repetition penalty", ["1.1"]),
         ("Schema file:", [str(ws.schema)]),
         ("Prompt file:", [str(ws.prompt)]),
         ("Context file:", [str(ws.context)]),
@@ -1286,6 +1353,8 @@ _DEFAULT_POOL: Final[Mapping[str, Sequence[Any]]] = MappingProxyType(
         "max_output_tokens": [3000],
         "temperature": [0.4],
         "top_p": [0.7],
+        "presence_penalty": [1.5],
+        "top_k": [20],
         "service_tier": ["priority", "auto"],
         "response_format": ["json", "text", "schema"],
         "dpi": [200, "native"],

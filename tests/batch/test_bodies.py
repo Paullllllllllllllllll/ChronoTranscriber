@@ -319,6 +319,39 @@ def test_anthropic_batch_thinking_matches_the_sync_client(
         assert body.get("temperature") == kwargs.get("temperature")
 
 
+@pytest.mark.parametrize(("effort", "sent"), [("none", 20), ("low", None)])
+def test_anthropic_batch_top_k_matches_the_sync_client(
+    effort: str, sent: int | None
+) -> None:
+    spec = model_spec(
+        "anthropic", "claude-sonnet-4-5", reasoning_effort=effort, top_k=20
+    )
+    kwargs = constructor_kwargs(spec, Settings())
+
+    body = build_plan(spec, Settings(), schema_path=DEFAULT_SCHEMA_PATH).body(REQUEST)
+
+    assert body.get("top_k") == kwargs.get("top_k") == sent
+
+
+def test_google_batch_samplers_match_the_sync_client() -> None:
+    spec = model_spec(
+        "google",
+        "gemini-3.1-pro",
+        presence_penalty=1.5,
+        frequency_penalty=-0.5,
+        top_k=20,
+    )
+    kwargs = constructor_kwargs(spec, Settings())
+
+    body = build_plan(spec, Settings(), schema_path=DEFAULT_SCHEMA_PATH).body(REQUEST)
+
+    names = (*_SAMPLERS, "presence_penalty", "frequency_penalty", "top_k")
+    assert {name: body["config"].get(name) for name in names} == {
+        name: kwargs.get(name) for name in names
+    }
+    assert body["config"]["presence_penalty"] == 1.5
+
+
 def test_anthropic_batch_thinking_follows_the_effort() -> None:
     budgets = {
         effort: plan(

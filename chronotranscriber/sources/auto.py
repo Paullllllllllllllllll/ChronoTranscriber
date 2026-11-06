@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from chronotranscriber.llm.media import SUPPORTED_IMAGE_EXTENSIONS
-from chronotranscriber.sources import SourceItem, source_type
+from chronotranscriber.sources import SKIPPED_FOLDERS, SourceItem, source_type
 from chronotranscriber.sources.pdf import PDFProcessor
 
 __all__ = ["AutoScan", "decide", "file_item", "scan"]
@@ -47,8 +47,9 @@ def _folder_has_images(path: str) -> bool:
 def scan(folder: Path) -> AutoScan:
     """Return the items directly in *folder*: PDFs, image folders, EPUB, MOBI.
 
-    Subfolders count when they directly hold a page image. Loose images
-    have no auto-mode pipeline; they are counted, not returned.
+    Subfolders count when they directly hold a page image, except
+    Mabillon's working folders (``SKIPPED_FOLDERS``). Loose images have no
+    auto-mode pipeline; they are counted, not returned.
     """
     found: dict[str, list[SourceItem]] = {kind: [] for kind in _ORDER}
     loose_images = 0
@@ -61,7 +62,11 @@ def scan(folder: Path) -> AutoScan:
                     found[kind].append(SourceItem(path, kind))
                 elif _is_image_name(entry.name):
                     loose_images += 1
-            elif entry.is_dir(follow_symlinks=False) and _folder_has_images(entry.path):
+            elif (
+                entry.is_dir(follow_symlinks=False)
+                and entry.name not in SKIPPED_FOLDERS
+                and _folder_has_images(entry.path)
+            ):
                 found["images"].append(SourceItem(path, "images"))
     items = tuple(item for kind in _ORDER for item in found[kind])
     logger.info(

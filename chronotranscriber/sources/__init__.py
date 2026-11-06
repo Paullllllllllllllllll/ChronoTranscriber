@@ -17,6 +17,7 @@ from chronotranscriber.sources.audio.constants import SUPPORTED_AUDIO_EXTENSIONS
 
 __all__ = [
     "EXTENSIONS",
+    "SKIPPED_FOLDERS",
     "SOURCE_TYPES",
     "SUPPORTED_MOBI_EXTENSIONS",
     "DiscoveryError",
@@ -40,6 +41,15 @@ EXTENSIONS: Mapping[str, tuple[str, ...]] = MappingProxyType(
     }
 )
 """File extensions of the file sources; image folders are directories."""
+
+
+SKIPPED_FOLDERS = frozenset({".mabillon"})
+"""Folders discovery never enters: Mabillon's working folders below an output root."""
+
+
+def _in_skipped_folder(path: Path, root: Path) -> bool:
+    """Whether *path* lies below a folder of :data:`SKIPPED_FOLDERS` inside *root*."""
+    return any(part in SKIPPED_FOLDERS for part in path.relative_to(root).parts[:-1])
 
 
 class DiscoveryError(ValueError):
@@ -99,6 +109,7 @@ def discover_items(
     subfolders with *recursive*, else the input folder itself. Other types:
     the input file itself, the named *files* inside the input folder, or
     the files with the type's extensions (all subfolders with *recursive*).
+    *recursive* never enters :data:`SKIPPED_FOLDERS`.
 
     Raises:
         DiscoveryError: An image run whose input is not a folder, or named
@@ -115,7 +126,11 @@ def discover_items(
                 input_path, files, Path.is_dir, f"are not folders in {input_path}"
             )
         elif recursive:
-            paths = [entry for entry in input_path.iterdir() if entry.is_dir()]
+            paths = [
+                entry
+                for entry in input_path.iterdir()
+                if entry.is_dir() and entry.name not in SKIPPED_FOLDERS
+            ]
         else:
             paths = [input_path]
         return [SourceItem(path, kind) for path in paths]
@@ -130,6 +145,7 @@ def discover_items(
             path
             for ext in extensions
             for path in input_path.rglob(f"*{ext}", case_sensitive=False)
+            if not _in_skipped_folder(path, input_path)
         ]
     else:
         paths = [

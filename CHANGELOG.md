@@ -1,5 +1,9 @@
 # Changelog
 
+- **v1.3.2** (6 November 2026) -- Discovery no longer enters `.mabillon` folders,
+  in which Mabillon v0.10.0 keeps its working state below an output root it shares
+  with ChronoTranscriber. A recursive run or an auto-mode scan over such a root used
+  to take the agent's scratch images and unit files as inputs.
 - **v1.3.1** (5 November 2026) -- A rerun of `transcribe` after a killed run no longer
   skips the killed run's items for the 10 minutes its leases stay valid. Before the
   run it reads the leases on its items again every 90 seconds; a lease whose expiry

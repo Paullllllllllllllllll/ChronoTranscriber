@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -53,6 +54,46 @@ def test_service_tier_with_another_provider_warns_and_runs(
     assert "--service-tier" in warning
     assert "only for provider openai" in warning
     assert "anthropic" in warning
+
+
+def test_openrouter_provider_with_another_provider_warns_and_is_not_shown(
+    make_pdf: MakePdf, capsys: pytest.CaptureFixture[str]
+) -> None:
+    argv = _dry_run(make_pdf(), "--openrouter-provider", "deepinfra")
+
+    assert entry.main(argv) == 0
+
+    captured = capsys.readouterr()
+    (warning,) = _warnings(captured.err)
+    assert "--openrouter-provider applies only for provider openrouter" in warning
+    assert "the provider is anthropic" in warning
+    assert "model.openrouter_provider" not in json.loads(captured.out)["spec"]
+
+
+def test_openrouter_provider_reaches_the_dry_run_spec(
+    make_pdf: MakePdf,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    argv = [
+        "transcribe",
+        "--input",
+        str(make_pdf()),
+        "--model",
+        "qwen/qwen3.5-flash-02-23",
+        "--openrouter-provider",
+        "deepinfra",
+        "--dry-run",
+        "--json",
+    ]
+
+    assert entry.main(argv) == 0
+
+    captured = capsys.readouterr()
+    assert _warnings(captured.err) == []
+    spec = json.loads(captured.out)["spec"]
+    assert spec["model.openrouter_provider"] == {"value": "deepinfra", "source": "flag"}
 
 
 def test_without_the_conditional_flag_nothing_warns(

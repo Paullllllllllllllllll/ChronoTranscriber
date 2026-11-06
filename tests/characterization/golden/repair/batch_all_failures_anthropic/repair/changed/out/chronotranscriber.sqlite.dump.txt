@@ -757,6 +757,10 @@
       "source": "flag",
       "value": "claude-sonnet-4-6"
     },
+    "model.openrouter_provider": {
+      "source": "default",
+      "value": null
+    },
     "model.provider": {
       "source": "flag",
       "value": "anthropic"
@@ -906,6 +910,10 @@
     "model.model": {
       "source": "flag",
       "value": "claude-sonnet-4-6"
+    },
+    "model.openrouter_provider": {
+      "source": "flag",
+      "value": null
     },
     "model.provider": {
       "source": "flag",

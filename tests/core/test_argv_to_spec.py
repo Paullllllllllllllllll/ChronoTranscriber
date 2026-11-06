@@ -503,6 +503,12 @@ ROWS = [
         "priority",
         sets=_model(service_tier="priority"),
     ),
+    _row(
+        "openrouter_provider",
+        "--openrouter-provider",
+        "deepinfra",
+        sets=_model(openrouter_provider="deepinfra"),
+    ),
     _row("decisions", "--decisions", "shadow", sets={"decision.mode": "shadow"}),
     _row(
         "decision_model",

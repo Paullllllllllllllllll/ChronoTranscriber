@@ -180,6 +180,10 @@
       "source": "flag",
       "value": "gemini-3-flash-preview"
     },
+    "model.openrouter_provider": {
+      "source": "default",
+      "value": null
+    },
     "model.provider": {
       "source": "flag",
       "value": "google"

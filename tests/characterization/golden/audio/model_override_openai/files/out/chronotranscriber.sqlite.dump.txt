@@ -204,6 +204,10 @@
       "source": "flag",
       "value": "whisper-1"
     },
+    "model.openrouter_provider": {
+      "source": "default",
+      "value": null
+    },
     "model.provider": {
       "source": "flag",
       "value": "openai"

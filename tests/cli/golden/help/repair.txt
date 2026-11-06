@@ -57,6 +57,10 @@ model:
   --response-format {schema,json,text}
                         schema (API-enforced), json (prompted, validated) or text (plain);
                         default: schema when the model supports it, else json
+  --openrouter-provider NAME
+                        provider slug that serves every OpenRouter model request, with no fallback
+                        to another provider; decision-model requests keep OpenRouter's routing;
+                        default: OpenRouter's routing; only for provider openrouter
 
 images:
   --dpi native|N        render resolution: native or a DPI value; default: the provider's

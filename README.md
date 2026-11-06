@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.3.2
+# ChronoTranscriber v1.4.0
 
 <img src="assets/logo.svg" alt="ChronoTranscriber logo" width="64" align="right">
 
@@ -107,6 +107,7 @@ option given twice keeps the values of both.
 | `--top-p P` | nucleus sampling, 0.0 to 1.0; sent only when supported | 1.0 | yes |
 | `--service-tier {auto,default,flex,priority}` | OpenAI service tier; only for provider openai | default | yes |
 | `--response-format {schema,json,text}` | schema (API-enforced), json (prompted, validated) or text (plain) | schema when the model supports it, else json | yes |
+| `--openrouter-provider NAME` | provider slug that serves every OpenRouter model request, with no fallback to another provider; decision-model requests keep OpenRouter's routing; only for provider openrouter | OpenRouter's routing | no |
 | `--decisions {off,shadow,apply}` | decision-model pre-pass of --method llm: shadow records each page's type; apply also skips pages without text of the book | off | yes |
 | `--decision-model ID` | decision model id; only for decisions apply, shadow | typesafe/jev-1.14 | yes |
 | `--decision-provider {openai,openrouter}` | decision API dialect; only for decisions apply, shadow | from the model id | yes |
@@ -587,7 +588,12 @@ custom endpoints as a strict `response_format`, Anthropic as a `json_schema`
 structured output with union types reduced to one type, and Google as
 `response_schema`, with or without a thinking configuration. OpenRouter receives
 a `response_format` without `strict`, so enforcement depends on OpenRouter and the
-routed model.
+routed model. `--openrouter-provider NAME` adds OpenRouter's routing object
+`{"order": [NAME], "allow_fallbacks": false, "require_parameters": true}` as
+`provider` to every model request, so one provider serves the run and a request
+it cannot serve fails instead of going to another provider. Decision-model
+requests (`--decisions`) go to OpenRouter's decision API, which the pin does not
+reach.
 
 The family rules in `chronotranscriber/common/capability_table.py`, shared with
 AutoExcerpter and ChronoMiner, feed the resolver in

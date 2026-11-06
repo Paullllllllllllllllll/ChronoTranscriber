@@ -73,6 +73,10 @@ EXEMPT: Final[Mapping[str, str]] = MappingProxyType(
         "wait": "the guided batch check makes one pass; waiting serves scripts",
         "poll_minutes": "applies with --wait only, which the UI does not offer",
         "wait_hours": "applies with --wait only, which the UI does not offer",
+        "openrouter_provider": (
+            "pins one OpenRouter provider for scripted runs; the UI leaves the "
+            "routing to OpenRouter"
+        ),
     }
 )
 NON_WIZARD: Final[Mapping[tuple[str, ...], str]] = MappingProxyType(

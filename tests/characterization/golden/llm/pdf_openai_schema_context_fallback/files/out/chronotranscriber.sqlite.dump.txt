@@ -335,6 +335,10 @@
       "source": "default",
       "value": "gpt-6-luna"
     },
+    "model.openrouter_provider": {
+      "source": "default",
+      "value": null
+    },
     "model.provider": {
       "source": "default",
       "value": "openai"

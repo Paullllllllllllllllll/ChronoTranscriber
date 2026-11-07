@@ -1,5 +1,13 @@
 # Changelog
 
+- **v1.6.0** (7 November 2026) -- Refreshed dependencies within their current majors:
+  `langchain-core` 1.7.6, `langchain-openai` 1.7.4, `langchain-anthropic` 1.7.10,
+  `langchain-google-genai` 4.4.3, `EbookLib` 0.21, and the dev tools `coverage` 7.17.2,
+  `ruff` 0.17.4, `types-PyYAML` 6.0.12.20261103 and `pytest-asyncio` 1.4.1.post1, with
+  their floors raised to match. Declared `pydantic>=2.14.3` as a direct runtime
+  dependency, since `llm/client.py` imports it. No dependencies were removed. Held
+  majors: `anthropic` 0.125 (2.x available), `openai` 2.54 (3.x), `google-genai` 2.34
+  (3.x, now capped below 3), `PyMuPDF` 1.28 (2.x) and `opencv-python` 4.14 (5.x).
 - **v1.5.0** (6 November 2026) -- `transcribe` and `repair` take
   `--presence-penalty`, `--frequency-penalty`, `--top-k`, `--min-p` and
   `--repetition-penalty`, settable from `defaults:` like `--temperature`. Unset, a

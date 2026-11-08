@@ -1025,6 +1025,9 @@ class _Session:
             role=ROLE,
         )
         transcriber.update_context_image(plan.context_image)
+        if self.images.recorded:
+            # The context image takes the recorded detail of the pages.
+            transcriber.page_detail = self.images.detail
         options = self.images.request_options()
         client: Any = (
             _DetailedTranscriber(transcriber, options) if options else transcriber

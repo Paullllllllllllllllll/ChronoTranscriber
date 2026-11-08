@@ -1,5 +1,15 @@
 # Changelog
 
+- **v1.7.0** (8 November 2026) -- Gemini models at `--image-detail original` now get
+  their pages at the rendered size, without the 768x1536 box and its padding, and every
+  image part of synchronous and batch requests carries media resolution `ultra_high`;
+  before, Google dropped `original` and sent the box-fitted page at `high`. The shared
+  `common/image_presets.py` sets the Google section accordingly and adds
+  `native_render_unbounded`, which the local check of native renders now calls;
+  ChronoTranscriber, ChronoMiner and AutoExcerpter carry the same copy. A synchronous
+  repair now sends the context image with the pages' recorded detail, and the warning
+  that a resize profile discards native resolution no longer appears for pages sent
+  unscaled.
 - **v1.6.0** (7 November 2026) -- Refreshed dependencies within their current majors:
   `langchain-core` 1.7.6, `langchain-openai` 1.7.4, `langchain-anthropic` 1.7.10,
   `langchain-google-genai` 4.4.3, `EbookLib` 0.21, and the dev tools `coverage` 7.17.2,

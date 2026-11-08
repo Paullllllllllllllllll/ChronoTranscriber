@@ -78,8 +78,35 @@ def test_run_values_override_the_recommendation() -> None:
 
 def test_a_detail_applies_only_where_the_section_takes_it() -> None:
     assert settings("gpt-5.6-luna", detail="low")["resolved_detail"] == "low"
-    google = settings("gemini-3-flash-preview", "google", detail="original")
-    assert google["media_resolution"] == "high"
+    google = settings("gemini-3-flash-preview", "google", detail="low")
+    assert google["media_resolution"] == "low"
+
+
+@pytest.mark.parametrize("model", ["gemini-3.1-pro-preview", "gemini-4-argon"])
+def test_a_gemini_page_at_original_detail_keeps_its_size_at_ultra_high(
+    model: str,
+) -> None:
+    cfg = settings(model, "google", detail="original", dpi="native")
+
+    assert cfg["media_resolution"] == "ultra_high"
+    assert cfg["resolved_detail"] == "ultra_high"
+    assert cfg["resize_profile"] == "none"
+    detail = cfg["resolved_detail"]
+    assert resolve_target_size(2481, 3509, "google", model, detail, cfg) == (
+        (2481, 3509),
+        "none",
+    )
+    page = resize_for_detail(Image.new("RGB", (2481, 3509)), detail, cfg, "google")
+    assert page.size == (2481, 3509)
+
+
+def test_original_detail_leaves_other_gemini_routes_and_details_alone() -> None:
+    high = settings("gemini-4-argon", "google", detail="high", dpi="native")
+    assert (high["media_resolution"], high["resize_profile"]) == ("high", "high")
+    routed = settings("google/gemini-3-flash", "openrouter", detail="original")
+    assert routed["media_resolution"] == "high"
+    assert routed["resize_profile"] == "high"
+    assert settings("gemini-4-argon", "google")["media_resolution"] == "high"
     anthropic = settings("claude-opus-5", "anthropic", detail="low")
     assert anthropic["resize_profile"] == "low"
 

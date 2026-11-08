@@ -205,11 +205,14 @@ class FakeTranscriber:
     texts: dict[str, str | None] = {}
     calls: list[tuple[str, dict[str, Any]]] = []
     created: list[dict[str, Any]] = []
+    instances: list[FakeTranscriber] = []
 
     def __init__(self, model: Any, env: Any, **kwargs: Any) -> None:
         self.model = model
         self.options = kwargs
+        self.page_detail: str | None = None
         FakeTranscriber.created.append(kwargs)
+        FakeTranscriber.instances.append(self)
 
     def update_context_image(self, path: Path | None) -> None:
         self.options["context_image"] = path
@@ -247,6 +250,7 @@ def transcriber(monkeypatch: pytest.MonkeyPatch) -> type[FakeTranscriber]:
     FakeTranscriber.texts = {}
     FakeTranscriber.calls = []
     FakeTranscriber.created = []
+    FakeTranscriber.instances = []
     return FakeTranscriber
 
 
@@ -318,6 +322,8 @@ async def test_the_recorded_detail_and_prompt_inputs_reach_the_transcriber(
     await repair_module.repair_transcription(spec_for(stored.output), Settings())
 
     assert transcriber.calls == [(page_name(0), {"image_detail": "low"})]
+    # The context image goes out with the pages' recorded detail.
+    assert [client.page_detail for client in transcriber.instances] == ["low"]
     (created,) = transcriber.created
     assert created["role"] == "repair"
     assert created["schema_path"] is not None

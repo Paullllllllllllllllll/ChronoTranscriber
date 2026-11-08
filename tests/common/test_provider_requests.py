@@ -99,6 +99,20 @@ def test_a_gemini_image_carries_its_media_resolution_in_a_sync_call() -> None:
     assert block["type"] == "image"
 
 
+@pytest.mark.parametrize("model", ["gemini-3-flash-preview", "gemini-4-argon"])
+def test_an_ultra_high_gemini_image_keeps_it_in_both_routes(model: str) -> None:
+    original = Part(data="aGVsbG8=", mime="image/jpeg", detail="ultra_high")
+    plan = _plan("google", model)
+
+    (block,) = message_content(plan, [original])
+    body = batch_body(plan, "system", [original], SCHEMA)
+
+    assert block["media_resolution"] == "MEDIA_RESOLUTION_ULTRA_HIGH"
+    image = body["contents"][0]["parts"][0]
+    assert image["media_resolution"] == {"level": "MEDIA_RESOLUTION_ULTRA_HIGH"}
+    assert "media_resolution" not in body["config"]
+
+
 def test_a_gemini_2_model_gets_a_budget_and_no_media_resolution() -> None:
     plan = _plan("google", "gemini-2.5-flash", "low")
 

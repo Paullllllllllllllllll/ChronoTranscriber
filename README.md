@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.6.0
+# ChronoTranscriber v1.7.0
 
 <img src="assets/logo.svg" alt="ChronoTranscriber logo" width="64" align="right">
 
@@ -647,7 +647,11 @@ custom preset):
 the model's documented limits; `original` detail without a model cap keeps the
 rendered size. At `original` detail, gpt-6-luna pages are limited to 3,000 px on
 the long side, since larger scans led it to invent text; `images.original_max_side_px`
-in the settings sets this limit for every OpenAI model.
+in the settings sets this limit for every OpenAI model. Gemini pages at `high`
+detail are fitted into 768x1536 px with white padding; at `original` detail they
+keep their rendered size and go out at media resolution `ultra_high` (2,240
+image tokens from Gemini 3 on; Gemini 2 takes no media resolution), and a page
+over Google's 20 MB limit fails.
 
 ## Sources and Methods
 

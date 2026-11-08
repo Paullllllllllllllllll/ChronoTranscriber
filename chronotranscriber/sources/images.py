@@ -147,6 +147,8 @@ def resolve_image_settings(
     section's detail; a route that sends no detail sizes by the section.
     OpenAI pages at ``original`` detail are limited on the long side to
     *original_max_side_px*, else to the model's default limit, if any.
+    Gemini pages at ``original`` detail keep their rendered size and take
+    media resolution ``ultra_high``.
 
     Raises:
         ValueError: A setting is invalid, or a native render has no bound.
@@ -185,11 +187,7 @@ def resolve_image_settings(
             result["original_max_side_px"] = int(side)
     cap = model_image_cap(model_type, model, detail, result)
     result["cap_policy"] = cap.policy if cap else "profile-v1"
-    if (
-        result["target_dpi"] == "native"
-        and not cap
-        and result["resize_profile"] == "none"
-    ):
+    if not cap and image_presets.native_render_unbounded(result):
         raise ValueError(f"Invalid resize_profile in {section}: native needs a bound")
     return result, model_type, section
 

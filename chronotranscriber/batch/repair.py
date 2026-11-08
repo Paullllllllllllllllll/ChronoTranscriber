@@ -51,6 +51,8 @@ from chronotranscriber.batch.finalize import (
 from chronotranscriber.batch.submit import (
     BatchSubmissionError,
     UnitRequest,
+    fail_oversized,
+    split_oversized,
     submit_units,
 )
 from chronotranscriber.batch.wait import wait_for_submissions
@@ -62,6 +64,7 @@ from chronotranscriber.common.store import (
     Store,
     StoreError,
     Submission,
+    UnitKey,
     UnitResult,
     UnitRow,
     WriterOptions,
@@ -185,8 +188,8 @@ class RepairDocument:
 class ImageSettings:
     """The image settings the repaired pages are rendered with.
 
-    *recorded* tells whether they are the document's recorded settings; only
-    then is their detail sent with each page.
+    *recorded* tells whether they are the document's recorded settings or
+    the current ones; either way their detail is sent with each page.
     """
 
     config: Mapping[str, Any]
@@ -201,8 +204,6 @@ class ImageSettings:
 
     def request_options(self) -> dict[str, str]:
         """Return the per-page options of a synchronous request."""
-        if not self.recorded:
-            return {}
         options: dict[str, str] = {}
         if self.detail:
             options["image_detail"] = self.detail
@@ -967,7 +968,7 @@ def plan_repairs(
 
 
 class _DetailedTranscriber:
-    """Sends every page with the recorded image detail of the repair."""
+    """Sends every page with the image detail of the repair's page settings."""
 
     def __init__(self, inner: PageTranscriber, options: Mapping[str, str]) -> None:
         self.inner = inner
@@ -1025,9 +1026,8 @@ class _Session:
             role=ROLE,
         )
         transcriber.update_context_image(plan.context_image)
-        if self.images.recorded:
-            # The context image takes the recorded detail of the pages.
-            transcriber.page_detail = self.images.detail
+        # The context image takes the detail the pages are rendered with.
+        transcriber.page_detail = self.images.detail
         options = self.images.request_options()
         client: Any = (
             _DetailedTranscriber(transcriber, options) if options else transcriber
@@ -1081,7 +1081,9 @@ class _Session:
 
         Returns the finalized submissions, or None when no unit was written:
         a refused submission leaves the units as they were, an unresolved or
-        unfinished one leaves them to ``batch check``.
+        unfinished one leaves them to ``batch check``. A page whose request
+        exceeds a size limit of the provider is stored as failed with that
+        error once the batch is accepted, or at once when no page is sent.
         """
         plan, handle = self.plan, self.handle
         images = self.images
@@ -1115,6 +1117,11 @@ class _Session:
             )
             for page in pages
         ]
+        units, oversized = split_oversized(units, body)
+        if oversized and not any(unit.request is not None for unit in units):
+            await self._record_pages(pages)
+            await self._fail_oversized(oversized)
+            return []
         try:
             outcome = await submit_units(
                 self.store, units, plan=body, clients=clients, label=LABEL
@@ -1136,6 +1143,7 @@ class _Session:
             )
             return None
         await self._record_pages(pages)
+        await self._fail_oversized(oversized)
         waited = await wait_for_submissions(
             self.store, outcome.submission_ids, clients, self.events
         )
@@ -1164,7 +1172,14 @@ class _Session:
                     f"Repair submission {submission_id} not finalized "
                     f"({result.outcome}): {result.detail}"
                 )
-        return finalized or None
+        return finalized or ([] if oversized else None)
+
+    async def _fail_oversized(self, errors: Mapping[UnitKey, str]) -> None:
+        """Store the pages whose request is too large as failed with the error."""
+        handle = self.handle
+        await fail_oversized(
+            self.store, errors, model=handle.model, provider=handle.provider
+        )
 
     async def render(self) -> tuple[Path, ...]:
         document = self.plan.document

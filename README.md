@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.7.0
+# ChronoTranscriber v1.8.0
 
 <img src="assets/logo.svg" alt="ChronoTranscriber logo" width="64" align="right">
 
@@ -651,7 +651,9 @@ in the settings sets this limit for every OpenAI model. Gemini pages at `high`
 detail are fitted into 768x1536 px with white padding; at `original` detail they
 keep their rendered size and go out at media resolution `ultra_high` (2,240
 image tokens from Gemini 3 on; Gemini 2 takes no media resolution), and a page
-over Google's 20 MB limit fails.
+over Google's 20 MB limit fails. A `native` render, like a numeric one, holds at
+most 24 megapixels, and a page rendered smaller for that reason records the
+downscale reason `memory_guard`.
 
 ## Sources and Methods
 
@@ -683,7 +685,10 @@ context and a warning, an empty one gives none. A settings file of your own that
 should keep that file as the fallback sets `fallback_context` in its `defaults:`
 block. The context image follows the same sidecar lookup with
 `_transcr_context_image.{ext}`, else takes `context/transcr_context_image.{ext}`
-in the repository, and is sent before every page.
+in the repository, and is sent before every page. A page fails without a request
+when an image of the request, the context image included, exceeds the payload
+limit of the model's family (OpenAI 50 MB, Anthropic 10 MB, Gemini 20 MB) or when
+a Gemini request's images and prompt text together exceed 20 MB.
 
 ### Decision pre-pass
 
@@ -950,9 +955,11 @@ document it holds, and a folder (by default the current one) every document of
 the databases at or below it. For each document it selects the failed pages of
 the chosen causes, narrowed by `--indices` (one document only), skips pages an
 open or unresolved batch holds, renders them with the image settings they were
-first rendered with and transcribes them synchronously or with `--batch`. The
-stored responses stay, and the documents' files are rendered again. A dry run
-plans without the API key variables.
+first rendered with and transcribes them synchronously or with `--batch`. A
+document without recorded image settings, or recorded for another model, is
+rendered with the current settings, and its requests carry the detail of those
+settings (for Gemini, the media resolution). The stored responses stay, and the documents'
+files are rendered again. A dry run plans without the API key variables.
 
 ## Resume
 

@@ -233,6 +233,20 @@ def test_the_context_image_detail_follows_the_page_tiers(
     assert _human(script.requests[0])[1]["image_url"]["detail"] == "high"
 
 
+def test_a_context_image_over_the_image_limit_fails_the_page_without_a_call(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    transcriber, script = _transcriber(monkeypatch, [ANSWER], SPECS["anthropic"])
+    path = tmp_path / "large.png"
+    path.write_bytes(b"\0" * 7_600_000)  # 10,133,336 base64 bytes
+    transcriber.update_context_image(path)
+
+    result = _transcribe(transcriber)
+
+    assert script.requests == []
+    assert "over the anthropic limit" in result["error"]
+
+
 def test_a_missing_or_cleared_context_image_sends_two_blocks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

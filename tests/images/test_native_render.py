@@ -73,7 +73,7 @@ def scan_pdf(path: Path, dpi: int, width: int = 144, height: int = 216) -> Path:
 @pytest.mark.parametrize("strategy", ["direct", "supersample"])
 def test_native_full_page(tmp_path: Path, dpi: int, strategy: str) -> None:
     pdf = scan_pdf(tmp_path / "scan.pdf", dpi)
-    cfg = settings(max_pixels_per_page=100, render_strategy=strategy)
+    cfg = settings(render_strategy=strategy)
 
     page = render_pdf_page(pdf, 0, cfg, "openai")
 
@@ -114,7 +114,7 @@ def test_native_anthropic_render_cap(
     tmp_path: Path, model: str, side: int, patches: int
 ) -> None:
     pdf = scan_pdf(tmp_path / "scan.pdf", 600, 288, 432)
-    cfg = settings(model, "anthropic", max_pixels_per_page=100)
+    cfg = settings(model, "anthropic")
 
     provenance = render_pdf_page(pdf, 0, cfg, "anthropic").provenance()
 
@@ -125,11 +125,19 @@ def test_native_anthropic_render_cap(
     assert provenance["source_dpi_x"] == pytest.approx(600)
 
 
-def test_large_native_ignores_the_numeric_memory_guard(tmp_path: Path) -> None:
+def test_a_large_native_page_stays_within_the_memory_guard(tmp_path: Path) -> None:
     pdf = scan_pdf(tmp_path / "large.pdf", 300, 1440, 1200)
-    native = render_pdf_page(pdf, 0, settings(), "openai").provenance()
-    assert (native["width"], native["height"]) == (6000, 5000)
-    assert native["downscale_reason"] == "none"
+    with patch.object(
+        pymupdf.Page, "get_pixmap", autospec=True, side_effect=pymupdf.Page.get_pixmap
+    ) as get_pixmap:
+        native = render_pdf_page(pdf, 0, settings(), "openai").provenance()
+    matrix = get_pixmap.call_args.kwargs["matrix"]
+    pixmap = (pymupdf.Rect(0, 0, 1440, 1200) * matrix).irect
+    assert pixmap.width * pixmap.height <= 24_000_000
+    assert (native["width"], native["height"]) == (pixmap.width, pixmap.height)
+    assert native["width"] * native["height"] == pytest.approx(24_000_000, rel=0.001)
+    assert native["render_dpi"] < 300
+    assert native["downscale_reason"] == "memory_guard"
     numeric = render_pdf_page(pdf, 0, settings(target_dpi=300), "openai").provenance()
     assert numeric["width"] * numeric["height"] == pytest.approx(24_000_000, rel=0.001)
     assert numeric["downscale_reason"] == "memory_guard"
@@ -284,7 +292,7 @@ def test_repair_uses_the_recorded_settings(tmp_path: Path, raw_on_disk: bool) ->
         images, warning = repair_image_settings(stored, model_spec("gpt-5.4"), None)
     assert resolve.called
     assert not images.recorded and warning is not None and "gpt-5.4" in warning
-    assert images.request_options() == {}
+    assert images.request_options() == {"image_detail": current["resolved_detail"]}
 
 
 def test_repair_finds_a_folder_image_by_its_position(tmp_path: Path) -> None:

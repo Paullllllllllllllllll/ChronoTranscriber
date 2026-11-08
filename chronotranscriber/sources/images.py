@@ -81,8 +81,8 @@ IMAGE_PROCESSING: Mapping[str, Any] = MappingProxyType(
         **IMAGE_PRESETS.sections(),
     }
 )
-"""Recommended image settings: the render strategy, the memory guard of a
-numeric render and one section per model family."""
+"""Recommended image settings: the render strategy, the memory guard of a PDF
+render and one section per model family."""
 
 
 def list_folder_images(folder: Path) -> list[Path]:

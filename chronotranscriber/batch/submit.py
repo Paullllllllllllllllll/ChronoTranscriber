@@ -21,7 +21,7 @@ Provider errors end in a :class:`SubmitOutcome` and never propagate.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol
@@ -36,6 +36,7 @@ from chronotranscriber.common.batch import (
     PartUpload,
     supports_batch,
 )
+from chronotranscriber.common.provider_requests import RequestTooLargeError
 from chronotranscriber.common.store import (
     Lease,
     PlannedUnit,
@@ -55,11 +56,14 @@ if TYPE_CHECKING:
 
 __all__ = [
     "LABEL",
+    "REQUEST_TOO_LARGE",
     "ROLE",
     "BatchSubmissionError",
     "SubmitDocument",
     "SubmitOutcome",
     "UnitRequest",
+    "fail_oversized",
+    "split_oversized",
     "submit_batch",
     "submit_units",
 ]
@@ -68,6 +72,8 @@ logger = logging.getLogger(__name__)
 
 ROLE = "transcription"
 LABEL = "batch-transcription"
+REQUEST_TOO_LARGE = "request_too_large"
+"""The error type of a unit whose request exceeds a size limit of the provider."""
 
 SubmitStatus = Literal["submitted", "refused", "unresolved"]
 
@@ -307,6 +313,60 @@ async def _submit_part(
     return None
 
 
+def split_oversized(
+    units: Sequence[UnitRequest], plan: BodyPlan
+) -> tuple[list[UnitRequest], dict[UnitKey, str]]:
+    """Split off the units whose request exceeds a size limit of the provider.
+
+    Returns the other units and the error of each unit split off
+    (:class:`~chronotranscriber.common.provider_requests.RequestTooLargeError`);
+    those units are not submitted.
+    """
+    kept: list[UnitRequest] = []
+    errors: dict[UnitKey, str] = {}
+    for unit in units:
+        if unit.request is not None:
+            try:
+                plan.body(unit.request)
+            except RequestTooLargeError as exc:
+                key = unit.unit
+                logger.warning(
+                    "%s unit %d of document %d: %s", key.kind, key.idx, key.doc_id, exc
+                )
+                errors[key] = str(exc)
+                continue
+        kept.append(unit)
+    return kept, errors
+
+
+async def fail_oversized(
+    store: Store, errors: Mapping[UnitKey, str], *, model: str, provider: str
+) -> None:
+    """Store each unit of *errors* as failed with its error, keeping its provenance.
+
+    The store must hold the lease of each unit's document.
+    """
+    held = store.held_leases()
+    for key, error in errors.items():
+        row = next(row for row in store.units(key.doc_id) if row.key == key)
+        await store.write_unit(
+            held[key.doc_id],
+            UnitResult(
+                kind=key.kind,
+                idx=key.idx,
+                status="failed",
+                model=model,
+                provider=provider,
+                content=f"[transcription error: {error}]",
+                outcome="failed",
+                error=error,
+                error_type=REQUEST_TOO_LARGE,
+                provenance=row.provenance,
+                attempts=row.attempts,
+            ),
+        )
+
+
 async def submit_units(
     store: Store,
     units: Sequence[UnitRequest],
@@ -417,11 +477,13 @@ async def submit_batch(
     Each payload is the unit of its order index in *document*; its unit is
     created when missing and the provenance of its image recorded. A page
     that could not be rendered is submitted without a request (see
-    :class:`UnitRequest`).
+    :class:`UnitRequest`); a page whose request exceeds a size limit of the
+    provider is stored as failed with that error and not submitted.
 
     Raises:
         BatchSubmissionError: The provider has no batch API, no page was
-            rendered, or the requests cannot be built.
+            rendered or within the size limits, or the requests cannot be
+            built.
     """
     model = spec.model
     if not supports_batch(model.provider):
@@ -454,6 +516,14 @@ async def submit_batch(
         )
         for payload in payloads
     ]
+    units, oversized = split_oversized(units, plan)
+    await fail_oversized(
+        document.store, oversized, model=model.model, provider=model.provider
+    )
+    if oversized and not any(unit.request is not None for unit in units):
+        raise BatchSubmissionError(
+            f"No page of '{document.name}' is within the provider's size limits"
+        )
     outcome = await submit_units(
         document.store, units, plan=plan, clients=BatchClients(settings, ROLE)
     )

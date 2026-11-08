@@ -37,6 +37,8 @@ from typing import TYPE_CHECKING, Any
 
 from chronotranscriber.common.provider_requests import (
     Part,
+    RequestTooLargeError,
+    check_request_size,
     message_content,
     system_content,
 )
@@ -304,6 +306,11 @@ class PageTranscriber:
         instruction and the page image. A page image carries *image_detail*,
         else the detail its page settings resolved (:attr:`page_detail`),
         else the requested detail.
+
+        Raises:
+            RequestTooLargeError: The request exceeds a size limit of the
+                provider (:func:`~chronotranscriber.common.provider_requests.
+                check_request_size`).
         """
         from langchain_core.messages import HumanMessage
 
@@ -316,6 +323,7 @@ class PageTranscriber:
         parts.append(Part(text=USER_INSTRUCTION))
         detail = image_detail or default
         parts.append(Part(data=image_base64, mime=mime_type, detail=detail))
+        check_request_size(self.plan, self.system_prompt, parts)
         content = message_content(self.plan, parts)
         return [self._system_message(), HumanMessage(content=content)]
 
@@ -360,7 +368,11 @@ class PageTranscriber:
             )
         if self.provider == "google" and media_resolution:
             image_detail = media_resolution
-        messages = self.messages(image_base64, mime_type, image_detail=image_detail)
+        try:
+            messages = self.messages(image_base64, mime_type, image_detail=image_detail)
+        except RequestTooLargeError as exc:
+            logger.error("Transcription failed for %s: %s", label or "page", exc)
+            return error_response(str(exc))
         try:
             result = await self.caller.call(
                 messages,

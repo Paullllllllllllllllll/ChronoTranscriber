@@ -25,8 +25,10 @@ import pymupdf
 import pytest
 
 from chronotranscriber.batch import repair as repair_module
+from chronotranscriber.batch.submit import REQUEST_TOO_LARGE
 from chronotranscriber.common.batch import BatchHandle, BatchResultItem
 from chronotranscriber.common.capture import AttemptRecord, record_attempt
+from chronotranscriber.common.image_presets import MAX_IMAGE_BYTES
 from chronotranscriber.common.sqlite import read
 from chronotranscriber.common.store import PlannedUnit, ResponseRow, UnitKey, UnitResult
 from chronotranscriber.output.render import render_item
@@ -329,6 +331,34 @@ async def test_the_recorded_detail_and_prompt_inputs_reach_the_transcriber(
     assert created["schema_path"] is not None
 
 
+@pytest.mark.parametrize("provider", ["google", "anthropic"])
+async def test_an_unrecorded_repair_sends_the_detail_its_pages_are_rendered_with(
+    tmp_path: Path,
+    transcriber: type[FakeTranscriber],
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+) -> None:
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    model = DEFAULT_MODELS[provider]
+    stored = await store_document(
+        tmp_path, ["failed"], provider=provider, model=model, record=None
+    )
+    transcriber.texts = {page_name(0): "Fixed"}
+    current = resolve_image_settings(provider, model, None)[0]
+
+    await repair_module.repair_transcription(
+        spec_for(stored.output, provider=provider, model=model), Settings()
+    )
+
+    detail = current["resolved_detail"]
+    expected = {"image_detail": detail}
+    if provider == "google":
+        expected["media_resolution"] = current["media_resolution"]
+    assert transcriber.calls == [(page_name(0), expected)]
+    assert [client.page_detail for client in transcriber.instances] == [detail]
+
+
 async def test_the_sidecar_context_image_reaches_the_transcriber(
     tmp_path: Path, transcriber: type[FakeTranscriber]
 ) -> None:
@@ -425,6 +455,39 @@ async def test_a_batch_repair_submits_finalizes_and_renders_the_units(
     )
     assert world.cleaned == [batch_id]
     assert_no_side_files(tmp_path)
+
+
+async def test_a_batch_repair_stores_the_error_of_an_oversized_page(
+    world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    stored = await store_document(
+        tmp_path, ["ok", "failed", "failed"], provider="anthropic"
+    )
+    render = repair_module.page_image
+
+    def oversized(*args: Any) -> Any:
+        page = render(*args)
+        if page.index != 1:
+            return page
+        return replace(page, base64="A" * (MAX_IMAGE_BYTES["anthropic"] + 4))
+
+    monkeypatch.setattr(repair_module, "page_image", oversized)
+
+    result = await repair_module.repair_transcription(
+        spec_for(stored.output, "batch", provider="anthropic"), Settings()
+    )
+
+    assert (result.repaired, result.failed, result.selected) == (1, 1, 2)
+    (requested,) = rows(stored.db, "SELECT idx FROM submission_requests")
+    assert requested == (2,)
+    ((status, error, error_type, content),) = rows(
+        stored.db,
+        "SELECT status, error, error_type, content FROM units WHERE idx = 1",
+    )
+    assert (status, error_type) == ("failed", REQUEST_TOO_LARGE)
+    assert "over the anthropic limit" in error
+    assert content == f"[transcription error: {error}]"
 
 
 async def test_a_batch_repair_sends_the_sidecar_context_image(

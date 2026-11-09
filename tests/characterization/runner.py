@@ -265,9 +265,8 @@ def build_argv(command: Command, options: Mapping[str, Any]) -> list[str]:
         if not {"files", "select"} & set(given):
             given.setdefault("all", True)
         given.setdefault("retry_errors", False)
-    elif command == "batch cancel":
-        if "batch_ids" not in given:
-            given.setdefault("all", True)
+    elif command == "batch cancel" and "batch_ids" not in given:
+        given.setdefault("all", True)
     return [*command.split(), *table.to_argv(given)]
 
 

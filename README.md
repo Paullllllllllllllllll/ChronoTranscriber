@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.8.1
+# ChronoTranscriber v1.8.2
 
 <img src="assets/logo.svg" alt="ChronoTranscriber logo" width="64" align="right">
 

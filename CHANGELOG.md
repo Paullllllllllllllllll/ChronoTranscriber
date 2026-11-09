@@ -1,5 +1,8 @@
 # Changelog
 
+- **v1.8.2** (9 November 2026) -- The characterization test runner merges a nested
+  condition into its final branch, so `ruff check` passes again; no behavior
+  changes.
 - **v1.8.1** (8 November 2026) -- pyasn1 moves from 0.6.4 to 0.6.5 in
   `uv.lock` for GHSA-2qm8-x737-gmw5, GHSA-9m75-vc3g-4x39, GHSA-fm9c-5rcf-2q5p
   and GHSA-mm57-4v3p-rchx. No source change.

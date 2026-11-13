@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import tempfile
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import AsyncIterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
@@ -75,7 +75,7 @@ class BatchSubmitter(Protocol):
 
     async def __call__(
         self,
-        payloads: Sequence[Any],
+        payloads: AsyncIterable[Any],
         *,
         document: DocumentHandle,
         spec: RunSpec,
@@ -84,7 +84,7 @@ class BatchSubmitter(Protocol):
         context: str | None = None,
         context_image: Path | None = None,
     ) -> SubmitOutcome:
-        """Submit *payloads* as one batch of *document* and return the outcome."""
+        """Submit *payloads* of *document* as they render; return the outcome."""
         ...
 
 

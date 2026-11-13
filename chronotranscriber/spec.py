@@ -573,12 +573,14 @@ class ClassifySpec:
 
     ``input`` selects the items as for transcribe; ``input.pages`` stays None
     for documents, whose pages are the classifier's selection.
+    ``concurrency`` bounds the requests about one item in flight at once.
     """
 
     unit: str
     input: InputSpec
     output: ClassifyOutput
     classify: ClassifierSpec
+    concurrency: int = DEFAULT_CONCURRENCY
     dry_run: bool = False
     json: bool = False
 
@@ -736,7 +738,6 @@ _LLM = Condition("method", frozenset({"llm"}))
 _TESSERACT = Condition("method", frozenset({"tesseract"}))
 _WHISPER = Condition("method", frozenset({"whisper"}))
 _AUDIO = Condition("method", frozenset({"whisper", "audio-api"}))
-_TYPED = Condition("type", frozenset(SOURCE_TYPES) - {"auto"})
 
 
 def _decision_options() -> list[Option]:
@@ -938,13 +939,12 @@ def _input_options() -> list[Option]:
         Option(
             "files",
             "--files",
-            "comma-separated names of files or folders inside the input folder",
+            "comma-separated paths of files or folders relative to the input folder",
             group="input",
             kind=Kind.LIST,
             type=nonempty_text,
             metavar="LIST",
             default=(),
-            condition=_TYPED,
             exclusive="selection",
             target="input.files",
             settable=False,
@@ -972,11 +972,10 @@ def _input_options() -> list[Option]:
         Option(
             "recursive",
             "--recursive",
-            "search the subfolders of the input folder",
+            "search the subfolders of the input folder at every level",
             group="input",
             kind=Kind.SWITCH,
             default=False,
-            condition=_TYPED,
             target="input.recursive",
         ),
         Option(
@@ -1269,8 +1268,6 @@ DROP_OPTIONS = OptionTable(
     group_titles={**_GROUP_TITLES, "documents": "documents to drop"},
 )
 
-_CLASSIFY_TYPED = Condition("type", frozenset(CLASSIFY_TYPES) - {"auto"})
-
 _CLASSIFY_FORCE_HELP = {
     "page": "ask again about every selected page instead of reusing stored answers",
     "document": "ask again about every document instead of reusing stored answers",
@@ -1281,8 +1278,8 @@ def _classify_options(unit: str) -> list[Option]:
     """Return the rows of ``classify pages`` (unit page) or ``classify documents``.
 
     The input, selection and output rows are transcribe's, so the items and
-    their document names are the same; only the output rows and the decision
-    model take settings defaults.
+    their document names are the same; only the output rows, the decision
+    model and the concurrency take settings defaults.
     """
     rows = [
         replace(
@@ -1299,10 +1296,10 @@ def _classify_options(unit: str) -> list[Option]:
             target="input.type",
             settable=False,
         ),
-        replace(OPTIONS["files"], condition=_CLASSIFY_TYPED),
+        OPTIONS["files"],
         replace(OPTIONS["select"], settable=False),
         replace(OPTIONS["all"], settable=False),
-        replace(OPTIONS["recursive"], condition=_CLASSIFY_TYPED, settable=False),
+        replace(OPTIONS["recursive"], settable=False),
     ]
     if unit == "page":
         rows.append(
@@ -1316,6 +1313,7 @@ def _classify_options(unit: str) -> list[Option]:
         force_help=_CLASSIFY_FORCE_HELP[unit]
     )
     rows += [classifier, *model, force]
+    rows.append(concurrency_option(DEFAULT_CONCURRENCY, target="concurrency"))
     rows += [dry_run_option("dry_run"), json_option("json"), settings_option()]
     return rows
 
@@ -1722,11 +1720,11 @@ def resolve_classify(
 ) -> Resolution[ClassifySpec]:
     """Resolve the options of ``classify pages`` (*unit* page) or ``documents``.
 
-    The output options and the decision model take settings defaults.
+    The output options, the decision model and the concurrency take settings
+    defaults.
 
     Raises:
-        SpecError: No input path, no classifier, or ``--files`` with
-            ``--type auto``.
+        SpecError: No input path or no classifier.
     """
     table = CLASSIFY_OPTIONS[unit]
     resolved = _resolve_table(table, flags, defaults)
@@ -1735,16 +1733,12 @@ def resolve_classify(
         raise SpecError("an input path is required (--input PATH)")
     if values["classify.classifier"] is None:
         raise SpecError("a classifier is required (--classifier NAME|PATH)")
-    if values["input.type"] == "auto" and values["input.files"]:
-        raise SpecError(
-            "--files selects items of one input type; set --type pdf or images, "
-            "or use --select or --all"
-        )
     spec = ClassifySpec(
         unit=unit,
         input=InputSpec(**{"pages": None, **_part(values, "input")}),
         output=ClassifyOutput(**_part(values, "output")),
         classify=ClassifierSpec(**_part(values, "classify")),
+        concurrency=values["concurrency"],
         dry_run=values["dry_run"],
         json=values["json"],
     )

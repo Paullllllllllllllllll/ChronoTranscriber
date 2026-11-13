@@ -159,34 +159,40 @@ def test_a_missing_endpoint_keeps_its_settings_error(docs: Path) -> None:
         core.plan(spec, make_settings(endpoints={"other": endpoint}))
 
 
-@pytest.mark.parametrize("dry_run", [False, True])
-def test_files_in_auto_mode_exit_2_before_any_output_folder(
-    tmp_path: Path, docs: Path, capsys: pytest.CaptureFixture[str], dry_run: bool
-) -> None:
-    out = tmp_path / "out"
-    argv = _transcribe(docs, out, "--type", "auto", "--files", "x.pdf")
-    if not dry_run:
-        argv.remove("--dry-run")
-    before = sorted(docs.rglob("*"))
-
-    assert entry.main(argv) == 2
-
-    _payload, err = _result(capsys)
-    assert "--files" in err and "auto mode" in err
-    assert not out.exists()
-    assert sorted(docs.rglob("*")) == before
-
-
-def test_recursive_in_auto_mode_warns_and_plans(
+def test_files_in_auto_mode_take_paths_relative_to_the_input(
     tmp_path: Path, docs: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     out = tmp_path / "out"
+    (docs / "vol" / "scans").mkdir(parents=True)
+    (docs / "vol" / "scans" / "p1.png").write_bytes(b"png")
+    (docs / "vol" / "talk.mp3").write_bytes(b"mp3")
+    files = "vol\\scans,x.pdf"
 
-    assert entry.main(_transcribe(docs, out, "--type", "auto", "--recursive")) == 0
+    assert entry.main(_transcribe(docs, out, "--files", files)) == 0
+
+    payload, _err = _result(capsys)
+    assert [item["name"] for item in payload["to_process"]] == ["scans", "x.pdf"]
+    assert entry.main(_transcribe(docs, out, "--files", "vol/talk.mp3,vol")) == 2
+    _payload, err = _result(capsys)
+    assert "'vol/talk.mp3', 'vol'" in err
+    assert not out.exists()
+
+
+def test_recursive_in_auto_mode_takes_every_level(
+    tmp_path: Path, docs: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "out"
+    (docs / "vol" / "deep").mkdir(parents=True)
+    (docs / "x.pdf").replace(docs / "vol" / "deep" / "x.pdf")
+    (docs / "vol" / "scans").mkdir()
+    (docs / "vol" / "scans" / "p1.png").write_bytes(b"png")
+    flat = _transcribe(docs, out, "--type", "auto")
+
+    assert entry.main(flat) == 2
+    capsys.readouterr()
+    assert entry.main([*flat, "--recursive", "--all"]) == 0
 
     payload, err = _result(capsys)
-    assert payload["items_total"] == 1
-    (warning,) = [line for line in err.splitlines() if "[WARNING]" in line]
-    assert "--recursive applies only for type" in warning
-    assert "the type is auto" in warning
+    assert payload["items_total"] == 2
+    assert "[WARNING]" not in err
     assert not out.exists()

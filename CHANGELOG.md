@@ -1,5 +1,32 @@
 # Changelog
 
+- **v1.10.0** (13 November 2026) -- ChronoTranscriber now reads input folders
+  through the discovery module it shares with AutoExcerpter and ChronoMiner
+  (`common/discovery.py`). A run processes its items in the natural order of
+  their paths below the input folder (`p2` before `p10`, `vol_2/` before
+  `vol_10/`, letter case ignored), the order `--select` numbers them in, so
+  `--select N` can name another item than before; `--select` also searches those
+  paths, and auto mode no longer groups its items by type or method.
+  `--recursive` reads every level of subfolders in every mode, auto mode
+  included. Under `--type images` it takes every folder at any depth that
+  directly holds page images, instead of every direct subfolder, and skips with
+  a warning an image folder that lies inside another. `--files` takes paths
+  relative to the input folder, with forward or back slashes, and is now
+  accepted in auto mode; two spellings of one path give one item, and a path
+  that leaves the input folder is refused. Discovery skips `.mabillon`, the kept
+  working folders, an `--output` folder inside the input and context sidecars,
+  and enters no folder link or junction; a run that leaves out a folder named
+  like a kept working folder (`audio_chunks`, `preprocessed_images_tesseract`)
+  says so in a warning. Two items that would share an output
+  are refused before any input is hashed, and the error names every pair.
+  `classify pages` and `classify documents` gain `--concurrency` (default 16)
+  and send up to that many requests of an item at once; a run stop lets the
+  requests in flight finish and starts no further one. `--batch` renders and
+  submits pages in slices of at most 64 MiB, so a large book becomes several
+  batches and is never held in memory whole; a refused part leaves the pages
+  after it pending. Document names and output paths are unchanged, so existing
+  output folders resume as before.
+
 - **v1.9.0** (13 November 2026) -- When the attempt context of `ext.py` answers a
   failed call with the new decision `STOP`, because a provider will serve no
   further calls of the run, `transcribe`, `repair` and `classify` stop at once

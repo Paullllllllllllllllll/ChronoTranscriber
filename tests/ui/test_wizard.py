@@ -94,7 +94,7 @@ def test_the_type_question_offers_auto_and_the_types_found(
     state.set("input", every_type)
     assert offered_types(state) == list(SOURCE_TYPES)
     state.set("recursive", True)
-    assert "auto" not in offered_types(state)
+    assert offered_types(state) == list(SOURCE_TYPES)
 
 
 @pytest.mark.parametrize("kind", SOURCE_TYPES)

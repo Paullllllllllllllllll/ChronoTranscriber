@@ -20,9 +20,10 @@ vision model.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -189,19 +190,21 @@ class LlmTranscriber:
         if already:
             logger.info("Skipped %d pages already stored for %s", already, item.name)
 
-        async def source(indices: list[int]) -> AsyncIterator[PageImage]:
+        async def source(indices: list[int]) -> AsyncGenerator[PageImage]:
             pages_type = FolderPages if is_folder else PdfPages
             pages = pages_type(item.path, img_cfg, model_type, section=section)
-            async for page in stream_pages(pages, indices):
-                yield page
+            # Closing this generator must close the page source at once: a
+            # refused batch reads the same file again right after.
+            async with contextlib.aclosing(stream_pages(pages, indices)) as stream:
+                async for page in stream:
+                    yield page
 
         needed = await self._decide(handle, needed, source, record)
         if not needed:
             return []
 
         if self.job.batch:
-            payloads = [payload async for payload in source(needed)]
-            if await self._submit(item, handle, payloads):
+            if await self._submit(item, handle, source(needed)):
                 return []
             # Parts accepted before the refused one stay held by their batch.
             todo = set(handle.todo(retry_errors=self.job.retry_errors))
@@ -347,12 +350,13 @@ class LlmTranscriber:
             await handle.store.set_image_settings(handle.lease, record)
 
     async def _submit(
-        self, item: Item, handle: DocumentHandle, payloads: list[PageImage]
+        self, item: Item, handle: DocumentHandle, payloads: AsyncGenerator[PageImage]
     ) -> bool:
-        """Submit the pages; False when they are to be transcribed synchronously.
+        """Submit the pages as they render; False to transcribe them synchronously.
 
         A refused submission fails the item unless ``--sync-fallback`` is
-        set; an unresolved one always fails it, its pages left blocked.
+        set; an unresolved one always fails it, its pages left blocked. The
+        page stream is closed when the submission ends.
 
         Raises:
             BatchSubmissionFailedError: The submission was not accepted.
@@ -361,15 +365,18 @@ class LlmTranscriber:
         if submit is None:
             raise RuntimeError("The run core set no batch submitter.")
         fallback = self.job.spec.run.sync_fallback
-        outcome = await submit(
-            payloads,
-            document=handle,
-            spec=self.job.spec,
-            settings=self.job.settings,
-            schema_path=self.job.schema_path,
-            context=item.context,
-            context_image=item.context_image,
-        )
+        try:
+            outcome = await submit(
+                payloads,
+                document=handle,
+                spec=self.job.spec,
+                settings=self.job.settings,
+                schema_path=self.job.schema_path,
+                context=item.context,
+                context_image=item.context_image,
+            )
+        finally:
+            await payloads.aclose()
         if outcome.status == "submitted":
             return True
         if outcome.status == "refused":

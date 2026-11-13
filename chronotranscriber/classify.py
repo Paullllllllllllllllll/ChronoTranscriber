@@ -84,6 +84,7 @@ from chronotranscriber.common.decisions import (
     dialect_for,
     request_fingerprint,
 )
+from chronotranscriber.common.discovery import duplicated
 from chronotranscriber.common.images import decision_jpeg
 from chronotranscriber.common.options import Source
 from chronotranscriber.common.retry import RunStopped
@@ -94,6 +95,7 @@ from chronotranscriber.common.usage import Usage
 from chronotranscriber.events import ItemFinished, ItemStarted, NullEvents, RunEvents
 from chronotranscriber.llm.caller import CallEnv
 from chronotranscriber.llm.decide import DecisionModel
+from chronotranscriber.llm.pool import run_streaming_transcription_tasks
 from chronotranscriber.llm.prompts import PROJECT_ROOT
 from chronotranscriber.output.store import (
     KIND_PAGE,
@@ -109,11 +111,11 @@ from chronotranscriber.run import (
     NoItemsError,
     StoreRefusedError,
     choose_items,
+    find_input,
     item_location,
 )
 from chronotranscriber.settings import Settings, SettingsError
-from chronotranscriber.sources import DiscoveryError, SourceItem, discover_items
-from chronotranscriber.sources.auto import file_item, scan
+from chronotranscriber.sources import SourceItem
 from chronotranscriber.sources.identity import input_identity, reordered
 from chronotranscriber.sources.images import (
     FolderPages,
@@ -322,8 +324,10 @@ def _classifier(spec: ClassifySpec) -> tuple[Path, Classifier]:
     return path, classifier
 
 
-def _discover(spec: ClassifySpec, input_path: Path) -> list[SourceItem]:
-    """Return the items at *input_path* in transcribe's discovery order.
+def _discover(
+    spec: ClassifySpec, input_path: Path, output_dir: Path | None
+) -> tuple[list[SourceItem], list[str]]:
+    """Return the items at *input_path* as ``transcribe`` finds them, with notes.
 
     Auto mode keeps EPUB and MOBI items, so ``--select`` numbers the items
     as ``transcribe`` does; :func:`_supported` sets them aside afterwards.
@@ -333,27 +337,12 @@ def _discover(spec: ClassifySpec, input_path: Path) -> list[SourceItem]:
             missing entries.
         NoItemsError: The input holds no item.
     """
-    kind = spec.input.type
-    if kind != "auto":
-        try:
-            items = discover_items(
-                input_path,
-                kind,
-                files=spec.input.files,
-                recursive=spec.input.recursive,
-            )
-        except DiscoveryError as exc:
-            raise InputError(str(exc)) from exc
-    elif input_path.is_file():
-        single = file_item(input_path)
-        items = [single] if single is not None else []
-    else:
-        items = list(scan(input_path).items)
+    items, warnings = find_input(spec.input, input_path, output_dir)
     if not items:
         raise NoItemsError(
             f"No PDFs or image folders found to classify in: {input_path}"
         )
-    return items
+    return items, warnings
 
 
 def _supported(
@@ -469,18 +458,22 @@ def _refusal(item: ClassifyItem, stores: dict[Path, Store | None]) -> str:
 def _check_shared(items: Sequence[ClassifyItem]) -> None:
     """Raise when two items would share one store document.
 
+    The error names both inputs of every such pair.
+
     Raises:
         ConfigurationError: Two items share an output root and document name.
     """
-    claimed: dict[tuple[Path, str], Path] = {}
-    for item in items:
-        first = claimed.setdefault((item.root, item.document.casefold()), item.path)
-        if first != item.path:
-            raise ConfigurationError(
-                f"{first} and {item.path} would share the store document "
-                f"{item.document}. Set --output DIR to keep them apart, or take "
-                "one of them with --select."
-            )
+    pairs = duplicated(items, key=lambda item: (item.root, item.document.casefold()))
+    if pairs:
+        clashes = "; ".join(
+            f"{earlier.path} and {later.path} would share the store document "
+            f"{later.document}"
+            for later, earlier in pairs
+        )
+        raise ConfigurationError(
+            f"{clashes}. Set --output DIR to keep them apart, or take one of "
+            "them with --select."
+        )
 
 
 def _missing_key(
@@ -606,10 +599,10 @@ def plan(
     input_path = _absolute(spec.input.path)
     if not input_path.exists():
         raise InputError(f"Input path does not exist: {input_path}")
-    found = _discover(spec, input_path)
-    chosen, warnings = choose_items(found, spec.input, input_path)
+    found, warnings = _discover(spec, input_path, output_dir)
+    chosen, notes = choose_items(found, spec.input, input_path)
     supported, skipped = _supported(chosen, input_path)
-    warnings += skipped
+    warnings += notes + skipped
     stores: dict[Path, Store | None] = {}
     items: list[ClassifyItem] = []
     for source in supported:
@@ -793,12 +786,44 @@ class _ItemClassifier:
             return []
         return [Unit(DOCUMENT_LOCATOR, 0, tuple(parts))]
 
+    async def _requests(
+        self,
+        item: ClassifyItem,
+        indices: list[int],
+        tally: _Tally,
+        failure: Sequence[Exception],
+    ) -> AsyncIterator[Request]:
+        """Yield the requests of *item* as its pages render; stop on a *failure*."""
+        shared: tuple[Part, ...] = (Json({"document": item.document}),)
+        if self.plan.spec.unit == "document":
+            groups: AsyncIterator[list[Unit]] = self._document_group(
+                item, indices, tally
+            )
+        else:
+            groups = self._page_units(item, indices, tally)
+        async for units in groups:
+            for request in plan_requests(
+                self.classifier, item.document, units, context=shared
+            ):
+                if failure:
+                    return
+                yield request
+
+    async def _document_group(
+        self, item: ClassifyItem, indices: list[int], tally: _Tally
+    ) -> AsyncIterator[list[Unit]]:
+        """Yield the document unit of *item* as its one group."""
+        yield await self._document_unit(item, indices, tally)
+
     async def classify(self, item: ClassifyItem, store: Store) -> _Tally:
         """Ask about the units of *item*, reusing stored answers.
 
-        A ``--pages`` range that selects none of the item's pages fails it.
-        When the provider stops the run, the tally holds the stop and the
-        units not yet asked about, and no further request is sent.
+        The requests of the item run through the streaming pool, at most
+        ``--concurrency`` at once, while its pages render. A ``--pages``
+        range that selects none of the item's pages fails it. When the
+        provider stops the run, no further request is sent, the requests in
+        flight finish, and the tally holds the stop and the units not yet
+        asked about.
 
         Raises:
             ChangedInputError: The store came to hold the document with
@@ -827,20 +852,26 @@ class _ItemClassifier:
             run_id=store.run_id,
             seen_doc_id=item.doc_id,
         )
-        shared: tuple[Part, ...] = (Json({"document": item.document}),)
+        failure: list[Exception] = []
+
+        async def settle(request: Request) -> None:
+            if failure:
+                return
+            try:
+                await self._settle(request, store, context, tally)
+            except RunStopped:
+                raise
+            except Exception as exc:  # noqa: BLE001 - re-raised once the pool ends
+                failure.append(exc)
+
         try:
-            if self.plan.spec.unit == "document":
-                unit = await self._document_unit(item, indices, tally)
-                for request in plan_requests(
-                    self.classifier, item.document, unit, context=shared
-                ):
-                    await self._settle(request, store, context, tally)
-            else:
-                async for units in self._page_units(item, indices, tally):
-                    for request in plan_requests(
-                        self.classifier, item.document, units, context=shared
-                    ):
-                        await self._settle(request, store, context, tally)
+            await run_streaming_transcription_tasks(
+                self._requests(item, indices, tally, failure),
+                settle,
+                concurrency_limit=self.plan.spec.concurrency,
+            )
+            if failure:
+                raise failure[0]
         except RunStopped as exc:
             count = len(indices) if self.plan.spec.unit == "page" else 1
             tally.stopped = exc
@@ -970,15 +1001,16 @@ async def _run_items(
 async def run(
     run_plan: ClassifyPlan, events: RunEvents | None = None
 ) -> ClassifyResult:
-    """Ask the plan's classifier about its items, one request at a time.
+    """Ask the plan's classifier about its items, one item after another.
 
-    Each output root's store is opened on first use and stamped with the
-    run. A request that fails after its retries leaves its units without
-    answers and fails the item, whose other requests still run; an item
-    whose stored document came to record another input is refused.
-    Cancellation propagates. When the provider stops the run, the answers
-    recorded so far stay, no further request is sent and no further item
-    starts; the run records exit code 3.
+    The requests of an item run ``--concurrency`` at a time. Each output
+    root's store is opened on first use and stamped with the run. A request
+    that fails after its retries leaves its units without answers and fails
+    the item, whose other requests still run; an item whose stored document
+    came to record another input is refused. Cancellation propagates. When
+    the provider stops the run, the answers recorded so far stay, the
+    requests in flight finish, no further request is sent and no further
+    item starts; the run records exit code 3.
 
     Raises:
         ValueError: The plan is a dry run.

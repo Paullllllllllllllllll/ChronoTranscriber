@@ -238,18 +238,12 @@ def _ask_input(ctx: StepContext) -> Nav:
     return StepContext.sequence(_InputQuestions(ctx).questions())
 
 
-def _auto_finds_items(location: Path) -> bool:
-    if location.is_dir():
-        return bool(auto.scan(location).items)
-    return auto.file_item(location) is not None
-
-
 def offered_types(state: State) -> list[str]:
     """Return the types the input can be run as: auto, then those it holds.
 
-    Auto is offered only when auto mode finds an item in the input (a PDF,
-    EPUB or MOBI file, or such files and image folders directly in a folder)
-    and the subfolder search is off, since auto mode does not search it.
+    Auto is offered only when auto mode finds an item in the input: a PDF,
+    EPUB or MOBI file, or such files and image folders in a folder, in its
+    subfolders too when the subfolder search is on.
     """
     location = _input(state)
     if location is None:
@@ -257,7 +251,7 @@ def offered_types(state: State) -> list[str]:
     inventory = inventory_of(state, location)
     held = {item.type for item in inventory.items}
     types = [kind for kind in SOURCE_TYPES if kind != "auto" and kind in held]
-    if not state.value("recursive") and _auto_finds_items(location):
+    if auto.find(location, recursive=bool(state.value("recursive"))).items:
         types.insert(0, "auto")
     return types
 
@@ -281,20 +275,29 @@ def run_items(state: State) -> list[SourceItem]:
     """Return the items the run finds, before any selection.
 
     The chosen input, type and subfolder search decide the items; they come
-    in the order ``--select`` numbers them
-    (:func:`chronotranscriber.run.selection_order`).
+    in the order ``--select`` numbers them (:func:`chronotranscriber.run.discover`).
     """
     location = _input(state)
     if location is None:
         return []
     kind = str(state.value("type"))
-    flags: dict[str, Any] = {"input": location, "type": kind}
-    if kind != "auto":
-        flags["recursive"] = bool(state.value("recursive"))
+    flags: dict[str, Any] = {
+        "input": location,
+        "type": kind,
+        "recursive": bool(state.value("recursive")),
+    }
     try:
-        return core.selection_order(core.discover(resolve_spec(flags).spec))
+        return core.discover(resolve_spec(flags).spec)
     except (core.PlanError, SpecError):
         return []
+
+
+def _run_names(state: State) -> list[str]:
+    """Return the names ``--select`` searches among :func:`run_items`."""
+    location = _input(state)
+    if location is None:
+        return []
+    return core.selection_names(run_items(state), location.expanduser().resolve())
 
 
 def file_names(state: State) -> tuple[list[str], bool]:
@@ -443,8 +446,7 @@ class _MethodQuestions:
         """Ask item numbers or ranges after showing the numbered items."""
         if self.how != _RANGE:
             return None
-        items = run_items(self.state)
-        names = [item.name for item in items]
+        names = _run_names(self.state)
         for index, name in enumerate(names[:_LISTED], start=1):
             self.ctx.prompter.show(f"  {index:>4}  {name}")
         if len(names) > _LISTED:
@@ -473,7 +475,7 @@ class _MethodQuestions:
         """Ask a text the names of the items to process contain."""
         if self.how != _SEARCH:
             return None
-        names = [item.name for item in run_items(self.state)]
+        names = _run_names(self.state)
 
         def validate(text: str) -> str | None:
             if not text.strip():
@@ -521,7 +523,7 @@ class _MethodQuestions:
             self.ctx.prompter.show("  select at least one item")
 
     def _pick_numbers(self) -> Nav:
-        names = [item.name for item in run_items(self.state)]
+        names = _run_names(self.state)
         chosen = self.state.value("select")
         checked: list[int] = []
         if chosen and is_numeric_selection(str(chosen)):

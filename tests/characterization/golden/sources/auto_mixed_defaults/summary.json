@@ -9,11 +9,11 @@
     "items_submitted": 0,
     "items_total": 5,
     "outputs": [
+      "<tmp>/out/annals.epub-6c4c57cc/annals.txt",
       "<tmp>/out/born.pdf-4c9a54da/born.txt",
+      "<tmp>/out/notes.mobi-c5137dc9/notes.txt",
       "<tmp>/out/scan.pdf-900db3ec/scan.txt",
       "<tmp>/out/scans-5982f892/scans.txt",
-      "<tmp>/out/annals.epub-6c4c57cc/annals.txt",
-      "<tmp>/out/notes.mobi-c5137dc9/notes.txt",
       "<tmp>/out/chronotranscriber.sqlite"
     ],
     "stopped": null,

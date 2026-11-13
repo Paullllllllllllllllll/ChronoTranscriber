@@ -202,6 +202,26 @@ def test_document_names_differing_only_in_case_share_an_output(
     assert str(pdf) in str(raised.value) and str(scans) in str(raised.value)
 
 
+def test_every_shared_output_is_named_before_any_input_is_hashed(
+    tmp_path: Path, make_pdf: MakePdf, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inputs = [make_pdf(f"in/{name}.pdf") for name in ("a", "b")]
+    for name in ("a", "b"):
+        (tmp_path / "in" / f"{name}.epub").write_bytes(b"PK")
+
+    def hashed(path: Path) -> None:
+        raise AssertionError(f"hashed {path}")
+
+    monkeypatch.setattr(core, "_identify", hashed)
+    with pytest.raises(core.ConfigurationError) as raised:
+        _plan(tmp_path / "in", method="tesseract")
+
+    message = str(raised.value)
+    for pdf in inputs:
+        assert f"{pdf.with_suffix('.epub')} and {pdf}" in message
+    assert message.count("would share the output") == 2
+
+
 def test_auto_mode_on_a_recording_points_to_the_audio_type(tmp_path: Path) -> None:
     talk = _wav(tmp_path / "talk.wav")
 
@@ -319,7 +339,7 @@ def test_auto_mode_needs_a_key_only_for_llm_items(
 
 
 @pytest.mark.usefixtures("keys")
-def test_auto_mode_routes_each_item_and_groups_them_by_method(
+def test_auto_mode_routes_each_item_and_keeps_the_natural_order(
     tmp_path: Path, make_pdf: MakePdf
 ) -> None:
     make_pdf("in/born.pdf")
@@ -332,8 +352,8 @@ def test_auto_mode_routes_each_item_and_groups_them_by_method(
 
     assert run_plan.auto and not run_plan.batch
     assert [(item.name, item.method) for item in run_plan.to_process] == [
-        ("born.pdf", "native"),
         ("book.epub", "native"),
+        ("born.pdf", "native"),
         ("scan.pdf", "llm"),
         ("scans", "llm"),
     ]

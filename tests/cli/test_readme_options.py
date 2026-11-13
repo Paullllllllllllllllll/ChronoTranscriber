@@ -263,9 +263,9 @@ def test_readme_view_columns_match_the_store(tmp_path: Path) -> None:
 
 DRIFT = [
     pytest.param(
-        "| `--concurrency N` | parallel requests | 16 | yes |",
-        "| `--concurrency N` | parallel requests | 32 | yes |",
-        "transcribe: --concurrency: default",
+        "only for method audio-api, whisper | 600 | yes |",
+        "only for method audio-api, whisper | 900 | yes |",
+        "transcribe: --audio-chunk-seconds: default",
         id="changed-default",
     ),
     pytest.param(
@@ -284,9 +284,9 @@ DRIFT = [
     ),
     pytest.param(
         "| `--recursive`, `--no-recursive` | search the subfolders of the input "
-        "folder; only for type audio",
-        "| `--recursive` | search the subfolders of the input folder; only for "
-        "type audio",
+        "folder at every level | off | yes |",
+        "| `--recursive` | search the subfolders of the input folder at every "
+        "level | off | yes |",
         "transcribe: --no-recursive: 0 README rows",
         id="missing-no-form",
     ),

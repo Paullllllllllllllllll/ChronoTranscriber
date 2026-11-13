@@ -8,7 +8,7 @@ unresolved) and an unbuildable submission drive the LLM method's reaction.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Sequence
+from collections.abc import AsyncIterable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -93,7 +93,7 @@ class FakeSubmit:
 
     async def __call__(
         self,
-        payloads: Sequence[Any],
+        payloads: AsyncIterable[Any],
         *,
         document: DocumentHandle,
         spec: Any,
@@ -102,7 +102,8 @@ class FakeSubmit:
         context: str | None = None,
         context_image: Path | None = None,
     ) -> Outcome:
-        self.items.append((Path(document.name).name, len(payloads)))
+        count = len([payload async for payload in payloads])
+        self.items.append((Path(document.name).name, count))
         if isinstance(self.outcome, Exception):
             raise self.outcome
         return self.outcome
@@ -242,9 +243,10 @@ class PartlyRefusedSubmit(FakeSubmit):
     """Open a batch for page 1, then refuse the part of page 2 in the store."""
 
     async def __call__(
-        self, payloads: Sequence[Any], *, document: DocumentHandle, **_: Any
+        self, payloads: AsyncIterable[Any], *, document: DocumentHandle, **_: Any
     ) -> Outcome:
-        self.items.append((Path(document.name).name, len(payloads)))
+        count = len([payload async for payload in payloads])
+        self.items.append((Path(document.name).name, count))
 
         async def upload(_submission: Any) -> None:
             return None

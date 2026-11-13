@@ -35,20 +35,12 @@ def _names(run_plan: core.RunPlan) -> list[str]:
     return sorted(item.name for item in run_plan.to_process)
 
 
-@pytest.mark.parametrize(
-    ("kind", "hint"),
-    [
-        ("pdf", "--all, --select or --files"),
-        # auto mode refuses --files, so its hint leaves it out.
-        ("auto", "neither --all nor --select"),
-    ],
-)
+@pytest.mark.parametrize("kind", ["pdf", "auto"])
 def test_several_items_without_a_selection_exit_2(
     tmp_path: Path,
     docs: Path,
     capsys: pytest.CaptureFixture[str],
     kind: str,
-    hint: str,
 ) -> None:
     out = tmp_path / "out"
 
@@ -68,8 +60,7 @@ def test_several_items_without_a_selection_exit_2(
 
     captured = capsys.readouterr()
     assert code == 2
-    assert hint in captured.err
-    assert ("--files" in captured.err) is (kind != "auto")
+    assert "--all, --select or --files" in captured.err
     assert json.loads(captured.out)["items_total"] == 0
     assert not out.exists()
 
@@ -158,9 +149,10 @@ def test_a_settings_default_all_yields_to_a_select_flag(docs: Path) -> None:
     assert _names(run_plan) == ["p2.pdf"]
 
 
-def test_selection_order_sorts_numbers_by_value(docs: Path) -> None:
+def test_discovery_and_processing_sort_numbers_by_value(docs: Path) -> None:
     found = core.discover(make_spec(docs, all=True))
+    run_plan = core.plan(make_spec(docs, all=True, dry_run=True), make_settings())
 
-    ordered = [item.name for item in core.selection_order(found)]
-
-    assert ordered == ["ledger.pdf", "p1.pdf", "p2.pdf", "p10.pdf"]
+    expected = ["ledger.pdf", "p1.pdf", "p2.pdf", "p10.pdf"]
+    assert [item.name for item in found] == expected
+    assert [item.name for item in run_plan.to_process] == expected

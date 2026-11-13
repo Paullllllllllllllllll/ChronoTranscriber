@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.9.0
+# ChronoTranscriber v1.10.0
 
 <img src="assets/logo.svg" alt="ChronoTranscriber logo" width="64" align="right">
 
@@ -81,10 +81,10 @@ option given twice keeps the values of both.
 | --- | --- | --- | --- |
 | `--input PATH` | PDF, EPUB, MOBI or audio file, image folder, or a folder of these | | no |
 | `--type {auto,pdf,images,epub,mobi,audio}` | input type; auto takes the PDFs, image folders, EPUB and MOBI files of the input; audio needs --type audio | auto | yes |
-| `--files LIST` | comma-separated names of files or folders inside the input folder; only for type audio, epub, images, mobi, pdf | | no |
+| `--files LIST` | comma-separated paths of files or folders relative to the input folder | | no |
 | `--select EXPR` | select items by number (1,3), range (1-5) or name search | | yes |
 | `--all` | process every discovered item | | yes |
-| `--recursive`, `--no-recursive` | search the subfolders of the input folder; only for type audio, epub, images, mobi, pdf | off | yes |
+| `--recursive`, `--no-recursive` | search the subfolders of the input folder at every level | off | yes |
 | `--pages RANGE` | pages, images or audio chunks: 5, first:5, last:5, 3-7, 3-, -7 or 1,3,5-8 | all | no |
 | `--method {llm,tesseract,native,whisper,audio-api}` | transcription method; in auto mode it serves scanned PDFs and image folders; EPUB and MOBI take native and audio takes whisper unless --method names another | llm | yes |
 | `--searchable-pdfs {ocr,text}` | PDFs with a text layer in auto mode: ocr transcribes them with the method, text takes the text layer; only for type auto | ocr | yes |
@@ -139,12 +139,16 @@ option given twice keeps the values of both.
 
 `--input` is required, and `--beside-input` overrides an `output` settings
 default. An input with several items needs one of `--all`, `--select` and
-`--files`; without one the run exits 2 and names the three. `--select` numbers
-the items from 1 by path, with numbers in names compared by value (`p2` before
-`p10`), and takes numbers and ranges (`1-3,5`) or a text that the item names
-contain (`ledger`); an out-of-range number warns, and a selection that matches
-nothing exits 2. `--files` names items exactly and needs a type other than
-`auto`. An option whose condition does not hold (`--ocr-config` with
+`--files`; without one the run exits 2 and names the three. A run processes
+its items in the natural order of their paths below the input folder, with
+numbers compared by value (`p2` before `p10`, `vol_2/a.pdf` before
+`vol_10/a.pdf`), and `--select` numbers them from 1 in that order. It takes
+numbers and ranges (`1-3,5`) or a text that the paths below the input contain
+(`ledger`); an out-of-range number warns, and a selection that matches nothing
+exits 2. `--files` names items by their paths relative to the input folder,
+with forward or back slashes (`vol_2/a.pdf`), in every mode; in auto mode a
+name must be a PDF, EPUB or MOBI file or a folder that directly holds page
+images. An option whose condition does not hold (`--ocr-config` with
 `--method llm`) has no effect, and the run warns on stderr. The type and method
 must form a valid pair:
 
@@ -159,8 +163,27 @@ must form a valid pair:
 EPUB, MOBI and audio switch to their first method unless `--method` names another
 as a flag (a settings default does not count); for the other types an invalid
 pair is a usage error. Auto mode takes the PDFs, image folders, EPUB and MOBI
-files directly inside the input folder, and with `--searchable-pdfs text` a PDF
-with a text layer takes the native method. Audio always needs `--type audio`.
+files of the input folder, and with `--searchable-pdfs text` a PDF with a text
+layer takes the native method. Audio always needs `--type audio`.
+
+A folder input is read one level deep: the files of the type directly in it,
+under `--type images` the folder itself as one image folder, and in auto mode
+its files and the subfolders that directly hold page images. `--recursive`
+reads every level, in every mode: the files at any depth, and each folder below
+the input that directly holds page images as one image folder. An image folder
+inside another image folder is skipped with a warning, since the outer folder's
+pages do not include it; pass it as `--input` to transcribe it.
+
+The search never enters Mabillon's `.mabillon` working folders, the working
+subfolders `preprocessed_images_tesseract` and `audio_chunks` that
+`--keep-working-files` keeps, or the `--output` folder when it lies inside the
+input folder. A run that leaves out a folder of one of these two names says so
+in a warning; pass a folder of your own with such a name as `--input`. The store `chronotranscriber.sqlite`, the rendered `.txt` and
+`.md` files and the context sidecars (`<name>_transcr_context.txt`,
+`<name>_transcr_context_image.<ext>`) are never items, and a sidecar image
+makes no folder an image folder. Two items that would write one output file and
+store document (`book.pdf` and `book.epub` beside the input) are refused before
+the run, and the error names both inputs of every such pair.
 
 ### repair
 
@@ -243,16 +266,18 @@ input as `transcribe` does and skip, with a warning, a selected EPUB or MOBI
 item. An item takes the name of the stored document whose recorded input path
 is the item, else the name `transcribe` would give it under `--output` and
 `--layout`. `--classifier` is required; [Classifiers](#classifiers) describes
-the files.
+the files. The items run one after another, and the requests of an item up to
+`--concurrency` at a time while its pages render; a stopped run lets the
+requests in flight finish.
 
 | Flag | Description | Default | In `defaults:` |
 | --- | --- | --- | --- |
 | `--input PATH` | PDF or image folder, or a folder of these | | no |
 | `--type {auto,pdf,images}` | input type; auto takes the PDFs and image folders of the input | auto | no |
-| `--files LIST` | comma-separated names of files or folders inside the input folder; only for type images, pdf | | no |
+| `--files LIST` | comma-separated paths of files or folders relative to the input folder | | no |
 | `--select EXPR` | select items by number (1,3), range (1-5) or name search | | no |
 | `--all` | process every discovered item | | no |
-| `--recursive`, `--no-recursive` | search the subfolders of the input folder; only for type images, pdf | off | no |
+| `--recursive`, `--no-recursive` | search the subfolders of the input folder at every level | off | no |
 | `--pages RANGE` | pages or images: 5, first:5, last:5, 3-7, 3-, -7 or 1,3,5-8 | all | no |
 | `--output DIR` | output folder | beside the input | yes |
 | `--beside-input` | write outputs beside each input | | no |
@@ -262,6 +287,7 @@ the files.
 | `--decision-provider {openai,openrouter}` | decision API dialect | from the model id | yes |
 | `--decision-endpoint URL` | decision endpoint URL | the provider's | yes |
 | `--force` | ask again about every selected page instead of reusing stored answers | | no |
+| `--concurrency N` | parallel requests | 16 | yes |
 | `--dry-run` | plan without API calls or writes | | no |
 | `--json` | print one JSON summary line on stdout | | no |
 | `--settings FILE` | alternate settings file | config/settings.yaml | no |
@@ -275,10 +301,10 @@ the pages it sends are the classifier's selection.
 | --- | --- | --- | --- |
 | `--input PATH` | PDF or image folder, or a folder of these | | no |
 | `--type {auto,pdf,images}` | input type; auto takes the PDFs and image folders of the input | auto | no |
-| `--files LIST` | comma-separated names of files or folders inside the input folder; only for type images, pdf | | no |
+| `--files LIST` | comma-separated paths of files or folders relative to the input folder | | no |
 | `--select EXPR` | select items by number (1,3), range (1-5) or name search | | no |
 | `--all` | process every discovered item | | no |
-| `--recursive`, `--no-recursive` | search the subfolders of the input folder; only for type images, pdf | off | no |
+| `--recursive`, `--no-recursive` | search the subfolders of the input folder at every level | off | no |
 | `--output DIR` | output folder | beside the input | yes |
 | `--beside-input` | write outputs beside each input | | no |
 | `--layout {hash,mirror}` | output folder layout: hash (one hash-suffixed folder per item) or mirror (the input folder tree) | hash | yes |
@@ -287,6 +313,7 @@ the pages it sends are the classifier's selection.
 | `--decision-provider {openai,openrouter}` | decision API dialect | from the model id | yes |
 | `--decision-endpoint URL` | decision endpoint URL | the provider's | yes |
 | `--force` | ask again about every document instead of reusing stored answers | | no |
+| `--concurrency N` | parallel requests | 16 | yes |
 | `--dry-run` | plan without API calls or writes | | no |
 | `--json` | print one JSON summary line on stdout | | no |
 | `--settings FILE` | alternate settings file | config/settings.yaml | no |
@@ -920,10 +947,14 @@ and changes nothing.
 
 `--batch` submits the pages of LLM items to the batch API of OpenAI, Anthropic or
 Google; OpenRouter, custom endpoints and audio have none. The run counts such
-items as submitted, not complete. Requests are split by the provider's count and
-byte limits, and each part becomes one submission in the database, committed
-before the upload. With `--sync-fallback`, an item whose submission fails is
-transcribed synchronously.
+items as submitted, not complete. The pages are rendered and sent in slices of
+at most 64 MiB of page images, so a submission holds a bounded share of a book in
+memory and a large book becomes several batches. Within a slice, requests are
+split by the provider's count and byte limits, and each part becomes one
+submission in the database, committed before the upload. The first part that
+is refused or unresolved ends the item's submission; its later pages stay
+pending and are not rendered. With `--sync-fallback`, an item whose submission
+fails is transcribed synchronously.
 
 `batch check` finds the databases below `--input`, finalizes every finished batch
 into the store, renders the affected documents in the formats of the run that

@@ -382,11 +382,9 @@ class Inventory:
 
 def _probe(path: Path, kind: str, recursive: bool) -> list[SourceItem]:
     """Return what a run of type *kind* would discover at *path*."""
-    flags: dict[str, Any] = {"input": path, "type": kind}
+    flags: dict[str, Any] = {"input": path, "type": kind, "recursive": recursive}
     if kind in _PROBE_METHODS:
         flags["method"] = _PROBE_METHODS[kind]
-    if kind != "auto":
-        flags["recursive"] = recursive
     try:
         return core.discover(resolve_spec(flags).spec)
     except (core.PlanError, SpecError):

@@ -2,8 +2,10 @@
 
 :func:`submit_batch` is the entry point of the LLM method and
 :func:`submit_units` the submission of given units, which repair reuses.
-The requests are split into parts by the provider's count and byte limits,
-and every part becomes one submission of the store: the submission and its
+:func:`submit_batch` takes the pages as they render, in slices of at most
+:data:`SLICE_BYTES` of page images. The requests are split into parts by
+the provider's count and byte limits, and every part becomes one
+submission of the store: the submission and its
 requests, whose custom ids are scoped to the submission id, are committed
 before the upload, and each request's body as submitted (payloads redacted)
 is recorded next, so finalization can store it as the request of the unit's
@@ -21,14 +23,22 @@ Provider errors end in a :class:`SubmitOutcome` and never propagate.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import (
+    AsyncIterable,
+    AsyncIterator,
+    Iterable,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Final, Literal, Protocol
 
 from chronotranscriber.batch.bodies import BodyPlan, build_plan
 from chronotranscriber.batch.clients import BatchClients
+from chronotranscriber.batch.finalize import MISSING_TEXT
 from chronotranscriber.common.batch import (
+    MISSING_RESULT_ERROR,
     BatchBackend,
     BatchCreateError,
     BatchPart,
@@ -58,6 +68,7 @@ __all__ = [
     "LABEL",
     "REQUEST_TOO_LARGE",
     "ROLE",
+    "SLICE_BYTES",
     "BatchSubmissionError",
     "SubmitDocument",
     "SubmitOutcome",
@@ -76,6 +87,14 @@ REQUEST_TOO_LARGE = "request_too_large"
 """The error type of a unit whose request exceeds a size limit of the provider."""
 
 SubmitStatus = Literal["submitted", "refused", "unresolved"]
+
+SLICE_BYTES: Final = 64 * 1024 * 1024
+"""Bytes of base64 page images a submission holds in memory at once.
+
+The bodies, envelopes and upload file of a part copy its images, so the
+peak of a submission is a small multiple of this figure, whatever the size
+of the document.
+"""
 
 _PROBE_PREFIX = "0" * 8
 """Stands in for a submission id prefix while parts are planned."""
@@ -346,11 +365,10 @@ async def fail_oversized(
 
     The store must hold the lease of each unit's document.
     """
-    held = store.held_leases()
     for key, error in errors.items():
-        row = next(row for row in store.units(key.doc_id) if row.key == key)
-        await store.write_unit(
-            held[key.doc_id],
+        await _fail(
+            store,
+            key,
             UnitResult(
                 kind=key.kind,
                 idx=key.idx,
@@ -361,8 +379,43 @@ async def fail_oversized(
                 outcome="failed",
                 error=error,
                 error_type=REQUEST_TOO_LARGE,
-                provenance=row.provenance,
-                attempts=row.attempts,
+            ),
+        )
+
+
+async def _fail(store: Store, key: UnitKey, result: UnitResult) -> None:
+    """Store the failed *result* of the unit *key*, keeping its provenance."""
+    row = next(row for row in store.units(key.doc_id) if row.key == key)
+    await store.write_unit(
+        store.held_leases()[key.doc_id],
+        replace(result, provenance=row.provenance, attempts=row.attempts),
+    )
+
+
+async def _fail_unrendered(
+    store: Store, units: Sequence[UnitRequest], *, model: str, provider: str
+) -> None:
+    """Store *units*, which have no request, as finalization stores such units.
+
+    A page that could not be rendered joins a submission and fails at its
+    finalization with the ``no result returned`` placeholder. The ones left
+    when the last slice holds no request to send have no submission to join.
+    """
+    for unit in units:
+        key = unit.unit
+        await _fail(
+            store,
+            key,
+            UnitResult(
+                kind=key.kind,
+                idx=key.idx,
+                status="failed",
+                model=model,
+                provider=provider,
+                content=MISSING_TEXT,
+                outcome="failed",
+                error=MISSING_RESULT_ERROR,
+                error_type="missing",
             ),
         )
 
@@ -462,8 +515,47 @@ def _request(payload: PageImage) -> BatchRequest | None:
     )
 
 
+async def _slices(
+    payloads: Iterable[PageImage] | AsyncIterable[PageImage],
+    limit: int,
+    shared: int = 0,
+) -> AsyncIterator[list[PageImage]]:
+    """Yield the payloads in slices whose requests hold at most *limit* bytes.
+
+    A rendered page counts with its image and the *shared* bytes every
+    request carries besides (the context image). A slice closes before a
+    rendered page that would take it over *limit*, so it always holds a
+    rendered page when one follows; a page larger than *limit* forms a slice
+    of its own. Pages that could not be rendered carry no image and join the
+    slice they come in.
+    """
+    current: list[PageImage] = []
+    held = 0
+    async for payload in _each(payloads):
+        rendered = payload.render_error is None
+        size = len(payload.base64 or "") + shared if rendered else 0
+        if held and size and held + size > limit:
+            yield current
+            current, held = [], 0
+        current.append(payload)
+        held += size
+    if current:
+        yield current
+
+
+async def _each(
+    payloads: Iterable[PageImage] | AsyncIterable[PageImage],
+) -> AsyncIterator[PageImage]:
+    if isinstance(payloads, AsyncIterable):
+        async for payload in payloads:
+            yield payload
+    else:
+        for payload in payloads:
+            yield payload
+
+
 async def submit_batch(
-    payloads: Sequence[PageImage],
+    payloads: Iterable[PageImage] | AsyncIterable[PageImage],
     *,
     document: SubmitDocument,
     spec: RunSpec,
@@ -474,11 +566,17 @@ async def submit_batch(
 ) -> SubmitOutcome:
     """Submit the rendered pages of one document to the batch API of *spec*.
 
-    Each payload is the unit of its order index in *document*; its unit is
-    created when missing and the provenance of its image recorded. A page
-    that could not be rendered is submitted without a request (see
-    :class:`UnitRequest`); a page whose request exceeds a size limit of the
-    provider is stored as failed with that error and not submitted.
+    The pages are taken as they render, in slices whose page images hold at
+    most :data:`SLICE_BYTES` (:func:`_slices`); each slice is recorded,
+    split into parts and submitted, one submission per part, before the next
+    one renders, so the first refused or unresolved part leaves the pages
+    after it pending and unrendered. Each payload is the unit of its order
+    index in *document*; its unit is created when missing and the provenance
+    of its image recorded. A page that could not be rendered is submitted
+    without a request (see :class:`UnitRequest`), with the next slice when
+    its own holds no request to send, and is stored as failed when no slice
+    follows; a page whose request exceeds a size limit of the provider is
+    stored as failed with that error and not submitted.
 
     Raises:
         BatchSubmissionError: The provider has no batch API, no page was
@@ -489,10 +587,6 @@ async def submit_batch(
     if not supports_batch(model.provider):
         raise BatchSubmissionError(
             f"Provider '{model.provider}' does not support batch processing"
-        )
-    if not any(payload.render_error is None for payload in payloads):
-        raise BatchSubmissionError(
-            f"No page of '{document.name}' could be rendered for batch submission"
         )
     detail = resolve_image_settings(model.provider, model.model, spec.images)[0][
         "resolved_detail"
@@ -509,24 +603,50 @@ async def submit_batch(
         )
     except (OSError, ValueError) as exc:
         raise BatchSubmissionError(f"Cannot build the batch requests: {exc}") from exc
-    await _record_pages(document, payloads, model.model, model.provider)
-    units = [
-        UnitRequest(
-            UnitKey(document.doc_id, document.kind, payload.index), _request(payload)
+    clients = BatchClients(settings, ROLE)
+    opened: list[str] = []
+    rendered = False
+    carried: list[UnitRequest] = []
+    outcome = SubmitOutcome("submitted")
+    shared = len(plan.context_image[0]) if plan.context_image is not None else 0
+    async for pages in _slices(payloads, SLICE_BYTES, shared):
+        rendered = rendered or any(page.render_error is None for page in pages)
+        await _record_pages(document, pages, model.model, model.provider)
+        units = [
+            UnitRequest(
+                UnitKey(document.doc_id, document.kind, page.index), _request(page)
+            )
+            for page in pages
+        ]
+        del pages
+        units, oversized = split_oversized(units, plan)
+        await fail_oversized(
+            document.store, oversized, model=model.model, provider=model.provider
         )
-        for payload in payloads
-    ]
-    units, oversized = split_oversized(units, plan)
-    await fail_oversized(
-        document.store, oversized, model=model.model, provider=model.provider
-    )
-    if oversized and not any(unit.request is not None for unit in units):
-        raise BatchSubmissionError(
-            f"No page of '{document.name}' is within the provider's size limits"
+        units = carried + units
+        if not any(unit.request is not None for unit in units):
+            carried = units
+            continue
+        carried = []
+        sent = await submit_units(document.store, units, plan=plan, clients=clients)
+        del units
+        opened += sent.submission_ids
+        if sent.status != "submitted":
+            outcome = SubmitOutcome(sent.status, tuple(opened), sent.detail)
+            break
+    else:
+        if not rendered:
+            raise BatchSubmissionError(
+                f"No page of '{document.name}' could be rendered for batch submission"
+            )
+        if not opened:
+            raise BatchSubmissionError(
+                f"No page of '{document.name}' is within the provider's size limits"
+            )
+        await _fail_unrendered(
+            document.store, carried, model=model.model, provider=model.provider
         )
-    outcome = await submit_units(
-        document.store, units, plan=plan, clients=BatchClients(settings, ROLE)
-    )
+        outcome = SubmitOutcome("submitted", tuple(opened))
     logger.info(
         "Batch submission of '%s' %s: %s",
         document.name,

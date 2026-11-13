@@ -246,7 +246,7 @@ def test_invalid_arguments_exit_with_status_2(argv: list[str]) -> None:
         ),
         (["--batch"], []),
         (["--type", "pdf", "--searchable-pdfs", "text"], ["searchable_pdfs"]),
-        (["--files", "a.pdf", "--recursive"], ["files", "recursive"]),
+        (["--files", "a.pdf", "--recursive"], []),
         (["--type", "pdf", "--files", "a.pdf", "--recursive"], []),
     ],
 )

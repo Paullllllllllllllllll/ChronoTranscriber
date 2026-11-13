@@ -61,6 +61,9 @@ class FakeDecisions:
         self.bodies.append(body)
         if len(self.bodies) == self.unavailable:
             return httpx.Response(503, json={"error": {"message": "unavailable"}})
+        return self.ok(body)
+
+    def ok(self, body: dict[str, Any]) -> httpx.Response:
         answers = {
             name: self.answer(question) for name, question in body["questions"].items()
         }
@@ -388,7 +391,9 @@ def test_a_stopped_run_sends_no_further_request_and_a_rerun_resumes(
 
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(ext.Attempt, "on_error", lambda self, exc: Decision.STOP)
-        code, payload = _run(capsys, *argv, "--classifier", str(path))
+        code, payload = _run(
+            capsys, *argv, "--classifier", str(path), "--concurrency", "1"
+        )
 
     assert code == 3, payload
     assert "503" in payload["stopped"]
@@ -403,6 +408,98 @@ def test_a_stopped_run_sends_no_further_request_and_a_rerun_resumes(
     assert code == 0, payload
     assert payload["stopped"] is None
     assert (payload["units_reused"], payload["units_asked"]) == (2, 8)
+
+
+def _gated(monkeypatch: pytest.MonkeyPatch, fake: FakeDecisions) -> None:
+    """Hold the first request until the second one has its response.
+
+    The request whose arrival number is ``fake.unavailable`` gets a 503.
+    """
+    gate = asyncio.Event()
+    arrivals = 0
+
+    async def handle(
+        transport: httpx.AsyncHTTPTransport, request: httpx.Request
+    ) -> httpx.Response:
+        nonlocal arrivals
+        arrivals += 1
+        arrival = arrivals
+        if arrival == 1:
+            await asyncio.wait_for(gate.wait(), timeout=10)
+        body = json.loads(request.content)
+        fake.bodies.append(body)
+        if arrival == fake.unavailable:
+            response = httpx.Response(503, json={"error": {"message": "unavailable"}})
+        else:
+            response = fake.ok(body)
+        if arrival == 2:
+            gate.set()
+        return response
+
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", handle)
+
+
+def _one_per_request(tmp_path: Path) -> Path:
+    path = _classifier(tmp_path, "The page is a title page.")
+    body = json.loads(path.read_text(encoding="utf-8"))
+    path.write_text(json.dumps({**body, "per_request": 1}), encoding="utf-8")
+    return path
+
+
+def test_the_requests_of_an_item_interleave_and_keep_every_answer(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    decisions: FakeDecisions,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    folder = make_image_folder(tmp_path / "scans", pages=4)
+    out = tmp_path / "out"
+    argv = ("pages", "--input", str(folder), "--type", "images", "--output", str(out))
+    path = _classifier(tmp_path, "The page is a title page.")
+    _gated(monkeypatch, decisions)
+
+    code, payload = _run(capsys, *argv, "--classifier", str(path))
+
+    assert code == 0, payload
+    assert (payload["units_asked"], payload["units_failed"]) == (4, 0)
+    assert len(decisions.bodies) == 2
+    rows = _view(out)
+    assert [row["ordinal"] for row in rows] == [0, 1, 2, 3]
+    assert {row["probability"] for row in rows} == {0.8}
+    assert _count(out, "classification_rows") == 4
+    code, payload = _run(capsys, *argv, "--classifier", str(path))
+    assert (payload["units_reused"], payload["units_asked"]) == (4, 0)
+    assert [row["reused"] for row in _view(out)] == [1, 1, 1, 1]
+
+
+def test_a_stop_ends_admission_and_the_request_in_flight_finishes(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    decisions: FakeDecisions,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    folder = make_image_folder(tmp_path / "scans", pages=4)
+    out = tmp_path / "out"
+    argv = ("pages", "--input", str(folder), "--type", "images", "--output", str(out))
+    path = _one_per_request(tmp_path)
+    decisions.unavailable = 2
+    _gated(monkeypatch, decisions)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(ext.Attempt, "on_error", lambda self, exc: Decision.STOP)
+        code, payload = _run(
+            capsys, *argv, "--classifier", str(path), "--concurrency", "2"
+        )
+
+    assert code == 3, payload
+    assert "503" in payload["stopped"]
+    assert (payload["units_asked"], payload["units_failed"]) == (1, 0)
+    assert len(decisions.bodies) == 2
+    assert len(_view(out)) == 1
+    decisions.unavailable = None
+    code, payload = _run(capsys, *argv, "--classifier", str(path))
+    assert code == 0, payload
+    assert (payload["units_reused"], payload["units_asked"]) == (1, 3)
 
 
 async def _seed(out: Path, name: str, sha256: str) -> None:

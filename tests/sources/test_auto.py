@@ -18,7 +18,7 @@ class TestScan:
         assert found.items == ()
         assert found.loose_images == 0
 
-    def test_items_come_in_type_order(self, temp_dir: Path) -> None:
+    def test_items_of_every_type_come_in_natural_order(self, temp_dir: Path) -> None:
         (temp_dir / "book.epub").write_bytes(b"")
         (temp_dir / "doc.pdf").write_bytes(b"%PDF")
         (temp_dir / "kindle.azw3").write_bytes(b"")
@@ -28,7 +28,7 @@ class TestScan:
 
         types = [item.type for item in scan(temp_dir).items]
 
-        assert types == ["pdf", "images", "epub", "mobi"]
+        assert types == ["epub", "pdf", "mobi", "images"]
 
     def test_loose_images_are_counted_not_returned(self, temp_dir: Path) -> None:
         (temp_dir / "image1.png").write_bytes(b"")

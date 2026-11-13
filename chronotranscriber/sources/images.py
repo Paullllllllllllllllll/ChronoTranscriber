@@ -16,7 +16,7 @@ import base64
 import logging
 import subprocess
 import tempfile
-from collections.abc import AsyncIterator, Iterable, Mapping
+from collections.abc import AsyncGenerator, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
@@ -242,10 +242,10 @@ def page_image(result: PagePayload | PageError, source: PageSource) -> PageImage
 
 async def stream_pages(
     source: PageSource, indices: Iterable[int] | None = None
-) -> AsyncIterator[PageImage]:
+) -> AsyncGenerator[PageImage]:
     """Yield the pages of *indices* (all by default) in order, one at a time.
 
-    The source is closed after the last page.
+    The source is closed after the last page, or when the generator is closed.
 
     Raises:
         RuntimeError: Too many pages failed to render (``check_failure_rate``).

@@ -33,7 +33,7 @@ import logging
 import os
 import sqlite3
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import AsyncIterable, Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -46,6 +46,8 @@ from chronotranscriber.common.batch import supports_batch
 from chronotranscriber.common.context import ContextError
 from chronotranscriber.common.contract import ExitCode, exit_code_for
 from chronotranscriber.common.decisions import dialect_for
+from chronotranscriber.common.discovery import duplicated, ordered, relative_name
+from chronotranscriber.common.discovery import scan as scan_folder
 from chronotranscriber.common.options import Source
 from chronotranscriber.common.retry import RunStopped
 from chronotranscriber.common.selection import (
@@ -99,7 +101,7 @@ from chronotranscriber.methods import (
 )
 from chronotranscriber.methods.llm import image_record
 from chronotranscriber.methods.units import DocumentHandle
-from chronotranscriber.output.paths import item_paths, natural_sort_key
+from chronotranscriber.output.paths import item_paths
 from chronotranscriber.output.render import format_path, render_item, text_formats
 from chronotranscriber.output.store import (
     Classification,
@@ -117,12 +119,13 @@ from chronotranscriber.settings import Settings, SettingsError
 from chronotranscriber.sources import (
     DiscoveryError,
     SourceItem,
-    discover_items,
+    find_items,
     source_type,
 )
 from chronotranscriber.sources.audio import chunk_settings, describe_chunks
 from chronotranscriber.sources.audio.ffmpeg import configure_ffmpeg_executables
-from chronotranscriber.sources.auto import decide, file_item, scan
+from chronotranscriber.sources.auto import decide
+from chronotranscriber.sources.auto import find as find_auto
 from chronotranscriber.sources.identity import (
     Snapshot,
     input_identity,
@@ -150,10 +153,11 @@ __all__ = [
     "StoreRefusedError",
     "choose_items",
     "discover",
+    "find_input",
     "item_location",
     "plan",
     "run",
-    "selection_order",
+    "selection_names",
 ]
 
 logger = logging.getLogger(__name__)
@@ -309,10 +313,10 @@ class RunPlan:
     """What a run will do.
 
     *output_dir* None writes beside each input. *discovered* holds the items
-    found and selected, in discovery order. *to_process* is in processing
-    order (in auto mode grouped by method), *skipped* holds the complete
-    items in discovery order; a complete item whose rendered files are
-    missing or stale is rendered again without model calls. *unstored* items
+    found and selected, in the natural order of their paths, the order
+    *to_process* keeps; *skipped* holds the complete items in that order; a
+    complete item whose rendered files are missing or stale is rendered
+    again without model calls. *unstored* items
     have outputs without store rows, *blocked* items are leased by another
     run or wait for a batch, *refused* items were stored with other image
     settings; none of them is processed. *warnings* are notes for the user.
@@ -450,41 +454,74 @@ def _output_dir(spec: RunSpec) -> Path | None:
     return path
 
 
+def find_input(
+    selection: InputSpec, input_path: Path, output_dir: Path | None = None
+) -> tuple[list[SourceItem], list[str]]:
+    """Return the items at *input_path* and notes about what was left out.
+
+    Auto mode takes the input file, or the PDFs, image folders, EPUB and
+    MOBI files of the folder; another type the items of that type. The
+    search leaves out the run's output folder *output_dir*, the working
+    folders and the sidecars (:func:`~chronotranscriber.sources.scan_input`).
+    The items come in the natural order of their paths below the input.
+
+    Raises:
+        InputError: The input cannot serve the type, or ``--files`` names
+            entries that are not items.
+    """
+    try:
+        if selection.type == "auto":
+            found = find_auto(
+                input_path,
+                files=selection.files,
+                recursive=selection.recursive,
+                output_dir=output_dir,
+            )
+        else:
+            found = find_items(
+                input_path,
+                selection.type,
+                files=selection.files,
+                recursive=selection.recursive,
+                output_dir=output_dir,
+            )
+    except DiscoveryError as exc:
+        raise InputError(str(exc)) from exc
+    warnings: list[str] = []
+    if found.loose_images:
+        logger.warning(
+            "Skipped %d loose image file(s) in %s: unsupported in auto mode.",
+            found.loose_images,
+            input_path,
+        )
+        warnings.append(
+            "loose image files are not supported in auto mode; place them "
+            "in a subfolder to process the folder."
+        )
+    for folder, parent in found.nested:
+        warnings.append(
+            f"Skipped the image folder '{relative_name(folder, input_path)}': it "
+            f"lies inside the image folder '{relative_name(parent, input_path)}'. "
+            "Pass it as --input to process it."
+        )
+    if found.working:
+        more = len(found.working) - 1
+        warnings.append(
+            f"Skipped the folder '{found.working[0]}'"
+            + (f" and {more} more" if more else "")
+            + ": folders of this name hold working files kept by "
+            "--keep-working-files. Pass one as --input to process its files."
+        )
+    return list(found.items), warnings
+
+
 def _discover(spec: RunSpec, input_path: Path) -> tuple[list[SourceItem], list[str]]:
     """Return the items at *input_path* and notes about skipped files."""
-    if spec.input.type != "auto":
-        try:
-            items = discover_items(
-                input_path,
-                spec.input.type,
-                files=spec.input.files,
-                recursive=spec.input.recursive,
-            )
-        except DiscoveryError as exc:
-            raise InputError(str(exc)) from exc
-        if not items:
-            raise NoItemsError(f"No items found to process in: {input_path}")
-        return items, []
-
-    warnings: list[str] = []
-    if input_path.is_file():
-        single = file_item(input_path)
-        items = [single] if single is not None else []
-    else:
-        found = scan(input_path)
-        items = list(found.items)
-        if found.loose_images:
-            logger.warning(
-                "Skipped %d loose image file(s) in %s: unsupported in auto mode.",
-                found.loose_images,
-                input_path,
-            )
-            warnings.append(
-                "loose image files are not supported in auto mode; place them "
-                "in a subfolder to process the folder."
-            )
+    items, warnings = find_input(spec.input, input_path, _output_dir(spec))
     if not items:
-        raise NoItemsError(_auto_empty_message(input_path))
+        if spec.input.type == "auto":
+            raise NoItemsError(_auto_empty_message(input_path))
+        raise NoItemsError(f"No items found to process in: {input_path}")
     return items, warnings
 
 
@@ -501,10 +538,7 @@ def _auto_empty_message(input_path: Path) -> str:
             message += _AUDIO_HINT
         return message
     message = f"No PDFs, image folders, EPUB or MOBI files found in: {input_path}."
-    if any(
-        entry.is_file() and source_type(entry) == "audio"
-        for entry in input_path.iterdir()
-    ):
+    if any(source_type(path) == "audio" for path in scan_folder(input_path)):
         message += _AUDIO_HINT
     return message
 
@@ -513,8 +547,8 @@ def discover(spec: RunSpec) -> list[SourceItem]:
     """Return the items the run of *spec* finds at its input.
 
     The items come before ``--all`` or ``--select`` choose among them
-    (``--files`` does apply), in discovery order; :func:`selection_order`
-    gives the order ``--select`` numbers them in.
+    (``--files`` does apply), in the natural order of their paths below the
+    input, the order a run processes them in and ``--select`` numbers them.
 
     Raises:
         PlanError: The input is missing or holds nothing to process.
@@ -522,12 +556,9 @@ def discover(spec: RunSpec) -> list[SourceItem]:
     return _discover(spec, _input_path(spec))[0]
 
 
-def selection_order(items: Sequence[SourceItem]) -> list[SourceItem]:
-    """Return *items* in the order ``--select`` numbers them.
-
-    The order is by path, with numbers in names compared by value.
-    """
-    return sorted(items, key=lambda item: natural_sort_key(item.path.as_posix()))
+def selection_names(items: Sequence[SourceItem], input_path: Path) -> list[str]:
+    """Return the names ``--select`` searches: each path below *input_path*."""
+    return [relative_name(item.path, input_path) for item in items]
 
 
 def choose_items(
@@ -535,27 +566,27 @@ def choose_items(
 ) -> tuple[list[SourceItem], list[str]]:
     """Apply ``--all``, ``--select`` or ``--files``; one item needs none.
 
-    ``--select`` numbers the items from 1 in :func:`selection_order` and
-    otherwise searches their names; its out-of-range parts are warnings. The
-    chosen items keep their discovery order.
+    The items are taken in the natural order of their paths below
+    *input_path*. ``--select`` numbers them from 1 in that order and
+    otherwise searches their :func:`selection_names`; its out-of-range parts
+    are warnings.
 
     Raises:
         SelectionError: ``--select`` matched no item.
         AmbiguousSelectionError: Several items and no selection.
     """
+    items = ordered(items, input_path, lambda item: item.path)
     if selection.all or selection.files:
         return items, []
     if selection.select:
-        ordered = selection_order(items)
-        result = select_items([item.name for item in ordered], selection.select)
+        result = select_items(selection_names(items, input_path), selection.select)
         warnings = []
         if result.unmatched:
             warnings.append(
                 "Ignored out-of-range or invalid --select part(s): "
                 f"{', '.join(result.unmatched)} (valid: 1-{len(items)})"
             )
-        chosen = {id(item) for item in result.pick(ordered)}
-        picked = [item for item in items if id(item) in chosen]
+        picked = result.pick(items)
         if not picked:
             raise SelectionError(
                 f"No item of {input_path} matches --select {selection.select!r}"
@@ -563,14 +594,6 @@ def choose_items(
         return picked, warnings
     if len(items) == 1:
         return items, []
-    if selection.type == "auto":
-        # plan() refuses --files in auto mode, so the hint names only the
-        # two selections that work here.
-        raise AmbiguousSelectionError(
-            f"{len(items)} items found in {input_path}, but neither --all nor "
-            "--select was given. Pass --all to process every item, or --select "
-            "to choose them by number, range or name search."
-        )
     raise AmbiguousSelectionError(
         f"{len(items)} items found in {input_path}, but none of --all, --select "
         "or --files was given. Pass --all to process every item, --select to "
@@ -590,13 +613,6 @@ def _route(item: SourceItem, spec: RunSpec) -> str:
             f"{' or '.join(VALID_PAIRS.get(item.type, ()))}, not {method}"
         )
     return method
-
-
-def _by_method(items: list[PlannedItem]) -> list[PlannedItem]:
-    """Group *items* by method, in the order the methods first appear."""
-    methods = dict.fromkeys(item.method for item in items)
-    order = {method: rank for rank, method in enumerate(methods)}
-    return sorted(items, key=lambda item: order[item.method])
 
 
 def _uses_llm(spec: RunSpec) -> bool:
@@ -911,25 +927,31 @@ def _image(
         return None
 
 
-def _check_shared(items: Sequence[PlannedItem]) -> None:
+def _check_shared(
+    items: Sequence[SourceItem],
+    locate: Callable[[SourceItem], tuple[Path, str, Path]],
+) -> None:
     """Raise when two items would write the same output and store document.
 
+    *locate* gives an item's output root, document name and output path.
     Document names compare case-insensitively, as the rendered files do on
-    Windows and macOS.
+    Windows and macOS. The error names both inputs of every such pair.
 
     Raises:
         ConfigurationError: Two items share an output root and document name.
     """
-    claimed: dict[tuple[Path, str], Path] = {}
-    for item in items:
-        key = (item.root, item.document.casefold())
-        first = claimed.setdefault(key, item.path)
-        if first != item.path:
-            raise ConfigurationError(
-                f"{first} and {item.path} would share the output {item.output} "
-                "and its store document. Set --output DIR to keep them apart, or "
-                "take one of them with --select."
-            )
+    located = [(item, *locate(item)) for item in items]
+    pairs = duplicated(located, key=lambda entry: (entry[1], entry[2].casefold()))
+    if pairs:
+        clashes = "; ".join(
+            f"{earlier[0].path} and {later[0].path} would share the output "
+            f"{later[3]} and its store document"
+            for later, earlier in pairs
+        )
+        raise ConfigurationError(
+            f"{clashes}. Set --output DIR to keep them apart, or take one of "
+            "them with --select."
+        )
 
 
 def plan(
@@ -954,11 +976,6 @@ def plan(
             ``exit_code`` the exit code. A database that is not a store, or
             is newer or unreadable, raises :class:`StoreRefusedError`.
     """
-    if spec.input.type == "auto" and spec.input.files:
-        raise ConfigurationError(
-            "--files selects items of one input type; auto mode would plan "
-            "every file in the folder. Set --type, or use --select or --all."
-        )
     output_dir = _output_dir(spec)
     input_path = _input_path(spec)
     logger.info("Input=%s, Output=%s", input_path, output_dir or "beside input")
@@ -969,15 +986,12 @@ def plan(
     image = _image(spec, settings, discovered)
     classifier = _Classifier(spec, output_dir, input_path, image)
     groups: dict[ItemState, list[PlannedItem]] = {state: [] for state in ItemState}
-    planned_items = classifier.plan_items(
-        [(item, _route(item, spec)) for item in discovered]
-    )
-    _check_shared(planned_items)
+    routed = [(item, _route(item, spec)) for item in discovered]
+    _check_shared(discovered, classifier.locate)
+    planned_items = classifier.plan_items(routed)
     for planned in planned_items:
         groups[planned.resume.state].append(planned)
     to_process = _in_order(groups, discovered)
-    if spec.input.type == "auto":
-        to_process = _by_method(to_process)
     pages = parse_page_range(spec.input.pages) if spec.input.pages else None
     warnings += _nothing_selected(pages, groups[ItemState.COMPLETE])
     logger.info(
@@ -1777,7 +1791,7 @@ class _Unbuildable:
 
 
 async def _submit_batch(
-    payloads: Sequence[Any],
+    payloads: AsyncIterable[Any],
     *,
     document: DocumentHandle,
     spec: RunSpec,
@@ -1786,13 +1800,13 @@ async def _submit_batch(
     context: str | None = None,
     context_image: Path | None = None,
 ) -> SubmitOutcome:
-    """Submit one document's pages through the batch package.
+    """Submit one document's pages through the batch package as they render.
 
     A submission whose requests cannot be built is reported as refused.
     """
     try:
         return await batch_submit.submit_batch(
-            list(payloads),
+            payloads,
             document=document,
             spec=spec,
             settings=settings,

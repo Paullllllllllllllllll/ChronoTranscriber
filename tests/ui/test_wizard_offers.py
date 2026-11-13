@@ -70,7 +70,7 @@ AUTO_OFFERED = {
     "image-folder": False,
     "single-pdf": True,
     "pdf-and-loose-image": True,
-    "mixed-recursive": False,
+    "mixed-recursive": True,
 }
 
 

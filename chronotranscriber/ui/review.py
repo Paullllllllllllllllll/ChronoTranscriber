@@ -207,6 +207,8 @@ def _run_line(spec: RunSpec, mark: _Mark) -> Line:
         parts.append(mark("run.retry_errors", "retry errors"))
     if not batch or run.sync_fallback:
         parts.append(mark("run.concurrency", f"concurrency {run.concurrency}"))
+    if not batch and run.open_items > 1 and spec.method.name in ("llm", "audio-api"):
+        parts.append(mark("run.open_items", f"{run.open_items} items open at once"))
     if run.keep_working_files:
         parts.append(mark("run.keep_working_files", "keep working files"))
     if run.dry_run:

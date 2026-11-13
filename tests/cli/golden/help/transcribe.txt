@@ -145,6 +145,8 @@ run control:
   --force               transcribe items again from the start: every stored unit of the item is
                         reset, also outside --pages; stored responses are kept
   --concurrency N       parallel requests; default: 16
+  --open-items N        items open at once, sharing the --concurrency requests; no effect with
+                        --batch or on a single item; default: 1; only for method audio-api, llm
   --keep-working-files, --no-keep-working-files
                         keep Tesseract's preprocessed page images and the audio chunks in the
                         item's working folder; default: off

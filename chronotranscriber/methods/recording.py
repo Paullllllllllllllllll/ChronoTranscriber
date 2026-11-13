@@ -211,10 +211,12 @@ async def transcribe_recording(
         total=len(todo),
         unit="chunk",
         already_complete=len(selected) - len(todo),
+        document=handle,
     )
     # A whole-file plan sends the source itself, so it needs no working files.
     cut = not is_whole_file_plan(plan.specs)
     working = job.working_dir(item.path) if cut else contextlib.nullcontext(None)
+    item.lane.expect(len(todo))
     with working as base:
         await run_unit_stream(
             handle,
@@ -232,5 +234,6 @@ async def transcribe_recording(
             concurrency=job.settings.concurrency.audio,
             delay=job.settings.concurrency.delay_between_tasks,
             on_unit=counter,
+            lane=item.lane,
         )
     return []

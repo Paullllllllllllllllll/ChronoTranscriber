@@ -401,6 +401,8 @@ class RunControl:
 
     ``keep_working_files`` keeps Tesseract's preprocessed images and the
     audio chunks, which are deleted after each item otherwise.
+    ``concurrency`` bounds the requests of the run in flight at once and
+    ``open_items`` the items that share them.
     """
 
     batch: bool
@@ -411,6 +413,7 @@ class RunControl:
     keep_working_files: bool
     dry_run: bool
     json: bool
+    open_items: int = 1
 
 
 @dataclass(frozen=True)
@@ -573,7 +576,8 @@ class ClassifySpec:
 
     ``input`` selects the items as for transcribe; ``input.pages`` stays None
     for documents, whose pages are the classifier's selection.
-    ``concurrency`` bounds the requests about one item in flight at once.
+    ``concurrency`` bounds the requests of the run in flight at once and
+    ``open_items`` the items that share them.
     """
 
     unit: str
@@ -581,6 +585,7 @@ class ClassifySpec:
     output: ClassifyOutput
     classify: ClassifierSpec
     concurrency: int = DEFAULT_CONCURRENCY
+    open_items: int = 1
     dry_run: bool = False
     json: bool = False
 
@@ -738,6 +743,29 @@ _LLM = Condition("method", frozenset({"llm"}))
 _TESSERACT = Condition("method", frozenset({"tesseract"}))
 _WHISPER = Condition("method", frozenset({"whisper"}))
 _AUDIO = Condition("method", frozenset({"whisper", "audio-api"}))
+_PROVIDER_CALLS = Condition("method", frozenset({"llm", "audio-api"}))
+
+
+def _open_items_option(
+    target: str, condition: Condition | None = None, *, batch: bool = False
+) -> Option:
+    """Return ``--open-items N``: how many items share the run's requests.
+
+    *batch* says that the command has a ``--batch`` mode, where the option
+    has no effect.
+    """
+    without = "with --batch or on a single item" if batch else "on a single item"
+    return Option(
+        "open_items",
+        "--open-items",
+        "items open at once, sharing the --concurrency requests; no effect " + without,
+        group="run",
+        type=positive_int,
+        metavar="N",
+        default=1,
+        condition=condition,
+        target=target,
+    )
 
 
 def _decision_options() -> list[Option]:
@@ -1080,6 +1108,7 @@ def _run_options() -> list[Option]:
             "item is reset, also outside --pages; stored responses are kept"
         ),
         concurrency_option(DEFAULT_CONCURRENCY),
+        _open_items_option("run.open_items", _PROVIDER_CALLS, batch=True),
         Option(
             "keep_working_files",
             "--keep-working-files",
@@ -1314,6 +1343,7 @@ def _classify_options(unit: str) -> list[Option]:
     )
     rows += [classifier, *model, force]
     rows.append(concurrency_option(DEFAULT_CONCURRENCY, target="concurrency"))
+    rows.append(_open_items_option("open_items"))
     rows += [dry_run_option("dry_run"), json_option("json"), settings_option()]
     return rows
 
@@ -1347,7 +1377,8 @@ def effective_spec(
     """Return every field of *spec* (dotted path) with its value and source.
 
     Values are JSON values; fields missing from *sources* were given by the
-    caller and count as flags.
+    caller and count as flags. ``open_items`` at 1 is left out: one open
+    item is the run without the option, and the stores record it as such.
     """
     known = sources or {}
     return {
@@ -1356,6 +1387,7 @@ def effective_spec(
             "source": known.get(path, Source.FLAG).value,
         }
         for path, value in _flatten(spec).items()
+        if not (path.rpartition(".")[2] == "open_items" and value == 1)
     }
 
 
@@ -1739,6 +1771,7 @@ def resolve_classify(
         output=ClassifyOutput(**_part(values, "output")),
         classify=ClassifierSpec(**_part(values, "classify")),
         concurrency=values["concurrency"],
+        open_items=values["open_items"],
         dry_run=values["dry_run"],
         json=values["json"],
     )

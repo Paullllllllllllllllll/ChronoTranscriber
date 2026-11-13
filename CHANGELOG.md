@@ -1,5 +1,23 @@
 # Changelog
 
+- **v1.11.0** (13 November 2026) -- `transcribe` (methods llm and audio-api),
+  `classify pages` and `classify documents` gain `--open-items N` (default 1,
+  settable in `defaults:`). `--concurrency` now bounds the requests of the whole
+  run (`concurrency.audio` for recordings), and `--open-items` sets how many
+  items share them: the run opens the next item whenever the open ones cannot
+  fill the limit, so a folder of small items no longer leaves most requests
+  idle. 40 two-page PDFs at `--concurrency 16` against an endpoint answering
+  after 1 s took 7.6 s with eight items open, against 46 s with one. Progress
+  lines of open items interleave and name their document. Each item keeps its
+  own lease, files are rendered one item at a time, and the summary and the exit
+  code follow the item order whatever the timing. A provider stop closes every
+  open item and counts the pending units over all of them; an item that was
+  only opening then is left as it was, also under `--force`. The option has no
+  effect, with a warning, under `--batch`, with a method that calls no provider
+  and on a run of one item. The stored run spec records `open_items` only above
+  1. With the default of 1 a run behaves as before. The shared package gains
+  `common/scheduler.py`.
+
 - **v1.10.0** (13 November 2026) -- ChronoTranscriber now reads input folders
   through the discovery module it shares with AutoExcerpter and ChronoMiner
   (`common/discovery.py`). A run processes its items in the natural order of

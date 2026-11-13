@@ -258,6 +258,7 @@ class TesseractTranscriber:
             total=len(files),
             unit="image" if is_folder else "page",
             already_complete=already_complete,
+            document=handle,
         )
         config = self.job.spec.ocr.config
 

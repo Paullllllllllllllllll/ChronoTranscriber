@@ -23,6 +23,7 @@ from chronotranscriber.cli.command import (
     load_settings,
     setup_logging,
     warn_conditions,
+    warn_open_items,
 )
 from chronotranscriber.cli.console import print_error, print_info, print_success
 from chronotranscriber.cli.reporter import StderrReporter
@@ -119,6 +120,7 @@ def _run(
     except PlanError as exc:
         print_error(f"Invalid arguments: {exc}")
         return summary.emit(exc.exit_code, items_total=exc.items_total)
+    warn_open_items(table, flags, settings, classify.open_items_effect(run_plan))
     name = run_plan.classifier.name
     planned = classify_fields(
         unit=unit,

@@ -641,6 +641,7 @@ ROWS = [
     _row("retry_errors", "--no-retry-errors", sets={"run.retry_errors": False}),
     _row("force", "--force", sets={"run.force": True}),
     _row("concurrency", "--concurrency", "4", sets={"run.concurrency": 4}),
+    _row("open_items", "--open-items", "3", sets={"run.open_items": 3}),
     _row(
         "keep_working_files",
         "--keep-working-files",

@@ -16,15 +16,23 @@ from chronotranscriber.cli.command import (
     setup_logging,
     summary_fields,
     warn_conditions,
+    warn_open_items,
 )
 from chronotranscriber.cli.console import print_error
 from chronotranscriber.cli.heartbeat import with_heartbeat
 from chronotranscriber.cli.reporter import StderrReporter
 from chronotranscriber.common.contract import ExitCode
 from chronotranscriber.common.stale_leases import HeldLease, wait_for_stale_leases
-from chronotranscriber.run import PlanError, RunPlan, plan, run
+from chronotranscriber.run import (
+    PlanError,
+    RunPlan,
+    open_items_effect,
+    open_window,
+    plan,
+    run,
+)
 from chronotranscriber.settings import Settings, SettingsError, SpecError, resolve
-from chronotranscriber.spec import OPTIONS
+from chronotranscriber.spec import OPTIONS, inapplicable
 
 __all__ = ["execute"]
 
@@ -38,7 +46,7 @@ def _process(run_plan: RunPlan, reporter: StderrReporter, summary: Summary) -> i
     """
     skipped = run_plan.not_processed
     reporter.beginning(run_plan)
-    events, progress = with_heartbeat(reporter)
+    events, progress = with_heartbeat(reporter, open_window(run_plan))
     try:
         result = asyncio.run(run(run_plan, events))
     except PlanError as exc:
@@ -140,6 +148,8 @@ def _execute(args: argparse.Namespace, summary: Summary) -> int:
     except PlanError as exc:
         print_error(f"Invalid arguments: {exc}")
         return summary.emit(exc.exit_code, **summary_fields(total=exc.items_total))
+    if not inapplicable(spec, ("open_items",)):
+        warn_open_items(OPTIONS, flags, settings, open_items_effect(run_plan))
     return _run(args, settings, run_plan, summary)
 
 

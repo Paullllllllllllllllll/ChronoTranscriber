@@ -502,6 +502,56 @@ def test_a_stop_ends_admission_and_the_request_in_flight_finishes(
     assert (payload["units_reused"], payload["units_asked"]) == (1, 3)
 
 
+@pytest.mark.parametrize(("open_items", "peak"), [(1, 1), (4, 4)])
+def test_open_items_share_the_requests_of_the_run(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    decisions: FakeDecisions,
+    monkeypatch: pytest.MonkeyPatch,
+    open_items: int,
+    peak: int,
+) -> None:
+    for name in ("a", "b", "c", "d"):
+        make_scanned_pdf(tmp_path / "docs" / f"{name}.pdf", 1)
+    out = tmp_path / "out"
+    flight = {"now": 0, "peak": 0}
+
+    async def handle(
+        transport: httpx.AsyncHTTPTransport, request: httpx.Request
+    ) -> httpx.Response:
+        flight["now"] += 1
+        flight["peak"] = max(flight["peak"], flight["now"])
+        try:
+            await asyncio.sleep(0.2)
+            return decisions.handle(request)
+        finally:
+            flight["now"] -= 1
+
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", handle)
+    path = _one_per_request(tmp_path)
+
+    code, payload = _run(
+        capsys,
+        "pages",
+        "--input",
+        str(tmp_path / "docs"),
+        "--all",
+        "--output",
+        str(out),
+        "--classifier",
+        str(path),
+        "--concurrency",
+        "4",
+        "--open-items",
+        str(open_items),
+    )
+
+    assert code == 0, payload
+    assert (payload["items_total"], payload["units_asked"]) == (4, 4)
+    assert flight["peak"] == peak
+    assert len(_view(out)) == 4
+
+
 async def _seed(out: Path, name: str, sha256: str) -> None:
     async with open_store(out) as store:
         await store.begin_run("transcribe")

@@ -73,6 +73,46 @@ def test_the_events_reach_the_reporter_and_the_file(tmp_path: Path) -> None:
     assert (data["units_done"], data["units_total"], data["eta_seconds"]) == (1, 1, 0)
 
 
+def test_an_item_that_ends_beside_an_open_one_does_not_end_the_run(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "hb.json"
+    ticks = iter(range(0, 1000, 10))
+    progress = ItemProgress(
+        Heartbeat(path, interval=0), "pages", clock=lambda: float(next(ticks))
+    )
+    events = HeartbeatEvents(Recording(), progress, open_items=2)
+
+    events.item_started(ItemStarted("a.pdf", "pdf", 1, 2, document="a", root="out"))
+    events.item_started(ItemStarted("b.pdf", "pdf", 2, 2, document="b", root="out"))
+    events.page_done(PageDone("b.pdf", 0, "ok", 1, 4, document="b", root="out"))
+    events.item_finished(ItemFinished("a.pdf", 1, 2, True, document="a", root="out"))
+
+    data = read(path)
+    assert (data["units_done"], data["units_total"]) == (1, 4)
+    assert data["eta_seconds"] != 0
+
+    events.item_finished(ItemFinished("b.pdf", 2, 2, True, document="b", root="out"))
+    assert read(path)["eta_seconds"] == 0
+
+
+def test_an_item_left_without_a_finish_event_gives_way_to_the_next(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "hb.json"
+    events = HeartbeatEvents(
+        Recording(), ItemProgress(Heartbeat(path, interval=0), "pages")
+    )
+
+    events.item_started(ItemStarted("a.pdf", "pdf", 1, 2, document="a", root="out"))
+    events.page_done(PageDone("a.pdf", 0, "ok", 1, 9, document="a", root="out"))
+    events.item_started(ItemStarted("b.pdf", "pdf", 2, 2, document="b", root="out"))
+    events.page_done(PageDone("b.pdf", 0, "ok", 1, 2, document="b", root="out"))
+
+    data = read(path)
+    assert (data["units_done"], data["units_total"]) == (1, 2)
+
+
 def test_without_the_variable_the_reporter_runs_alone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

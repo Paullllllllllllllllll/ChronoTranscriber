@@ -88,6 +88,7 @@ from chronotranscriber.common.discovery import duplicated
 from chronotranscriber.common.images import decision_jpeg
 from chronotranscriber.common.options import Source
 from chronotranscriber.common.retry import RunStopped
+from chronotranscriber.common.scheduler import ItemTicket, RunScheduler
 from chronotranscriber.common.selection import parse_page_range
 from chronotranscriber.common.sqlite import read
 from chronotranscriber.common.store import Store, StoreError, WriterOptions
@@ -97,6 +98,7 @@ from chronotranscriber.llm.caller import CallEnv
 from chronotranscriber.llm.decide import DecisionModel
 from chronotranscriber.llm.pool import run_streaming_transcription_tasks
 from chronotranscriber.llm.prompts import PROJECT_ROOT
+from chronotranscriber.methods.units import SOLO, Lane
 from chronotranscriber.output.store import (
     KIND_PAGE,
     image_settings_record,
@@ -139,6 +141,7 @@ __all__ = [
     "ClassifyPlan",
     "ClassifyResult",
     "classifier_names",
+    "open_items_effect",
     "plan",
     "run",
 ]
@@ -255,8 +258,9 @@ class ClassifyResult:
     *units_reused* those whose stored answers it kept, *units_failed* those
     left without answers. *failed* and *refused* name items with the reason.
     *stopped* is the reason the provider stopped the run during the item
-    *stopped_item*, whose *units_left* units it did not ask about, before
-    *items_left* further items.
+    *stopped_item* and the further open items *stopped_others*, whose
+    *units_left* units it did not ask about, before *items_left* further
+    items.
     """
 
     items: int = 0
@@ -272,6 +276,7 @@ class ClassifyResult:
     stopped_item: str | None = None
     units_left: int = 0
     items_left: int = 0
+    stopped_others: tuple[str, ...] = ()
 
     @property
     def exit_code(self) -> ExitCode:
@@ -285,9 +290,13 @@ class ClassifyResult:
         """The error line of a stopped run, or None."""
         if self.stopped is None:
             return None
+        subject = f"'{self.stopped_item}'"
+        if self.stopped_others:
+            names = (self.stopped_item, *self.stopped_others)
+            subject = "the open items " + ", ".join(f"'{name}'" for name in names)
         return (
             f"The run stopped: the provider serves no further calls ({self.stopped}). "
-            f"{self.units_left} unit(s) of '{self.stopped_item}' and "
+            f"{self.units_left} unit(s) of {subject} and "
             f"{self.items_left} further item(s) were left unclassified; a rerun "
             "resumes them."
         )
@@ -655,6 +664,7 @@ class _Stores:
         self._plan = run_plan
         self._events = events
         self._stores: dict[Path, Store] = {}
+        self._opening = asyncio.Lock()
 
     @property
     def databases(self) -> tuple[str, ...]:
@@ -677,13 +687,19 @@ class _Stores:
     async def get(self, root: Path) -> Store:
         """Return the open store of output root *root*, stamped with the run.
 
+        The items open at once share it: the store is opened once.
+
         Raises:
             StoreRefusedError: The root's database is refused.
         """
         key = root.resolve()
-        store = self._stores.get(key)
-        if store is not None:
-            return store
+        async with self._opening:
+            store = self._stores.get(key)
+            if store is not None:
+                return store
+            return await self._open(key)
+
+    async def _open(self, key: Path) -> Store:
         key.mkdir(parents=True, exist_ok=True)
         store = open_store(key, writer=self._writer())
         try:
@@ -815,15 +831,17 @@ class _ItemClassifier:
         """Yield the document unit of *item* as its one group."""
         yield await self._document_unit(item, indices, tally)
 
-    async def classify(self, item: ClassifyItem, store: Store) -> _Tally:
+    async def classify(
+        self, item: ClassifyItem, store: Store, lane: Lane = SOLO
+    ) -> _Tally:
         """Ask about the units of *item*, reusing stored answers.
 
-        The requests of the item run through the streaming pool, at most
-        ``--concurrency`` at once, while its pages render. A ``--pages``
-        range that selects none of the item's pages fails it. When the
-        provider stops the run, no further request is sent, the requests in
-        flight finish, and the tally holds the stop and the units not yet
-        asked about.
+        The requests of the item run through the streaming pool while its
+        pages render; each asks under a slot of *lane*, whose scheduler holds
+        ``--concurrency`` slots for the whole run. A ``--pages`` range that
+        selects none of the item's pages fails it. When the provider stops
+        the run, no further request is sent, the requests in flight finish,
+        and the tally holds the stop and the units not yet asked about.
 
         Raises:
             ChangedInputError: The store came to hold the document with
@@ -853,16 +871,22 @@ class _ItemClassifier:
             seen_doc_id=item.doc_id,
         )
         failure: list[Exception] = []
+        if self.plan.spec.unit == "document":
+            lane.expect(1)
+        else:
+            lane.expect(math.ceil(len(indices) / _group_size(self.classifier)))
 
         async def settle(request: Request) -> None:
-            if failure:
-                return
             try:
-                await self._settle(request, store, context, tally)
+                if failure:
+                    return
+                await self._settle(request, store, context, tally, lane)
             except RunStopped:
                 raise
             except Exception as exc:  # noqa: BLE001 - re-raised once the pool ends
                 failure.append(exc)
+            finally:
+                lane.done()
 
         try:
             await run_streaming_transcription_tasks(
@@ -905,9 +929,14 @@ class _ItemClassifier:
         return found if all(set(answers) == names for answers in found) else None
 
     async def _settle(
-        self, request: Request, store: Store, context: RowContext, tally: _Tally
+        self,
+        request: Request,
+        store: Store,
+        context: RowContext,
+        tally: _Tally,
+        lane: Lane = SOLO,
     ) -> None:
-        """Reuse the stored answers of *request*, or ask and record them."""
+        """Reuse the stored answers of *request*, or ask under a slot of *lane*."""
         units = request.units
         if not self.plan.spec.classify.force:
             reused = self._reusable(request, store, context)
@@ -928,7 +957,8 @@ class _ItemClassifier:
             f"{units[0].locator}..{units[-1].locator}"
         )
         try:
-            result = await self.model.runner.ask(request, label=label)
+            async with lane.slot():
+                result = await self.model.runner.ask(request, label=label)
         except _ASK_ERRORS as exc:
             tally.failed += len(units)
             tally.errors.append(f"{label}: {exc}")
@@ -950,8 +980,69 @@ class _Outcomes:
     refused: list[tuple[str, str]] = field(default_factory=list)
     stopped: str | None = None
     stopped_item: str | None = None
+    stopped_others: tuple[str, ...] = ()
     units_left: int = 0
     items_left: int = 0
+
+
+def open_items_effect(run_plan: ClassifyPlan) -> str | None:
+    """Return why ``--open-items`` has no effect on *run_plan*, or None."""
+    if len(run_plan.items) == 1:
+        return "the run has one item to classify"
+    return None
+
+
+@dataclass(frozen=True)
+class _ItemOutcome:
+    """What one item came to: its tally, or the error that failed or refused it."""
+
+    item: ClassifyItem
+    tally: _Tally | None = None
+    failed: str | None = None
+    refused: str | None = None
+
+
+async def _classify_item(  # noqa: PLR0913 - the run's shared state
+    worker: _ItemClassifier,
+    item: ClassifyItem,
+    index: int,
+    total: int,
+    stores: _Stores,
+    lane: Lane,
+) -> _ItemOutcome:
+    """Classify one item and report it; a stopped item reports no end."""
+    events = worker.events
+    root = str(item.root.resolve())
+    events.item_started(
+        ItemStarted(
+            item.name, item.type, index, total, document=item.document, root=root
+        )
+    )
+    store = await stores.get(item.root)
+
+    def finished(success: bool, *, error: str | None) -> ItemFinished:
+        return ItemFinished(
+            item.name,
+            index,
+            total,
+            success,
+            error=error,
+            document=item.document,
+            root=root,
+        )
+
+    try:
+        tally = await worker.classify(item, store, lane)
+    except DocumentChangedError as exc:
+        events.item_finished(finished(False, error=str(exc)))
+        return _ItemOutcome(item, failed=str(exc))
+    except ChangedInputError as exc:
+        events.item_finished(finished(False, error=str(exc)))
+        return _ItemOutcome(item, refused=str(exc))
+    if tally.stopped is None:
+        error = "; ".join(tally.errors) if tally.errors else None
+        events.item_finished(finished(error is None, error=error))
+    return _ItemOutcome(item, tally)
 
 
 async def _run_items(
@@ -961,49 +1052,66 @@ async def _run_items(
     events: RunEvents,
     outcomes: _Outcomes,
 ) -> None:
+    """Classify the plan's items through the run scheduler; fold their outcomes.
+
+    The scheduler opens the items in order, ``--open-items`` at once, and
+    their requests share ``--concurrency`` slots. The outcomes go to
+    *outcomes* in item order once every opened item has ended; a stop opens
+    no further item.
+    """
     worker = _ItemClassifier(run_plan, model, events)
-    total = len(run_plan.items)
-    for index, item in enumerate(run_plan.items, start=1):
-        events.item_started(ItemStarted(item.name, item.type, index, total))
-        store = await stores.get(item.root)
+    entries = list(enumerate(run_plan.items, start=1))
+    total = len(entries)
+    window = 1 if open_items_effect(run_plan) else run_plan.spec.open_items
+    scheduler = RunScheduler(
+        run_plan.spec.concurrency, window=window, stop=model.env.stop
+    )
+
+    async def process(
+        entry: tuple[int, ClassifyItem], ticket: ItemTicket
+    ) -> _ItemOutcome:
+        index, item = entry
+        return await _classify_item(
+            worker, item, index, total, stores, Lane(scheduler, ticket)
+        )
+
+    stopped: list[tuple[ClassifyItem, _Tally]] = []
+    for outcome in await scheduler.run(entries, process):
+        item, tally = outcome.item, outcome.tally
         outcomes.items += 1
-        try:
-            tally = await worker.classify(item, store)
-        except DocumentChangedError as exc:
-            outcomes.failed.append((item.name, str(exc)))
-            events.item_finished(
-                ItemFinished(item.name, index, total, False, error=str(exc))
-            )
-            continue
-        except ChangedInputError as exc:
-            outcomes.refused.append((item.name, str(exc)))
-            events.item_finished(
-                ItemFinished(item.name, index, total, False, error=str(exc))
-            )
+        if outcome.failed is not None:
+            outcomes.failed.append((item.name, outcome.failed))
+        if outcome.refused is not None:
+            outcomes.refused.append((item.name, outcome.refused))
+        if tally is None:
             continue
         outcomes.asked += tally.asked
         outcomes.reused += tally.reused
         outcomes.failed_units += tally.failed
-        error = "; ".join(tally.errors) if tally.errors else None
-        if error is not None:
-            outcomes.failed.append((item.name, error))
+        if tally.errors:
+            outcomes.failed.append((item.name, "; ".join(tally.errors)))
         if tally.stopped is not None:
-            outcomes.stopped = model.env.stop.reason or str(tally.stopped)
-            outcomes.stopped_item = item.name
-            outcomes.units_left = tally.left
-            outcomes.items_left = total - index
-            return
-        events.item_finished(
-            ItemFinished(item.name, index, total, error is None, error=error)
+            stopped.append((item, tally))
+    reason = model.env.stop.reason
+    if stopped or (reason is not None and outcomes.items < total):
+        first = stopped[0] if stopped else None
+        outcomes.stopped = reason or (str(first[1].stopped) if first else None)
+        outcomes.stopped_item = (
+            first[0].name if first else run_plan.items[outcomes.items - 1].name
         )
+        outcomes.stopped_others = tuple(item.name for item, _ in stopped[1:])
+        outcomes.units_left = sum(tally.left for _, tally in stopped)
+        outcomes.items_left = total - outcomes.items
 
 
 async def run(
     run_plan: ClassifyPlan, events: RunEvents | None = None
 ) -> ClassifyResult:
-    """Ask the plan's classifier about its items, one item after another.
+    """Ask the plan's classifier about its items.
 
-    The requests of an item run ``--concurrency`` at a time. Each output
+    The items open in order, ``--open-items`` at once, and the requests of
+    all open items run ``--concurrency`` at a time; the counts, failures
+    and stop are taken in item order. Each output
     root's store is opened on first use and stamped with the run. A request
     that fails after its retries leaves its units without answers and fails
     the item, whose other requests still run; an item whose stored document
@@ -1065,4 +1173,5 @@ async def run(
         stopped_item=outcomes.stopped_item,
         units_left=outcomes.units_left,
         items_left=outcomes.items_left,
+        stopped_others=outcomes.stopped_others,
     )

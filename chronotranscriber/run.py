@@ -50,6 +50,7 @@ from chronotranscriber.common.discovery import duplicated, ordered, relative_nam
 from chronotranscriber.common.discovery import scan as scan_folder
 from chronotranscriber.common.options import Source
 from chronotranscriber.common.retry import RunStopped
+from chronotranscriber.common.scheduler import ItemTicket, RunScheduler
 from chronotranscriber.common.selection import (
     PageRange,
     parse_page_range,
@@ -100,7 +101,7 @@ from chronotranscriber.methods import (
     Transcriber,
 )
 from chronotranscriber.methods.llm import image_record
-from chronotranscriber.methods.units import DocumentHandle
+from chronotranscriber.methods.units import SOLO, DocumentHandle, Lane
 from chronotranscriber.output.paths import item_paths
 from chronotranscriber.output.render import format_path, render_item, text_formats
 from chronotranscriber.output.store import (
@@ -155,6 +156,8 @@ __all__ = [
     "discover",
     "find_input",
     "item_location",
+    "open_items_effect",
+    "open_window",
     "plan",
     "run",
     "selection_names",
@@ -1109,8 +1112,9 @@ class RunStop:
     """Why a run stopped before its last item, and what it left to do.
 
     *reason* names the failed call whose ``STOP`` decision ended the run;
-    *item* is the item in work, *units_left* its units still pending and
-    *outputs* the files it was rendered to; *items_left* counts the items
+    *item* is the item in work, *others* the further items open at that
+    moment that the stop closed, *units_left* their units still pending and
+    *outputs* the files they were rendered to; *items_left* counts the items
     not started.
     """
 
@@ -1119,15 +1123,34 @@ class RunStop:
     units_left: int = 0
     items_left: int = 0
     outputs: tuple[str, ...] = ()
+    others: tuple[str, ...] = ()
 
     @property
     def message(self) -> str:
         """The error line of the stopped run."""
+        if self.others:
+            names = ", ".join(f"'{name}'" for name in (self.item, *self.others))
+            subject = f"the open items {names}"
+        else:
+            subject = f"'{self.item}'"
         return (
             f"The run stopped: the provider serves no further calls ({self.reason}). "
-            f"{self.units_left} pending unit(s) of '{self.item}' and "
+            f"{self.units_left} pending unit(s) of {subject} and "
             f"{self.items_left} further item(s) were left unprocessed; a rerun "
             "resumes them."
+        )
+
+    @classmethod
+    def merged(cls, reason: str, stops: Sequence[RunStop], items_left: int) -> RunStop:
+        """Return one stop for the items *stops* closed, in item order."""
+        first, *rest = stops
+        return cls(
+            reason,
+            first.item,
+            units_left=sum(stop.units_left for stop in stops),
+            items_left=items_left,
+            outputs=tuple(path for stop in stops for path in stop.outputs),
+            others=tuple(stop.item for stop in rest),
         )
 
 
@@ -1245,7 +1268,9 @@ class _Stores:
 
     Opening a store stamps the run, stores the prompt and schema texts of
     LLM runs, marks submissions left ``submitting`` as unresolved and starts
-    the heartbeat that renews the run's leases.
+    the heartbeat that renews the run's leases. The items open at once share
+    the store of their root; *finishing* lets one item at a time render its
+    files.
     """
 
     def __init__(self, run_plan: RunPlan, events: RunEvents) -> None:
@@ -1253,6 +1278,8 @@ class _Stores:
         self._events = events
         self._stores: dict[Path, Store] = {}
         self._keepers: list[LeaseKeeper] = []
+        self._opening = asyncio.Lock()
+        self.finishing = asyncio.Lock()
 
     @property
     def databases(self) -> tuple[str, ...]:
@@ -1260,15 +1287,20 @@ class _Stores:
         return tuple(str(store.path.resolve()) for store in self._stores.values())
 
     async def get(self, root: Path) -> Store:
-        """Return the open store of output root *root*.
+        """Return the open store of output root *root*, opening it once.
 
         Raises:
             StoreRefusedError: The root's database is refused.
         """
         key = root.resolve()
-        store = self._stores.get(key)
-        if store is not None:
-            return store
+        # A store enters the map before its run stamp is written: wait for that.
+        async with self._opening:
+            store = self._stores.get(key)
+            if store is not None:
+                return store
+            return await self._open(key)
+
+    async def _open(self, key: Path) -> Store:
         key.mkdir(parents=True, exist_ok=True)
         store = open_store(key, writer=_writer_options(self._events))
         try:
@@ -1524,10 +1556,14 @@ class _ItemRun:
     async def render_or_note(
         self, store: Store, doc_id: int, lease: Lease, *, force: bool
     ) -> tuple[str, ...]:
-        """Render like :meth:`render`; note a lost lease or a file error instead."""
+        """Render like :meth:`render`; note a lost lease or a file error instead.
+
+        One item at a time renders: the others wait for :attr:`_Stores.finishing`.
+        """
         name = self.planned.name
         try:
-            return await self.render(store, doc_id, lease, force=force)
+            async with self.stores.finishing:
+                return await self.render(store, doc_id, lease, force=force)
         except LeaseLostError as exc:
             message = f"'{name}' was not rendered: {exc}"
         except OSError as exc:
@@ -1548,11 +1584,12 @@ class _ItemRun:
         lease: Lease,
         transcriber: Transcriber,
         pages: PageRange | None,
+        lane: Lane = SOLO,
     ) -> tuple[tuple[str, ...], str | None]:
         """Run the method, then render; return the outputs and the error.
 
-        A stopped run (:attr:`stopped`) renders the units stored so far and
-        returns no error.
+        The method's calls draw on *lane*. A stopped run (:attr:`stopped`)
+        renders the units stored so far and returns no error.
         """
         planned, job = self.planned, self.job
         spec = job.spec
@@ -1577,6 +1614,7 @@ class _ItemRun:
             context=planned.context,
             context_image=planned.context_image,
             document=handle,
+            lane=lane,
         )
         returned: tuple[str, ...] = ()
         error: str | None = None
@@ -1608,11 +1646,13 @@ async def _run_item(
     total: int,
     pages: PageRange | None,
     stores: _Stores,
+    lane: Lane = SOLO,
 ) -> ItemResult | _Blocked | RunStop:
     """Process one item; :class:`_Blocked` when another run holds its document.
 
-    A :class:`RunStop` is returned when the provider stopped the run during
-    the item; its lease is released and no item event reports it finished.
+    The item's calls draw on *lane*. A :class:`RunStop` is returned when the
+    provider stopped the run during the item; its lease is released and no
+    item event reports it finished.
 
     Raises:
         NothingSelectedError: ``--pages`` selects no unit of the item.
@@ -1625,10 +1665,22 @@ async def _run_item(
     if leased is None:
         return _Blocked(item_run.held or "another run holds its document")
     store, doc_id, lease = leased
-    events.item_started(ItemStarted(planned.name, planned.type, index, total))
+    reason = job.env.stop.reason
+    if reason is not None:
+        # Another open item stopped the run while this one waited for its
+        # lease: it sends nothing, so --force must not reset what it stored.
+        with contextlib.suppress(sqlite3.Error):
+            await store.release(lease)
+        return RunStop(reason, planned.name, units_left=_pending_units(store, doc_id))
+    document, root = planned.document, str(store.path.parent)
+    events.item_started(
+        ItemStarted(
+            planned.name, planned.type, index, total, document=document, root=root
+        )
+    )
     try:
         outputs, error = await item_run.transcribe(
-            store, doc_id, lease, transcriber, pages
+            store, doc_id, lease, transcriber, pages, lane
         )
     finally:
         with contextlib.suppress(sqlite3.Error):
@@ -1664,6 +1716,8 @@ async def _run_item(
             error,
             submitted,
             partial,
+            document=document,
+            root=root,
         )
     )
     failures = () if success else _failed_units(store, doc_id)
@@ -1856,20 +1910,24 @@ async def _process_items(  # noqa: PLR0913 - the run's shared state
     results: list[ItemResult],
     unselected: list[str],
 ) -> RunStop | None:
-    """Process the plan's items in order; return the stop that ended them early.
+    """Process the plan's items; return the stop that ended them early.
 
-    Each item's outcome goes to *results*, *held* or *unselected*; a stopped
-    run starts no further item.
+    The run scheduler opens the items in order, up to :func:`open_window` at
+    once, and their units share :func:`_limit` request slots. Once all have
+    ended, each item's outcome goes, in item order, to *results*, *held* or
+    *unselected*. A stopped run opens no further item; the stop counts the
+    units the open items left and the items not opened.
     """
-    total = len(run_plan.to_process)
-    for index, planned in enumerate(run_plan.to_process, start=1):
-        # An item that fails otherwise while the run stops, as by a lost lease,
-        # returns that failure and no stop.
-        if index > 1 and job.env.stop.reason is not None:
-            last = run_plan.to_process[index - 2].name
-            return RunStop(job.env.stop.reason, last, items_left=total - index + 1)
+    items = list(enumerate(run_plan.to_process, start=1))
+    total = len(items)
+    scheduler = RunScheduler(
+        _limit(run_plan), window=open_window(run_plan), stop=job.env.stop
+    )
+
+    async def process(entry: tuple[int, PlannedItem], ticket: ItemTicket) -> _Outcome:
+        index, planned = entry
         try:
-            result = await _run_item(
+            return await _run_item(
                 job,
                 transcribers[planned.method],
                 planned,
@@ -1877,22 +1935,84 @@ async def _process_items(  # noqa: PLR0913 - the run's shared state
                 total,
                 run_plan.pages,
                 stores,
+                Lane(scheduler, ticket),
             )
         except NothingSelectedError:
+            return _Unselected()
+
+    outcomes = await scheduler.run(items, process)
+    stops: list[RunStop] = []
+    for (_index, planned), outcome in zip(items, outcomes, strict=False):
+        if isinstance(outcome, RunStop):
+            stops.append(outcome)
+        elif isinstance(outcome, _Blocked):
+            held.add(planned, outcome)
+        elif isinstance(outcome, _Unselected):
             unselected.append(planned.name)
-            continue
-        if isinstance(result, RunStop):
-            return replace(result, items_left=total - index)
-        if isinstance(result, _Blocked):
-            held.add(planned, result)
         else:
-            results.append(result)
+            results.append(outcome)
+    left = total - len(outcomes)
+    reason = job.env.stop.reason
+    if stops:
+        return RunStop.merged(reason or stops[0].reason, stops, left)
+    # An item that fails otherwise while the run stops, as by a lost lease,
+    # returns that failure; the stop then counts only the items not opened.
+    if reason is not None and left and outcomes:
+        return RunStop(reason, items[len(outcomes) - 1][1].name, items_left=left)
     return None
 
 
-async def run(run_plan: RunPlan, events: RunEvents | None = None) -> RunResult:
-    """Process the plan's items one after another on the running event loop.
+@dataclass(frozen=True)
+class _Unselected:
+    """The outcome of an item of which ``--pages`` selects no unit."""
 
+
+type _Outcome = ItemResult | _Blocked | RunStop | _Unselected
+"""What one item of a run comes to."""
+
+
+def _limit(run_plan: RunPlan) -> int:
+    """Return the requests the open items of a run may have in flight at once.
+
+    Recordings take the ``concurrency.audio`` setting, other items
+    ``--concurrency``.
+    """
+    if run_plan.spec.input.type == "audio":
+        return run_plan.settings.concurrency.audio
+    return run_plan.spec.run.concurrency
+
+
+def open_items_effect(run_plan: RunPlan) -> str | None:
+    """Return why ``--open-items`` has no effect on *run_plan*, or None.
+
+    The option shares the requests of a provider's synchronous calls among
+    several items; a run without such calls, a ``--batch`` run and a run of
+    one item open one item at a time.
+    """
+    if not any(method in _KEYED_METHODS for method in run_plan.methods):
+        return "the run calls no provider"
+    if run_plan.batch:
+        return "--batch submits the pages to the batch API"
+    if len(run_plan.to_process) == 1:
+        return "the run has one item to process"
+    return None
+
+
+def open_window(run_plan: RunPlan) -> int:
+    """Return how many items of the run are open at once (``--open-items``)."""
+    if open_items_effect(run_plan) is not None:
+        return 1
+    return run_plan.spec.run.open_items
+
+
+async def run(run_plan: RunPlan, events: RunEvents | None = None) -> RunResult:
+    """Process the plan's items on the running event loop.
+
+    The items open in order, ``--open-items`` at once where the option has
+    an effect (:func:`open_items_effect`), else one after another; the
+    requests of all open items share ``--concurrency`` slots
+    (``concurrency.audio`` for recordings). Their events interleave, and
+    the results, the stop and the exit code are taken in item order.
     The run owns one :class:`~chronotranscriber.llm.caller.CallEnv` and opens
     the transcriber of every method it uses before any item starts or any
     file is written; with nothing to process it opens none. It opens one
@@ -1905,11 +2025,12 @@ async def run(run_plan: RunPlan, events: RunEvents | None = None) -> RunResult:
     render again, counts as blocked and the run records exit code 1 like a
     failure. A failed item is logged and
     counted; the run continues with the next one. Refused items count as
-    failed. Cancellation propagates. When the provider stops the run
-    (:class:`~chronotranscriber.common.retry.RunStopped`), the item in work
-    is rendered from the units stored so far and released, no further item
-    starts, and :attr:`RunResult.stop` says what was left; the run records
-    exit code 3.
+    failed. Cancellation propagates: the open items are cancelled and their
+    leases released before the stores close. When the provider stops the
+    run (:class:`~chronotranscriber.common.retry.RunStopped`), each open
+    item is rendered from the units stored so far and released, no further
+    item starts, and :attr:`RunResult.stop` says what was left; the run
+    records exit code 3.
 
     Raises:
         ValueError: The plan is a dry run.

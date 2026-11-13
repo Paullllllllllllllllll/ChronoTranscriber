@@ -121,6 +121,7 @@ defaults:
   # formats: [md]  # txt, md; chronotranscriber.sqlite is always written
   # layout: hash
   # concurrency: 16
+  # open_items: 1  # items open at once, sharing the concurrency
   # batch: false
   # retry_errors: true         # transcribe error pages again on a rerun
   # keep_working_files: false  # keep Tesseract images and audio chunks

@@ -2,7 +2,7 @@
 
 :class:`RichProgress` implements :class:`~chronotranscriber.events.RunEvents`
 on a rich console. On a terminal it shows an overall bar for the items, a
-unit bar (pages, images or audio chunks) for the current item and a status
+unit bar (pages, images or audio chunks) for each open item and a status
 line for waits; warnings and one result line per item are printed above the
 bars, and so are log records written to stderr while the display runs. On
 any other console it prints plain lines only. It tallies the units of each
@@ -31,7 +31,13 @@ from rich.table import Table
 from rich.text import Text
 
 from chronotranscriber.common.usage import Usage
-from chronotranscriber.events import ItemFinished, ItemStarted, PageDone, Waiting
+from chronotranscriber.events import (
+    ItemFinished,
+    ItemStarted,
+    PageDone,
+    Waiting,
+    item_key,
+)
 from chronotranscriber.run import PlannedItem, RunPlan, RunResult
 
 __all__ = ["RichProgress", "UnitTally", "plan_table", "summary_table"]
@@ -102,10 +108,17 @@ class UnitTally:
 
 
 class RichProgress:
-    """Show run events on a rich console; use as a context manager."""
+    """Show run events on a rich console; use as a context manager.
 
-    def __init__(self, console: Console | None = None) -> None:
+    *open_items* is the number of items the run keeps open at once. An item
+    the run leaves without a finish event (``--pages`` selected none of its
+    units, or the run stopped in it) loses its bar once that many younger
+    items have started.
+    """
+
+    def __init__(self, console: Console | None = None, open_items: int = 1) -> None:
         self.console = console if console is not None else Console(stderr=True)
+        self.open_items = max(1, open_items)
         self._progress = Progress(
             TextColumn("{task.description}", markup=False),
             BarColumn(),
@@ -116,7 +129,8 @@ class RichProgress:
             auto_refresh=False,
         )
         self._items_task: TaskID | None = None
-        self._unit_task: TaskID | None = None
+        self._unit_tasks: dict[tuple[str, str], tuple[int, TaskID]] = {}
+        self._items_done = 0
         self._status: str = ""
         self._live: Live | None = None
         self._tallies: dict[str, UnitTally] = {}
@@ -173,9 +187,14 @@ class RichProgress:
             )
         else:
             self._progress.update(self._items_task, total=event.total)
-        if self._unit_task is not None:
-            self._progress.remove_task(self._unit_task)
-        self._unit_task = self._progress.add_task(event.name, total=None, note="")
+        key = item_key(event)
+        if key in self._unit_tasks:
+            self._progress.remove_task(self._unit_tasks.pop(key)[1])
+        while len(self._unit_tasks) >= self.open_items:
+            oldest = next(iter(self._unit_tasks))
+            self._progress.remove_task(self._unit_tasks.pop(oldest)[1])
+        task = self._progress.add_task(event.name, total=None, note="")
+        self._unit_tasks[key] = (event.index, task)
         if not self.live:
             self._print(
                 Text(
@@ -188,13 +207,14 @@ class RichProgress:
         """Count the unit and advance the unit bar to *done* of *total*."""
         self._status = ""
         self._tallies.setdefault(event.item, UnitTally()).count(event)
-        if self._unit_task is None:
+        entry = self._unit_tasks.get(item_key(event))
+        if entry is None:
             return
         note = f"{event.unit}s"
         if event.already_complete:
             note += f", +{event.already_complete} from an earlier run"
         self._progress.update(
-            self._unit_task, completed=event.done, total=event.total, note=note
+            entry[1], completed=event.done, total=event.total, note=note
         )
 
     def waiting(self, event: Waiting) -> None:
@@ -211,13 +231,22 @@ class RichProgress:
             self._print(Text(f"Warning: {line}", style="yellow"))
 
     def item_finished(self, event: ItemFinished) -> None:
-        """Print the item's result line and advance the overall bar."""
+        """Print the item's result line and advance the overall bar.
+
+        The bar stands at the highest position finished less the items
+        before it that are still open, which with one item open at a time is
+        the position of this item.
+        """
         self._status = ""
-        if self._unit_task is not None:
-            self._progress.remove_task(self._unit_task)
-            self._unit_task = None
+        entry = self._unit_tasks.pop(item_key(event), None)
+        if entry is not None:
+            self._progress.remove_task(entry[1])
+        self._items_done = max(self._items_done, event.index)
         if self._items_task is not None:
-            self._progress.update(self._items_task, completed=event.index)
+            behind = sum(
+                index < self._items_done for index, _ in self._unit_tasks.values()
+            )
+            self._progress.update(self._items_task, completed=self._items_done - behind)
         line = Text(f"[{event.index}/{event.total}] {event.name}: ")
         line.append(*_verdict(event))
         tally = self._tallies.get(event.name)

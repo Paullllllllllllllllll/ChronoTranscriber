@@ -142,11 +142,13 @@ class MOBIProcessor:
         try:
             import pymupdf
 
+            from chronotranscriber.common.images import PYMUPDF_LOCK
+
             sections: list[str] = []
             title = None
             authors: list[str] = []
 
-            with pymupdf.open(str(pdf_path)) as doc:
+            with PYMUPDF_LOCK, pymupdf.open(str(pdf_path)) as doc:
                 metadata = doc.metadata
                 if metadata:
                     title = metadata.get("title", "").strip() or None

@@ -9,7 +9,8 @@ one short transaction that checks the lease.
 :func:`run_unit_stream` transcribes in-memory payloads (rendered pages,
 folder images, audio chunks) as a producer yields them; :func:`run_unit_files`
 transcribes image files (Tesseract). For every unit both pipelines wait for
-room in the store's write queue before the provider call, attribute the
+room in the store's write queue before the provider call, hold one request
+slot of the item's :class:`Lane` for the call and its retries, attribute the
 call's attempts to the unit and record them through
 :class:`~chronotranscriber.output.attempts.AttemptRows`, write the unit, and
 only then report it to *on_unit*. After all units they raise
@@ -40,6 +41,7 @@ Unit conventions (the kinds of :mod:`chronotranscriber.output.store`):
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
@@ -49,6 +51,7 @@ from typing import Any
 
 from chronotranscriber.common.capture import error_type_of, use_recorder
 from chronotranscriber.common.retry import RunStopped
+from chronotranscriber.common.scheduler import ItemTicket, RunScheduler
 from chronotranscriber.common.store import (
     Lease,
     LeaseLostError,
@@ -67,9 +70,11 @@ from chronotranscriber.output.attempts import AttemptRows
 from chronotranscriber.output.store import forced_replacement
 
 __all__ = [
+    "SOLO",
     "UNIT_KIND",
     "DocumentHandle",
     "FileHandler",
+    "Lane",
     "StreamHandler",
     "UnitsFailedError",
     "absolute_order",
@@ -128,6 +133,40 @@ class UnitsFailedError(Exception):
                 f"{type(first).__name__}: {first}"
             )
         super().__init__(message)
+
+
+@dataclass(frozen=True)
+class Lane:
+    """The run's request slots as one item draws on them.
+
+    *scheduler* holds the slots all open items share and *ticket* tells it
+    how many units the item has left
+    (:class:`~chronotranscriber.common.scheduler.RunScheduler`). Without a
+    scheduler a unit takes no slot and the counts go nowhere.
+    """
+
+    scheduler: RunScheduler | None = None
+    ticket: ItemTicket | None = None
+
+    def slot(self) -> contextlib.AbstractAsyncContextManager[None]:
+        """Return the context that holds one request slot for a unit's calls."""
+        if self.scheduler is None:
+            return contextlib.nullcontext()
+        return self.scheduler.slot()
+
+    def expect(self, units: int) -> None:
+        """Say that the item has *units* units still to send."""
+        if self.ticket is not None:
+            self.ticket.expect(units)
+
+    def done(self, units: int = 1) -> None:
+        """Say that *units* units ended, whatever their outcome."""
+        if self.ticket is not None:
+            self.ticket.done(units)
+
+
+SOLO = Lane()
+"""The lane of an item outside a scheduled run: no slots, no counts."""
 
 
 @dataclass(frozen=True)
@@ -341,9 +380,12 @@ def _provenance(payload: Any) -> Mapping[str, Any] | None:
 class _Units:
     """The per-unit steps the pipelines share, and their tally."""
 
-    def __init__(self, handle: DocumentHandle, on_unit: UnitCallback | None) -> None:
+    def __init__(
+        self, handle: DocumentHandle, on_unit: UnitCallback | None, lane: Lane = SOLO
+    ) -> None:
         self.handle = handle
         self.on_unit = on_unit
+        self.lane = lane
         self.total = 0
         self.failed = 0
         self.write_errors: list[BaseException] = []
@@ -360,10 +402,26 @@ class _Units:
     ) -> None:
         """Transcribe one unit through *call*, write it, then report it.
 
+        The call and its retries hold one slot of the lane; the lane counts
+        the unit as done once it ends, whatever its outcome.
+
         Raises:
             RunStopped: The provider serves no further calls of this run;
                 the unit is not written and keeps its status.
         """
+        try:
+            await self._run(idx, label, call, source_index, provenance)
+        finally:
+            self.lane.done()
+
+    async def _run(
+        self,
+        idx: int,
+        label: str,
+        call: Callable[[], Awaitable[PayloadResult]],
+        source_index: int | str,
+        provenance: Mapping[str, Any] | None,
+    ) -> None:
         handle = self.handle
         if self.lost is not None:
             return
@@ -377,7 +435,8 @@ class _Units:
         raised: BaseException | None = None
         with unit_context(handle.key(idx)), use_recorder(recorder):
             try:
-                result = await call()
+                async with self.lane.slot():
+                    result = await call()
             except RunStopped:
                 raise
             except Exception as exc:
@@ -485,14 +544,16 @@ async def run_unit_stream(
     concurrency: int = 20,
     delay: float = 0.0,
     on_unit: UnitCallback | None = None,
+    lane: Lane = SOLO,
 ) -> int:
     """Transcribe streamed payloads into the document's units.
 
     A pool of *concurrency* workers runs *handler* on each payload as the
     producer yields it, each call *delay* seconds after the worker's
-    previous one. A payload carries ``index`` and ``image_name``; the
-    producer leaves out the units already done. Returns the number of
-    units processed.
+    previous one; each call holds a slot of *lane*, whose scheduler bounds
+    the calls of all items open at once. A payload carries ``index`` and
+    ``image_name``; the producer leaves out the units already done. Returns
+    the number of units processed.
 
     Raises:
         UnitsFailedError: A unit failed or could not be written.
@@ -500,7 +561,7 @@ async def run_unit_stream(
         RunStopped: The provider serves no further calls of this run; the
             units not written keep their status.
     """
-    units = _Units(handle, on_unit)
+    units = _Units(handle, on_unit, lane)
 
     async def handle_payload(payload: Any) -> None:
         label = str(payload.image_name)

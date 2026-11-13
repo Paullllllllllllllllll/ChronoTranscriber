@@ -182,6 +182,8 @@ class TestPageEvents:
             "image",
         )
         assert stored == [["done"]]
+        # The page event names its item as the item events do.
+        assert (done.document is not None, done.root) == (True, str(root))
 
 
 def _run_tess_preprocess(

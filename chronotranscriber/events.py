@@ -3,6 +3,10 @@
 The core never prints. It calls a :class:`RunEvents` implementation instead:
 the CLI writes the events to stderr, a test records them, and
 :class:`NullEvents` drops them. Events are called on the event-loop thread.
+
+The events of items open at once interleave. Each item event names the
+item's store *document* and the output *root* of its store, which together
+tell the items apart; the core sets them, a front end may leave them None.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ __all__ = [
     "PageDone",
     "RunEvents",
     "Waiting",
+    "item_key",
 ]
 
 
@@ -32,6 +37,8 @@ class ItemStarted:
     kind: str
     index: int
     total: int
+    document: str | None = None
+    root: str | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +58,8 @@ class PageDone:
     total: int
     already_complete: int = 0
     unit: str = "page"
+    document: str | None = None
+    root: str | None = None
 
 
 @dataclass(frozen=True)
@@ -81,6 +90,14 @@ class ItemFinished:
     error: str | None = None
     submitted: bool = False
     partial: bool = False
+    document: str | None = None
+    root: str | None = None
+
+
+def item_key(event: ItemStarted | PageDone | ItemFinished) -> tuple[str, str]:
+    """Return what tells the event's item apart from the other open items."""
+    name = event.item if isinstance(event, PageDone) else event.name
+    return (event.root or "", event.document or name)
 
 
 class RunEvents(Protocol):
@@ -91,7 +108,7 @@ class RunEvents(Protocol):
         ...
 
     def page_done(self, event: PageDone) -> None:
-        """Report that a page of the current item finished."""
+        """Report that a unit of an open item finished."""
         ...
 
     def waiting(self, event: Waiting) -> None:

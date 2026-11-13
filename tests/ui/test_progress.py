@@ -98,6 +98,29 @@ def test_item_without_units_prints_its_verdict() -> None:
     assert "[1/1] gamma.epub: failed" in lines
 
 
+def test_the_items_bar_follows_items_that_finish_out_of_order() -> None:
+    keys = [{"document": name, "root": "out"} for name in "abc"]
+    with RichProgress(_console(), open_items=3) as progress:
+        for index, key in enumerate(keys, start=1):
+            progress.item_started(ItemStarted(f"{index}.pdf", "pdf", index, 3, **key))
+        (items, *_rest) = progress._progress.tasks
+        progress.item_finished(ItemFinished("2.pdf", 2, 3, True, **keys[1]))
+        assert items.completed == 1
+        progress.item_finished(ItemFinished("3.pdf", 3, 3, True, **keys[2]))
+        assert items.completed == 2
+        progress.item_finished(ItemFinished("1.pdf", 1, 3, True, **keys[0]))
+        assert items.completed == 3
+
+
+def test_an_item_left_without_a_finish_event_loses_its_bar() -> None:
+    with RichProgress(_console()) as progress:
+        progress.item_started(ItemStarted("a.pdf", "pdf", 1, 2, document="a"))
+        progress.item_started(ItemStarted("b.pdf", "pdf", 2, 2, document="b"))
+        progress.item_finished(ItemFinished("b.pdf", 2, 2, True, document="b"))
+        (items,) = progress._progress.tasks
+        assert items.completed == 2
+
+
 def test_submitted_item_is_named_and_the_batch_check_with_it() -> None:
     console = _console()
     with RichProgress(console) as progress:

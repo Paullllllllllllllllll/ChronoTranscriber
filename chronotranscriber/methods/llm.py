@@ -151,9 +151,9 @@ class LlmTranscriber:
         if item.document is None:
             raise RuntimeError(f"No store document is open for '{item.name}'.")
         handle = item.document
+        client: PageTranscriber | None = None
         if self._client is not None:
-            self._client.update_context(item.context)
-            self._client.update_context_image(item.context_image)
+            client = self._client.for_item(item.context, item.context_image)
         is_folder = item.source == "images"
         units = self._units(item.path, is_folder)
         if not units:
@@ -176,8 +176,8 @@ class LlmTranscriber:
             self.job.spec.images,
             self.job.settings.images.original_max_side_px,
         )
-        if self._client is not None:
-            self._client.page_detail = str(img_cfg.get("resolved_detail") or "") or None
+        if client is not None:
+            client.page_detail = str(img_cfg.get("resolved_detail") or "") or None
         record = image_settings_record(img_cfg, model_type)
         if self.job.force:
             await handle.replace_units(units, image_settings=record)
@@ -216,15 +216,18 @@ class LlmTranscriber:
             total=len(needed),
             unit="image" if is_folder else "page",
             already_complete=already,
+            document=handle,
         )
+        item.lane.expect(len(needed))
         await run_unit_stream(
             handle,
             source(needed),
-            self._client,
+            client,
             transcribe_payload,
             concurrency=self.job.spec.run.concurrency,
             delay=self.job.settings.concurrency.delay_between_tasks,
             on_unit=counter,
+            lane=item.lane,
         )
         return []
 

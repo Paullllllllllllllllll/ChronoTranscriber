@@ -75,7 +75,7 @@ def _run(request: RunRequest) -> int:
         console.print(plan_table(run_plan))
         return int(ExitCode.OK)
     try:
-        with RichProgress(console) as progress:
+        with RichProgress(console, core.open_window(run_plan)) as progress:
             for warning in run_plan.warnings:
                 progress.warning(warning)
             result = asyncio.run(core.run(run_plan, progress))

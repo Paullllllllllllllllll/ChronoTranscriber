@@ -43,6 +43,7 @@ __all__ = [
     "drop_fields",
     "guarded",
     "load_settings",
+    "open_items_warning",
     "plan_fields",
     "render_fields",
     "repair_fields",
@@ -456,6 +457,46 @@ def warn_conditions(
 ) -> None:
     """Write the condition warnings of *spec* to stderr."""
     for message in condition_warnings(table, flags, settings.defaults, spec):
+        print_warning(message)
+
+
+def open_items_warning(
+    table: OptionTable,
+    flags: Mapping[str, Any],
+    defaults: Mapping[str, Any],
+    reason: str | None,
+) -> str | None:
+    """Return the warning that a given ``--open-items`` has no effect, or None.
+
+    *reason* says why the planned run opens one item at a time; as with
+    :func:`condition_warnings`, a value from the code default never warns.
+    """
+    option = table["open_items"]
+    if reason is None:
+        return None
+    origin = _origin(table, option, (("flag", flags), ("settings", defaults)))
+    if origin is None:
+        return None
+    label = (
+        option.flag
+        if origin[0] == "flag"
+        else (f"the settings default open_items ({option.flag})")
+    )
+    return (
+        f"{label} applies only to synchronous provider calls of several items "
+        f"and has no effect here: {reason}"
+    )
+
+
+def warn_open_items(
+    table: OptionTable,
+    flags: Mapping[str, Any],
+    settings: Settings,
+    reason: str | None,
+) -> None:
+    """Write the :func:`open_items_warning` to stderr, if any."""
+    message = open_items_warning(table, flags, settings.defaults, reason)
+    if message is not None:
         print_warning(message)
 
 

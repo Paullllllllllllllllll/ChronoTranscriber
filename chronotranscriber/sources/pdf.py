@@ -18,7 +18,7 @@ from typing import Any, ClassVar
 import pymupdf
 from PIL import Image
 
-from chronotranscriber.common.images import PdfPageSource
+from chronotranscriber.common.images import PYMUPDF_LOCK, PdfPageSource
 from chronotranscriber.images.pipeline import ImageProcessor, TesseractSettings
 from chronotranscriber.sources.images import (
     PAYLOAD_SHA256_KEY,
@@ -123,7 +123,7 @@ class PDFProcessor:
             bool: True if native, False otherwise.
         """
         try:
-            with pymupdf.open(self.pdf_path) as doc:
+            with PYMUPDF_LOCK, pymupdf.open(self.pdf_path) as doc:
                 return any(page.get_text().strip() for page in doc)
         except Exception as e:  # noqa: BLE001 - any unreadable PDF counts as scanned
             logger.error(f"Error checking if PDF is native: {self.pdf_path}, {e}")
@@ -132,16 +132,18 @@ class PDFProcessor:
     def open_pdf(self) -> None:
         """Open the PDF document."""
         try:
-            self.doc = pymupdf.open(self.pdf_path)
+            with PYMUPDF_LOCK:
+                self.doc = pymupdf.open(self.pdf_path)
         except Exception as e:
             logger.error(f"Failed to open PDF: {self.pdf_path}, {e}")
             raise
 
     def close_pdf(self) -> None:
         """Close the opened PDF document."""
-        if self.doc:
-            self.doc.close()
-            self.doc = None
+        with PYMUPDF_LOCK:
+            if self.doc:
+                self.doc.close()
+                self.doc = None
 
     def __enter__(self) -> PDFProcessor:
         self.open_pdf()
@@ -257,8 +259,9 @@ class PDFProcessor:
         Runs in a worker thread with its own document. Returns True on success.
         """
         try:
-            # A document per thread: PyMuPDF documents are not thread-safe.
-            with pymupdf.open(pdf_path) as doc:
+            # A document per thread, and one PyMuPDF call of the process at a
+            # time: the library supports a single thread.
+            with PYMUPDF_LOCK, pymupdf.open(pdf_path) as doc:
                 page = doc[page_index]
                 effective_dpi = _get_effective_dpi(page, target_dpi, max_pixels)
                 pix = page.get_pixmap(
@@ -295,7 +298,7 @@ class PDFProcessor:
 
     def page_count(self) -> int:
         """Return the number of pages; the document is closed afterwards."""
-        with pymupdf.open(self.pdf_path) as doc:
+        with PYMUPDF_LOCK, pymupdf.open(self.pdf_path) as doc:
             return int(doc.page_count)
 
 
@@ -306,7 +309,7 @@ def native_extract_pdf_pages(pdf_path: Path, page_indices: list[int]) -> dict[in
     """
     pages: dict[int, str] = {}
     try:
-        with PDFProcessor(pdf_path) as proc:
+        with PYMUPDF_LOCK, PDFProcessor(pdf_path) as proc:
             if proc.doc:
                 for idx in page_indices:
                     if 0 <= idx < proc.doc.page_count:
@@ -329,7 +332,7 @@ def native_extract_pdf_text(
     """
     parts: list[str] = []
     try:
-        with PDFProcessor(pdf_path) as proc:
+        with PYMUPDF_LOCK, PDFProcessor(pdf_path) as proc:
             if proc.doc:
                 if page_indices is not None:
                     for idx in page_indices:

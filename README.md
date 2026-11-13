@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.10.0
+# ChronoTranscriber v1.11.0
 
 <img src="assets/logo.svg" alt="ChronoTranscriber logo" width="64" align="right">
 
@@ -132,6 +132,7 @@ option given twice keeps the values of both.
 | `--retry-errors`, `--no-retry-errors` | on resume, transcribe pages again whose earlier result is an error; --no-retry-errors keeps those results | on | yes |
 | `--force` | transcribe items again from the start: every stored unit of the item is reset, also outside --pages; stored responses are kept | | no |
 | `--concurrency N` | parallel requests | 16 | yes |
+| `--open-items N` | items open at once, sharing the --concurrency requests; no effect with --batch or on a single item; only for method audio-api, llm | 1 | yes |
 | `--keep-working-files`, `--no-keep-working-files` | keep Tesseract's preprocessed page images and the audio chunks in the item's working folder | off | yes |
 | `--dry-run` | plan without API calls or writes | | no |
 | `--json` | print one JSON summary line on stdout | | no |
@@ -184,6 +185,18 @@ in a warning; pass a folder of your own with such a name as `--input`. The store
 makes no folder an image folder. Two items that would write one output file and
 store document (`book.pdf` and `book.epub` beside the input) are refused before
 the run, and the error names both inputs of every such pair.
+
+`--concurrency` bounds the requests of the whole run, and `--open-items` how
+many items share them. With the default of one open item the items run one
+after another, so an item of two pages keeps two requests in flight however
+high `--concurrency` is. With `--open-items 8` the run opens the next item
+whenever the open ones have fewer pages left than `--concurrency`, up to eight
+items at once. Their progress lines interleave, each naming its item. Every
+item keeps its own lease, the files are rendered one item at a time, and the
+summary lists the items in input order. Recordings draw on the
+`concurrency.audio` setting instead of `--concurrency`. The option has no
+effect, and the run warns, under `--batch`, with a method that calls no
+provider and on a run of one item.
 
 ### repair
 
@@ -266,9 +279,10 @@ input as `transcribe` does and skip, with a warning, a selected EPUB or MOBI
 item. An item takes the name of the stored document whose recorded input path
 is the item, else the name `transcribe` would give it under `--output` and
 `--layout`. `--classifier` is required; [Classifiers](#classifiers) describes
-the files. The items run one after another, and the requests of an item up to
-`--concurrency` at a time while its pages render; a stopped run lets the
-requests in flight finish.
+the files. The requests run up to `--concurrency` at a time over the whole run
+while the pages render, and `--open-items` sets how many items share them (one
+by default, so the items run one after another; it has no effect on a run of
+one item). A stopped run lets the requests in flight finish.
 
 | Flag | Description | Default | In `defaults:` |
 | --- | --- | --- | --- |
@@ -288,6 +302,7 @@ requests in flight finish.
 | `--decision-endpoint URL` | decision endpoint URL | the provider's | yes |
 | `--force` | ask again about every selected page instead of reusing stored answers | | no |
 | `--concurrency N` | parallel requests | 16 | yes |
+| `--open-items N` | items open at once, sharing the --concurrency requests; no effect on a single item | 1 | yes |
 | `--dry-run` | plan without API calls or writes | | no |
 | `--json` | print one JSON summary line on stdout | | no |
 | `--settings FILE` | alternate settings file | config/settings.yaml | no |
@@ -314,6 +329,7 @@ the pages it sends are the classifier's selection.
 | `--decision-endpoint URL` | decision endpoint URL | the provider's | yes |
 | `--force` | ask again about every document instead of reusing stored answers | | no |
 | `--concurrency N` | parallel requests | 16 | yes |
+| `--open-items N` | items open at once, sharing the --concurrency requests; no effect on a single item | 1 | yes |
 | `--dry-run` | plan without API calls or writes | | no |
 | `--json` | print one JSON summary line on stdout | | no |
 | `--settings FILE` | alternate settings file | config/settings.yaml | no |
@@ -335,9 +351,10 @@ the pages it sends are the classifier's selection.
 | 130 | interrupted (Ctrl+C, or Ctrl+Break on Windows) |
 
 A stopped run sends no further request once the provider's refusal is known.
-The units in flight finish, the item in work is rendered from the units stored
-so far and its lease is released, and no further item starts. One error line
-on stderr names the reason and the units and items left. A rerun of
+The units in flight finish, each item in work (several under `--open-items`) is
+rendered from the units stored so far and its lease is released, and no
+further item starts. One error line on stderr names the reason and the units
+and items left over all items. A rerun of
 `transcribe` resumes the pending units; after a stopped `repair`, the pages it
 had reset are pending, so `transcribe` takes them up and `repair` the documents
 it did not reach.
@@ -371,7 +388,7 @@ every exit path, zero where nothing ran, unless stated otherwise.
 In the `transcribe`, `repair` and `classify` summaries, `stopped` is null unless
 the provider stopped the run (exit code 3); it then holds the reason, the error
 of the call after which the provider served no further calls. In `transcribe`,
-the item in work when the run stopped counts neither complete nor failed, and
+an item in work when the run stopped counts neither complete nor failed, and
 its rendered files are among the `outputs`; in `repair`, its pages left pending
 count neither repaired nor failed.
 
@@ -393,9 +410,10 @@ successfully adds `to_process` (each item's `name`, `type`, `method` and resume
 `state`), `skipped` (names of complete items), `unstored`, `blocked` and `refused`
 (`name` and `reason`), and `spec`, which maps every field of the effective run
 specification, such as `model.model`, to its `value` and `source` (`flag`,
-`settings`, `default` or `resolved`, described under Settings File). A dry run
-plans without the API key variables and names an unset one in a warning on
-stderr.
+`settings`, `default` or `resolved`, described under Settings File);
+`open_items` appears there, and in the spec the store records with the run, only
+above 1. A dry run plans without the API key variables and names an unset one in
+a warning on stderr.
 
 For `batch check`, `finalized`, `pending`, `failed` and `unresolved` count
 submissions; `submitted` counts the submissions the check opened (always 0, since
@@ -451,6 +469,8 @@ it is on), Tesseract or audio options, pages, and the run options with batch
 or sync; a batch run asks `If a batch submission fails:` (stop with an error, or
 transcribe synchronously as `--sync-fallback` does). `Parallel requests:` is asked
 only where calls are synchronous, so not for a batch run without the sync fallback.
+`Items open at once` (`--open-items`) follows for a synchronous run of the LLM
+or audio API over several items.
 A step appears only for the methods that use it. Every list offers Back, and a
 text or path prompt takes `<` as Back. Settings defaults are preselected, and
 answers act like flags over them. The review screen marks values from settings
@@ -595,6 +615,7 @@ defaults:
   # formats: [md]  # txt, md; chronotranscriber.sqlite is always written
   # layout: hash
   # concurrency: 16
+  # open_items: 1  # items open at once, sharing the concurrency
   # batch: false
   # retry_errors: true         # transcribe error pages again on a rerun
   # keep_working_files: false  # keep Tesseract images and audio chunks

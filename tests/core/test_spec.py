@@ -85,16 +85,23 @@ def test_the_effective_spec_names_the_source_of_every_option() -> None:
     defaults = OPTIONS.check_defaults(
         {"model": "gpt-5.6-terra", "concurrency": 40, "formats": ["md", "txt"]}
     )
-    flags = {"input": Path("x"), "concurrency": 8, "layout": "mirror"}
+    flags = {"input": Path("x"), "concurrency": 8, "layout": "mirror", "open_items": 2}
 
     resolution = resolve_spec(flags, defaults)
 
     payload = effective_spec(resolution.spec, resolution.sources)
     assert payload["run.concurrency"] == {"value": 8, "source": "flag"}
+    assert payload["run.open_items"] == {"value": 2, "source": "flag"}
     assert payload["model.model"] == {"value": "gpt-5.6-terra", "source": "settings"}
     assert payload["input.path"] == {"value": "x", "source": "flag"}
     assert payload["output.formats"]["value"] == ["txt", "md"]
     assert len(payload) == len([o for o in OPTIONS if o.target is not None])
+
+
+def test_the_effective_spec_leaves_out_one_open_item() -> None:
+    resolution = resolve_spec({"input": Path("x"), "open_items": 1})
+
+    assert "run.open_items" not in effective_spec(resolution.spec, resolution.sources)
 
 
 def test_to_argv_spells_out_values_the_settings_defaults_change() -> None:

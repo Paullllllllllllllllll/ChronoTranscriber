@@ -20,7 +20,7 @@ from chronotranscriber.common.selection import PageRange
 from chronotranscriber.common.store import Store
 from chronotranscriber.events import PageDone, RunEvents
 from chronotranscriber.llm.caller import CallEnv
-from chronotranscriber.methods.units import DocumentHandle
+from chronotranscriber.methods.units import SOLO, DocumentHandle, Lane
 from chronotranscriber.output.paths import ItemPaths, item_paths
 from chronotranscriber.output.render import text_formats
 from chronotranscriber.settings import Settings
@@ -165,7 +165,8 @@ class Item:
 
     *pages* selects pages, images or audio chunks; *context* and
     *context_image* are the item's resolved prompt context (LLM items).
-    *document* is the item's store document, set by the run core.
+    *document* is the item's store document and *lane* the run's request
+    slots as the item draws on them, both set by the run core.
     """
 
     path: Path
@@ -175,6 +176,7 @@ class Item:
     context: str | None = None
     context_image: Path | None = None
     document: DocumentHandle | None = None
+    lane: Lane = SOLO
 
     @property
     def name(self) -> str:
@@ -209,18 +211,24 @@ class Transcriber(Protocol):
 
 @dataclass
 class PageCounter:
-    """Report each finished unit of an item as a :class:`PageDone` event."""
+    """Report each finished unit of an item as a :class:`PageDone` event.
+
+    *document* is the item's store document; the events name it and the
+    output root of its store.
+    """
 
     events: RunEvents
     item: str
     total: int
     unit: str = "page"
     already_complete: int = 0
+    document: DocumentHandle | None = None
     done: int = field(default=0, init=False)
 
     def __call__(self, index: int, failed: bool) -> None:
         """Count unit *index* as done and report it."""
         self.done += 1
+        handle = self.document
         self.events.page_done(
             PageDone(
                 item=self.item,
@@ -230,5 +238,7 @@ class PageCounter:
                 total=self.total,
                 already_complete=self.already_complete,
                 unit=self.unit,
+                document=handle.name if handle is not None else None,
+                root=str(handle.store.path.parent) if handle is not None else None,
             )
         )

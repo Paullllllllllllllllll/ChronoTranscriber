@@ -373,6 +373,32 @@ def llm_named_endpoint(ws: Workspace) -> Script:
     return Script("transcribe", ws.session(), answers)
 
 
+def llm_open_items(ws: Workspace) -> Script:
+    """Every image subfolder through the named endpoint, four items open at once."""
+    answers = [
+        str(ws.archive),
+        KEEP,
+        "images",
+        "llm",
+        "all",
+        "beside",
+        KEEP,
+        "endpoint:local",
+        "qwen-vl",
+        KEEP,
+        "text",
+        *RESPONSE_KEEPS[:4],
+        "recommended",
+        KEEP,
+        KEEP,
+        [],
+        KEEP,
+        "4",
+        "copy",
+    ]
+    return Script("transcribe", ws.session(), answers)
+
+
 def llm_endpoint_samplers(ws: Workspace) -> Script:
     """The named endpoint with every sampler without a code default."""
     answers = [
@@ -899,6 +925,7 @@ SESSIONS: Final[Mapping[str, Callable[[Workspace], Script]]] = MappingProxyType(
             llm_pdf_customized,
             llm_reasoning_and_schema_file,
             llm_named_endpoint,
+            llm_open_items,
             llm_endpoint_samplers,
             llm_provider_without_implied_model,
             tesseract_images_with_back,

@@ -103,7 +103,13 @@ DECISION_OPTIONS: Final = (
     "decision_endpoint",
 )
 RUN_FLAGS: Final = ("retry_errors", "force", "keep_working_files", "dry_run")
-RUN_OPTIONS: Final = ("batch", "sync_fallback", *RUN_FLAGS, "concurrency")
+RUN_OPTIONS: Final = (
+    "batch",
+    "sync_fallback",
+    *RUN_FLAGS,
+    "concurrency",
+    "open_items",
+)
 
 TYPE_TITLES: Final = {
     "auto": "Automatic (each file by its type)",
@@ -876,7 +882,21 @@ def _run_step(session: Session) -> Step:
                 return None
             return ctx.text_option("concurrency", "Parallel requests:")
 
-        return StepContext.sequence([submission, fallback, flags, concurrency])
+        def open_items() -> Nav | None:
+            # Only synchronous provider calls over several items share requests.
+            if state.value("batch") or _method(state) not in _MODEL_METHODS:
+                return None
+            files = state.value("files")
+            count = len(files) if files else len(run_items(state))
+            if count < 2:
+                return None
+            return ctx.text_option(
+                "open_items", "Items open at once (sharing the parallel requests):"
+            )
+
+        return StepContext.sequence(
+            [submission, fallback, flags, concurrency, open_items]
+        )
 
     return Step("run", "Run options", ask=ask, sets=RUN_OPTIONS)
 

@@ -31,6 +31,7 @@ returned: the page was not transcribed.
 from __future__ import annotations
 
 import base64
+import copy
 import json
 import logging
 from collections.abc import Mapping
@@ -294,6 +295,20 @@ class PageTranscriber:
             return
         self._context_image = _encode_image(path)
         logger.info("Context image loaded: %s", path.name)
+
+    def for_item(
+        self, context: str | None, context_image: Path | None
+    ) -> PageTranscriber:
+        """Return a transcriber of one item's pages that shares this one's caller.
+
+        The copy carries the item's *context* and *context_image*, and later
+        its :attr:`page_detail`, so that items open at once keep their own
+        prompts; the clients, the schema and the request plan stay shared.
+        """
+        item = copy.copy(self)
+        item.update_context(context)
+        item.update_context_image(context_image)
+        return item
 
     def _system_message(self) -> SystemMessage:
         from langchain_core.messages import SystemMessage

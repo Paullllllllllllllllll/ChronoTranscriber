@@ -101,7 +101,7 @@ from typing import Any, Final
 from chronotranscriber.common.classify_store import COMPONENT as CLASSIFICATIONS
 from chronotranscriber.common.classify_store import VIEW as CLASSIFICATIONS_VIEW
 from chronotranscriber.common.native import changed_image_settings
-from chronotranscriber.common.sqlite import read, read_only
+from chronotranscriber.common.sqlite import read_only
 from chronotranscriber.common.store import (
     BLOCKING_SUBMISSIONS,
     Component,
@@ -113,6 +113,7 @@ from chronotranscriber.common.store import (
     WriterOptions,
     check_schema,
     refresh_documents,
+    resume_state,
 )
 
 __all__ = [
@@ -126,6 +127,7 @@ __all__ = [
     "VIEWS",
     "Classification",
     "ItemState",
+    "StoreReader",
     "changed_input",
     "classify",
     "database_path",
@@ -138,6 +140,7 @@ __all__ = [
     "page_type_rows",
     "read_only_connection",
     "read_store",
+    "store_reader",
     "tool_version",
 ]
 
@@ -484,6 +487,72 @@ def lease_reason(holder: str | None, until: float | None) -> str:
     return reason
 
 
+class StoreReader:
+    """Classifies the items of one output root over one read-only connection.
+
+    :func:`store_reader` yields it; *connection* is None when the root holds
+    no store yet.
+    """
+
+    def __init__(self, root: Path, connection: sqlite3.Connection | None) -> None:
+        """Read the store of output root *root* through *connection*."""
+        self.root = Path(root)
+        self._connection = connection
+
+    def page_labels(self, doc_id: int) -> dict[int, str | None]:
+        """Return the label of each stored page unit of document *doc_id*."""
+        if self._connection is None:
+            return {}
+        rows = self._connection.execute(
+            "SELECT idx, label FROM units WHERE doc_id = ? AND kind = 'page'",
+            (doc_id,),
+        )
+        return {int(idx): label for idx, label in rows}
+
+    def classify(  # noqa: PLR0913 - one keyword per resume input
+        self,
+        name: str,
+        *,
+        outputs: Sequence[Path] = (),
+        image_settings: Mapping[str, Any] | None = None,
+        model: str | None = None,
+        retry_errors: bool = False,
+        holder: str | None = None,
+        now: float | None = None,
+        input_sha256: str | None = None,
+    ) -> Classification:
+        """Classify item *name* from the store, as :func:`classify` documents."""
+        return _classified(
+            self.root,
+            self._connection,
+            name,
+            outputs=outputs,
+            image_settings=image_settings,
+            model=model,
+            retry_errors=retry_errors,
+            holder=holder,
+            now=now,
+            input_sha256=input_sha256,
+        )
+
+
+@contextlib.contextmanager
+def store_reader(root: Path) -> Iterator[StoreReader]:
+    """Yield a reader of *root*'s store: one schema check, one connection.
+
+    The connection is read-only and holds one read transaction, so every
+    item classified through the reader sees the same state; close the reader
+    when done, since a running transcription's commit waits for it. Raises
+    the store's errors for a versionless, newer or unreadable database.
+    """
+    state = _schema(root)
+    if not state.exists or state.empty:
+        yield StoreReader(root, None)
+        return
+    with read_only(state.path) as connection:
+        yield StoreReader(root, connection)
+
+
 def classify(  # noqa: PLR0913 - one keyword per resume input
     root: Path,
     name: str,
@@ -509,15 +578,36 @@ def classify(  # noqa: PLR0913 - one keyword per resume input
     document without a recorded identity is trusted. A changed user image
     setting refuses a partial item; a changed model alone resumes with a
     note. Raises the store's errors for a versionless, newer or unreadable
-    database.
+    database. Classify many items of one root through :func:`store_reader`.
     """
-    path = database_path(root)
+    with store_reader(root) as reader:
+        return reader.classify(
+            name,
+            outputs=outputs,
+            image_settings=image_settings,
+            model=model,
+            retry_errors=retry_errors,
+            holder=holder,
+            now=now,
+            input_sha256=input_sha256,
+        )
+
+
+def _classified(  # noqa: PLR0913 - one keyword per resume input
+    root: Path,
+    connection: sqlite3.Connection | None,
+    name: str,
+    *,
+    outputs: Sequence[Path],
+    image_settings: Mapping[str, Any] | None,
+    model: str | None,
+    retry_errors: bool,
+    holder: str | None,
+    now: float | None,
+    input_sha256: str | None,
+) -> Classification:
     present = tuple(output for output in outputs if _nonempty(output))
-    state = _schema(root)
-    store = None
-    if state.exists and not state.empty:
-        store = Store(path, TOOL, components=_COMPONENTS)
-    resume = store.resume_state(name) if store is not None else None
+    resume = resume_state(connection, name) if connection is not None else None
     doc_id = resume.doc_id if resume is not None else None
     moment = time.time() if now is None else now
     if (
@@ -548,6 +638,7 @@ def classify(  # noqa: PLR0913 - one keyword per resume input
             )
         return Classification(ItemState.NONE, name, doc_id, reason="no stored units")
     assert doc_id is not None
+    assert connection is not None
 
     if resume.blocked:
         return Classification(
@@ -560,9 +651,7 @@ def classify(  # noqa: PLR0913 - one keyword per resume input
             ),
         )
 
-    models, registered, stored_sha256 = read(
-        path, lambda connection: _details(connection, doc_id)
-    )
+    models, registered, stored_sha256 = _details(connection, doc_id)
     if (
         stored_sha256 is not None
         and input_sha256 is not None

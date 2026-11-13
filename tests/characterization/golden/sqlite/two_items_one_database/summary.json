@@ -13,6 +13,7 @@
       "<tmp>/out/beta.pdf-2e6a7e74/beta.txt",
       "<tmp>/out/chronotranscriber.sqlite"
     ],
+    "stopped": null,
     "usage": {
       "total": {
         "cached_tokens": 0,

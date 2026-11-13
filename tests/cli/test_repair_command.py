@@ -117,6 +117,7 @@ def test_a_dry_run_without_the_key_warns_and_writes_nothing(
         "repaired": 0,
         "failed": 0,
         "usage": ZERO_USAGE,
+        "stopped": None,
     }
     assert "[WARNING]" in err and "OPENAI_API_KEY" in err
     assert "[DRY RUN] 1 page(s) would be repaired." in err
@@ -241,6 +242,7 @@ def test_an_error_of_the_repair_work_exits_1(
         "repaired": 0,
         "failed": 0,
         "usage": ZERO_USAGE,
+        "stopped": None,
     }
     assert "Unexpected error: page image unreadable" in err
     assert "Invalid arguments" not in err

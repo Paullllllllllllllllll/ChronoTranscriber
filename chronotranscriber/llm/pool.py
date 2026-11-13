@@ -13,6 +13,8 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
+from chronotranscriber.common.retry import RunStopped
+
 __all__ = [
     "run_concurrent_transcription_tasks",
     "run_streaming_transcription_tasks",
@@ -102,50 +104,18 @@ async def run_streaming_transcription_tasks(
     producer exception is re-raised after the workers have processed what
     was produced before it, so partial progress reaches *on_result*.
 
+    A handler that raises :class:`~chronotranscriber.common.retry.RunStopped`
+    ends admission: the producer yields no further item, no worker starts
+    another one, the handlers in flight finish, and the first
+    :class:`~chronotranscriber.common.retry.RunStopped` is raised.
+
     Returns:
         The handler results in completion order (``None`` for a failed item
         or a failed callback).
     """
-    workers_n = max(1, int(concurrency_limit))
-    queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=2 * workers_n)
-    producer_error: list[BaseException] = []
-    results: list[Any] = []
-
-    async def produce() -> None:
-        try:
-            async for item in producer:
-                await queue.put(item)
-        except BaseException as e:  # noqa: BLE001 - re-raised after the workers drain
-            producer_error.append(e)
-        finally:
-            for _ in range(workers_n):
-                await queue.put(_SENTINEL)
-
-    async def work() -> None:
-        while True:
-            item = await queue.get()
-            if item is _SENTINEL:
-                return
-            if delay > 0:
-                await asyncio.sleep(delay)
-            try:
-                result = await handler(item)
-            except Exception as e:  # noqa: BLE001 - one failed item must not stop the pool
-                logger.error(f"Streaming transcription task failed: {e}")
-                results.append(None)
-                continue
-            results.append(result)
-            # Other workers append while the callback awaits, so fix the slot now.
-            slot = len(results) - 1
-            if on_result is not None:
-                try:
-                    await on_result(result)
-                except Exception as cb_exc:  # noqa: BLE001 - isolate callback
-                    logger.error(f"on_result callback failed: {cb_exc}")
-                    results[slot] = None
-
-    producer_task = asyncio.create_task(produce())
-    worker_tasks = [asyncio.create_task(work()) for _ in range(workers_n)]
+    stream = _Stream(handler, max(1, int(concurrency_limit)), delay, on_result)
+    producer_task = asyncio.create_task(stream.produce(producer))
+    worker_tasks = [asyncio.create_task(stream.work()) for _ in range(stream.workers)]
     all_tasks = [producer_task, *worker_tasks]
     try:
         await asyncio.gather(*all_tasks)
@@ -155,6 +125,80 @@ async def run_streaming_transcription_tasks(
         await asyncio.gather(*all_tasks, return_exceptions=True)
         raise
 
-    if producer_error:
-        raise producer_error[0]
-    return results
+    if stream.stopped:
+        raise stream.stopped[0]
+    if stream.producer_error:
+        raise stream.producer_error[0]
+    return stream.results
+
+
+class _Stream:
+    """The queue, the workers' steps and the outcome of one streaming pool."""
+
+    def __init__(
+        self,
+        handler: Callable[[Any], Awaitable[Any]],
+        workers: int,
+        delay: float,
+        on_result: Callable[[Any], Awaitable[None]] | None,
+    ) -> None:
+        self.handler = handler
+        self.workers = workers
+        self.delay = delay
+        self.on_result = on_result
+        self.queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=2 * workers)
+        self.producer_error: list[BaseException] = []
+        self.stopped: list[RunStopped] = []
+        self.results: list[Any] = []
+
+    async def produce(self, producer: AsyncIterator[Any]) -> None:
+        """Queue the producer's items, then one sentinel per worker."""
+        try:
+            async for item in producer:
+                if self.stopped:
+                    break
+                await self.queue.put(item)
+            if self.stopped:
+                close = getattr(producer, "aclose", None)
+                if close is not None:
+                    await close()
+        except BaseException as e:  # noqa: BLE001 - re-raised after the workers drain
+            self.producer_error.append(e)
+        finally:
+            for _ in range(self.workers):
+                await self.queue.put(_SENTINEL)
+
+    async def work(self) -> None:
+        """Handle queued items until the sentinel; after a stop, only drain."""
+        while True:
+            item = await self.queue.get()
+            if item is _SENTINEL:
+                return
+            # After a stop the queue is drained so the producer can finish.
+            if self.stopped:
+                continue
+            if self.delay > 0:
+                await asyncio.sleep(self.delay)
+                if self.stopped:
+                    continue
+            await self._handle(item)
+
+    async def _handle(self, item: Any) -> None:
+        try:
+            result = await self.handler(item)
+        except RunStopped as e:
+            self.stopped.append(e)
+            return
+        except Exception as e:  # noqa: BLE001 - one failed item must not stop the pool
+            logger.error(f"Streaming transcription task failed: {e}")
+            self.results.append(None)
+            return
+        self.results.append(result)
+        # Other workers append while the callback awaits, so fix the slot now.
+        slot = len(self.results) - 1
+        if self.on_result is not None:
+            try:
+                await self.on_result(result)
+            except Exception as cb_exc:  # noqa: BLE001 - isolate callback
+                logger.error(f"on_result callback failed: {cb_exc}")
+                self.results[slot] = None

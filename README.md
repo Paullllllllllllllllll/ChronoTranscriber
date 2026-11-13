@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.8.2
+# ChronoTranscriber v1.9.0
 
 <img src="assets/logo.svg" alt="ChronoTranscriber logo" width="64" align="right">
 
@@ -304,7 +304,16 @@ the pages it sends are the classifier's selection.
 | 0 | every item completed or, under `--batch`, was submitted, or nothing was left to do; a dry run that planned, also without API keys |
 | 1 | an item failed (refused items included), a classify request failed or a classify item was refused for a changed input, another run leases an item (the final message names each blocked item with its reason and a lease with its expiry; an item waiting for a batch is named but does not change the exit code), a repaired page stayed unrepaired, a batch failed or waits unresolved, `batch check --wait` reached `--wait-hours` with work pending, a cancellation failed, a file could not be rendered, `drop` refused a document, or an unexpected error |
 | 2 | usage or configuration error: invalid flags or settings, an unset API key variable (except in a dry run), a provider without a batch API under `--batch`, no items in the input, several items without `--all`, `--select` or `--files`, two items that would share one output file (`book.pdf` and `book.epub` beside the input), a `--select` that matches nothing, `repair --indices` with several documents, a `drop` selection that names no stored document, a classifier that is missing, invalid or of another unit, a missing input path or store, a database that is not a ChronoTranscriber store, newer than the tool or unreadable |
+| 3 | `transcribe`, `repair` or `classify` stopped because the provider serves no further calls of the run, as an extension can decide after a failed call; the units still to do stay pending (in `repair`, the pages it had reset), and a rerun resumes them; it wins over codes 0 and 1 |
 | 130 | interrupted (Ctrl+C, or Ctrl+Break on Windows) |
+
+A stopped run sends no further request once the provider's refusal is known.
+The units in flight finish, the item in work is rendered from the units stored
+so far and its lease is released, and no further item starts. One error line
+on stderr names the reason and the units and items left. A rerun of
+`transcribe` resumes the pending units; after a stopped `repair`, the pages it
+had reset are pending, so `transcribe` takes them up and `repair` the documents
+it did not reach.
 
 An interrupted `transcribe` run releases its leases, so a rerun right away
 resumes with the units still to do. A run that is killed instead keeps its
@@ -324,13 +333,20 @@ every exit path, zero where nothing ran, unless stated otherwise.
 
 | Command | Fields |
 | --- | --- |
-| `transcribe` | `items_total`, `items_complete`, `items_failed`, `items_skipped`, `items_blocked`, `items_submitted`, `outputs`, `usage` |
-| `repair` | `command` (`repair`), `repaired`, `failed`, `usage` |
+| `transcribe` | `items_total`, `items_complete`, `items_failed`, `items_skipped`, `items_blocked`, `items_submitted`, `outputs`, `usage`, `stopped` |
+| `repair` | `command` (`repair`), `repaired`, `failed`, `usage`, `stopped` |
 | `batch check` | `command` (`check_batches`), `finalized`, `pending`, `failed`, `submitted`, `complete`, `failed_pages`, `outputs`, `usage`, `unresolved`; the booleans `adopted` with `--adopt` and `abandoned` with `--abandon`; with `--wait`, `polls` (checks finished), `waited_seconds` and `stopped` (`settled`, `timeout`, `interrupted`, `error`; null before the first check), and the counts are each submission's state in the store at the end; the line of a parse error carries only the first ten |
 | `batch cancel` | `command` (`cancel_batches`), `cancelled`, `failed` |
 | `render` | `command` (`render`), `databases`, `documents`, `written`, `unchanged`, `kept`, `stale`, `skipped`, `outputs` |
 | `drop` | `command` (`drop`), `dropped`, `refused`, `deleted_files`, `kept_files` |
-| `classify pages`, `classify documents` | `command` (`classify`), `unit` (`page` or `document`), `classifier`, `items_total`, `units_asked`, `units_reused`, `units_failed`, `items_refused`, `items_failed`, `usage` |
+| `classify pages`, `classify documents` | `command` (`classify`), `unit` (`page` or `document`), `classifier`, `items_total`, `units_asked`, `units_reused`, `units_failed`, `items_refused`, `items_failed`, `usage`, `stopped` |
+
+In the `transcribe`, `repair` and `classify` summaries, `stopped` is null unless
+the provider stopped the run (exit code 3); it then holds the reason, the error
+of the call after which the provider served no further calls. In `transcribe`,
+the item in work when the run stopped counts neither complete nor failed, and
+its rendered files are among the `outputs`; in `repair`, its pages left pending
+count neither repaired nor failed.
 
 For `transcribe`, `items_total` counts the items processed (on a plan error, the
 items the run would have processed), `items_skipped` the complete, unstored and

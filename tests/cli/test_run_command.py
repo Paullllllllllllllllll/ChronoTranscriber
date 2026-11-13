@@ -39,6 +39,7 @@ TRANSCRIBE_KEYS = {
     "items_submitted",
     "outputs",
     "usage",
+    "stopped",
 }
 PLAN_KEYS = {"to_process", "skipped", "unstored", "blocked", "refused", "spec"}
 ZERO_USAGE = {
@@ -212,6 +213,7 @@ def test_interrupt_and_crash_write_one_json_line(
         "items_submitted": 0,
         "outputs": [],
         "usage": ZERO_USAGE,
+        "stopped": None,
     }
     assert "[ERROR]" in err
 
@@ -440,12 +442,15 @@ def test_startup_runs_before_processing(
     assert order == ["process after 1 startup call(s)"]
 
 
-@pytest.mark.parametrize(("failed", "code"), [(0, 0), (1, 1)])
+@pytest.mark.parametrize(
+    ("failed", "stopped", "code"), [(0, None, 0), (1, None, 1), (1, "busy", 3)]
+)
 def test_repair_summary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     failed: int,
+    stopped: str | None,
     code: int,
 ) -> None:
     async def repair(repairs: Any, events: Any) -> RepairResult:
@@ -454,6 +459,7 @@ def test_repair_summary(
             failed=failed,
             selected=3 + failed,
             usage={"repair": Usage(5, 1, 6)},
+            stopped=stopped,
         )
 
     monkeypatch.setattr(repair_cli, "run_repairs", repair)
@@ -470,6 +476,7 @@ def test_repair_summary(
         "repaired": 3,
         "failed": failed,
         "usage": {"repair": tokens, "total": tokens},
+        "stopped": stopped,
     }
 
 

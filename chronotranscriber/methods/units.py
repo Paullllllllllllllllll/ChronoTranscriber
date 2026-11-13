@@ -15,7 +15,10 @@ call's attempts to the unit and record them through
 only then report it to *on_unit*. After all units they raise
 :class:`UnitsFailedError` when a unit failed or could not be written; a lost
 lease stops the document and is raised as
-:class:`~chronotranscriber.common.store.LeaseLostError`.
+:class:`~chronotranscriber.common.store.LeaseLostError`. A stopped run
+(:class:`~chronotranscriber.common.retry.RunStopped`) leaves the unit whose
+call it stopped unwritten, starts no further unit, lets the units in flight
+finish and is raised once they have.
 
 Unit conventions (the kinds of :mod:`chronotranscriber.output.store`):
 
@@ -45,6 +48,7 @@ from pathlib import Path
 from typing import Any
 
 from chronotranscriber.common.capture import error_type_of, use_recorder
+from chronotranscriber.common.retry import RunStopped
 from chronotranscriber.common.store import (
     Lease,
     LeaseLostError,
@@ -354,7 +358,12 @@ class _Units:
         source_index: int | str,
         provenance: Mapping[str, Any] | None = None,
     ) -> None:
-        """Transcribe one unit through *call*, write it, then report it."""
+        """Transcribe one unit through *call*, write it, then report it.
+
+        Raises:
+            RunStopped: The provider serves no further calls of this run;
+                the unit is not written and keeps its status.
+        """
         handle = self.handle
         if self.lost is not None:
             return
@@ -369,6 +378,8 @@ class _Units:
         with unit_context(handle.key(idx)), use_recorder(recorder):
             try:
                 result = await call()
+            except RunStopped:
+                raise
             except Exception as exc:
                 logger.exception("Error transcribing %s: %s", label, exc)
                 raised = exc
@@ -486,6 +497,8 @@ async def run_unit_stream(
     Raises:
         UnitsFailedError: A unit failed or could not be written.
         LeaseLostError: The lease was lost; the remaining units were skipped.
+        RunStopped: The provider serves no further calls of this run; the
+            units not written keep their status.
     """
     units = _Units(handle, on_unit)
 

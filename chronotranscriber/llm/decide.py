@@ -144,6 +144,7 @@ class DecisionModel:
             record=self._record,
             retry=settings.retry,
             gate=env.limiters.get(self.dialect),
+            stop=env.stop,
         )
         self.runner = DecisionRunner(seam, model=model, dialect=self.dialect)
 
@@ -276,6 +277,7 @@ class PageDecider(DecisionModel):
         Raises:
             MalformedAnswer: An answer does not fit its question.
             httpx.HTTPError: A request failed after the retries.
+            RunStopped: The provider serves no further calls of this run.
         """
         decisions: list[PageDecision] = []
         group: list[tuple[int, bytes]] = []

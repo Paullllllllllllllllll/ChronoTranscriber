@@ -15,6 +15,7 @@
       "<tmp>/out/notes.mobi-c5137dc9/notes.txt",
       "<tmp>/out/chronotranscriber.sqlite"
     ],
+    "stopped": null,
     "usage": {
       "total": {
         "cached_tokens": 0,

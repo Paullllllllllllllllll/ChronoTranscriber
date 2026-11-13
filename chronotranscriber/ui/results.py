@@ -190,6 +190,8 @@ def repair_result(spec: RepairSpec, result: RepairResult) -> RenderableType:
     parts: list[RenderableType] = [causes, table]
     if result.message is not None:
         parts.append(Text(result.message, style="yellow"))
+    if result.stop_message is not None:
+        parts.append(Text(result.stop_message, style="red"))
     parts += [Text(f"Stored in: {database}") for database in result.databases]
     parts += _lines((str(path) for path in result.outputs), "Rendered: ")
     return Group(*parts)

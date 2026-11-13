@@ -12,13 +12,19 @@ fails.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import hashlib
 import sqlite3
 import sys
+import time
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from chronotranscriber.common.store import Lease, UnitResult
+from chronotranscriber.output import render
 from chronotranscriber.output.render import (
     FAILED_PLACEHOLDER,
     document_targets,
@@ -258,6 +264,69 @@ def test_render_database_adds_formats_beside_the_registered_file(
     assert output.with_suffix(".md").read_bytes() == b"Page 1 text\n\nPage 2 text\n"
 
 
+def _rows(root: Path, sql: str) -> list[tuple[Any, ...]]:
+    connection = sqlite3.connect(database_path(root))
+    try:
+        return connection.execute(sql).fetchall()
+    finally:
+        connection.close()
+
+
+_OUTPUTS = (
+    "SELECT doc_id, path, format, sha256, rendered_at, run_id, stale FROM outputs"
+)
+_LEASES = "SELECT lease_run_id, lease_until, lease_generation FROM documents"
+
+
+def test_render_database_writes_nothing_for_a_matching_document(
+    tmp_path: Path,
+) -> None:
+    output = _seeded(tmp_path)
+    outputs, leases = _rows(tmp_path, _OUTPUTS), _rows(tmp_path, _LEASES)
+    (runs,) = _rows(tmp_path, "SELECT count(*) FROM runs")
+
+    (result,) = asyncio.run(render_database(database_path(tmp_path)))
+
+    assert result.unchanged == [output]
+    assert (result.written, result.kept, result.stale) == ([], [], [])
+    assert not result.failed
+    assert result.database == database_path(tmp_path)
+    assert _rows(tmp_path, _OUTPUTS) == outputs
+    assert _rows(tmp_path, _LEASES) == leases
+    assert _rows(tmp_path, "SELECT count(*) FROM runs") == [(runs[0] + 1,)]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "UPDATE outputs SET stale = 1",
+        "UPDATE outputs SET sha256 = 'recorded elsewhere'",
+        "DELETE FROM outputs",
+    ],
+)
+def test_render_database_records_a_matching_file_whose_row_differs(
+    tmp_path: Path, sql: str
+) -> None:
+    output = _seeded(tmp_path)
+    connection = sqlite3.connect(database_path(tmp_path))
+    try:
+        connection.execute(sql)
+        connection.commit()
+    finally:
+        connection.close()
+    ((_, _, generation),) = _rows(tmp_path, _LEASES)
+
+    (result,) = asyncio.run(render_database(database_path(tmp_path)))
+
+    assert result.unchanged == [output]
+    reader = open_store(tmp_path)
+    (doc,) = reader.documents()
+    (row,) = reader.outputs(doc.doc_id)
+    assert (row.path, row.stale) == ("doc-139d544b/doc.txt", 0)
+    assert row.sha256 == hashlib.sha256(output.read_bytes()).hexdigest()
+    assert doc.lease_generation == generation + 1
+
+
 def test_render_database_skips_a_document_another_run_holds(tmp_path: Path) -> None:
     _seeded(tmp_path)
 
@@ -276,6 +345,52 @@ def test_render_database_skips_a_document_another_run_holds(tmp_path: Path) -> N
 
     assert result.skipped is not None and result.failed
     assert result.written == []
+
+
+def test_render_database_reads_each_document_when_its_turn_comes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seeded(tmp_path)
+    second = "doc-zzzzzzzz/other"
+
+    async def main() -> None:
+        async with open_store(tmp_path) as store:
+            await store.begin_run("transcribe")
+            lease = await seed_document(store, [page(0)], name=second)
+            await render_item(
+                store, second, ("txt",), tmp_path / f"{second}.txt", lease
+            )
+
+    asyncio.run(main())
+    real = render.read_only
+    opened = 0
+
+    @contextlib.contextmanager
+    def read_only(path: Path) -> Iterator[sqlite3.Connection]:
+        # Another run takes the second document after the first was read.
+        nonlocal opened
+        opened += 1
+        if opened == 2:
+            connection = sqlite3.connect(path)
+            try:
+                connection.execute(
+                    "UPDATE documents SET lease_run_id = 'other-run', "
+                    "lease_until = ? WHERE name = ?",
+                    (time.time() + 600, second),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+        with real(path) as connection:
+            yield connection
+
+    monkeypatch.setattr(render, "read_only", read_only)
+
+    results = asyncio.run(render_database(database_path(tmp_path)))
+
+    by_name = {result.name: result for result in results}
+    assert by_name[NAME].unchanged and by_name[NAME].skipped is None
+    assert by_name[second].skipped == "another run holds its lease"
 
 
 def test_preview_database_writes_nothing(tmp_path: Path) -> None:

@@ -6,9 +6,9 @@ repair; 1 when a targeted page stays unrepaired or the repair work fails; 2
 when the repair cannot be planned (missing path, a file no store records, a
 refused database, ``--indices`` with several documents, unresolvable
 schema, prompt or context, no key or batch API, a model without image
-input) or the extension refuses it. A dry run plans without the key
-variables. The extension starts on every dry run and on every run with
-pages to repair.
+input) or the extension refuses it; 3 when the provider stopped the
+repair. A dry run plans without the key variables. The extension starts on
+every dry run and on every run with pages to repair.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ from chronotranscriber.cli.console import (
     print_warning,
 )
 from chronotranscriber.cli.reporter import StderrReporter
-from chronotranscriber.common.contract import ExitCode, exit_code_for
+from chronotranscriber.common.contract import ExitCode
 from chronotranscriber.settings import SettingsError, SpecError, resolve_repair
 from chronotranscriber.spec import REPAIR_OPTIONS, RepairSpec
 
@@ -68,7 +68,9 @@ def _report(spec: RepairSpec, result: RepairResult) -> None:
         print_warning(result.message)
     print_header("REPAIR COMPLETE", "")
     subject = _subject(spec, result)
-    if result.failed:
+    if result.stop_message is not None:
+        print_error(result.stop_message)
+    elif result.failed:
         print_warning(
             f"Repair of {subject} ({result.mode}) left {result.failed} of "
             f"{result.selected} page(s) unrepaired."
@@ -115,9 +117,12 @@ def _execute(args: argparse.Namespace, summary: Summary) -> int:
         result = asyncio.run(run_repairs(repairs, StderrReporter()))
     _report(spec, result)
     return summary.emit(
-        exit_code_for(failed=result.failed),
+        result.exit_code,
         **repair_fields(
-            repaired=result.repaired, failed=result.failed, usage=result.usage
+            repaired=result.repaired,
+            failed=result.failed,
+            usage=result.usage,
+            stopped=result.stopped,
         ),
     )
 

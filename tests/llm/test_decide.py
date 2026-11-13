@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import io
 import json
 from collections.abc import AsyncIterator
@@ -13,6 +14,8 @@ import httpx
 import pytest
 from PIL import Image as PILImage
 
+from chronotranscriber import ext
+from chronotranscriber.common.retry import Decision, RunStopped
 from chronotranscriber.common.settings_schema import Decisions
 from chronotranscriber.llm.caller import CallEnv
 from chronotranscriber.llm.decide import SKIPPED_OUTCOME, PageDecider, PageDecision
@@ -259,6 +262,41 @@ def test_shadow_and_apply_without_a_threshold_skip_nothing() -> None:
     needed, handle, events = _run_decide("apply", None)
     assert (needed, handle.writes) == ([0, 1], [])
     assert "No validated decision threshold" in events.warnings[0]
+
+
+def test_a_stop_decision_ends_the_pre_pass_without_its_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(503, json={"error": {"message": "unavailable"}})
+
+    monkeypatch.setattr(ext.Attempt, "on_error", lambda self, exc: Decision.STOP)
+    env = _env(pages_per_request=1)
+    decider = PageDecider(DecisionSpec("shadow", "typesafe/jev-1.14", None, None), env)
+    decider._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    events = _Events()
+    job = type("Job", (), {})()
+    job.spec = type("Spec", (), {"decision": DecisionSpec("shadow", "m", None, None)})()
+    job.events = events
+    transcriber = LlmTranscriber(job)
+    transcriber._decider = decider
+    data = base64.b64encode(_jpeg((60, 90))).decode()
+
+    async def source(indices: list[int]) -> Any:
+        for idx in indices:
+            yield type(
+                "Page", (), {"index": idx, "base64": data, "render_error": None}
+            )()
+
+    with pytest.raises(RunStopped):
+        asyncio.run(transcriber._decide(_Handle(), [0, 1, 2], source, {}))  # type: ignore[arg-type]
+
+    assert calls == [1]
+    assert env.stop.reason is not None
+    assert events.warnings == []
 
 
 def test_decisions_need_the_llm_method() -> None:

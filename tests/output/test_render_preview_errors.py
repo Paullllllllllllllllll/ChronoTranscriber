@@ -139,6 +139,8 @@ def test_render_reports_a_render_that_raises_permission_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     held, other = _seeded(tmp_path)
+    # A document whose files match is not rendered; both need a render here.
+    held.unlink()
     other.unlink()
     original = Store.render
 

@@ -12,6 +12,7 @@
       "<tmp>/out/annals-44f25468/annals.txt",
       "<tmp>/out/chronotranscriber.sqlite"
     ],
+    "stopped": null,
     "usage": {
       "total": {
         "cached_tokens": 0,

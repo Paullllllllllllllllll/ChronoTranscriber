@@ -236,6 +236,7 @@
         "value": false
       }
     },
+    "stopped": null,
     "to_process": [
       {
         "method": "audio-api",

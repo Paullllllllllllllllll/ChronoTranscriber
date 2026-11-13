@@ -59,6 +59,8 @@ Exit codes:
   2    usage or configuration error: no item found, several items without
        --all, --select or --files, --select matching nothing, a database
        the store refuses, or an unset API key variable
+  3    the provider serves no further calls of this run; the units left
+       stay pending and a rerun resumes them
   130  interrupted (Ctrl+C or Ctrl+Break)
 """
     + JSON_LINE
@@ -89,6 +91,8 @@ Exit codes:
   2    usage or configuration error: a path no store records, a database
        the store refuses, --indices with several documents, or an unset
        API key variable
+  3    the provider serves no further calls of this run; the pages left
+       stay pending
   130  interrupted (Ctrl+C or Ctrl+Break)
 """
     + JSON_LINE
@@ -185,6 +189,8 @@ Exit codes:
   2    usage or configuration error: no classifier, a classifier of another
        unit, no item found, several items without --all, --select or
        --files, a database the store refuses, or an unset API key variable
+  3    the provider serves no further calls of this run; a rerun asks
+       about the units left
   130  interrupted (Ctrl+C or Ctrl+Break)
 """
     + JSON_LINE

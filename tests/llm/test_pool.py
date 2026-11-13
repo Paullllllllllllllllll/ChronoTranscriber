@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from chronotranscriber.common.retry import RunStopped
 from chronotranscriber.llm.pool import (
     run_concurrent_transcription_tasks,
     run_streaming_transcription_tasks,
@@ -289,6 +290,47 @@ class TestRunStreamingTranscriptionTasks:
         results = asyncio.run(run())
         assert None in results
         assert sorted(r for r in results if r is not None) == [0, 1, 3]
+
+    @pytest.mark.unit
+    def test_a_stop_ends_admission_and_lets_the_item_in_flight_finish(self) -> None:
+        started: list[int] = []
+        finished: list[int] = []
+        produced: list[int] = []
+        closed: list[bool] = []
+
+        async def run() -> RunStopped | None:
+            second_started = asyncio.Event()
+
+            async def producer() -> AsyncIterator[int]:
+                try:
+                    for i in range(20):
+                        produced.append(i)
+                        yield i
+                finally:
+                    closed.append(True)
+
+            async def handler(x: int) -> int:
+                started.append(x)
+                if x == 0:
+                    await second_started.wait()
+                    raise RunStopped("no further calls")
+                second_started.set()
+                await asyncio.sleep(0)
+                finished.append(x)
+                return x
+
+            try:
+                await run_streaming_transcription_tasks(producer(), handler, 2)
+            except RunStopped as exc:
+                return exc
+            return None
+
+        stop = asyncio.run(run())
+        assert str(stop) == "no further calls"
+        assert started == [0, 1]
+        assert finished == [1]
+        assert closed == [True]
+        assert len(produced) < 20
 
 
 @pytest.mark.asyncio

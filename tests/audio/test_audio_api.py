@@ -18,7 +18,7 @@ from unittest.mock import patch
 import pytest
 
 from chronotranscriber import ext
-from chronotranscriber.common.retry import Decision
+from chronotranscriber.common.retry import Decision, RunStopped
 from chronotranscriber.common.usage import Usage
 from chronotranscriber.llm.caller import CallEnv
 from chronotranscriber.llm.capabilities import CapabilityError
@@ -528,6 +528,23 @@ class TestOpenAIAttempts:
 
         assert "busy" in result["error"]
         assert len(_entered(attempts)) == len(_calls()) == 1
+
+    async def test_a_stop_decision_raises_and_sends_no_further_request(
+        self,
+        tmp_path: Path,
+        recording_ext: Callable[[Decision | None], list[_RecordingAttempt]],
+    ) -> None:
+        recording_ext(Decision.STOP)
+        _queue(_HttpError("busy", status_code=503), _FakeResponse("never"))
+        env = _env()
+        backend = _openai(env=env)
+        with pytest.raises(RunStopped):
+            await backend.transcribe_audio_chunk(_payload(tmp_path))
+        with pytest.raises(RunStopped):
+            await backend.transcribe_audio_chunk(_payload(tmp_path))
+
+        assert env.stop.reason is not None and "busy" in env.stop.reason
+        assert len(_calls()) == 1
 
     async def test_usage_recovered_from_a_failure_is_recorded(
         self,

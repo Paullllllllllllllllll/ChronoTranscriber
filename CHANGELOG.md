@@ -1,5 +1,22 @@
 # Changelog
 
+- **v1.9.0** (13 November 2026) -- When the attempt context of `ext.py` answers a
+  failed call with the new decision `STOP`, because a provider will serve no
+  further calls of the run, `transcribe`, `repair` and `classify` stop at once
+  with the new exit code 3. Before, they retried every page until all had failed.
+  No further request is sent, calls already in flight finish, and the item in
+  work is rendered from its finished units and released. Its unprocessed units
+  stay pending; for `repair`, these are the pages it had reset, which a
+  `transcribe` rerun takes up. No further item starts. The JSON lines of the
+  three commands carry a new `stopped` field, null unless the run was stopped, one
+  error line names the reason and how much was left, and `--help` lists the exit
+  code. Planning hashes the inputs eight at a time and reads each output root's
+  database once for all its items. A render reads each document when its turn
+  comes and leaves it alone, without a lease or a write, when its files and rows
+  already match the store. The stored message of a failed attempt names the
+  transport error behind it, for example `(cause: httpx.ReadTimeout)`. The
+  shared package gains `Decision.STOP`, `RunStopped`, `StopSignal`, `heed_stop`,
+  `ExitCode.STOPPED` and the connection-level `resume_state`.
 - **v1.8.2** (9 November 2026) -- The characterization test runner merges a nested
   condition into its final branch, so `ruff check` passes again; no behavior
   changes.

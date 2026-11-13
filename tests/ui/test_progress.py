@@ -225,6 +225,15 @@ def test_summary_table_without_progress_usage_or_skips() -> None:
     assert "Outputs: none" in output
 
 
+def test_a_stopped_run_shows_the_error_line_of_the_command_line() -> None:
+    stop = core.RunStop("busy", "alpha.pdf", units_left=4, items_left=2)
+    result = core.RunResult(items=(), stop=stop)
+    output = " ".join(_render(summary_table(result)).split())
+    assert stop.message in output
+    assert "4 pending unit(s) of 'alpha.pdf' and 2 further item(s)" in output
+    assert result.exit_code == 3
+
+
 def _failed_unit(idx: int, error_type: str | None, error: str | None) -> UnitRow:
     return UnitRow(
         doc_id=1,

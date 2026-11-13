@@ -23,7 +23,9 @@ dict the page pipeline records::
 turns it into the page text. A failed page returns the dict with ``error``
 set instead of raising; an answer the provider stopped (a content filter, a
 refusal, an answer cut at the output-token limit, in every response format)
-fails the page.
+fails the page. A stopped run
+(:class:`~chronotranscriber.common.retry.RunStopped`) is raised, not
+returned: the page was not transcribed.
 """
 
 from __future__ import annotations
@@ -43,6 +45,7 @@ from chronotranscriber.common.provider_requests import (
     system_content,
 )
 from chronotranscriber.common.responses import unwrap_raw_response
+from chronotranscriber.common.retry import RunStopped
 from chronotranscriber.common.structured import (
     ResponseFormat,
     StructuredRequest,
@@ -361,6 +364,9 @@ class PageTranscriber:
         *image_detail* replaces the page image's detail; a Gemini image
         carries the media resolution of *media_resolution*, else of the
         detail.
+
+        Raises:
+            RunStopped: The provider serves no further calls of this run.
         """
         if not self.capabilities.supports_vision:
             return error_response(
@@ -380,6 +386,8 @@ class PageTranscriber:
                 label=label or "page",
                 min_input_tokens=self.settings.retry.min_input_tokens,
             )
+        except RunStopped:
+            raise
         except Exception as exc:  # noqa: BLE001 - a failed page returns an error dict
             logger.error(
                 "Transcription failed for %s: %s - %s",

@@ -12,6 +12,7 @@
       "<tmp>/out/doc-139d544b/doc.txt",
       "<tmp>/out/chronotranscriber.sqlite"
     ],
+    "stopped": null,
     "usage": {
       "total": {
         "cached_tokens": 0,

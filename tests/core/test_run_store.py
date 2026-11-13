@@ -252,6 +252,31 @@ def test_an_output_without_a_store_row_is_skipped_as_unstored(
     assert output.read_text(encoding="utf-8") == "an earlier transcription\n"
 
 
+def test_planning_reads_each_store_over_two_connections(
+    tmp_path: Path, script: Script, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name in ("c.pdf", "a.pdf", "b.pdf"):
+        _pdf(tmp_path / "in" / name, 2)
+    spec = make_spec(
+        tmp_path / "in", type="pdf", output=tmp_path / "out", concurrency=1
+    )
+    settings = make_settings(rate_limits=((100_000, 1),))
+    asyncio.run(core.run(core.plan(spec, settings), RecordingEvents()))
+    connect = sqlite3.connect
+    opened: list[object] = []
+
+    def counting(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        opened.append(args[0])
+        return connect(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", counting)
+    run_plan = core.plan(spec, settings)
+
+    assert [item.name for item in run_plan.skipped] == ["a.pdf", "b.pdf", "c.pdf"]
+    assert all(item.input_sha256 for item in run_plan.skipped)
+    assert len(opened) == 2
+
+
 def test_a_dry_run_lists_the_items_left_out_with_their_reasons(
     scenario: Scenario, capsys: pytest.CaptureFixture[str]
 ) -> None:

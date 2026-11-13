@@ -16,8 +16,9 @@ file is replaced atomically under the document's lease and recorded in
 ``outputs``; a file changed outside the tool is kept unless forced, and a
 file that cannot be replaced is marked stale while the units stay stored.
 :func:`render_database` renders every document of a database that way (the
-``render`` subcommand) and :func:`preview_database` reports what it would
-write without writing.
+``render`` subcommand), leaving out the documents whose files and rows
+already match, and :func:`preview_database` reports what it would write
+without writing.
 """
 
 from __future__ import annotations
@@ -25,12 +26,13 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import sqlite3
+import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Final
 
-from chronotranscriber.common.sqlite import read
+from chronotranscriber.common.sqlite import read, read_only
 from chronotranscriber.common.store import (
     DocumentRow,
     Lease,
@@ -46,8 +48,8 @@ from chronotranscriber.llm.response_parsing import format_page_line
 from chronotranscriber.output.store import (
     DATABASE_NAME,
     KIND_TEXT,
+    _path_key,
     open_store,
-    read_only_connection,
     read_store,
 )
 
@@ -255,45 +257,111 @@ def document_targets(
     ]
 
 
-def _preview_document(
+@dataclass(frozen=True)
+class _Surveyed:
+    """A document's preview and whether its files and rows already match it.
+
+    *current* holds when every target file matches its rendering, its
+    ``outputs`` row records that hash and format without the stale flag,
+    and no other run's lease is live: a render would only renew the rows.
+    """
+
+    document: DocumentRow
+    preview: DocumentRender
+    current: bool
+
+
+def _preview_document(  # noqa: PLR0913 - the document, its rows and the options
     connection: sqlite3.Connection,
     database: Path,
     document: DocumentRow,
     registered: Sequence[OutputRow],
     formats: Sequence[str] | None,
     force: bool,
-) -> DocumentRender:
+    leased: bool,
+) -> _Surveyed:
+    root = database.parent
     result = DocumentRender(database, document.name)
-    recorded = {
-        _registered_path(database.parent, row): row.sha256 for row in registered
-    }
-    for target in document_targets(database.parent, document.name, registered, formats):
+    recorded = {_registered_path(root, row): row.sha256 for row in registered}
+    rows = {row.path: row for row in registered}
+    current = not leased
+    for target in document_targets(root, document.name, registered, formats):
         text = target.renderer(connection, document.doc_id)
         data = text if isinstance(text, bytes) else text.encode("utf-8")
         digest = hashlib.sha256(data).hexdigest()
         try:
-            current = file_sha256(target.path)
+            on_disk = file_sha256(target.path)
         except OSError as exc:
             result.stale.append(target.path)
             result.warnings.append(f"Could not read {target.path}: {exc}")
+            current = False
             continue
-        if current == digest:
+        row = rows.get(_path_key(target.path, root))
+        current = current and (
+            on_disk == digest
+            and row is not None
+            and (row.sha256, row.format, row.stale) == (digest, target.format, 0)
+        )
+        if on_disk == digest:
             result.unchanged.append(target.path)
-        elif current is not None and current != recorded.get(target.path) and not force:
+        elif on_disk is not None and on_disk != recorded.get(target.path) and not force:
             result.kept.append(target.path)
         else:
             result.written.append(target.path)
-    return result
+    return _Surveyed(document, result, current)
 
 
-def _renderable_documents(root: Path) -> tuple[Store, list[DocumentRow]] | None:
-    reader = read_store(root)
+_RENDERED_DOCUMENTS: Final = (
+    "SELECT DISTINCT doc_id FROM units WHERE status != 'pending'"
+)
+_OUTPUT_ROWS: Final = (
+    "SELECT doc_id, path, format, sha256, rendered_at, run_id, stale FROM outputs "
+    "WHERE doc_id = ? ORDER BY path"
+)
+_LEASE: Final = "SELECT lease_run_id, lease_until FROM documents WHERE doc_id = ?"
+
+
+def _rendered_documents(database: Path) -> list[DocumentRow]:
+    """Return the documents with a done or failed unit, in name order.
+
+    None are returned without a database; the schema is checked once.
+    """
+    reader = read_store(database.parent)
     if reader is None:
-        return None
-    documents = [
-        doc for doc in reader.documents() if rendered_units(reader, doc.doc_id)
-    ]
-    return reader, documents
+        return []
+    rendered = read(
+        reader.path,
+        lambda connection: {
+            int(row[0]) for row in connection.execute(_RENDERED_DOCUMENTS)
+        },
+    )
+    return [doc for doc in reader.documents() if doc.doc_id in rendered]
+
+
+def _survey(
+    database: Path, document: DocumentRow, formats: Sequence[str] | None, force: bool
+) -> _Surveyed:
+    """Preview *document* in a read transaction of its own.
+
+    Its lease and ``outputs`` rows are read now, since another run may have
+    changed them after the documents were listed. A transaction over all
+    documents would hold off the commits of a run working in this store.
+    """
+    key = (document.doc_id,)
+    with read_only(database) as connection:
+        lease = connection.execute(_LEASE, key).fetchone()
+        leased = lease is None or (
+            lease[0] is not None and lease[1] is not None and lease[1] > time.time()
+        )
+        outputs = [
+            OutputRow(int(doc_id), path, fmt, sha256, rendered_at, run_id, stale)
+            for doc_id, path, fmt, sha256, rendered_at, run_id, stale in (
+                connection.execute(_OUTPUT_ROWS, key)
+            )
+        ]
+        return _preview_document(
+            connection, database, document, outputs, formats, force, leased
+        )
 
 
 def preview_database(
@@ -309,19 +377,10 @@ def preview_database(
     Raises:
         StoreError: The database is versionless, newer or unreadable.
     """
-    root = database.parent
-    found = _renderable_documents(root)
-    if found is None:
-        return []
-    reader, documents = found
-    outputs = {doc.doc_id: reader.outputs(doc.doc_id) for doc in documents}
-    with read_only_connection(root) as connection:
-        return [
-            _preview_document(
-                connection, database, doc, outputs[doc.doc_id], formats, force
-            )
-            for doc in documents
-        ]
+    return [
+        _survey(database, document, formats, force).preview
+        for document in _rendered_documents(database)
+    ]
 
 
 async def _render_document(
@@ -366,19 +425,21 @@ async def render_database(
 ) -> list[DocumentRender]:
     """Render every document of *database* from the store, without model calls.
 
-    Each document is rendered under its lease; a document another run holds
-    is skipped with a note. A file changed outside the tool is left alone
-    unless *force*; a file that cannot be replaced stays stale for a later
-    render. Documents without a done or failed unit are left out.
+    Each document is previewed when its turn comes. A document
+    whose files and ``outputs`` rows already match its rendering is reported
+    unchanged without a lease or a write; every other one is rendered under
+    its lease, and one another run holds is skipped with a note. A file
+    changed outside the tool is left alone unless *force*; a file that
+    cannot be replaced stays stale for a later render. Documents without a
+    done or failed unit are left out.
 
     Raises:
         StoreError: The database is versionless, newer or unreadable.
     """
     root = database.parent
-    found = _renderable_documents(root)
-    if found is None or not found[1]:
+    documents = _rendered_documents(database)
+    if not documents:
         return []
-    documents = found[1]
     results: list[DocumentRender] = []
     async with open_store(root) as store:
         await store.begin_run(
@@ -390,7 +451,13 @@ async def render_database(
         )
         try:
             for document in documents:
-                results.append(await _render_document(store, document, formats, force))
+                entry = _survey(database, document, formats, force)
+                if entry.current:
+                    results.append(replace(entry.preview, database=store.path))
+                else:
+                    results.append(
+                        await _render_document(store, entry.document, formats, force)
+                    )
         finally:
             await store.end_run(1 if any(result.failed for result in results) else 0)
     return results

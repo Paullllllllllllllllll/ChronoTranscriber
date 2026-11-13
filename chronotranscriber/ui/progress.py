@@ -275,12 +275,28 @@ def _failure_lines(result: RunResult, tallies: Mapping[str, UnitTally]) -> list[
     return [Text("Failed units:"), *lines] if lines else []
 
 
+def _run_notes(result: RunResult) -> list[Text]:
+    """Return the stop's error line and the batch note, where they apply."""
+    notes: list[Text] = []
+    if result.stop is not None:
+        notes.append(Text(result.stop.message, style="red"))
+    if result.submitted:
+        notes.append(
+            Text(
+                f"Batch: {result.submitted} item(s) submitted; run the batch check "
+                "task, or 'chronotranscriber batch check', to collect the results."
+            )
+        )
+    return notes
+
+
 def summary_table(
     result: RunResult, progress: RichProgress | None = None
 ) -> RenderableType:
     """Return the run summary: items, outputs, run facts and token usage.
 
-    The unit counts come from *progress*; without it they show as ``-``.
+    The unit counts come from *progress*; without it they show as ``-``. A
+    stopped run adds the error line the command line writes.
     """
     tallies = progress.tallies if progress is not None else {}
     table = Table(title="Run summary", title_justify="left")
@@ -320,14 +336,11 @@ def summary_table(
         "",
         style="bold",
     )
-    parts: list[RenderableType] = [table, *_failure_lines(result, tallies)]
-    if result.submitted:
-        parts.append(
-            Text(
-                f"Batch: {result.submitted} item(s) submitted; run the batch check "
-                "task, or 'chronotranscriber batch check', to collect the results."
-            )
-        )
+    parts: list[RenderableType] = [
+        table,
+        *_failure_lines(result, tallies),
+        *_run_notes(result),
+    ]
     outputs = [path for item in result.items for path in item.outputs]
     parts.append(_listing("Outputs", outputs))
     parts += [

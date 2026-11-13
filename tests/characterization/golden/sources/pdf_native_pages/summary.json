@@ -12,6 +12,7 @@
       "<tmp>/out/born-08229637/born.txt",
       "<tmp>/out/chronotranscriber.sqlite"
     ],
+    "stopped": null,
     "usage": {
       "total": {
         "cached_tokens": 0,

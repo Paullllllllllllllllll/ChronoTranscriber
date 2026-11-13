@@ -5,7 +5,7 @@ Its run resolves the answers, plans, starts the extension and runs the plan
 under the rich progress display. Exit codes are those of
 ``chronotranscriber transcribe``: 0 when every item completed or nothing was
 left, 1 when an item failed or another run leases one, 2 for usage and
-configuration errors.
+configuration errors, 3 when the provider stopped the run.
 """
 
 from __future__ import annotations

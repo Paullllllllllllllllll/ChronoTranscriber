@@ -12,6 +12,7 @@
       "<tmp>/out/talk-ce7611e7/talk.txt",
       "<tmp>/out/chronotranscriber.sqlite"
     ],
+    "stopped": null,
     "usage": {
       "audio": {
         "cached_tokens": 0,

@@ -12,6 +12,7 @@
       "<tmp>/out/scan-59ad1b2f/scan.txt",
       "<tmp>/out/chronotranscriber.sqlite"
     ],
+    "stopped": null,
     "usage": {
       "total": {
         "cached_tokens": 0,

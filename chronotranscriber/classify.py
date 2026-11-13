@@ -86,6 +86,7 @@ from chronotranscriber.common.decisions import (
 )
 from chronotranscriber.common.images import decision_jpeg
 from chronotranscriber.common.options import Source
+from chronotranscriber.common.retry import RunStopped
 from chronotranscriber.common.selection import parse_page_range
 from chronotranscriber.common.sqlite import read
 from chronotranscriber.common.store import Store, StoreError, WriterOptions
@@ -251,6 +252,9 @@ class ClassifyResult:
     *units_asked* counts the units answered by a request of this run,
     *units_reused* those whose stored answers it kept, *units_failed* those
     left without answers. *failed* and *refused* name items with the reason.
+    *stopped* is the reason the provider stopped the run during the item
+    *stopped_item*, whose *units_left* units it did not ask about, before
+    *items_left* further items.
     """
 
     items: int = 0
@@ -262,11 +266,29 @@ class ClassifyResult:
     usage: Mapping[str, Usage] = field(default_factory=dict)
     databases: tuple[str, ...] = ()
     seconds: float = 0.0
+    stopped: str | None = None
+    stopped_item: str | None = None
+    units_left: int = 0
+    items_left: int = 0
 
     @property
     def exit_code(self) -> ExitCode:
-        """1 when an item failed or was refused, else 0."""
+        """3 when the run stopped, 1 when an item failed or was refused, else 0."""
+        if self.stopped is not None:
+            return ExitCode.STOPPED
         return ExitCode.FAILURE if self.failed or self.refused else ExitCode.OK
+
+    @property
+    def stop_message(self) -> str | None:
+        """The error line of a stopped run, or None."""
+        if self.stopped is None:
+            return None
+        return (
+            f"The run stopped: the provider serves no further calls ({self.stopped}). "
+            f"{self.units_left} unit(s) of '{self.stopped_item}' and "
+            f"{self.items_left} further item(s) were left unclassified; a rerun "
+            "resumes them."
+        )
 
 
 def _absolute(path: Path) -> Path:
@@ -692,12 +714,14 @@ class _Stores:
 
 @dataclass
 class _Tally:
-    """The counts of one item."""
+    """The counts of one item; *stopped* when the provider stopped the run."""
 
     asked: int = 0
     reused: int = 0
     failed: int = 0
     errors: list[str] = field(default_factory=list)
+    stopped: RunStopped | None = None
+    left: int = 0
 
 
 class _ItemClassifier:
@@ -773,6 +797,8 @@ class _ItemClassifier:
         """Ask about the units of *item*, reusing stored answers.
 
         A ``--pages`` range that selects none of the item's pages fails it.
+        When the provider stops the run, the tally holds the stop and the
+        units not yet asked about, and no further request is sent.
 
         Raises:
             ChangedInputError: The store came to hold the document with
@@ -815,6 +841,10 @@ class _ItemClassifier:
                         self.classifier, item.document, units, context=shared
                     ):
                         await self._settle(request, store, context, tally)
+        except RunStopped as exc:
+            count = len(indices) if self.plan.spec.unit == "page" else 1
+            tally.stopped = exc
+            tally.left = max(0, count - tally.asked - tally.reused - tally.failed)
         except RuntimeError as exc:  # too many pages failed to render
             tally.errors.append(str(exc))
         return tally
@@ -879,7 +909,7 @@ class _ItemClassifier:
 
 @dataclass
 class _Outcomes:
-    """The counts and the failed and refused items of a run."""
+    """The counts and the failed and refused items of a run, and its stop."""
 
     items: int = 0
     asked: int = 0
@@ -887,6 +917,10 @@ class _Outcomes:
     failed_units: int = 0
     failed: list[tuple[str, str]] = field(default_factory=list)
     refused: list[tuple[str, str]] = field(default_factory=list)
+    stopped: str | None = None
+    stopped_item: str | None = None
+    units_left: int = 0
+    items_left: int = 0
 
 
 async def _run_items(
@@ -922,6 +956,12 @@ async def _run_items(
         error = "; ".join(tally.errors) if tally.errors else None
         if error is not None:
             outcomes.failed.append((item.name, error))
+        if tally.stopped is not None:
+            outcomes.stopped = model.env.stop.reason or str(tally.stopped)
+            outcomes.stopped_item = item.name
+            outcomes.units_left = tally.left
+            outcomes.items_left = total - index
+            return
         events.item_finished(
             ItemFinished(item.name, index, total, error is None, error=error)
         )
@@ -936,7 +976,9 @@ async def run(
     run. A request that fails after its retries leaves its units without
     answers and fails the item, whose other requests still run; an item
     whose stored document came to record another input is refused.
-    Cancellation propagates.
+    Cancellation propagates. When the provider stops the run, the answers
+    recorded so far stay, no further request is sent and no further item
+    starts; the run records exit code 3.
 
     Raises:
         ValueError: The plan is a dry run.
@@ -968,6 +1010,8 @@ async def run(
             await _run_items(run_plan, model, stores, sink, outcomes)
         failed = outcomes.failed or outcomes.refused
         exit_code = ExitCode.FAILURE if failed else ExitCode.OK
+        if outcomes.stopped is not None:
+            exit_code = ExitCode.STOPPED
     except (asyncio.CancelledError, KeyboardInterrupt):
         exit_code = ExitCode.INTERRUPTED
         raise
@@ -985,4 +1029,8 @@ async def run(
         usage={role: env.usage.get(role) for role in env.usage.roles},
         databases=stores.databases,
         seconds=time.monotonic() - started,
+        stopped=outcomes.stopped,
+        stopped_item=outcomes.stopped_item,
+        units_left=outcomes.units_left,
+        items_left=outcomes.items_left,
     )

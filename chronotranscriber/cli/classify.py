@@ -4,8 +4,8 @@ Exit codes: 0 when every item was classified (asked or reused), or in a dry
 run planned; 1 when a request failed or an item was refused because its
 stored document records another input; 2 for usage and configuration
 errors (no classifier, a classifier of another unit, no items, an unset key
-variable); 130 on Ctrl+C or Ctrl+Break. With ``--json`` one summary line
-goes to stdout on every exit.
+variable); 3 when the provider stopped the run; 130 on Ctrl+C or
+Ctrl+Break. With ``--json`` one summary line goes to stdout on every exit.
 """
 
 from __future__ import annotations
@@ -81,7 +81,9 @@ def _report_plan(run_plan: classify.ClassifyPlan, reporter: StderrReporter) -> N
 
 
 def _report_result(result: classify.ClassifyResult) -> None:
-    if result.failed or result.refused:
+    if result.stop_message is not None:
+        print_error(result.stop_message)
+    elif result.failed or result.refused:
         print_error(
             f"Classification finished with {len(result.failed)} failed and "
             f"{len(result.refused)} refused item(s) of "
@@ -152,6 +154,7 @@ def _run(
             refused=len(result.refused),
             failed=len(result.failed),
             usage=result.usage,
+            stopped=result.stopped,
         ),
     )
 

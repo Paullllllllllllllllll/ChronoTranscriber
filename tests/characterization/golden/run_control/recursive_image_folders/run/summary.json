@@ -13,6 +13,7 @@
       "<tmp>/out/vol2-e10b4878/vol2.txt",
       "<tmp>/out/chronotranscriber.sqlite"
     ],
+    "stopped": null,
     "usage": {
       "total": {
         "cached_tokens": 0,

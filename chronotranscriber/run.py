@@ -34,6 +34,7 @@ import os
 import sqlite3
 import time
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,7 @@ from chronotranscriber.common.context import ContextError
 from chronotranscriber.common.contract import ExitCode, exit_code_for
 from chronotranscriber.common.decisions import dialect_for
 from chronotranscriber.common.options import Source
+from chronotranscriber.common.retry import RunStopped
 from chronotranscriber.common.selection import (
     PageRange,
     parse_page_range,
@@ -102,14 +104,14 @@ from chronotranscriber.output.render import format_path, render_item, text_forma
 from chronotranscriber.output.store import (
     Classification,
     ItemState,
+    StoreReader,
     changed_input,
-    classify,
     database_path,
     document_name,
     identity_write,
     lease_reason,
     open_store,
-    read_store,
+    store_reader,
 )
 from chronotranscriber.settings import Settings, SettingsError
 from chronotranscriber.sources import (
@@ -143,6 +145,7 @@ __all__ = [
     "PlannedItem",
     "RunPlan",
     "RunResult",
+    "RunStop",
     "SelectionError",
     "StoreRefusedError",
     "choose_items",
@@ -170,6 +173,9 @@ _KEYED_METHODS = ("llm", "audio-api")
 
 _EBOOKS = ("epub", "mobi")
 """Source types that never take the mirror layout."""
+
+_HASH_WORKERS = 8
+"""Inputs hashed at once while planning; the threads overlap the file reads."""
 
 BUSY_TIMEOUT: float = DEFAULT_BUSY_TIMEOUT
 """Seconds a store write or read waits on a busy database before it backs off."""
@@ -769,45 +775,71 @@ class _Classifier:
             output_format=text_formats(self.spec.output.formats)[0],
         )
 
-    def planned(self, item: SourceItem, method: str) -> PlannedItem:
-        """Return *item* planned with its resume state; write nothing.
+    def plan_items(self, routed: Sequence[tuple[SourceItem, str]]) -> list[PlannedItem]:
+        """Return each ``(item, method)`` of *routed* planned; write nothing.
 
-        The input identity is computed here, its snapshot first; an input
-        whose identity cannot be computed is refused, also under --force,
-        so that no document records it as unknown.
+        The inputs are hashed in a thread pool first; then the items of each
+        output root are classified through one reader of its store, the
+        roots in the order of their first item.
 
         Raises:
-            StoreRefusedError: The root's database is refused.
+            StoreRefusedError: A root's database is refused.
         """
-        root, name, output = self.locate(item)
+        located = [self.locate(item) for item, _ in routed]
+        with ThreadPoolExecutor(_HASH_WORKERS) as pool:
+            identities = list(pool.map(_identify, [item.path for item, _ in routed]))
+        by_root: dict[Path, list[int]] = {}
+        for index, (root, _, _) in enumerate(located):
+            by_root.setdefault(root, []).append(index)
+        planned: dict[int, PlannedItem] = {}
+        for root, indices in by_root.items():
+            try:
+                with store_reader(root) as reader:
+                    for index in indices:
+                        item, method = routed[index]
+                        planned[index] = self.planned(
+                            reader, item, method, located[index], identities[index]
+                        )
+            except StoreError as exc:
+                raise StoreRefusedError(str(exc)) from exc
+        return [planned[index] for index in range(len(routed))]
+
+    def planned(
+        self,
+        reader: StoreReader,
+        item: SourceItem,
+        method: str,
+        location: tuple[Path, str, Path],
+        identity: _Identity,
+    ) -> PlannedItem:
+        """Return *item* planned with its resume state; write nothing.
+
+        *location* is the item's :meth:`locate` and *identity* its input
+        identity with its snapshot; an input whose identity cannot be
+        computed is refused, also under --force, so that no document records
+        it as unknown.
+        """
+        root, name, output = location
         formats = text_formats(self.spec.output.formats)
         outputs = [format_path(output, fmt) for fmt in formats]
         keyed = method in _KEYED_METHODS
-        identity: str | None = None
-        snapshot: Snapshot = ()
+        snapshot, sha256, error = identity
         unreadable: str | None = None
-        try:
-            snapshot = input_snapshot(item.path)
-            identity = input_identity(item.path)
-        except OSError as exc:
+        if error is not None:
             unreadable = (
-                f"Cannot compute the input identity of '{name}' ({exc}). Skipping it."
+                f"Cannot compute the input identity of '{name}' ({error}). Skipping it."
             )
 
-        try:
-            state = classify(
-                root,
-                name,
-                outputs=outputs,
-                image_settings=self.image if method == "llm" else None,
-                model=self.spec.model.model if keyed else None,
-                retry_errors=self.spec.run.retry_errors,
-                input_sha256=identity,
-            )
-        except StoreError as exc:
-            raise StoreRefusedError(str(exc)) from exc
+        state = reader.classify(
+            name,
+            outputs=outputs,
+            image_settings=self.image if method == "llm" else None,
+            model=self.spec.model.model if keyed else None,
+            retry_errors=self.spec.run.retry_errors,
+            input_sha256=sha256,
+        )
         if item.type == "images" and unreadable is None:
-            moved = _misplaced_pages(root, name, item.path, state)
+            moved = _misplaced_pages(reader, name, item.path, state)
             if moved is not None:
                 state = Classification(
                     ItemState.REFUSED, name, state.doc_id, reason=moved
@@ -827,39 +859,40 @@ class _Classifier:
             root,
             name,
             output,
-            input_sha256=identity,
+            input_sha256=sha256,
             snapshot=snapshot,
         )
 
 
+type _Identity = tuple[Snapshot, str | None, OSError | None]
+"""An input's snapshot, its identity and the error that left it unknown."""
+
+
+def _identify(path: Path) -> _Identity:
+    """Return the snapshot and identity of the input at *path*, snapshot first."""
+    snapshot: Snapshot = ()
+    try:
+        snapshot = input_snapshot(path)
+        return snapshot, input_identity(path), None
+    except OSError as exc:
+        return snapshot, None, exc
+
+
 def _misplaced_pages(
-    root: Path, name: str, folder: Path, state: Classification
+    reader: StoreReader, name: str, folder: Path, state: Classification
 ) -> str | None:
     """Return why a stored folder document's pages no longer fit its images.
 
     A partial or complete document is checked page by page
     (:func:`~chronotranscriber.sources.identity.reordered`), whether it
     records an identity or not.
-
-    Raises:
-        StoreRefusedError: The root's database is refused.
     """
     if state.doc_id is None or state.state not in (
         ItemState.PARTIAL,
         ItemState.COMPLETE,
     ):
         return None
-    try:
-        store = read_store(root)
-    except StoreError as exc:
-        raise StoreRefusedError(str(exc)) from exc
-    if store is None:
-        return None
-    labels = {
-        unit.idx: unit.label
-        for unit in store.units(state.doc_id)
-        if unit.kind == "page"
-    }
+    labels = reader.page_labels(state.doc_id)
     try:
         return reordered(name, folder, labels)
     except OSError as exc:
@@ -936,9 +969,9 @@ def plan(
     image = _image(spec, settings, discovered)
     classifier = _Classifier(spec, output_dir, input_path, image)
     groups: dict[ItemState, list[PlannedItem]] = {state: [] for state in ItemState}
-    planned_items = [
-        classifier.planned(item, _route(item, spec)) for item in discovered
-    ]
+    planned_items = classifier.plan_items(
+        [(item, _route(item, spec)) for item in discovered]
+    )
     _check_shared(planned_items)
     for planned in planned_items:
         groups[planned.resume.state].append(planned)
@@ -1058,6 +1091,33 @@ class ItemResult:
 
 
 @dataclass(frozen=True)
+class RunStop:
+    """Why a run stopped before its last item, and what it left to do.
+
+    *reason* names the failed call whose ``STOP`` decision ended the run;
+    *item* is the item in work, *units_left* its units still pending and
+    *outputs* the files it was rendered to; *items_left* counts the items
+    not started.
+    """
+
+    reason: str
+    item: str
+    units_left: int = 0
+    items_left: int = 0
+    outputs: tuple[str, ...] = ()
+
+    @property
+    def message(self) -> str:
+        """The error line of the stopped run."""
+        return (
+            f"The run stopped: the provider serves no further calls ({self.reason}). "
+            f"{self.units_left} pending unit(s) of '{self.item}' and "
+            f"{self.items_left} further item(s) were left unprocessed; a rerun "
+            "resumes them."
+        )
+
+
+@dataclass(frozen=True)
 class RunResult:
     """The outcome of a run.
 
@@ -1070,7 +1130,8 @@ class RunResult:
     of them that another run's lease held; they make the run exit 1, while
     items waiting for a batch are submitted work. *unselected* names those
     of which ``--pages`` selects no unit. *rendered* are the files rendered
-    again for complete items.
+    again for complete items. *stop* says why the run stopped before its
+    last item; the item in work is in none of the other fields.
     """
 
     items: tuple[ItemResult, ...]
@@ -1083,6 +1144,12 @@ class RunResult:
     unselected: tuple[str, ...] = ()
     blocked_reasons: tuple[str, ...] = ()
     leased: tuple[str, ...] = ()
+    stop: RunStop | None = None
+
+    @property
+    def stopped(self) -> str | None:
+        """The reason the run stopped, or None when it was not stopped."""
+        return self.stop.reason if self.stop is not None else None
 
     @property
     def total_usage(self) -> Usage:
@@ -1121,14 +1188,17 @@ class RunResult:
 
     @property
     def exit_code(self) -> ExitCode:
-        """1 when an item failed or another run's lease held one, else 0."""
+        """3 when the run stopped, 1 when an item failed or was leased, else 0."""
+        if self.stop is not None:
+            return ExitCode.STOPPED
         return exit_code_for(failed=self.failed + len(self.leased))
 
     @property
     def outputs(self) -> list[str]:
         """The paths written: files rendered again, item files, then databases."""
         items = [path for item in self.items for path in item.outputs]
-        return [*self.rendered, *items, *self.databases]
+        stopped = list(self.stop.outputs) if self.stop is not None else []
+        return [*self.rendered, *items, *stopped, *self.databases]
 
 
 def _writer_options(events: RunEvents) -> WriterOptions:
@@ -1262,6 +1332,14 @@ class _Blocked:
     reason: str
 
 
+def _pending_units(store: Store, doc_id: int) -> int:
+    """Return the pending units of the document *doc_id*; 0 when unreadable."""
+    with contextlib.suppress(StoreError, sqlite3.Error):
+        document = store.document(doc_id)
+        return document.units_pending if document is not None else 0
+    return 0
+
+
 def _changed_during_run(planned: PlannedItem) -> str | None:
     """Return why *planned*'s input no longer has its planned identity, or None.
 
@@ -1291,7 +1369,8 @@ class _ItemRun:
     *held* is the reason the item could not be leased, once :meth:`lease`
     found another run holding it; *refused* the reason its input refused it.
     *replacement* is the identity a --force run records with the units'
-    reset, when the stored units belong to another input.
+    reset, when the stored units belong to another input. *stopped* is set
+    when the provider stopped the run during the item.
     """
 
     job: Job
@@ -1300,6 +1379,7 @@ class _ItemRun:
     held: str | None = None
     refused: str | None = None
     replacement: str | None = None
+    stopped: RunStopped | None = None
 
     def _refusal(self, stored: DocumentRow | None) -> str | None:
         """Return why the stored document refuses the item's input, or None.
@@ -1455,7 +1535,11 @@ class _ItemRun:
         transcriber: Transcriber,
         pages: PageRange | None,
     ) -> tuple[tuple[str, ...], str | None]:
-        """Run the method, then render; return the outputs and the error."""
+        """Run the method, then render; return the outputs and the error.
+
+        A stopped run (:attr:`stopped`) renders the units stored so far and
+        returns no error.
+        """
         planned, job = self.planned, self.job
         spec = job.spec
         if planned.resume.note:
@@ -1491,6 +1575,8 @@ class _ItemRun:
         except NothingSelectedError as exc:
             await _note(store, doc_id, str(exc), job.events)
             raise
+        except RunStopped as exc:
+            self.stopped = exc
         except Exception as exc:
             logger.exception("Failed to process item %s: %s", planned.name, exc)
             error = bounded_error(str(exc)) or type(exc).__name__
@@ -1508,8 +1594,11 @@ async def _run_item(
     total: int,
     pages: PageRange | None,
     stores: _Stores,
-) -> ItemResult | _Blocked:
+) -> ItemResult | _Blocked | RunStop:
     """Process one item; :class:`_Blocked` when another run holds its document.
+
+    A :class:`RunStop` is returned when the provider stopped the run during
+    the item; its lease is released and no item event reports it finished.
 
     Raises:
         NothingSelectedError: ``--pages`` selects no unit of the item.
@@ -1530,6 +1619,13 @@ async def _run_item(
     finally:
         with contextlib.suppress(sqlite3.Error):
             await store.release(lease)
+    if item_run.stopped is not None:
+        return RunStop(
+            job.env.stop.reason or str(item_run.stopped),
+            planned.name,
+            units_left=_pending_units(store, doc_id),
+            outputs=outputs,
+        )
     success = error is None
     submitted = (
         success
@@ -1737,6 +1833,49 @@ async def _open_methods(
     return transcribers
 
 
+async def _process_items(  # noqa: PLR0913 - the run's shared state
+    job: Job,
+    run_plan: RunPlan,
+    transcribers: Mapping[str, Transcriber],
+    stores: _Stores,
+    held: _Held,
+    results: list[ItemResult],
+    unselected: list[str],
+) -> RunStop | None:
+    """Process the plan's items in order; return the stop that ended them early.
+
+    Each item's outcome goes to *results*, *held* or *unselected*; a stopped
+    run starts no further item.
+    """
+    total = len(run_plan.to_process)
+    for index, planned in enumerate(run_plan.to_process, start=1):
+        # An item that fails otherwise while the run stops, as by a lost lease,
+        # returns that failure and no stop.
+        if index > 1 and job.env.stop.reason is not None:
+            last = run_plan.to_process[index - 2].name
+            return RunStop(job.env.stop.reason, last, items_left=total - index + 1)
+        try:
+            result = await _run_item(
+                job,
+                transcribers[planned.method],
+                planned,
+                index,
+                total,
+                run_plan.pages,
+                stores,
+            )
+        except NothingSelectedError:
+            unselected.append(planned.name)
+            continue
+        if isinstance(result, RunStop):
+            return replace(result, items_left=total - index)
+        if isinstance(result, _Blocked):
+            held.add(planned, result)
+        else:
+            results.append(result)
+    return None
+
+
 async def run(run_plan: RunPlan, events: RunEvents | None = None) -> RunResult:
     """Process the plan's items one after another on the running event loop.
 
@@ -1752,7 +1891,11 @@ async def run(run_plan: RunPlan, events: RunEvents | None = None) -> RunResult:
     render again, counts as blocked and the run records exit code 1 like a
     failure. A failed item is logged and
     counted; the run continues with the next one. Refused items count as
-    failed. Cancellation propagates.
+    failed. Cancellation propagates. When the provider stops the run
+    (:class:`~chronotranscriber.common.retry.RunStopped`), the item in work
+    is rendered from the units stored so far and released, no further item
+    starts, and :attr:`RunResult.stop` says what was left; the run records
+    exit code 3.
 
     Raises:
         ValueError: The plan is a dry run.
@@ -1789,6 +1932,7 @@ async def run(run_plan: RunPlan, events: RunEvents | None = None) -> RunResult:
     )
     stores = _Stores(run_plan, sink)
     exit_code: int = ExitCode.FAILURE
+    stop: RunStop | None = None
     try:
         async with contextlib.AsyncExitStack() as stack:
             transcribers = await _open_methods(run_plan, job, stack)
@@ -1796,30 +1940,16 @@ async def run(run_plan: RunPlan, events: RunEvents | None = None) -> RunResult:
                 run_plan.output_dir.mkdir(parents=True, exist_ok=True)
             await _note_blocked(job, run_plan, stores)
             rendered = await _render_again(job, run_plan, stores, held, results)
-            total = len(run_plan.to_process)
-            for index, planned in enumerate(run_plan.to_process, start=1):
-                try:
-                    result = await _run_item(
-                        job,
-                        transcribers[planned.method],
-                        planned,
-                        index,
-                        total,
-                        run_plan.pages,
-                        stores,
-                    )
-                except NothingSelectedError:
-                    unselected.append(planned.name)
-                    continue
-                if isinstance(result, _Blocked):
-                    held.add(planned, result)
-                else:
-                    results.append(result)
+            stop = await _process_items(
+                job, run_plan, transcribers, stores, held, results, unselected
+            )
             for planned in run_plan.refused:
                 sink.warning(planned.reason)
                 results.append(ItemResult(planned.name, False, (), planned.reason))
         failed = any(not result.success for result in results)
         exit_code = ExitCode.FAILURE if failed or held.leased else ExitCode.OK
+        if stop is not None:
+            exit_code = ExitCode.STOPPED
     except (asyncio.CancelledError, KeyboardInterrupt):
         exit_code = ExitCode.INTERRUPTED
         raise
@@ -1838,4 +1968,5 @@ async def run(run_plan: RunPlan, events: RunEvents | None = None) -> RunResult:
         unselected=tuple(unselected),
         blocked_reasons=tuple(held.reasons),
         leased=tuple(held.leased),
+        stop=stop,
     )

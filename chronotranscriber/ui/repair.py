@@ -26,7 +26,7 @@ from chronotranscriber.batch.repair import (
     run_repairs,
 )
 from chronotranscriber.common.batch import supports_batch
-from chronotranscriber.common.contract import ExitCode, exit_code_for
+from chronotranscriber.common.contract import ExitCode
 from chronotranscriber.common.wizard import (
     BACK,
     DONE,
@@ -338,7 +338,7 @@ def _run(request: RunRequest) -> int:
         with RichProgress(request.console) as progress:
             result = asyncio.run(run_repairs(repairs, progress))
     request.console.print(repair_result(spec, result))
-    return int(exit_code_for(failed=result.failed))
+    return int(result.exit_code)
 
 
 def flow() -> TaskFlow:

@@ -24,7 +24,11 @@ the units (their responses stay), or through the provider's batch API with
 :func:`~chronotranscriber.batch.submit.submit_units`, a wait on the
 submissions and :func:`~chronotranscriber.batch.finalize.finalize_submission`.
 Every unit is written in a transaction that checks the lease; the
-document's files are then rendered again from the store.
+document's files are then rendered again from the store. When the provider
+stops a synchronous repair
+(:class:`~chronotranscriber.common.retry.RunStopped`), the pages not yet
+written stay pending, the document is rendered and no further document is
+repaired.
 """
 
 from __future__ import annotations
@@ -58,6 +62,7 @@ from chronotranscriber.batch.submit import (
 from chronotranscriber.batch.wait import wait_for_submissions
 from chronotranscriber.common.batch import BatchRequest, supports_batch
 from chronotranscriber.common.contract import ExitCode, exit_code_for
+from chronotranscriber.common.retry import RunStopped
 from chronotranscriber.common.sqlite import read
 from chronotranscriber.common.store import (
     LeaseLostError,
@@ -224,6 +229,10 @@ class RepairResult:
     the documents with pages to repair; *message* explains a repair that
     ended before any page was sent. *usage* holds the tokens of the repair
     calls, or of the finalized repair batches, under the ``repair`` role.
+    *stopped* is the reason the provider stopped the repair of the document
+    *stopped_document*, whose *left* pages it had reset stay pending, before
+    *documents_left* further documents; the pending pages count neither
+    repaired nor failed.
     """
 
     repaired: int = 0
@@ -237,6 +246,30 @@ class RepairResult:
     documents: int = 0
     databases: tuple[Path, ...] = ()
     usage: dict[str, Usage] = field(default_factory=dict)
+    stopped: str | None = None
+    stopped_document: str | None = None
+    left: int = 0
+    documents_left: int = 0
+
+    @property
+    def exit_code(self) -> ExitCode:
+        """3 when the repair stopped, 1 when a page stayed unrepaired, else 0."""
+        if self.stopped is not None:
+            return ExitCode.STOPPED
+        return exit_code_for(failed=self.failed)
+
+    @property
+    def stop_message(self) -> str | None:
+        """The error line of a stopped repair, or None."""
+        if self.stopped is None:
+            return None
+        return (
+            "The repair stopped: the provider serves no further calls "
+            f"({self.stopped}). {self.left} page(s) of '{self.stopped_document}' "
+            f"were left pending and {self.documents_left} further document(s) "
+            "unrepaired; a rerun resumes them (transcribe takes up the pending "
+            "pages, repair the documents not started)."
+        )
 
 
 @dataclass
@@ -989,7 +1022,10 @@ async def _stream(pages: Sequence[PageImage]) -> AsyncIterator[PageImage]:
 
 @dataclass
 class _Session:
-    """One repair of one leased document; *usage* sums its tokens by role."""
+    """One repair of one leased document; *usage* sums its tokens by role.
+
+    *stopped* is set when the provider stopped the synchronous repair.
+    """
 
     plan: RepairPlan
     store: Store
@@ -997,6 +1033,7 @@ class _Session:
     events: RunEvents
     clients: BatchClients | None = None
     usage: UsageTotals = field(default_factory=UsageTotals)
+    stopped: RunStopped | None = None
 
     @property
     def images(self) -> ImageSettings:
@@ -1012,7 +1049,11 @@ class _Session:
         self.events.warning(message)
 
     async def sync(self, pages: Sequence[PageImage]) -> bool:
-        """Transcribe *pages* one call each; return True (units were written)."""
+        """Transcribe *pages* one call each; return True (units were written).
+
+        A stopped run is kept in :attr:`stopped`; the pages not written stay
+        pending.
+        """
         plan = self.plan
         await self.handle.reset(self.idxs)
         env = CallEnv.create(plan.settings, self.events)
@@ -1043,6 +1084,8 @@ class _Session:
             )
         except UnitsFailedError as exc:
             logger.info("Repair of '%s': %s", self.handle.name, exc)
+        except RunStopped as exc:
+            self.stopped = exc
         finally:
             await transcriber.close()
             for role in env.usage.roles:
@@ -1197,13 +1240,21 @@ class _Session:
 
     def count(self, result: RepairResult) -> None:
         wanted = set(self.idxs)
-        repaired = sum(
-            1
+        units = [
+            unit
             for unit in self.store.units(self.handle.doc_id, kind=self.handle.kind)
-            if unit.idx in wanted and unit.status == "done" and unit.outcome == "ok"
+            if unit.idx in wanted
+        ]
+        repaired = sum(
+            1 for unit in units if unit.status == "done" and unit.outcome == "ok"
         )
         result.repaired = repaired
         result.failed = len(wanted) - repaired
+        if self.stopped is not None:
+            result.stopped = str(self.stopped)
+            result.stopped_document = self.handle.name
+            result.left = sum(1 for unit in units if unit.status == "pending")
+            result.failed -= result.left
 
 
 def _writer_options(events: RunEvents) -> WriterOptions:
@@ -1321,7 +1372,7 @@ async def run_repair(plan: RepairPlan, events: RunEvents | None = None) -> Repai
         exit_code = int(ExitCode.FAILURE)
         try:
             await _repair(store, plan, result, sink)
-            exit_code = int(exit_code_for(failed=result.failed))
+            exit_code = int(result.exit_code)
         finally:
             try:
                 await store.end_run(exit_code)
@@ -1335,7 +1386,8 @@ async def run_repairs(
 ) -> RepairResult:
     """Repair the documents of *repairs* one after another; sum their results.
 
-    A set with nothing to do, or a dry run, returns its outcome.
+    A set with nothing to do, or a dry run, returns its outcome. A repair
+    the provider stopped starts no further document.
     """
     result = repairs.outcome()
     if not repairs.to_repair or repairs.dry_run:
@@ -1344,7 +1396,7 @@ async def run_repairs(
     databases: list[Path] = []
     outputs: list[Path] = []
     usage = UsageTotals()
-    for plan in repairs.plans:
+    for number, plan in enumerate(repairs.plans, start=1):
         done = await run_repair(plan, events)
         result.repaired += done.repaired
         result.failed += done.failed
@@ -1356,6 +1408,12 @@ async def run_repairs(
         result.usage = {role: usage.get(role) for role in usage.roles}
         if done.message is not None and result.message is None:
             result.message = done.message
+        if done.stopped is not None:
+            result.stopped = done.stopped
+            result.stopped_document = done.stopped_document
+            result.left = done.left
+            result.documents_left = len(repairs.plans) - number
+            break
     result.databases = tuple(dict.fromkeys(databases))
     result.database = result.databases[0] if result.databases else None
     result.outputs = tuple(outputs)

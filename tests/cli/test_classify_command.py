@@ -19,8 +19,9 @@ import pytest
 from PIL import Image
 
 from chronotranscriber import __main__ as entry
-from chronotranscriber import classify
+from chronotranscriber import classify, ext
 from chronotranscriber.common.classifiers import load_classifier
+from chronotranscriber.common.retry import Decision
 from chronotranscriber.common.store import PlannedUnit, file_sha256
 from chronotranscriber.output.store import KIND_PAGE, database_path, open_store
 from chronotranscriber.run import item_location
@@ -38,10 +39,14 @@ SHIPPED = {
 
 
 class FakeDecisions:
-    """Answer every question of an OpenRouter decision body; keep the bodies."""
+    """Answer every question of an OpenRouter decision body; keep the bodies.
+
+    The request numbered *unavailable* (from 1) is answered with a 503.
+    """
 
     def __init__(self) -> None:
         self.bodies: list[dict[str, Any]] = []
+        self.unavailable: int | None = None
 
     def answer(self, question: dict[str, Any]) -> dict[str, Any]:
         if question["type"] == "choice":
@@ -54,6 +59,8 @@ class FakeDecisions:
     def handle(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
         self.bodies.append(body)
+        if len(self.bodies) == self.unavailable:
+            return httpx.Response(503, json={"error": {"message": "unavailable"}})
         answers = {
             name: self.answer(question) for name, question in body["questions"].items()
         }
@@ -366,6 +373,36 @@ def test_force_asks_again_instead_of_reusing(
     assert (forced["units_asked"], forced["units_reused"]) == (2, 0)
     assert len(decisions.bodies) == 2
     assert {row["reused"] for row in _view(out)} == {0}
+
+
+def test_a_stopped_run_sends_no_further_request_and_a_rerun_resumes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], decisions: FakeDecisions
+) -> None:
+    folder = tmp_path / "in"
+    for name in ("a.pdf", "b.pdf"):
+        make_scanned_pdf(folder / name, pages=5)
+    out = tmp_path / "out"
+    path = _classifier(tmp_path, "The page is a title page.")
+    argv = ("pages", "--input", str(folder), "--all", "--output", str(out))
+    decisions.unavailable = 2
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(ext.Attempt, "on_error", lambda self, exc: Decision.STOP)
+        code, payload = _run(capsys, *argv, "--classifier", str(path))
+
+    assert code == 3, payload
+    assert "503" in payload["stopped"]
+    assert (payload["units_asked"], payload["units_failed"]) == (2, 0)
+    assert payload["items_failed"] == 0
+    assert len(decisions.bodies) == 2
+    assert len(_view(out)) == 2
+
+    decisions.unavailable = None
+    code, payload = _run(capsys, *argv, "--classifier", str(path))
+
+    assert code == 0, payload
+    assert payload["stopped"] is None
+    assert (payload["units_reused"], payload["units_asked"]) == (2, 8)
 
 
 async def _seed(out: Path, name: str, sha256: str) -> None:

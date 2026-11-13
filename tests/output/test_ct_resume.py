@@ -40,6 +40,7 @@ from chronotranscriber.output.store import (
     classify,
     image_settings_record,
     open_store,
+    store_reader,
 )
 from tests.output.test_ct_store import MODEL, NAME, Unit, page, seed_document
 
@@ -308,6 +309,36 @@ def test_classify(tmp_path: Path, name: str) -> None:
     else:
         assert result.note is None
     assert _fingerprint(tmp_path) == before
+
+
+def test_one_reader_classifies_the_items_of_a_root(tmp_path: Path) -> None:
+    seeded(PAGES_RUN, sql=_lease("other-run", 600))(tmp_path)
+    items = [(NAME, [_output(tmp_path)]), ("missing-1/missing", []), (NAME, [])]
+    expected = [
+        classify(tmp_path, document, outputs=outputs, holder=HOLDER)
+        for document, outputs in items
+    ]
+
+    with store_reader(tmp_path) as reader:
+        results = [
+            reader.classify(document, outputs=outputs, holder=HOLDER)
+            for document, outputs in items
+        ]
+
+    assert results == expected
+    assert [result.state for result in results] == [
+        ItemState.BLOCKED,
+        ItemState.NONE,
+        ItemState.BLOCKED,
+    ]
+
+
+def test_a_reader_of_a_root_without_database_finds_nothing(tmp_path: Path) -> None:
+    with store_reader(tmp_path) as reader:
+        assert reader.classify(NAME).state is ItemState.NONE
+        assert reader.page_labels(1) == {}
+
+    assert not (tmp_path / DATABASE_NAME).exists()
 
 
 def test_a_missing_file_is_listed_for_rendering(tmp_path: Path) -> None:

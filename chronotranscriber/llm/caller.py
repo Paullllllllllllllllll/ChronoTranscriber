@@ -46,6 +46,7 @@ from chronotranscriber.common.retry import (
     ErrorKind,
     RetryEvent,
     RetryHooks,
+    StopSignal,
     call_with_retry,
     classify_error,
 )
@@ -161,13 +162,17 @@ class CallEnv:
     """What the model calls of one run share.
 
     *limiters* holds one rate limiter per provider, *usage* the token totals
-    per role, and *events* receives the retry waits.
+    per role, and *events* receives the retry waits. *stop* is the run's stop
+    signal: once a call's ``STOP`` decision sets it, every call of the run
+    raises :class:`~chronotranscriber.common.retry.RunStopped` before its
+    next attempt.
     """
 
     settings: Settings = field(default_factory=Settings)
     limiters: RateLimiterRegistry = field(default_factory=RateLimiterRegistry)
     usage: UsageTotals = field(default_factory=UsageTotals)
     events: RunEvents = field(default_factory=NullEvents)
+    stop: StopSignal = field(default_factory=StopSignal)
 
     @classmethod
     def create(
@@ -180,6 +185,7 @@ class CallEnv:
             limiters=RateLimiterRegistry(settings.rate_limits),
             usage=UsageTotals(),
             events=events or NullEvents(),
+            stop=StopSignal(),
         )
 
     def record(self, role: str, usage: Usage) -> None:
@@ -307,6 +313,7 @@ class ModelCaller:
 
         Raises:
             PageTimeoutError: The call ran past the page deadline.
+            RunStopped: The provider serves no further calls of this run.
         """
         numbers = itertools.count(1)
         watchdog = None if self.deadline is None else asyncio.timeout(self.deadline)
@@ -363,7 +370,7 @@ class ModelCaller:
         numbers: Iterator[int] | None = None,
         deadline: _Deadline | None = None,
     ) -> Any:
-        decisions = AttemptDecisions()
+        decisions = AttemptDecisions(self.env.stop)
         timeouts = 0
         counter = numbers if numbers is not None else itertools.count(1)
         clock = deadline if deadline is not None else _Deadline()
@@ -439,6 +446,7 @@ class ModelCaller:
             on_retry=report,
             gate=self.env.limiters.get(self.provider),
             sleep=sleep,
+            stop=self.env.stop,
         )
         return await call_with_retry(
             one_attempt,

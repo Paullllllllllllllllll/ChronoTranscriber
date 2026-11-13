@@ -4,7 +4,8 @@
 with the LLM transcriber; :func:`transcribe_audio_payload` one audio chunk
 through the remote speech-to-text venue. Both return a
 :data:`~chronotranscriber.methods.units.PayloadResult` and turn a failure
-into the error placeholder instead of raising.
+into the error placeholder instead of raising; a stopped run
+(:class:`~chronotranscriber.common.retry.RunStopped`) is raised.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from chronotranscriber.common.retry import RunStopped
 from chronotranscriber.llm.response_parsing import extract_transcribed_text
 from chronotranscriber.methods.units import PayloadResult
 
@@ -50,6 +52,8 @@ async def transcribe_payload(payload: Any, transcriber: Any) -> PayloadResult:
         result = await transcriber.transcribe_image_from_base64(
             payload.base64, payload.mime_type, label=image_name
         )
+    except RunStopped:
+        raise
     except Exception as exc:
         logger.exception("Error transcribing %s: %s", image_name, exc)
         return (payload, image_name, _error_text(image_name), None, payload.index)
@@ -62,6 +66,8 @@ async def transcribe_audio_payload(payload: Any, transcriber: Any) -> PayloadRes
     image_name = payload.image_name
     try:
         result = await transcriber.transcribe_audio_chunk(payload)
+    except RunStopped:
+        raise
     except Exception as exc:
         logger.exception("Error transcribing %s: %s", image_name, exc)
         return (payload, image_name, _error_text(image_name), None, payload.index)

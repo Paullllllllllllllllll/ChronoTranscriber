@@ -19,7 +19,9 @@ parses::
 
 An empty transcript is reported as the shared ``[No transcribable text]``
 placeholder, and a failure returns the dict with ``error`` set instead of
-raising, so the item records a placeholder for the chunk and goes on.
+raising, so the item records a placeholder for the chunk and goes on. A
+stopped run (:class:`~chronotranscriber.common.retry.RunStopped`) is raised
+instead: the chunk was not transcribed.
 
 Every OpenAI request runs inside :func:`chronotranscriber.ext.attempt`,
 retried by :func:`~chronotranscriber.common.retry.call_with_retry` with the
@@ -46,7 +48,12 @@ from chronotranscriber import ext
 from chronotranscriber.common.capture import async_capture_hooks, redact_payloads
 from chronotranscriber.common.http_timeouts import build_httpx_timeout
 from chronotranscriber.common.responses import unwrap_raw_response
-from chronotranscriber.common.retry import RetryEvent, RetryHooks, call_with_retry
+from chronotranscriber.common.retry import (
+    RetryEvent,
+    RetryHooks,
+    RunStopped,
+    call_with_retry,
+)
 from chronotranscriber.common.structured import StructuredRequest, StructuredResult
 from chronotranscriber.common.usage import Usage
 from chronotranscriber.events import Waiting
@@ -126,7 +133,11 @@ class AudioBackend(Protocol):
     async def transcribe_audio_chunk(
         self, payload: AudioChunkPayload
     ) -> dict[str, Any]:
-        """Transcribe one chunk; a failure is reported in the ``error`` key."""
+        """Transcribe one chunk; a failure is reported in the ``error`` key.
+
+        Raises:
+            RunStopped: The provider serves no further calls of this run.
+        """
         ...
 
     async def close(self) -> None:
@@ -333,7 +344,7 @@ class OpenAIAudioBackend:
         Each attempt's record goes to the recorder in the context, if any,
         before the next attempt is sent.
         """
-        decisions = AttemptDecisions()
+        decisions = AttemptDecisions(self.env.stop)
         numbers = itertools.count(1)
 
         async def one_attempt() -> Any:
@@ -370,6 +381,7 @@ class OpenAIAudioBackend:
             on_error=decisions.decide,
             on_retry=self._report_retry,
             gate=self.env.limiters.get(self.provider_name),
+            stop=self.env.stop,
         )
         return await call_with_retry(
             one_attempt, policy=self._policy, hooks=hooks, label=label
@@ -404,6 +416,8 @@ class OpenAIAudioBackend:
             data = await payload.read_bytes()
             kwargs = self.request_kwargs(payload.image_name, data, payload.mime_type)
             response = await self._request(kwargs, payload.image_name)
+        except RunStopped:
+            raise
         except Exception as exc:  # noqa: BLE001 - a failed chunk returns an error dict
             logger.error(
                 "OpenAI audio transcription failed for %s: %s", payload.image_name, exc
@@ -570,6 +584,8 @@ class GoogleAudioBackend:
                 request,
                 label=payload.image_name,
             )
+        except RunStopped:
+            raise
         except Exception as exc:  # noqa: BLE001 - a failed chunk returns an error dict
             logger.error(
                 "Gemini audio transcription failed for %s: %s", payload.image_name, exc

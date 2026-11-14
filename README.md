@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.12.1
+# ChronoTranscriber v1.13.0
 
 <img src="assets/logo.svg" alt="ChronoTranscriber logo" width="64" align="right">
 
@@ -92,7 +92,8 @@ option given twice keeps the values of both.
 | `--beside-input` | write outputs beside each input | | no |
 | `--layout {hash,mirror}` | output folder layout: hash (one hash-suffixed folder per item) or mirror (the input folder tree) | hash | yes |
 | `--formats LIST` | comma-separated output formats; from txt, md | txt | yes |
-| `--schema NAME\|PATH` | transcription schema: a name found in schemas/ or a path | markdown_transcription_schema | yes |
+| `--schema NAME\|PATH` | transcription schema: a file path, or the file name without .json or the name field of a schema in the --schemas-dir folders, the settings' schemas_dirs or schemas/ | markdown_transcription_schema | yes |
+| `--schemas-dir DIR` | folder of schemas, searched for --schema before the settings' schemas_dirs and schemas/; repeatable | | no |
 | `--prompt PATH\|default` | system prompt file, or default (the prompt of the response format) | default | yes |
 | `--context TEXT\|PATH\|auto\|none` | transcription context: topics as text or a path to a text file (overrides sidecars), auto (the item's sidecar) or none (no context) | auto | yes |
 | `--fallback-context TEXT\|PATH\|none` | transcription context for items without a sidecar under --context auto: topics as text, a path to a text file, or none | none | yes |
@@ -298,6 +299,7 @@ one item). A stopped run lets the requests in flight finish.
 | `--beside-input` | write outputs beside each input | | no |
 | `--layout {hash,mirror}` | output folder layout: hash (one hash-suffixed folder per item) or mirror (the input folder tree) | hash | yes |
 | `--classifier NAME\|PATH` | classifier: a file path, a file name in the classifier folder without .json, or the name field of a classifier there | required | no |
+| `--classifiers-dir DIR` | folder of classifiers, searched for --classifier before the settings' classifiers_dirs and classifiers/; repeatable | | no |
 | `--decision-model ID` | decision model id | typesafe/jev-1.14 | yes |
 | `--decision-provider {openai,openrouter}` | decision API dialect | from the model id | yes |
 | `--decision-endpoint URL` | decision endpoint URL | the provider's | yes |
@@ -325,6 +327,7 @@ the pages it sends are the classifier's selection.
 | `--beside-input` | write outputs beside each input | | no |
 | `--layout {hash,mirror}` | output folder layout: hash (one hash-suffixed folder per item) or mirror (the input folder tree) | hash | yes |
 | `--classifier NAME\|PATH` | classifier: a file path, a file name in the classifier folder without .json, or the name field of a classifier there | required | no |
+| `--classifiers-dir DIR` | folder of classifiers, searched for --classifier before the settings' classifiers_dirs and classifiers/; repeatable | | no |
 | `--decision-model ID` | decision model id | typesafe/jev-1.14 | yes |
 | `--decision-provider {openai,openrouter}` | decision API dialect | from the model id | yes |
 | `--decision-endpoint URL` | decision endpoint URL | the provider's | yes |
@@ -339,6 +342,7 @@ the pages it sends are the classifier's selection.
 
 | Flag | Description | Default | In `defaults:` |
 | --- | --- | --- | --- |
+| `--schemas-dir DIR` | folder of schemas, searched for --schema before the settings' schemas_dirs and schemas/; repeatable | | no |
 | `--settings FILE` | alternate settings file | config/settings.yaml | no |
 
 ## Exit Codes and JSON Summary
@@ -605,6 +609,13 @@ state_dir: ''
 # repository.
 logs_dir: ''
 
+# Folders of schemas and classifiers, searched in order after the
+# --schemas-dir and --classifiers-dir folders and before the repository's
+# schemas/ and classifiers/. A file shadows the repository's file of the same
+# name; a name found in two such folders (flag or settings) is an error.
+schemas_dirs: []
+classifiers_dirs: []
+
 # Run defaults keyed by option name; flags override them.
 defaults:
   # Context for items without a _transcr_context sidecar: the repository's
@@ -732,11 +743,18 @@ downscale reason `memory_guard`.
 
 Image folders hold JPEG, PNG, TIFF, BMP, GIF, WebP, JPEG 2000 (`.jp2`, `.j2k`),
 PBM, PGM or PPM files in natural sort order; MOBI covers `.mobi`, `.azw`, `.azw3`
-and `.kfx`. `--schema` names a schema in `schemas/`
-(`markdown_transcription_schema`, `plain_text_transcription_schema`,
-`plain_text_transcription_with_markers_schema`) or a path to your own with the
-fields `transcription`, `no_transcribable_text` and `transcription_not_possible`.
-The default schema prompt states no transcription rules of its own and points the
+and `.kfx`. `--schema` takes a path to a schema file, else a file name without
+`.json` or a schema's `name` field, looked up first in the `--schemas-dir`
+folders, then in the folders of the settings key `schemas_dirs`, then in the
+repository's `schemas/` (`markdown_transcription_schema`,
+`plain_text_transcription_schema`,
+`plain_text_transcription_with_markers_schema`). A file in one of these user
+folders hides the file of the same file name in `schemas/`, and a name that
+matches files in two user folders is an error that names both files; a folder
+given twice is searched once, and a `--schemas-dir` folder must exist. A schema
+needs the fields `transcription`, `no_transcribable_text` and
+`transcription_not_possible`; one found by name without them is an error. The
+default schema prompt states no transcription rules of its own and points the
 model to the schema's field descriptions, so a schema of your own carries its
 rules there.
 
@@ -811,14 +829,15 @@ the decision pre-pass under a `profile`, page units only). `per_request` (defaul
 
 1) groups up to that many pages into one request, at most 20 images; a document
 classifier sets `selection.first_pages` (at most 20). `--classifier` takes a path,
-else the stem of a file in the repository's `classifiers/` folder, else the `name`
-of a classifier there. The repository ships `page_kind` (the general page types),
-`script_and_hand` (printed roman, printed italic, blackletter, handwritten, mixed
-or no text), `language` (the main European languages and Latin, other, or none),
-`layout` (single column, multi-column, table or list, structured, or no text; its
-description names the schema that suits each) and `document_type` (printed book,
-periodical, manuscript or letter, account book, register or list, printed form or
-ephemera, or other).
+else the stem of a file or the `name` of a classifier, looked up as `--schema`
+is: in the `--classifiers-dir` folders, then in the settings' `classifiers_dirs`,
+then in the repository's `classifiers/` folder. The repository ships `page_kind`
+(the general page types), `script_and_hand` (printed roman, printed italic,
+blackletter, handwritten, mixed or no text), `language` (the main European
+languages and Latin, other, or none), `layout` (single column, multi-column,
+table or list, structured, or no text; its description names the schema that
+suits each) and `document_type` (printed book, periodical, manuscript or letter,
+account book, register or list, printed form or ephemera, or other).
 
 Pages are rendered as `transcribe` renders them for the default model, then
 downscaled to `decisions.image_max_px` and sent with the document name as
@@ -889,7 +908,8 @@ sidecars `{stem}_transcr_context.*` are inputs and are never written.
 ## Store
 
 Every output root holds one `chronotranscriber.sqlite`, written by every run: the
-runs with tool version and effective spec, the prompt, schema and context texts,
+runs with tool version and effective spec (and the hash of the schema an LLM
+run sends, see [Resume](#resume)), the prompt, schema and context texts,
 the documents and their units, every provider attempt verbatim, the batch
 submissions and the registry of rendered files. Readers outside the tool use the
 documented views, which stay stable; the tables behind them may change.
@@ -1028,7 +1048,10 @@ first rendered with and transcribes them synchronously or with `--batch`. A
 document without recorded image settings, or recorded for another model, is
 rendered with the current settings, and its requests carry the detail of those
 settings (for Gemini, the media resolution). The stored responses stay, and the documents'
-files are rendered again. A dry run plans without the API key variables.
+files are rendered again. A dry run plans without the API key variables. A
+document whose other done pages were transcribed under another schema than the
+repair's is refused (see [Resume](#resume)); pass the earlier schema with
+`--schema` to repair it.
 
 ## Resume
 
@@ -1041,7 +1064,7 @@ Resume is the default and reads only the store; a dry run shows each item's stat
 | `complete` | no pending or failed units (failed units count as done under `--no-retry-errors`) | skip; missing or stale files are rendered again without calls (a run that writes units marks every rendered file of the document stale and renders only its own formats; a file the store holds no record of counts as stale) |
 | `unstored` | a rendered file exists without store rows, such as a hand-edited file `drop` kept | skip and list; `--force` redoes it |
 | `blocked` | another live run holds the item, or its pages wait for a batch | skip; a held item makes the run exit 1 |
-| `refused` | the input changed since it was transcribed, its identity cannot be computed, or units remain but the stored pages used other image settings | not processed, counted as failed; `--force` starts it over, except for an unreadable input |
+| `refused` | the input changed since it was transcribed, its identity cannot be computed, or units remain but the stored pages used other image settings or another schema | not processed, counted as failed; `--force` starts it over, except for an unreadable input |
 
 Besides the reset its option row describes, `--force` deletes the units another
 method stored (for example the `text` units of `native`), and with `--pages` it
@@ -1082,6 +1105,22 @@ format the run does not write is rendered again by the next run that asks for
 it. An open or unresolved batch submission that holds any unit of the document
 refuses the replacement. A forced run whose `--pages` selects nothing changes
 none of this.
+
+An LLM run that sends a schema records its SHA-256 as the entry `schema_sha256`
+of its record in the `runs` table (`spec`), the hash under which the store keeps
+the schema text in `artifacts`. A page's schema is the hash recorded by the run
+that sent its request: for a page answered in a batch, the run that submitted
+the batch. A run that would write pages of a document while leaving in place a
+done page whose recorded hash differs from its own schema is refused for that
+document, with both hashes named: a resume of a partial document, also one
+under `--retry-errors` that retries failed pages, and a `repair` whose selected
+pages leave such a page in place, also in a complete document. A repair that
+selects every page of the other schema is not refused. `--force` replaces the
+document and is never refused; to keep the pages, restore the earlier schema
+instead. Pages of runs that recorded no hash (earlier versions, the text
+response format, methods without a model) and pages the decision pre-pass
+skipped have no known schema and never refuse a run. The check runs while the
+run plans and again once it holds the document's lease.
 
 ## Agent Skill
 

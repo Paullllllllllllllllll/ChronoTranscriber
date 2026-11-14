@@ -150,12 +150,15 @@ def run_app(
 ) -> int:
     """Run the wizard, then the chosen task, and return the exit code.
 
-    *args* holds the parsed ``ui`` arguments for the extension (default:
-    none); *console* shows messages, the run screen and the summary
-    (default: stderr); *stdout* receives the copied command; *clipboard*
-    runs the clipboard program; *environ* is where the review looks up API
-    key variables. ``require_tty=False`` skips the terminal check.
+    *args* holds the parsed ``ui`` arguments (default: none): their
+    ``--schemas-dir`` folders are searched before the settings'
+    ``schemas_dirs``, and the extension reads its own. *console* shows
+    messages, the run screen and the summary (default: stderr); *stdout*
+    receives the copied command; *clipboard* runs the clipboard program;
+    *environ* is where the review looks up API key variables.
+    ``require_tty=False`` skips the terminal check.
     """
+    schemas_dirs: tuple[Path, ...] = tuple(getattr(args, "schemas_dir", None) or ())
     if require_tty and not _interactive():
         sys.stderr.write(NOT_INTERACTIVE + "\n")
         return int(ExitCode.USAGE)
@@ -169,10 +172,11 @@ def run_app(
             return int(ExitCode.USAGE)
         held = _HeldLog(settings)
         session = Session(
-            settings,
+            settings.with_folders(schemas_dirs),
             settings_path,
             environ if environ is not None else os.environ,
             args,
+            schemas_dirs,
         )
         return _guided(
             session,

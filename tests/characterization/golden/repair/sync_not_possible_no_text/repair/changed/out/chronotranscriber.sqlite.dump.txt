@@ -574,6 +574,10 @@
     "run.sync_fallback": {
       "source": "default",
       "value": false
+    },
+    "schema_sha256": {
+      "source": "computed",
+      "value": "8b93f21affce91a798484db57326afb8a3b28d3732a4cd296acaa85594a2a383"
     }
   },
   "started_at": "<datetime>",
@@ -706,6 +710,10 @@
     "run.json": {
       "source": "flag",
       "value": true
+    },
+    "schema_sha256": {
+      "source": "computed",
+      "value": "8b93f21affce91a798484db57326afb8a3b28d3732a4cd296acaa85594a2a383"
     },
     "selection.causes": {
       "source": "flag",

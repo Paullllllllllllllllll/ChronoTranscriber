@@ -222,10 +222,11 @@ class PageTranscriber:
     """Transcribe page images with the run's model.
 
     The system prompt is ``prompt_path``, else the schema prompt (rendered
-    with the schema of ``schema_path``) or, for the text format, the
-    plain-text prompt. ``image_detail`` is the requested detail of the page
-    and context images; OpenAI and OpenRouter keep only the tiers the model
-    takes. ``context`` is the context text until :meth:`update_context`.
+    with the schema ``schema_text``, else the schema of ``schema_path``) or,
+    for the text format, the plain-text prompt. ``image_detail`` is the
+    requested detail of the page and context images; OpenAI and OpenRouter
+    keep only the tiers the model takes. ``context`` is the context text
+    until :meth:`update_context`.
 
     Raises:
         FileNotFoundError: The prompt or schema file is missing.
@@ -242,6 +243,7 @@ class PageTranscriber:
         image_detail: str | None = None,
         context: str | None = None,
         role: str = ROLE,
+        schema_text: str | None = None,
     ) -> None:
         self.provider = model.provider
         self.model_name = model.model
@@ -253,7 +255,7 @@ class PageTranscriber:
         )
         self.settings = env.settings
         self.schema: dict[str, Any] | None = None
-        self._base_prompt = self._load_prompt(prompt_path, schema_path)
+        self._base_prompt = self._load_prompt(prompt_path, schema_path, schema_text)
         self.response_format = fit_response_format(
             self.provider, self.response_format, self.schema
         )
@@ -268,7 +270,12 @@ class PageTranscriber:
         """Whether the model answers in plain text (the text format)."""
         return self.response_format == "text"
 
-    def _load_prompt(self, prompt_path: Path | None, schema_path: Path | None) -> str:
+    def _load_prompt(
+        self,
+        prompt_path: Path | None,
+        schema_path: Path | None,
+        schema_text: str | None,
+    ) -> str:
         default = PLAIN_PROMPT_PATH if self.plain_text else SCHEMA_PROMPT_PATH
         path = Path(prompt_path) if prompt_path is not None else default
         if not path.exists():
@@ -276,11 +283,14 @@ class PageTranscriber:
         raw = path.read_text(encoding="utf-8").strip()
         if self.plain_text:
             return raw
-        schema_file = Path(schema_path) if schema_path else DEFAULT_SCHEMA_PATH
-        if not schema_file.exists():
-            raise FileNotFoundError(f"Schema file missing: {schema_file}")
-        with schema_file.open("r", encoding="utf-8") as handle:
-            loaded = json.load(handle)
+        if schema_text is not None:
+            loaded = json.loads(schema_text)
+        else:
+            schema_file = Path(schema_path) if schema_path else DEFAULT_SCHEMA_PATH
+            if not schema_file.exists():
+                raise FileNotFoundError(f"Schema file missing: {schema_file}")
+            with schema_file.open("r", encoding="utf-8") as handle:
+                loaded = json.load(handle)
         self.schema = wrapped_schema(loaded)
         return render_prompt_with_schema(raw, loaded)
 

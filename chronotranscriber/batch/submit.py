@@ -563,8 +563,12 @@ async def submit_batch(
     schema_path: Path | None,
     context: str | None = None,
     context_image: Path | None = None,
+    schema_text: str | None = None,
 ) -> SubmitOutcome:
     """Submit the rendered pages of one document to the batch API of *spec*.
+
+    *schema_text* is the schema the run read at planning; without it the
+    file *schema_path* is read.
 
     The pages are taken as they render, in slices whose page images hold at
     most :data:`SLICE_BYTES` (:func:`_slices`); each slice is recorded,
@@ -600,6 +604,7 @@ async def submit_batch(
             context=context,
             context_image=context_image,
             detail=detail,
+            schema_text=schema_text,
         )
     except (OSError, ValueError) as exc:
         raise BatchSubmissionError(f"Cannot build the batch requests: {exc}") from exc

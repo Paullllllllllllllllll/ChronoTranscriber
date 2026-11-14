@@ -125,6 +125,7 @@ class LlmTranscriber:
             prompt_path=spec.prompt.prompt,
             image_detail=spec.images.detail,
             role=ROLE,
+            schema_text=self.job.schema_text,
         )
 
     async def close(self) -> None:
@@ -377,6 +378,7 @@ class LlmTranscriber:
                 schema_path=self.job.schema_path,
                 context=item.context,
                 context_image=item.context_image,
+                schema_text=self.job.schema_text,
             )
         finally:
             await payloads.aclose()

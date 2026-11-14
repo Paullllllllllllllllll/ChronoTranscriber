@@ -117,9 +117,11 @@ class BodyPlan:
         return batch_body(self.plan, self.system_prompt, parts, self._enforced())
 
 
-def _read_schema(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as handle:
-        loaded = json.load(handle)
+def _read_schema(path: Path, text: str | None = None) -> dict[str, Any]:
+    """Return the schema object of *text*, else of the file *path*."""
+    if text is None:
+        text = path.read_text(encoding="utf-8")
+    loaded = json.loads(text)
     if not isinstance(loaded, dict):
         raise ValueError(f"Schema file {path} does not hold a JSON object")
     return loaded
@@ -134,11 +136,13 @@ def build_plan(
     context: str | None = None,
     context_image: Path | None = None,
     detail: str | None = None,
+    schema_text: str | None = None,
 ) -> BodyPlan:
     """Return the body plan of a submission for *model*.
 
     *prompt_path* (``--prompt``) replaces the prompt of the response format;
-    *schema_path* defaults to the markdown schema.
+    *schema_text* is the schema the run read at planning, else the file
+    *schema_path* is read, by default the markdown schema.
 
     Raises:
         ValueError: The provider has no batch API, or the schema is invalid.
@@ -155,7 +159,7 @@ def build_plan(
     raw_prompt = prompt_path.read_text(encoding="utf-8").strip()
     schema: dict[str, Any] | None = None
     if response_format != "text":
-        schema = _read_schema(schema_path or DEFAULT_SCHEMA_PATH)
+        schema = _read_schema(schema_path or DEFAULT_SCHEMA_PATH, schema_text)
         response_format = fit_response_format(model.provider, response_format, schema)
     image: tuple[str, str] | None = None
     if context_image is not None and context_image.exists():

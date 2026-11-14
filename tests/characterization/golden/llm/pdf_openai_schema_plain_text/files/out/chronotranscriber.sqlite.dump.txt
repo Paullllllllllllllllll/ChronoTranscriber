@@ -453,6 +453,10 @@
     "run.sync_fallback": {
       "source": "default",
       "value": false
+    },
+    "schema_sha256": {
+      "source": "computed",
+      "value": "5b1dd9a66fd48da62ce728d6417dce3b1832e02736af557468b556c89efec93c"
     }
   },
   "started_at": "<datetime>",

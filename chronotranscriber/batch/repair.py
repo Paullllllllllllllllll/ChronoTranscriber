@@ -13,7 +13,10 @@ the pages the decision pre-pass skipped), narrowed by
 ``--indices`` (page indices; one document only), leaves out the units an
 open or unresolved batch submission holds, picks the image settings the
 pages were rendered with, resolves the schema, prompt and context and checks
-provider access; a dry run plans without the key variables. It writes
+provider access; a dry run plans without the key variables. A document
+whose done pages outside the selection were transcribed under another
+schema than the repair's is refused, also when it is complete; the check
+is repeated under the document's lease. It writes
 nothing and raises :class:`RepairPlanError` (exit 2) for usage and
 configuration errors, a database the store refuses included.
 
@@ -84,6 +87,7 @@ from chronotranscriber.llm.prompts import (
     fallback_context,
     item_context,
     item_context_image,
+    read_schema_text,
     resolve_schema,
     system_prompt_path,
 )
@@ -98,11 +102,14 @@ from chronotranscriber.output.render import TEXT_FORMATS, render_item
 from chronotranscriber.output.store import (
     DATABASE_NAME,
     KIND_PAGE,
+    SCHEMA_ENTRY,
     changed_input,
     database_path,
     identity_write,
     open_store,
     read_store,
+    schema_entry,
+    schema_refusal,
 )
 from chronotranscriber.settings import Settings, SettingsError
 from chronotranscriber.sources.audio.ffmpeg import configure_ffmpeg_executables
@@ -278,10 +285,14 @@ class RepairPlan:
 
     *units* are the selected page units; *message* explains a plan with
     nothing to repair. *refused* marks a plan whose input changed since
-    transcription: its units stay unrepaired. *identity* is the input
+    transcription, or whose other done pages used another schema: its
+    units stay unrepaired. *identity* is the input
     identity computed at planning, checked again under the lease and
-    recorded there when the document records none. *warnings* are for the front
-    end to show. *args* holds the parsed command line, if any.
+    recorded there when the document records none. *schema_text* is the
+    schema the requests send, read once at planning, and *schema_sha256*
+    its SHA-256, which the repair's run record holds; both are None in the
+    text response format. *warnings* are for the front end to show. *args*
+    holds the parsed command line, if any.
     """
 
     spec: RepairSpec
@@ -290,6 +301,8 @@ class RepairPlan:
     units: list[UnitRow] = field(default_factory=list)
     images: ImageSettings | None = None
     schema_path: Path | None = None
+    schema_text: str | None = None
+    schema_sha256: str | None = None
     prompt_path: Path | None = None
     context: str | None = None
     context_image: Path | None = None
@@ -332,7 +345,10 @@ class RepairPlan:
 
 
 NOTHING_TO_REPAIR = "No failed pages detected matching your criteria."
-REFUSED_REPAIR = "No page was repaired: the input changed since it was transcribed."
+REFUSED_REPAIR = (
+    "No page was repaired: each document with selected pages was refused, as "
+    "the warnings say."
+)
 
 
 @dataclass
@@ -771,10 +787,12 @@ def _input_refusal(
 
 
 def _leased_refusal(store: Store, plan: RepairPlan) -> str | None:
-    """Return why the leased document no longer fits the plan's input, or None.
+    """Return why the leased document no longer fits the plan, or None.
 
-    The stored identity must still be the one planned on, and the input must
-    still have the identity computed at planning.
+    The stored identity must still be the one planned on, the input must
+    still have the identity computed at planning, and no done page the
+    repair leaves in place may record another schema than the plan's, which
+    another run may have written since planning (:func:`_schema_refusal`).
     """
     document = plan.document
     assert document is not None
@@ -785,21 +803,20 @@ def _leased_refusal(store: Store, plan: RepairPlan) -> str | None:
             f"The stored input identity of '{document.name}' changed since the "
             "repair was planned. Skipping it."
         )
-    if plan.identity is None or document.input_path is None:
-        return None
-    try:
-        current = input_identity(document.input_path)
-    except OSError as exc:
-        return (
-            f"Cannot compute the input identity of '{document.name}' ({exc}). "
-            "Skipping it."
-        )
-    if current == plan.identity:
-        return None
-    return (
-        f"Input changed for '{document.name}' during the repair (planned "
-        f"{plan.identity[:12]}..., now {current[:12]}...). Skipping it."
-    )
+    if plan.identity is not None and document.input_path is not None:
+        try:
+            current = input_identity(document.input_path)
+        except OSError as exc:
+            return (
+                f"Cannot compute the input identity of '{document.name}' "
+                f"({exc}). Skipping it."
+            )
+        if current != plan.identity:
+            return (
+                f"Input changed for '{document.name}' during the repair (planned "
+                f"{plan.identity[:12]}..., now {current[:12]}...). Skipping it."
+            )
+    return read(store.path, lambda connection: _schema_refusal(connection, plan))
 
 
 def _plan_document(
@@ -838,6 +855,9 @@ def _plan_document(
         plan.warnings = tuple(warnings)
         return plan
     refusal, plan.identity = _input_refusal(document, units)
+    if refusal is None:
+        _schema(plan, settings)
+        refusal = read(store.path, lambda connection: _schema_refusal(connection, plan))
     if refusal is not None:
         plan.message, plan.refused = refusal, True
         plan.warnings = tuple(warnings)
@@ -855,13 +875,47 @@ def _plan_document(
         warnings.append(warning)
     plan.images = images
     plan.warnings = tuple(warnings)
-    try:
-        plan.schema_path = resolve_schema(spec.prompt.schema)[1]
-        plan.prompt_path = system_prompt_path(spec.prompt.prompt)
-    except (ValueError, FileNotFoundError) as exc:
-        raise RepairPlanError(str(exc)) from exc
     plan.context, plan.context_image = _context(spec, document, path, fallback)
     return plan
+
+
+def _schema(plan: RepairPlan, settings: Settings) -> None:
+    """Resolve the plan's schema in the settings' folders, read and hash it.
+
+    The text response format sends no schema; its plan keeps no text or
+    hash.
+
+    Raises:
+        RepairPlanError: The schema or prompt is not found, two user folders
+            hold the schema, or its file cannot be read.
+    """
+    spec = plan.spec
+    try:
+        plan.schema_path = resolve_schema(spec.prompt.schema, settings.schemas_dirs)[1]
+        plan.prompt_path = system_prompt_path(spec.prompt.prompt)
+        if spec.model.response_format != "text":
+            plan.schema_text, plan.schema_sha256 = read_schema_text(plan.schema_path)
+    except (OSError, ValueError) as exc:
+        raise RepairPlanError(str(exc)) from exc
+
+
+def _schema_refusal(connection: sqlite3.Connection, plan: RepairPlan) -> str | None:
+    """Return why the plan's repair is refused by the document's schema, or None.
+
+    The repair rewrites its selected pages; a done page it leaves in place
+    whose run recorded another schema hash refuses it
+    (:func:`~chronotranscriber.output.store.schema_refusal`).
+    """
+    document = plan.document
+    assert document is not None
+    return schema_refusal(
+        connection,
+        document.doc_id,
+        document.name,
+        plan.schema_sha256,
+        replaced=[unit.idx for unit in plan.units],
+        repair=True,
+    )
 
 
 def _input_path(spec: RepairSpec) -> Path:
@@ -1065,6 +1119,7 @@ class _Session:
             image_detail=plan.spec.images.detail,
             context=plan.context,
             role=ROLE,
+            schema_text=plan.schema_text,
         )
         transcriber.update_context_image(plan.context_image)
         # The context image takes the detail the pages are rendered with.
@@ -1140,6 +1195,7 @@ class _Session:
                 context=plan.context,
                 context_image=plan.context_image,
                 detail=images.detail,
+                schema_text=plan.schema_text,
             )
         except (OSError, ValueError) as exc:
             self.warn(f"Cannot build the repair batch requests: {exc}")
@@ -1353,6 +1409,18 @@ async def _repair(
     result.failed += result.selected - len(units)
 
 
+def _run_record(plan: RepairPlan) -> dict[str, dict[str, Any]]:
+    """Return the repair's record in ``runs.spec``: its effective spec.
+
+    A repair that sends a schema adds the ``schema_sha256`` entry, the
+    ``artifacts.sha256`` of the schema text it stores.
+    """
+    record = effective_spec(plan.spec)
+    if plan.schema_sha256 is not None:
+        record[SCHEMA_ENTRY] = schema_entry(plan.schema_sha256)
+    return record
+
+
 async def run_repair(plan: RepairPlan, events: RunEvents | None = None) -> RepairResult:
     """Repair the units *plan* selected; a plan with nothing to do returns its result.
 
@@ -1368,7 +1436,9 @@ async def run_repair(plan: RepairPlan, events: RunEvents | None = None) -> Repai
     result.database = document.database
     result.databases = (document.database,)
     async with open_store(document.root, writer=_writer_options(sink)) as store:
-        await store.begin_run("repair", spec=effective_spec(plan.spec))
+        await store.begin_run("repair", spec=_run_record(plan))
+        if plan.schema_text is not None:
+            await store.store_artifact("schema", plan.schema_text)
         exit_code = int(ExitCode.FAILURE)
         try:
             await _repair(store, plan, result, sink)

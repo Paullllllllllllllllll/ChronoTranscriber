@@ -650,6 +650,7 @@ ROWS = [
     _row("dry_run", "--dry-run", sets={"run.dry_run": True}),
     _row("json", "--json", sets={"run.json": True}),
     _row("settings", "--settings", "other.yaml", sets={}),
+    _row("schemas_dir", "--schemas-dir", ".", sets={}),
     _row(
         "errors_only",
         "--errors-only",

@@ -125,10 +125,12 @@ __all__ = [
     "TOOL",
     "UNIT_KINDS",
     "VIEWS",
+    "SCHEMA_ENTRY",
     "Classification",
     "ItemState",
     "StoreReader",
     "changed_input",
+    "changed_schema",
     "classify",
     "database_path",
     "document_name",
@@ -137,9 +139,12 @@ __all__ = [
     "image_settings_record",
     "lease_reason",
     "open_store",
+    "page_schemas",
     "page_type_rows",
     "read_only_connection",
     "read_store",
+    "schema_entry",
+    "schema_refusal",
     "store_reader",
     "tool_version",
 ]
@@ -475,6 +480,129 @@ def changed_input(name: str, stored: str, current: str) -> str:
     )
 
 
+SCHEMA_ENTRY: Final = "schema_sha256"
+"""The entry of a run record (``runs.spec``) that holds the SHA-256 of the
+schema text an LLM run sends, which is the ``artifacts.sha256`` under which
+the run stores that text."""
+
+_SKIPPED_OUTCOME: Final = "skipped_no_text"
+"""The outcome of a page the decision pre-pass closed without a request
+(:data:`chronotranscriber.llm.decide.SKIPPED_OUTCOME`)."""
+
+_PAGE_RUNS: Final = """
+SELECT u.idx, COALESCE(s.run_id, u.run_id)
+FROM units AS u
+LEFT JOIN responses AS p ON p.response_id = u.response_id
+LEFT JOIN submissions AS s ON s.submission_id = p.submission_id
+WHERE u.doc_id = ? AND u.kind = 'page' AND u.status = 'done'
+    AND (u.outcome IS NULL OR u.outcome != ?)
+"""
+_AWAITED_PAGE_RUNS: Final = """
+SELECT q.idx, s.run_id
+FROM submission_requests AS q
+JOIN submissions AS s ON s.submission_id = q.submission_id
+WHERE q.doc_id = ? AND q.kind = 'page'
+    AND s.status IN (SELECT value FROM json_each(?))
+"""
+_RUN_SPECS: Final = (
+    "SELECT run_id, spec FROM runs WHERE run_id IN (SELECT value FROM json_each(?))"
+)
+
+
+def schema_entry(sha256: str) -> dict[str, str]:
+    """Return the :data:`SCHEMA_ENTRY` value of a run record for *sha256*."""
+    return {"value": sha256, "source": "computed"}
+
+
+def _recorded_schema(spec: Any) -> str | None:
+    """Return the schema hash a stored run record holds, None when it holds none."""
+    if isinstance(spec, str):
+        try:
+            spec = json.loads(spec)
+        except ValueError:
+            return None
+    entry = spec.get(SCHEMA_ENTRY) if isinstance(spec, Mapping) else None
+    value = entry.get("value") if isinstance(entry, Mapping) else None
+    return value if isinstance(value, str) and value else None
+
+
+def page_schemas(connection: sqlite3.Connection, doc_id: int) -> dict[int, str]:
+    """Return the schema hash of each page of *doc_id* whose run records one.
+
+    The pages are the done ones and those that await an open or unresolved
+    batch submission, whose answers arrive under the submitting run's
+    schema. A page's run is the run that sent its request: for a page
+    answered in a batch, or awaiting one, the run of the submission, else
+    the page's run. Pages the decision pre-pass skipped sent no request and
+    are left out, as are pages whose run records no schema (an earlier
+    version, the text response format or a method without a model).
+    """
+    rows = connection.execute(_PAGE_RUNS, (doc_id, _SKIPPED_OUTCOME)).fetchall()
+    done = {int(idx) for idx, _run_id in rows}
+    awaited = connection.execute(
+        _AWAITED_PAGE_RUNS, (doc_id, json.dumps(list(BLOCKING_SUBMISSIONS)))
+    ).fetchall()
+    rows += [(idx, run_id) for idx, run_id in awaited if int(idx) not in done]
+    runs = sorted({str(run_id) for _idx, run_id in rows})
+    if not runs:
+        return {}
+    recorded = {
+        str(run_id): _recorded_schema(spec)
+        for run_id, spec in connection.execute(_RUN_SPECS, (json.dumps(runs),))
+    }
+    found: dict[int, str] = {}
+    for idx, run_id in rows:
+        value = recorded.get(str(run_id))
+        if value is not None:
+            found[int(idx)] = value
+    return found
+
+
+def changed_schema(name: str, recorded: str, current: str, *, repair: bool) -> str:
+    """Return the refusal of item *name* whose done pages used another schema.
+
+    *recorded* and *current* are the schema hashes; *repair* words the
+    remedy for the repair command.
+    """
+    remedy = (
+        "transcribe it again with --force to use the current schema, or repair "
+        "it with the earlier schema"
+        if repair
+        else "use --force to transcribe it again with the current schema, or "
+        "restore the earlier schema"
+    )
+    return (
+        f"The schema changed for '{name}' since its done pages were transcribed "
+        f"(recorded {recorded[:12]}..., now {current[:12]}...). Skipping it; "
+        f"{remedy}, whose text the store keeps in its artifacts."
+    )
+
+
+def schema_refusal(  # noqa: PLR0913 - one keyword per part of the check
+    connection: sqlite3.Connection,
+    doc_id: int,
+    name: str,
+    current: str | None,
+    *,
+    replaced: Sequence[int] = (),
+    repair: bool = False,
+) -> str | None:
+    """Return why a run that writes pages of *doc_id* is refused, or None.
+
+    A run whose schema hash is *current* is refused when a done page it
+    leaves in place (any page but those of *replaced*) records another
+    hash (:func:`page_schemas`); a run without a hash and a page without
+    one are never refused.
+    """
+    if current is None:
+        return None
+    kept = set(replaced)
+    for idx, recorded in sorted(page_schemas(connection, doc_id).items()):
+        if idx not in kept and recorded != current:
+            return changed_schema(name, recorded, current, repair=repair)
+    return None
+
+
 def lease_reason(holder: str | None, until: float | None) -> str:
     """Name the run that leases a document and when its lease expires.
 
@@ -520,6 +648,7 @@ class StoreReader:
         holder: str | None = None,
         now: float | None = None,
         input_sha256: str | None = None,
+        schema_sha256: str | None = None,
     ) -> Classification:
         """Classify item *name* from the store, as :func:`classify` documents."""
         return _classified(
@@ -533,6 +662,7 @@ class StoreReader:
             holder=holder,
             now=now,
             input_sha256=input_sha256,
+            schema_sha256=schema_sha256,
         )
 
 
@@ -564,6 +694,7 @@ def classify(  # noqa: PLR0913 - one keyword per resume input
     holder: str | None = None,
     now: float | None = None,
     input_sha256: str | None = None,
+    schema_sha256: str | None = None,
 ) -> Classification:
     """Classify item *name* of output root *root* from the store; never write.
 
@@ -577,8 +708,11 @@ def classify(  # noqa: PLR0913 - one keyword per resume input
     *input_sha256*, the current one, is refused, partial or complete; a
     document without a recorded identity is trusted. A changed user image
     setting refuses a partial item; a changed model alone resumes with a
-    note. Raises the store's errors for a versionless, newer or unreadable
-    database. Classify many items of one root through :func:`store_reader`.
+    note. A partial item with a done page whose run recorded another
+    schema hash than *schema_sha256*, this run's, is refused
+    (:func:`schema_refusal`). Raises the store's errors for a versionless,
+    newer or unreadable database. Classify many items of one root through
+    :func:`store_reader`.
     """
     with store_reader(root) as reader:
         return reader.classify(
@@ -590,6 +724,7 @@ def classify(  # noqa: PLR0913 - one keyword per resume input
             holder=holder,
             now=now,
             input_sha256=input_sha256,
+            schema_sha256=schema_sha256,
         )
 
 
@@ -605,6 +740,7 @@ def _classified(  # noqa: PLR0913 - one keyword per resume input
     holder: str | None,
     now: float | None,
     input_sha256: str | None,
+    schema_sha256: str | None,
 ) -> Classification:
     present = tuple(output for output in outputs if _nonempty(output))
     resume = resume_state(connection, name) if connection is not None else None
@@ -712,6 +848,10 @@ def _classified(  # noqa: PLR0913 - one keyword per resume input
                 "Skipping it; use --force to replace the existing run."
             ),
         )
+    # The run writes only pending and failed units, so every done page stays.
+    refusal = schema_refusal(connection, doc_id, name, schema_sha256)
+    if refusal is not None:
+        return Classification(ItemState.REFUSED, name, doc_id, reason=refusal)
     units = tuple(sorted(work))
     return Classification(
         ItemState.PARTIAL,

@@ -19,8 +19,10 @@ beside the input) holds one ``chronotranscriber.sqlite``, the store of the
 run's documents. Resume reads only the store: an item whose rendered output
 exists without units in the store is ``unstored`` and skipped, an item
 leased by another live run or waiting for a batch is ``blocked`` and
-skipped, and an item whose stored pages used other image settings is
-``refused``.
+skipped, and an item whose stored pages used other image settings, or whose
+done pages another schema, is ``refused``. Each run records the SHA-256 of
+the schema its LLM requests send in its ``runs.spec`` record
+(:meth:`RunPlan.run_record`).
 """
 
 from __future__ import annotations
@@ -57,7 +59,11 @@ from chronotranscriber.common.selection import (
     select_items,
 )
 from chronotranscriber.common.spec_view import resolved_view
-from chronotranscriber.common.sqlite import DEFAULT_BUSY_TIMEOUT, DEFAULT_WARN_INTERVAL
+from chronotranscriber.common.sqlite import (
+    DEFAULT_BUSY_TIMEOUT,
+    DEFAULT_WARN_INTERVAL,
+    read,
+)
 from chronotranscriber.common.store import (
     DocumentRow,
     Lease,
@@ -89,6 +95,7 @@ from chronotranscriber.llm.prompts import (
     fallback_context,
     item_context,
     item_context_image,
+    read_schema_text,
     resolve_schema,
     system_prompt_path,
 )
@@ -105,6 +112,7 @@ from chronotranscriber.methods.units import SOLO, DocumentHandle, Lane
 from chronotranscriber.output.paths import item_paths
 from chronotranscriber.output.render import format_path, render_item, text_formats
 from chronotranscriber.output.store import (
+    SCHEMA_ENTRY,
     Classification,
     ItemState,
     StoreReader,
@@ -114,6 +122,8 @@ from chronotranscriber.output.store import (
     identity_write,
     lease_reason,
     open_store,
+    schema_entry,
+    schema_refusal,
     store_reader,
 )
 from chronotranscriber.settings import Settings, SettingsError
@@ -325,7 +335,9 @@ class RunPlan:
     settings; none of them is processed. *warnings* are notes for the user.
     *sources* maps spec fields to where their values came from.
     *missing_keys* lists the key variables a dry run (or a plan that does
-    not check them) found unset.
+    not check them) found unset. *schema_text* is the text of the schema
+    file the LLM requests send, read once at planning, and *schema_sha256*
+    its SHA-256; both are None for a run in the text response format.
     """
 
     spec: RunSpec
@@ -338,6 +350,8 @@ class RunPlan:
     settings: Settings = field(default_factory=Settings)
     sources: Mapping[str, Source] = field(default_factory=dict)
     schema_path: Path | None = None
+    schema_text: str | None = None
+    schema_sha256: str | None = None
     pages: PageRange | None = None
     unstored: tuple[PlannedItem, ...] = ()
     blocked: tuple[PlannedItem, ...] = ()
@@ -401,6 +415,22 @@ class RunPlan:
         The shape is ``{field: {"value": ..., "source": ...}}``.
         """
         return effective_spec(self.spec, self.sources)
+
+    @property
+    def schema_identity(self) -> str | None:
+        """The schema hash the run records, None when no item sends the schema."""
+        return self.schema_sha256 if "llm" in self.methods else None
+
+    def run_record(self) -> dict[str, dict[str, Any]]:
+        """Return the record the store keeps of the run in ``runs.spec``.
+
+        It is :meth:`effective_spec` with the ``schema_sha256`` entry when
+        LLM items send a schema: the ``artifacts.sha256`` of its text.
+        """
+        record = self.effective_spec()
+        if self.schema_identity is not None:
+            record[SCHEMA_ENTRY] = schema_entry(self.schema_identity)
+        return record
 
     def resolved_spec(self) -> dict[str, dict[str, Any]]:
         """Return :meth:`effective_spec` as the dry run shows it.
@@ -776,13 +806,15 @@ def item_location(
 class _Classifier:
     """Classifies the items of one plan from the stores of their roots.
 
-    *image* is the run's image-settings record.
+    *image* is the run's image-settings record and *schema_sha256* the hash
+    of the schema its LLM requests send.
     """
 
     spec: RunSpec
     output_dir: Path | None
     input_root: Path
     image: Mapping[str, Any] | None
+    schema_sha256: str | None = None
 
     def locate(self, item: SourceItem) -> tuple[Path, str, Path]:
         """Return the output root, document name and output path of *item*."""
@@ -856,6 +888,7 @@ class _Classifier:
             model=self.spec.model.model if keyed else None,
             retry_errors=self.spec.run.retry_errors,
             input_sha256=sha256,
+            schema_sha256=self.schema_sha256 if method == "llm" else None,
         )
         if item.type == "images" and unreadable is None:
             moved = _misplaced_pages(reader, name, item.path, state)
@@ -930,6 +963,33 @@ def _image(
         return None
 
 
+def _schema(
+    spec: RunSpec, settings: Settings
+) -> tuple[Path | None, str | None, str | None]:
+    """Return the schema file of an LLM run, its text and the text's SHA-256.
+
+    The schema is found in the settings' folders, and the system prompt
+    file is checked. A run in the text response format sends no schema:
+    its text and hash are None. A run without the LLM method returns
+    three Nones.
+
+    Raises:
+        ConfigurationError: The schema or prompt is not found, two user
+            folders hold the schema, or its file cannot be read.
+    """
+    if not _uses_llm(spec):
+        return None, None, None
+    try:
+        path = resolve_schema(spec.prompt.schema, settings.schemas_dirs)[1]
+        system_prompt_path(spec.prompt.prompt)
+        if spec.model.response_format == "text":
+            return path, None, None
+        text, sha256 = read_schema_text(path)
+    except (OSError, ValueError) as exc:
+        raise ConfigurationError(str(exc)) from exc
+    return path, text, sha256
+
+
 def _check_shared(
     items: Sequence[SourceItem],
     locate: Callable[[SourceItem], tuple[Path, str, Path]],
@@ -985,9 +1045,10 @@ def plan(
     found, warnings = _discover(spec, input_path)
     discovered, notes = choose_items(found, spec.input, input_path)
     warnings += notes
+    schema_path, schema_text, schema_sha256 = _schema(spec, settings)
 
     image = _image(spec, settings, discovered)
-    classifier = _Classifier(spec, output_dir, input_path, image)
+    classifier = _Classifier(spec, output_dir, input_path, image, schema_sha256)
     groups: dict[ItemState, list[PlannedItem]] = {state: [] for state in ItemState}
     routed = [(item, _route(item, spec)) for item in discovered]
     _check_shared(discovered, classifier.locate)
@@ -1003,13 +1064,7 @@ def plan(
         len(groups[ItemState.COMPLETE]),
     )
 
-    schema_path: Path | None = None
     if _uses_llm(spec):
-        try:
-            schema_path = resolve_schema(spec.prompt.schema)[1]
-            system_prompt_path(spec.prompt.prompt)
-        except (ValueError, FileNotFoundError) as exc:
-            raise ConfigurationError(str(exc)) from exc
         fallback: str | None = None
         if spec.prompt.context is None and to_process:
             fallback, note = fallback_context(spec.prompt.fallback_context)
@@ -1028,6 +1083,8 @@ def plan(
         settings=settings,
         sources=dict(sources or {}),
         schema_path=schema_path,
+        schema_text=schema_text,
+        schema_sha256=schema_sha256,
         pages=pages,
         unstored=tuple(groups[ItemState.UNSTORED]),
         blocked=tuple(groups[ItemState.BLOCKED]),
@@ -1308,7 +1365,7 @@ class _Stores:
         except StoreError as exc:
             raise StoreRefusedError(str(exc)) from exc
         self._stores[key] = store
-        await store.begin_run("transcribe", spec=self._plan.effective_spec())
+        await store.begin_run("transcribe", spec=self._plan.run_record())
         await self._artifacts(store)
         marked = await store.mark_stale_submissions()
         if marked:
@@ -1329,8 +1386,17 @@ class _Stores:
             "are not stored by this run."
         )
 
+    @property
+    def schema_sha256(self) -> str | None:
+        """The schema hash of the run's LLM requests, as the run records it."""
+        return self._plan.schema_identity
+
     async def _artifacts(self, store: Store) -> None:
-        """Store the prompt and schema texts of an LLM run."""
+        """Store the prompt and schema texts of an LLM run.
+
+        The schema text is the one read at planning, whose hash the run
+        record holds.
+        """
         spec = self._plan.spec
         if "llm" not in self._plan.methods:
             return
@@ -1339,7 +1405,7 @@ class _Stores:
         default = PLAIN_PROMPT_PATH if plain else SCHEMA_PROMPT_PATH
         texts = {
             "prompt": _read_text(_absolute(prompt) if prompt else default),
-            "schema": None if plain else _read_text(self._plan.schema_path),
+            "schema": self._plan.schema_text,
         }
         for kind, text in texts.items():
             if text is not None:
@@ -1481,15 +1547,39 @@ class _ItemRun:
                 await store.add_note(message, doc_id=doc_id, level="info")
         return None
 
-    async def lease(self) -> tuple[Store, int, Lease] | None:
+    def _schema_refusal(self, store: Store, doc_id: int) -> str | None:
+        """Return why the leased document refuses the run's schema, or None.
+
+        Another run may have written pages since planning, so the check of
+        :func:`~chronotranscriber.output.store.classify` is repeated: an LLM
+        item with units to write (pending, or failed under --retry-errors)
+        is refused when a done page records another schema hash. --force
+        replaces every page and is not checked.
+        """
+        current = self.stores.schema_sha256
+        if current is None or self.planned.method != "llm" or self.job.force:
+            return None
+        state = store.resume_state(doc_id)
+        if state is None or not (
+            state.pending or (self.job.retry_errors and state.failed)
+        ):
+            return None
+        name = self.planned.document
+        return read(
+            store.path,
+            lambda connection: schema_refusal(connection, doc_id, name, current),
+        )
+
+    async def lease(self, *, writes: bool = True) -> tuple[Store, int, Lease] | None:
         """Ensure the item's document and lease it; None when it is not leased.
 
         A stored identity that differs, or an input that changed since
         planning, refuses the item before the document row is written; the
         row never takes an identity there. Under the
         lease the input and the stored identity are checked again and the
-        identity recorded (:meth:`_settle_identity`). :attr:`refused` says
-        why a refused item was not leased.
+        identity recorded (:meth:`_settle_identity`); an item that *writes*
+        units is checked against the run's schema (:meth:`_schema_refusal`).
+        :attr:`refused` says why a refused item was not leased.
         """
         planned = self.planned
         store = await self.stores.get(planned.root)
@@ -1513,6 +1603,8 @@ class _ItemRun:
         if lease is not None:
             try:
                 self.refused = await self._settle_identity(store, doc_id, lease)
+                if self.refused is None and writes:
+                    self.refused = self._schema_refusal(store, doc_id)
             except BaseException:
                 with contextlib.suppress(sqlite3.Error):
                     await store.release(lease)
@@ -1751,7 +1843,7 @@ async def _render_only(
     when its input changed since planning.
     """
     item_run = _ItemRun(job, planned, stores)
-    leased = await item_run.lease()
+    leased = await item_run.lease(writes=False)
     if leased is None and item_run.refused is not None:
         return ItemResult(planned.name, False, (), item_run.refused)
     if leased is None:
@@ -1853,6 +1945,7 @@ async def _submit_batch(
     schema_path: Path | None,
     context: str | None = None,
     context_image: Path | None = None,
+    schema_text: str | None = None,
 ) -> SubmitOutcome:
     """Submit one document's pages through the batch package as they render.
 
@@ -1867,6 +1960,7 @@ async def _submit_batch(
             schema_path=schema_path,
             context=context,
             context_image=context_image,
+            schema_text=schema_text,
         )
     except batch_submit.BatchSubmissionError as exc:
         return _Unbuildable(str(exc) or type(exc).__name__)
@@ -2062,6 +2156,7 @@ async def run(run_plan: RunPlan, events: RunEvents | None = None) -> RunResult:
         output_dir=run_plan.output_dir,
         input_root=run_plan.input_path,
         schema_path=run_plan.schema_path,
+        schema_text=run_plan.schema_text,
         batch=run_plan.batch,
         submit=_submit_batch if run_plan.batch else None,
     )

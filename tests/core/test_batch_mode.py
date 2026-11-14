@@ -101,6 +101,7 @@ class FakeSubmit:
         schema_path: Path | None,
         context: str | None = None,
         context_image: Path | None = None,
+        schema_text: str | None = None,
     ) -> Outcome:
         count = len([payload async for payload in payloads])
         self.items.append((Path(document.name).name, count))

@@ -41,7 +41,7 @@ TABLES: dict[str, OptionTable] = {
     "drop": DROP_OPTIONS,
     "classify pages": CLASSIFY_OPTIONS["page"],
     "classify documents": CLASSIFY_OPTIONS["document"],
-    "ui": OPTIONS.subset(("settings",)),
+    "ui": OPTIONS.subset(("schemas_dir", "settings")),
 }
 SHARED_GROUPS = frozenset({"prompt", "model", "images"})
 """Groups whose transcribe options repair takes; its section may omit them."""

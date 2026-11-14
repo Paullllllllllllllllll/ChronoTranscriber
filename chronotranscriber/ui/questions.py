@@ -717,11 +717,12 @@ class ResponseQuestions:
         return chosen == "text"
 
     def schema(self) -> Nav | None:
-        """Ask the schema: a name from schemas/ or another file."""
+        """Ask the schema: a name from the schema folders or another file."""
         if self._plain():
             return None
         state = self.state
-        names = [name for name, _path in list_schema_options()]
+        folders = self.session.settings.schemas_dirs
+        names = [name for name, _path in list_schema_options(folders)]
         current = state.value("schema")
         if current not in names:
             names.insert(0, current)

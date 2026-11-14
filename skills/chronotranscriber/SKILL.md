@@ -52,9 +52,10 @@ uv --directory <clone> run chronotranscriber <command> --input <absolute path> [
    exits 0; for a classify command, when the exit code is 0 and `items_failed`,
    `items_refused` and `units_failed` are 0. Exit 1 means an item failed, was
    refused or is leased by another run, or a batch unit failed. Rerun the same
-   command, which resumes and retries failed pages, or follow [REFERENCE.md](REFERENCE.md), Troubleshooting. Exit 3 means the
-   provider stopped serving the run: nothing failed, the unsent pages stay pending,
-   and the same command resumes them once the provider serves again.
+   command, which resumes and retries failed pages, or follow
+   [REFERENCE.md](REFERENCE.md), Troubleshooting. Exit 3 means the provider stopped
+   serving the run: nothing failed, the unsent pages stay pending, and the same
+   command resumes them once the provider serves again.
 
 ## Conventions
 
@@ -69,6 +70,12 @@ uv --directory <clone> run chronotranscriber <command> --input <absolute path> [
   bilevel scans are the exception and take `--image-format png`. A resumed document
   whose stored pages used other image settings is `refused` (exit 1): pass the stored
   values the refusal names, or `--force` to start it over.
+- `--schema` takes a path, or a name found in the `--schemas-dir` folders, the
+  settings' `schemas_dirs` and then `schemas/` (README, Sources and Methods); a name
+  in two of the user folders is an error (exit 2) that names both files. A resume or
+  `repair` that would leave done pages of another schema beside its new ones is
+  `refused` (exit 1, both hashes named): pass the earlier schema, or `--force` to
+  transcribe the document again (README, Resume).
 - Context is a topic file `{stem}_transcr_context.txt` beside the input (folder forms:
   README, Sources and Methods). Above 4,000 characters the run warns. An item without
   a sidecar gets the settings' fallback context, if one is set.
@@ -84,7 +91,8 @@ uv --directory <clone> run chronotranscriber <command> --input <absolute path> [
 - `classify pages` and `classify documents --classifier NAME|PATH` ask a decision
   model a classifier file's questions about page images, or about a document from
   its first pages, without transcribing; the shipped classifiers are in
-  `classifiers/` (README, Classifiers), a project's own are passed by path. Answers
+  `classifiers/` (README, Classifiers), a project's own are passed by path or found
+  in the `--classifiers-dir` folders and the settings' `classifiers_dirs`. Answers
   only record: read them in the `classifications` view. A page answer joins
   `page_text` on document and ordinal once the pages are transcribed, so pass the
   same `--output` and `--layout` as the transcription to match the document names;

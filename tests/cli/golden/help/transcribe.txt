@@ -37,8 +37,11 @@ output:
   --formats LIST        comma-separated output formats; from txt, md; default: txt
 
 schema, prompt and context:
-  --schema NAME|PATH    transcription schema: a name found in schemas/ or a path; default:
-                        markdown_transcription_schema
+  --schema NAME|PATH    transcription schema: a file path, or the file name without .json or the
+                        name field of a schema in the --schemas-dir folders, the settings'
+                        schemas_dirs or schemas/; default: markdown_transcription_schema
+  --schemas-dir DIR     folder of schemas, searched for --schema before the settings' schemas_dirs
+                        and schemas/; repeatable
   --prompt PATH|default
                         system prompt file, or default (the prompt of the response format);
                         default: default

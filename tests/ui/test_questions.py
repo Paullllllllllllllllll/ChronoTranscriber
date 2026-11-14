@@ -21,6 +21,7 @@ from chronotranscriber.common.wizard import (
     StepContext,
     render_review,
 )
+from chronotranscriber.llm.prompts import SCHEMAS_DIR
 from chronotranscriber.spec import OPTIONS, REPAIR_OPTIONS
 from chronotranscriber.ui.questions import (
     OTHER,
@@ -273,6 +274,29 @@ def test_response_questions_default_schema_and_context_choices(
     assert asked.state.value("prompt") is None
     assert asked.state.value("context") == "none"
     assert asked.state.value("context_image") == image
+
+
+def test_the_schema_question_lists_the_session_schema_folders(
+    session: Session, tmp_path: Path
+) -> None:
+    bundled = SCHEMAS_DIR / "markdown_transcription_schema.json"
+    body = json.loads(bundled.read_text(encoding="utf-8"))
+    body["name"] = "ledger_pages"
+    folder = tmp_path / "project"
+    folder.mkdir()
+    (folder / "ledger_pages.json").write_text(json.dumps(body), encoding="utf-8")
+    started = dataclasses.replace(
+        session, settings=session.settings.with_folders((folder,))
+    )
+
+    asked = _ask(
+        _response,
+        started,
+        ["schema", "ledger_pages", "default", "auto", "none", "auto"],
+    )
+
+    assert "   ledger_pages" in asked.lines
+    assert asked.state.value("schema") == "ledger_pages"
 
 
 def test_plain_text_skips_the_schema(session: Session) -> None:

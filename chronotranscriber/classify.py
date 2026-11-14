@@ -2,8 +2,9 @@
 
 :func:`plan` turns a :class:`~chronotranscriber.spec.ClassifySpec` and the
 settings into a :class:`ClassifyPlan` without API calls or writes: it
-resolves the classifier (a path, a file stem in ``classifiers/`` or a
-classifier name there), finds and selects the PDFs and image folders of the
+resolves the classifier (a path, else a file stem or a classifier name in
+the ``--classifiers-dir`` folders, the settings' ``classifiers_dirs`` or
+``classifiers/``), finds and selects the PDFs and image folders of the
 input in ``transcribe``'s discovery order (EPUB and MOBI items it selects
 are skipped with a warning), and names each item's store document: the name
 of a stored document whose recorded input path is the item, else the name
@@ -56,6 +57,7 @@ from chronotranscriber import ext
 from chronotranscriber.common.classifiers import (
     Classifier,
     load_classifier,
+    named_files,
     resolve_classifier,
 )
 from chronotranscriber.common.classify_store import (
@@ -163,15 +165,17 @@ _ASK_ERRORS: Final = (httpx.HTTPError, MalformedAnswer, OSError, ValueError)
 """Errors of one request that fail its units and leave the item's others."""
 
 
-def classifier_names() -> list[str]:
-    """Return the names of the classifiers in ``classifiers/`` that load."""
-    names: list[str] = []
-    if CLASSIFIERS_DIR.is_dir():
-        for path in sorted(CLASSIFIERS_DIR.glob("*.json")):
-            try:
-                names.append(load_classifier(path).name)
-            except (OSError, ValueError):
-                continue
+def classifier_names(folders: Sequence[Path] = ()) -> list[str]:
+    """Return the names of the classifiers a lookup can find that load.
+
+    *folders* are the user folders, searched before ``classifiers/``.
+    """
+    names: set[str] = set()
+    for path in named_files(folders, CLASSIFIERS_DIR):
+        try:
+            names.add(load_classifier(path).name)
+        except (OSError, ValueError):
+            continue
     return sorted(names)
 
 
@@ -306,15 +310,20 @@ def _absolute(path: Path) -> Path:
     return path.expanduser().resolve()
 
 
-def _classifier(spec: ClassifySpec) -> tuple[Path, Classifier]:
+def _classifier(
+    spec: ClassifySpec, folders: Sequence[Path] = ()
+) -> tuple[Path, Classifier]:
     """Return the file and the classifier of *spec*, checked against its unit.
 
+    The user *folders* are searched before :data:`CLASSIFIERS_DIR`.
+
     Raises:
-        ConfigurationError: The classifier is not found, does not load, has
-            another unit, or selects more pages than a request carries.
+        ConfigurationError: The classifier is not found, two user folders
+            hold it, it does not load, has another unit, or selects more
+            pages than a request carries.
     """
     try:
-        path = resolve_classifier(spec.classify.classifier, CLASSIFIERS_DIR)
+        path = resolve_classifier(spec.classify.classifier, CLASSIFIERS_DIR, folders)
         classifier = load_classifier(path)
     except (OSError, ValueError) as exc:
         raise ConfigurationError(str(exc)) from exc
@@ -599,7 +608,7 @@ def plan(
     Raises:
         PlanError: The run cannot proceed; ``exit_code`` is its exit code.
     """
-    path, classifier = _classifier(spec)
+    path, classifier = _classifier(spec, settings.classifiers_dirs)
     output_dir = None
     if spec.output.directory is not None:
         output_dir = _absolute(spec.output.directory)

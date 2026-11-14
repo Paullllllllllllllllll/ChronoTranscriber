@@ -11,6 +11,15 @@ The classify tables (:data:`CLASSIFY_OPTIONS`) reuse transcribe's input,
 selection and output rows; there only the output rows and the decision model
 take settings defaults.
 
+``--schema`` names a schema file or a schema of the user folders
+(``--schemas-dir``, then the settings' ``schemas_dirs``) or of the
+repository's ``schemas/`` folder
+(:func:`~chronotranscriber.llm.prompts.resolve_schema`). ``--classifier``
+names a classifier of the ``--classifiers-dir`` folders, the settings'
+``classifiers_dirs`` or ``classifiers/`` the same way. The folder flags fill
+no spec field and join the settings' folder lists instead
+(:meth:`~chronotranscriber.settings.Settings.with_folders`).
+
 A folder with several items needs ``--all``, ``--select`` or ``--files``;
 the three are alternatives (see :func:`chronotranscriber.run.plan`).
 
@@ -701,6 +710,50 @@ def _language(value: str) -> str | None:
     return nonempty_text(value).strip()
 
 
+def _folder(value: str) -> Path:
+    """Return the absolute path of an existing folder."""
+    path = Path(nonempty_text(value)).expanduser()
+    if not path.is_dir():
+        raise ValueError(f"not a folder: {value}")
+    return path.resolve()
+
+
+def _schemas_dir_option() -> Option:
+    """Return ``--schemas-dir DIR``; it fills the settings, not the spec."""
+    return Option(
+        "schemas_dir",
+        "--schemas-dir",
+        (
+            "folder of schemas, searched for --schema before the settings' "
+            "schemas_dirs and schemas/; repeatable"
+        ),
+        group="prompt",
+        kind=Kind.LIST,
+        type=_folder,
+        metavar="DIR",
+        default=(),
+        settable=False,
+    )
+
+
+def _classifiers_dir_option() -> Option:
+    """Return ``--classifiers-dir DIR``; it fills the settings, not the spec."""
+    return Option(
+        "classifiers_dir",
+        "--classifiers-dir",
+        (
+            "folder of classifiers, searched for --classifier before the "
+            "settings' classifiers_dirs and classifiers/; repeatable"
+        ),
+        group="classify",
+        kind=Kind.LIST,
+        type=_folder,
+        metavar="DIR",
+        default=(),
+        settable=False,
+    )
+
+
 def _parse_indices(value: str) -> tuple[int, ...]:
     """Parse 0-based indices such as ``0,5,12`` or ``3-7``."""
     indices: set[int] = set()
@@ -780,13 +833,18 @@ def _prompt_options() -> list[Option]:
         Option(
             "schema",
             "--schema",
-            "transcription schema: a name found in schemas/ or a path",
+            (
+                "transcription schema: a file path, or the file name without "
+                ".json or the name field of a schema in the --schemas-dir "
+                "folders, the settings' schemas_dirs or schemas/"
+            ),
             group="prompt",
             type=nonempty_text,
             metavar="NAME|PATH",
             default=DEFAULT_SCHEMA,
             target="prompt.schema",
         ),
+        _schemas_dir_option(),
         Option(
             "prompt",
             "--prompt",
@@ -1341,7 +1399,7 @@ def _classify_options(unit: str) -> list[Option]:
     classifier, force, *model = classifier_options(
         force_help=_CLASSIFY_FORCE_HELP[unit]
     )
-    rows += [classifier, *model, force]
+    rows += [classifier, _classifiers_dir_option(), *model, force]
     rows.append(concurrency_option(DEFAULT_CONCURRENCY, target="concurrency"))
     rows.append(_open_items_option("open_items"))
     rows += [dry_run_option("dry_run"), json_option("json"), settings_option()]

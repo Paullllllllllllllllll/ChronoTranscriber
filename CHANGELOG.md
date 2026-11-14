@@ -1,5 +1,20 @@
 # Changelog
 
+- **v1.13.0** (14 November 2026) -- Schemas and classifiers can live in folders
+  outside the repository. The repeatable flags `--schemas-dir` and
+  `--classifiers-dir` and the settings lists `schemas_dirs` and `classifiers_dirs`
+  name user folders that every lookup searches before the bundled `schemas/` and
+  `classifiers/`. A user file shadows the bundled file of the same file name, and
+  a name that two user folders hold is an error naming both files. Every LLM run
+  with a schema now records the hash of its schema text in its run record
+  (`schema_sha256` in `runs.spec`), the hash under which the text is stored in
+  `artifacts`. A run that would write pages into a document while leaving in
+  place a done page made under another recorded schema is refused: on resume,
+  in `repair` unless it replaces every such page, and while a page of another
+  schema awaits a batch. `--force` is never refused, and neither are pages of
+  unknown schema, made by an earlier version, in the text format or without a
+  model. `repair` now stores its schema text as an artifact. No table of the
+  store changes.
 - **v1.12.1** (14 November 2026) -- A README paragraph on the folders a search
   never enters is wrapped to the documentation's line length. Nothing else
   changed.

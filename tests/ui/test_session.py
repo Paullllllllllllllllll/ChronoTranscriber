@@ -183,6 +183,23 @@ def test_command_words_add_the_settings_file_only_where_the_table_has_it(
     )
 
 
+def test_command_words_repeat_the_ui_schema_folders_where_the_table_has_them(
+    session: Session, tmp_path: Path
+) -> None:
+    folders = (tmp_path / "one", tmp_path / "two")
+    started = Session(session.settings.with_folders(folders), None, {}, None, folders)
+    program = ("chronotranscriber", "repair")
+
+    assert command_words(program, [], started, REPAIR_OPTIONS) == [
+        *program,
+        "--schemas-dir",
+        str(folders[0]),
+        "--schemas-dir",
+        str(folders[1]),
+    ]
+    assert command_words(program, [], started, BATCH_CHECK_OPTIONS) == list(program)
+
+
 def test_reset_is_offered_only_without_a_settings_default(
     make_session: SessionMaker,
 ) -> None:

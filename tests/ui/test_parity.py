@@ -70,6 +70,9 @@ EXEMPT: Final[Mapping[str, str]] = MappingProxyType(
     {
         "json": "agent-contract output (one JSON line on stdout); no use in the UI",
         "settings": "given to the ui itself (ui --settings) and added to the command",
+        "schemas_dir": (
+            "given to the ui itself (ui --schemas-dir) and added to the command"
+        ),
         "wait": "the guided batch check makes one pass; waiting serves scripts",
         "poll_minutes": "applies with --wait only, which the UI does not offer",
         "wait_hours": "applies with --wait only, which the UI does not offer",
@@ -1008,15 +1011,24 @@ def test_every_option_is_an_argument_of_the_subcommand(task: str) -> None:
         assert strings == expected, option.name
 
 
-def test_the_ui_parser_accepts_the_settings_option(tmp_path: Path) -> None:
+def test_the_ui_parser_accepts_the_settings_and_schema_folder_options(
+    tmp_path: Path,
+) -> None:
     try:
         arguments = _arguments(_subparser(("ui",)))
     except KeyError:
         pytest.skip("no ui subcommand")
-    assert set(arguments) == {"settings", *_extension_dests()}
+    assert set(arguments) == {"settings", "schemas_dir", *_extension_dests()}
     path = tmp_path / "other.yaml"
-    args = build_parser().parse_args(["ui", "--settings", str(path)])
+    folders = [tmp_path / "one", tmp_path / "two"]
+    for folder in folders:
+        folder.mkdir()
+    argv = ["ui", "--settings", str(path)]
+    for folder in folders:
+        argv += ["--schemas-dir", str(folder)]
+    args = build_parser().parse_args(argv)
     assert args.settings == path
+    assert args.schemas_dir == tuple(folder.resolve() for folder in folders)
 
 
 def _leaf_commands(

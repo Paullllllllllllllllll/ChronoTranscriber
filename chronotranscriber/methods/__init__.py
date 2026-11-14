@@ -83,6 +83,7 @@ class BatchSubmitter(Protocol):
         schema_path: Path | None,
         context: str | None = None,
         context_image: Path | None = None,
+        schema_text: str | None = None,
     ) -> SubmitOutcome:
         """Submit *payloads* of *document* as they render; return the outcome."""
         ...
@@ -94,7 +95,8 @@ class Job:
 
     *output_dir* None writes beside each input; *input_root* is the run's
     input, against which hash keys and the mirror layout are taken.
-    *schema_path* is the resolved schema of LLM items. *batch* submits LLM
+    *schema_path* is the resolved schema of LLM items and *schema_text* its
+    text as read at planning, which the requests send. *batch* submits LLM
     items to the provider's batch API through *submit*. *store* is the
     run's open store; the run core sets it and *submit*.
     """
@@ -106,6 +108,7 @@ class Job:
     output_dir: Path | None
     input_root: Path
     schema_path: Path | None = None
+    schema_text: str | None = None
     batch: bool = False
     store: Store | None = None
     submit: BatchSubmitter | None = None

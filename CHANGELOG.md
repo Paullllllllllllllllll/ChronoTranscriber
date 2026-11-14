@@ -1,5 +1,8 @@
 # Changelog
 
+- **v1.12.1** (14 November 2026) -- A README paragraph on the folders a search
+  never enters is wrapped to the documentation's line length. Nothing else
+  changed.
 - **v1.12.0** (14 November 2026) -- The repository ships a skill for coding
   agents in `skills/chronotranscriber/`. `SKILL.md` gives the steps of a job (dry
   run, sample, run, verify) and the conventions for image settings, context files,

@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.12.0
+# ChronoTranscriber v1.12.1
 
 <img src="assets/logo.svg" alt="ChronoTranscriber logo" width="64" align="right">
 
@@ -179,12 +179,13 @@ The search never enters Mabillon's `.mabillon` working folders, the working
 subfolders `preprocessed_images_tesseract` and `audio_chunks` that
 `--keep-working-files` keeps, or the `--output` folder when it lies inside the
 input folder. A run that leaves out a folder of one of these two names says so
-in a warning; pass a folder of your own with such a name as `--input`. The store `chronotranscriber.sqlite`, the rendered `.txt` and
-`.md` files and the context sidecars (`<name>_transcr_context.txt`,
-`<name>_transcr_context_image.<ext>`) are never items, and a sidecar image
-makes no folder an image folder. Two items that would write one output file and
-store document (`book.pdf` and `book.epub` beside the input) are refused before
-the run, and the error names both inputs of every such pair.
+in a warning; pass a folder of your own with such a name as `--input`. The store
+`chronotranscriber.sqlite`, the rendered `.txt` and `.md` files and the context
+sidecars (`<name>_transcr_context.txt`, `<name>_transcr_context_image.<ext>`) are
+never items, and a sidecar image makes no folder an image folder. Two items that
+would write one output file and store document (`book.pdf` and `book.epub` beside
+the input) are refused before the run, and the error names both inputs of every
+such pair.
 
 `--concurrency` bounds the requests of the whole run, and `--open-items` how
 many items share them. With the default of one open item the items run one

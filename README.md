@@ -1,4 +1,4 @@
-# ChronoTranscriber v1.11.0
+# ChronoTranscriber v1.12.0
 
 <img src="assets/logo.svg" alt="ChronoTranscriber logo" width="64" align="right">
 
@@ -1081,6 +1081,16 @@ format the run does not write is rendered again by the next run that asks for
 it. An open or unresolved batch submission that holds any unit of the document
 refuses the replacement. A forced run whose `--pages` selects nothing changes
 none of this.
+
+## Agent Skill
+
+`skills/chronotranscriber/` holds a skill for coding agents such as Claude Code.
+`SKILL.md` gives the steps of a job (dry run, sample, run, verify) and the
+conventions for image settings, context files, the decision pre-pass, classifiers
+and the store; `REFERENCE.md` lists fixes the error messages do not name. To
+install it, copy or link the folder into the agent's skills folder, for Claude Code
+`~/.claude/skills/chronotranscriber/`. The skill runs the tool from a clone set up
+as in Installation and defers to this README and `--help` for flags and behavior.
 
 ## Architecture
 

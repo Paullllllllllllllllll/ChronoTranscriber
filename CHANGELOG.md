@@ -1,5 +1,12 @@
 # Changelog
 
+- **v1.12.0** (14 November 2026) -- The repository ships a skill for coding
+  agents in `skills/chronotranscriber/`. `SKILL.md` gives the steps of a job (dry
+  run, sample, run, verify) and the conventions for image settings, context files,
+  the decision pre-pass, classifiers and the store; `REFERENCE.md` lists the fixes
+  the error messages do not name. The skill defers to the README and `--help` for
+  flags and behavior, and the README's new Agent Skill section says how to install
+  it. The tool's code and behavior are unchanged.
 - **v1.11.0** (13 November 2026) -- `transcribe` (methods llm and audio-api),
   `classify pages` and `classify documents` gain `--open-items N` (default 1,
   settable in `defaults:`). `--concurrency` now bounds the requests of the whole
